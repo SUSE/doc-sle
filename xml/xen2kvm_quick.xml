@@ -1,0 +1,708 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet href="urn:x-suse:xslt:profiling:novdoc-profile.xsl"
+                 type="text/xml" 
+                 title="Profiling step"?>
+<!DOCTYPE article PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN"
+                      "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "IGNORE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<?provo dirname="installquick/"?>
+<article id="art.sles.xen2kvmquick" lang="en">
+<?suse-quickstart color="suse"?>
+ <title>&xen; to &kvm; Migration Guide</title>
+ <subtitle>&productname; &productnumber;</subtitle>
+ <articleinfo>
+  <productnumber>&productnumber;</productnumber><productname>&productname;</productname>
+ </articleinfo>
+ <abstract>
+  <para>
+   As the &kvm; virtualization solution is becoming more and more popular
+   among server administrators, many of them need a path to migrate their
+   existing &xen; based environments to &kvm;. As of now, there are no
+   mature tools to automatically convert &xen; VMs to &kvm;. There is,
+   however, a technical solution that helps convert &xen; virtual machines
+   to &kvm;. Information and procedures introduced in this helps you smooth
+   the migration.
+  </para>
+ </abstract>
+ <important>
+  <para>
+   The migration procedure described in this document is not fully supported
+   by SUSE. We provide it as a guidance only.
+  </para>
+ </important>
+ <sect1>
+  <title>&xen; to &kvm; Manual Migration</title>
+
+  <para></para>
+
+  <sect2>
+   <title>General Outline</title>
+   <para>
+    The preferred solution to manage virtual machines is based on
+    <systemitem>libvirt</systemitem> (See <ulink url="http://libvirt.org/"/>
+    for more details). It has several notable advantages over the manual way
+    of defining/running virtual machines &mdash;
+    <systemitem>libvirt</systemitem> is cross-platform, supports many
+    hypervisors, secure remote management, virtual networking, and, most of
+    all, provides a unified abstract layer to manage virtual machines.
+    Therefore the main focus of this article is on the
+    <systemitem>libvirt</systemitem> solution.
+   </para>
+   <para>
+    Generally, the &xen; to &kvm; migration runs in the following basic
+    steps:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Make a backup copy of the original &xen; &vmguest;.
+     </para>
+    </step>
+    <step>
+     <para>
+      OPTIONAL: Apply changes specific to paravirtualized guests.
+     </para>
+    </step>
+    <step>
+     <para>
+      Obtain information about the original &xen; &vmguest; and update it to
+      &kvm; equivalents.
+     </para>
+    </step>
+    <step>
+     <para>
+      Shut down the guest on the &xen; host, and run the new one under the
+      &kvm; hypervisor.
+     </para>
+    </step>
+   </procedure>
+   <warning>
+    <title>No Live Migration</title>
+    <para>
+     The &xen; to &kvm; migration cannot be done live while the source
+     &vmguest; is running. Before running the new &kvm;-ready &vmguest;, you
+     are advised to shut down the original &xen; &vmguest;.
+    </para>
+   </warning>
+  </sect2>
+
+  <sect2>
+   <title>Back Up the &xen; &vmguest;</title>
+   <para>
+    To back up your &xen; &vmguest;, follow these steps:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Identify the relevant &xen; guest you want to migrate, and remember
+      its ID/name.
+     </para>
+<screen># virsh list --all
+Id Name                 State
+----------------------------------
+ 0 Domain-0             running
+ 1 SLES11SP3            running 
+[...]</screen>
+    </step>
+    <step>
+     <para>
+      Shut down the guest. You can do this either by shutting down the guest
+      OS, or with <command>virsh</command>:
+     </para>
+<screen># virsh shutdown SLES11SP3</screen>
+    </step>
+    <step>
+     <para>
+      Backup its configuration to an XML file.
+     </para>
+<screen># virsh dumpxml SLES11SP3 > sles11sp3.xml</screen>
+    </step>
+    <step>
+     <para>
+      Backup its disk image file. Use the <command>cp</command> or
+      <command>rsync</command> commands to create the backup copy. Remember
+      that it is always a good idea to check the copy with the
+      <command>md5sum</command> command.
+     </para>
+    </step>
+    <step>
+     <para>
+      After the image file is backed up, you can start the guest again with
+     </para>
+<screen># virsh start SLES11SP3</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2>
+   <title>Changes Specific to Paravirtualized Guests</title>
+   <para>
+    Apply the following changes if you are migrating a paravirtualized &xen;
+    guest. You can do it either on the running guest, or on the stopped
+    guest using <literal>guestfs-tools</literal>.
+<!-- toba: maybe add more info on guestfs-tools -->
+   </para>
+   <important>
+    <para>
+     After applying the changes described in this section, the image file
+     related to the migrated &vmguest; will not be usable under &xen;
+     anymore.
+    </para>
+   </important>
+   <sect3>
+    <title>Install the Default Kernel</title>
+    <warning>
+     <para>
+      After you install the default Kernel, do not try to boot the &xen;
+      guest with it, the system will not boot.
+     </para>
+    </warning>
+    <para>
+     Before cloning the &xen; guest disk image for use under the &kvm;
+     hypervisor, make sure it is bootable <emphasis>without</emphasis> the
+     &xen; hypervisor. This is very important for paravirtualized &xen;
+     guests as they usually contain a special &xen; Kernel, and often do not
+     have a complete GRUB boot loader installed.
+    </para>
+    <orderedlist>
+     <listitem>
+      <para>
+       Update the <filename>/etc/sysconfig/kernel</filename> file. Change
+       the <literal>INITRD_MODULES</literal> parameter by removing all &xen;
+       drivers and replacing the with virtio drivers. Replace
+      </para>
+<screen>INITRD_MODULES="xenblk xennet"</screen>
+      <para>
+       with
+      </para>
+<screen>INITRD_MODULES="virtio_blk virtio_pci virtio_net virtio_ballon"</screen>
+     </listitem>
+     <listitem>
+      <para>
+       Paravirtualized &xen; guests are running a specific &xen; Kernel. To
+       run the guest under &kvm;, you need to install the default Kernel.
+      </para>
+      <note>
+       <para>
+        You do not need to install the default Kernel for a fully
+        virtualized guests as it is already installed.
+       </para>
+      </note>
+      <para>
+       Enter <command>rpm -q kernel-default</command> on the &xen; guest to
+       find out if the default Kernel is installed. If not, install it with
+       <command>zypper in kernel-default</command>.
+      </para>
+      <para>
+       The Kernel we are going to use to boot the guest under &kvm; must
+       have <emphasis>virtio</emphasis> (paravirtualized) drivers available.
+       Run the following command to find out. Do not forget to replace
+       <literal>3.8.9-4</literal> with your Kernel version:
+      </para>
+<screen># find /lib/modules/3.8.9-4-default/kernel/drivers/ -name virtio*
+/lib/modules/3.8.9-4-default/kernel/drivers/net/virtio_net.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/scsi/virtio_scsi.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/block/virtio_blk.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/char/virtio_console.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/char/hw_random/virtio-rng.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/virtio
+/lib/modules/3.8.9-4-default/kernel/drivers/virtio/virtio.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/virtio/virtio_pci.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/virtio/virtio_balloon.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/virtio/virtio_ring.ko
+/lib/modules/3.8.9-4-default/kernel/drivers/virtio/virtio_mmio.ko</screen>
+     </listitem>
+     <listitem>
+      <para>
+       Update <filename>/etc/fstab</filename>. Change any storage devices
+       from <literal>xvda</literal> to <literal>vda</literal>.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Update the boot loader configuration. Enter <command>rpm -q
+       grub</command> on the &xen; guest to find out if GRUB is already
+       installed. If not, install it with <command>zypper in grub</command>.
+      </para>
+      <para>
+       Now make the newly installed default Kernel the default for booting
+       the OS. Also remove/update the Kernel command line options that may
+       refer to &xen;-specific devices. You can do it either with &yast;
+       (<menuchoice><guimenu>System</guimenu><guimenu>Boot
+       Loader</guimenu></menuchoice>), or manually:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         In your favorite text editor, open
+         <filename>/boot/grub/menu.lst</filename>.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         Find the boot menu entry (entries start with
+         <literal>title</literal>) containing the default non-&xen; Kernel
+         to boot, and set the global GRUB's <literal>default</literal>
+         option to the number of the entry (counted from zero).
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         From the same menu entry's Kernel command line, remove/update any
+         reference to &xen;-specific devices. In the following example, you
+         can replace
+        </para>
+<screen>root=/dev/xvda1 disk=/dev/xvda console=xvc</screen>
+        <para>
+         with
+        </para>
+<screen>root=/dev/vda1 disk=/dev/vda</screen>
+        <para>
+         Note that you need to remove all references to
+         <literal>xvc</literal>-type consoles (such as
+         <literal>xvc0</literal>).
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+     <listitem>
+      <para>
+       Update <filename>device.map</filename> in one of the
+       <filename>/boot/grub</filename>, <filename>/boot/grub2</filename>, or
+       <filename>/boot/grub2-efi</filename> directory. Change any storage
+       device from <literal>xvda</literal> to <literal>vda</literal>.
+      </para>
+     </listitem>
+    </orderedlist>
+   </sect3>
+   <sect3>
+    <title>Update the Guest for Boot under &kvm;</title>
+    <orderedlist>
+     <listitem>
+      <para>
+       Update the <filename>/etc/inittab</filename> file to use default
+       serial console:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Comment the line containing <literal>xvc0</literal>.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         OPTIONAL. Uncomment the line containing <literal>S0</literal> if
+         you are using a serial port.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+     <listitem>
+      <para>
+       Update the <filename>/etc/securetty</filename> file. Replace
+       <literal>xvc0</literal> with <literal>ttyS0</literal>.
+      </para>
+     </listitem>
+    </orderedlist>
+   </sect3>
+  </sect2>
+
+  <sect2>
+   <title>Update the &xen; &vmguest; Configuration</title>
+   <para>
+    This section describes how to export the configuration of the original
+    &xen; &vmguest;, and what particular changes to apply to it to be able
+    to import it as a &kvm; guest into <systemitem>libvirt</systemitem>.
+   </para>
+   <sect3>
+    <title>Export the &xen; &vmguest; Configuration</title>
+    <para>
+     First export the configuration of the guest and save it to a file. A
+     typical one may look like this:
+    </para>
+<screen># virsh dumpxml SLES11SP3
+&lt;domain type='xen'&gt;
+  &lt;name&gt;SLES11SP3&lt;/name&gt;
+  &lt;uuid&gt;fa9ea4d7-8f95-30c0-bce9-9e58ffcabeb2&lt;/uuid&gt;
+  &lt;memory&gt;524288&lt;/memory&gt;
+  &lt;currentMemory&gt;524288&lt;/currentMemory&gt;
+  &lt;vcpu&gt;1&lt;/vcpu&gt;
+  &lt;bootloader&gt;/usr/bin/pygrub&lt;/bootloader&gt;
+  &lt;os&gt;
+    &lt;type&gt;linux&lt;/type&gt;
+  &lt;/os&gt;
+  &lt;clock offset='utc'/&gt;
+  &lt;on_poweroff&gt;destroy&lt;/on_poweroff&gt;
+  &lt;on_reboot&gt;restart&lt;/on_reboot&gt;
+  &lt;on_crash&gt;restart&lt;/on_crash&gt;
+  &lt;devices&gt;
+    &lt;emulator&gt;/usr/lib/xen/bin/qemu-dm&lt;/emulator&gt;
+    &lt;disk type='file' device='disk'&gt;
+      &lt;driver name='file'/&gt;
+      &lt;source file='/var/lib/libvirt/images/SLES_11_SP2_JeOS.x86_64-0.0.2_para.raw'/&gt;
+      &lt;target dev='xvda' bus='xen'/&gt;
+    &lt;/disk&gt;
+    &lt;interface type='bridge'&gt;
+      &lt;mac address='00:16:3e:2d:91:c3'/&gt;
+      &lt;source bridge='br0'/&gt;
+      &lt;script path='vif-bridge'/&gt;
+    &lt;/interface&gt;
+    &lt;console type='pty'&gt;
+      &lt;target type='xen' port='0'/&gt;
+    &lt;/console&gt;
+    &lt;input type='mouse' bus='xen'/&gt;
+    &lt;graphics type='vnc' port='-1' autoport='yes' keymap='en-us'/&gt;
+  &lt;/devices&gt;
+&lt;/domain&gt;
+</screen>
+    <tip>
+     <para>
+      You can find detailed information on the libvirt XML format for
+      &vmguest; description at
+      <ulink url="http://libvirt.org/formatdomain.html"/>.
+     </para>
+    </tip>
+   </sect3>
+   <sect3>
+    <title>General Changes to the Guest Configuration</title>
+    <para>
+     You have to make a few general changes to the exported &xen; guest XML
+     configuration in order to run it under the &kvm; hypervisor. The
+     following applies to both fully virtualized and paravirtualized guests.
+     Note that not all of the following XML elements need to be present in
+     your specific configuration.
+    </para>
+    <tip>
+     <title>Conventions Used</title>
+     <para>
+      To refer to a node in the XML configuration file, an XPath syntax will
+      be used throughout this document. For example, to refer to a
+      <literal>&lt;name&gt;</literal> inside the
+      <literal>&lt;domain&gt;</literal> tag
+     </para>
+<screen>&lt;domain&gt;
+  &lt;name&gt;sles11sp3&lt;/name&gt;
+&lt;/domain&gt;</screen>
+     <para>
+      an XPath equivalent <literal>/domain/name</literal> will be used.
+     </para>
+    </tip>
+    <orderedlist>
+     <listitem>
+      <para>
+       Change the <literal>type</literal> attribute of the
+       <literal>/domain</literal> element from <literal>xen</literal>to
+       <literal>kvm</literal>.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Remove the <literal>/domain/bootloader</literal> element section.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Remove the <literal>/domain/bootloader_args</literal> element
+       section.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Change the <literal>/domain/os/type</literal> element value from
+       <literal>linux</literal> to <literal>hvm</literal>.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Add <literal>&lt;boot dev="hd"/&gt;</literal> under the
+       <literal>/domain/os</literal> element.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Add the <literal>arch</literal> attribute to the
+       <literal>/domain/os/type</literal> element. Acceptable values are
+       <literal>arch=”x86_64”</literal> or
+       <literal>arch=”i686”</literal>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Change the <literal>/domain/devices/emulator</literal> element from
+       <literal>/usr/lib/xen/bin/qemu-dm'</literal> to
+       <literal>/usr/bin/qemu-kvm</literal>.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       For each disk associated with the paravirtualized (PV) guest, change
+       the following:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Change the <literal>name</literal> attribute of the
+         <literal>/domain/devices/disk/driver</literal> element from
+         <literal>file</literal> to <literal>qemu</literal>, and add a
+         <literal>type</literal> attribute for the disk type. For example,
+         valid options include <literal>raw</literal> or
+         <literal>qcow2</literal>.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         Change the <literal>dev</literal> attribute of the
+         <literal>/domain/devices/disk/target</literal> element from
+         <literal>xvda</literal> to <literal>vda</literal>.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         Change the <literal>bus</literal> attribute of the
+         <literal>/domain/devices/disk/target</literal> element from
+         <literal>xen</literal> to <literal>virtio</literal>.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+     <listitem>
+      <para>
+       For each network interface card, do the following changes:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         If there is <literal>model</literal> defined in
+         <literal>/domain/devices/interface</literal>, change its
+         <literal>type</literal> attribute value to
+         <literal>virtio</literal>
+        </para>
+<screen>&lt;model type=”virtio”&gt;</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Delete all <literal>/domain/devices/interface/script</literal>
+         sections.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         Delete all <literal>/domain/devices/interface/target</literal>
+         elements if the <literal>dev</literal> attribute starts with
+         <literal>vif</literal> or <literal>vnet</literal> or
+         <literal>veth</literal>. If using a custom network then change the
+         <literal>dev</literal> value to that target.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+     <listitem>
+      <para>
+       Remove the <literal>/domain/devices/console</literal> element section
+       if it exists.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Remove the <literal>/domain/devices/serial</literal> element section
+       if it exists.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Change the <literal>bus</literal> attribute on the
+       <literal>/domain/devices/input</literal> element from
+       <literal>xen</literal> to <literal>ps2</literal>.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Add the following element for memory ballooning features under the
+       <literal>/domain/devices</literal> element.
+      </para>
+<screen>&lt;memballoon model="virtio"/&gt;</screen>
+     </listitem>
+    </orderedlist>
+    <tip>
+     <para>
+      <literal>&lt;target dev='hda' bus='ide'/&gt;</literal> controls the
+      device under which the disk is exposed to the guest OS. The
+      <literal>dev</literal> attribute indicates the "logical" device name.
+      The actual device name specified is not guaranteed to map to the
+      device name in the guest OS. Therefore you may need to change the disk
+      mapping on the boot loader command line. For example if the boot
+      loader expects a root disk to be <literal>hda2</literal> but &kvm;
+      still sees it as <literal>sda2</literal>, change the boot loader
+      command line from
+     </para>
+<screen>[...] root=/dev/hda2 resume=/dev/hda1 [...]</screen>
+     <para>
+      to
+     </para>
+<screen>[...] root=/dev/sda2 resume=/dev/sda1 [...]</screen>
+     <para>
+      or to
+     </para>
+<screen>[...] root=/dev/vda2 resume=/dev/vda1 [...]</screen>
+     <para>
+      in the case of paravirtualized <literal>xvda</literal> devices.
+     </para>
+     <para>
+      Otherwise the &vmguest; will refuse to boot in the &kvm; environment.
+     </para>
+    </tip>
+   </sect3>
+   <sect3>
+    <title>The Target &kvm; Guest Configuration</title>
+    <para>
+     After having applied all the modifications mentioned above, you end up
+     with the following configuration for your &kvm; guest:
+    </para>
+<screen>
+&lt;domain type='kvm'&gt;
+  &lt;name&gt;SLES11SP3&lt;/name&gt;
+  &lt;uuid&gt;fa9ea4d7-8f95-30c0-bce9-9e58ffcabeb2&lt;/uuid&gt;
+  &lt;memory&gt;524288&lt;/memory&gt;
+  &lt;currentMemory&gt;524288&lt;/currentMemory&gt;
+  &lt;vcpu cpuset='0-3'&gt;1&lt;/vcpu&gt;
+  &lt;os&gt;
+    &lt;type arch=”x86_64”&gt;hvm&lt;/type&gt;
+    &lt;boot dev="hd"/&gt;
+  &lt;/os&gt;
+  &lt;clock offset='utc'/&gt;
+  &lt;on_poweroff&gt;destroy&lt;/on_poweroff&gt;
+  &lt;on_reboot&gt;restart&lt;/on_reboot&gt;
+  &lt;on_crash&gt;restart&lt;/on_crash&gt;
+  &lt;devices&gt;
+    &lt;emulator&gt;/usr/bin/qemu-kvm&lt;/emulator&gt;
+    &lt;disk type='file' device='disk'&gt;
+      &lt;driver name='qemu' type="raw"/&gt;
+      &lt;source file='/var/lib/libvirt/images/SLES_11_SP2_JeOS.x86_64-0.0.2_para.raw'/&gt;
+      &lt;target dev='vda' bus='virtio'/&gt;
+    &lt;/disk&gt;
+    &lt;interface type='bridge'&gt;
+      &lt;mac address='00:16:3e:2d:91:c3'/&gt;
+      &lt;source bridge='br0'/&gt;
+    &lt;/interface&gt;
+    &lt;input type='mouse' bus='usb'/&gt;
+    &lt;graphics type='vnc' port='5900' autoport='yes' keymap='en-us'/&gt;
+    &lt;memballoon model="virtio"/&gt;
+  &lt;/devices&gt;
+&lt;/domain&gt;
+
+</screen>
+    <para>
+     Save the configuration to a file in your home directory. After you
+     later import it, it will be copied to the default
+     <filename>/etc/libvirt/qemu</filename>. Suppose you save the file as
+     <filename>SLES11SP3.xml</filename>.
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2>
+   <title>Migrate the &vmguest;</title>
+   <para>
+    After you updated the &vmguest; configuration, and applied necessary
+    changes to the guest OS, it is time to shut down the original &xen;
+    guest, and run its clone under the &kvm; hypervisor.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Shut down the guest on the &xen; host by running <command>shutdown -h
+      now</command> as &rootuser; from the console.
+     </para>
+    </step>
+    <step>
+     <para>
+      Copy the disk files associated with the &vmguest; if needed. A default
+      configuration will require the &xen; disk files to be copied from
+      <filename>/var/lib/xen/images</filename> to
+      <filename>/var/lib/kvm/images</filename>. The
+      <filename>/var/lib/kvm/images</filename> directory may need to be
+      created (as &rootuser;) if you have not previously created a
+      &vmguest;.
+     </para>
+    </step>
+    <step>
+     <para>
+      Create the new domain, and register it with
+      <systemitem>libvirt</systemitem>:
+     </para>
+<screen># virsh define SLES11SP3.xml
+ Domain SLES11SP3 defined from SLES11SP3.xml</screen>
+    </step>
+    <step>
+     <para>
+      Verify that the new guest is seen in the &kvm; configuration:
+     </para>
+<screen>virsh list –all</screen>
+    </step>
+    <step>
+     <para>
+      Once the domain is created, you can start it:
+     </para>
+<screen># virsh start SLES11SP3
+ Domain SLES11SP3 started</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+<!-- cancelled for now...
+  <sect2>
+   <title>Most Common Issues</title>
+   <para>
+    TODO
+   </para>
+  </sect2>
+
+  <sect2>
+   <title>Limitation</title>
+   <para>
+    TODO
+   </para>
+  </sect2>
+-->
+ </sect1>
+<!-- cancelled for now...
+ <sect1>
+  <title>&xen; to &kvm; Migration Using the virt-v2v Tool</title>
+
+  <para>
+   TODO
+  </para>
+ </sect1>
+ -->
+ <sect1>
+  <title>For more information</title>
+
+  <para>
+   For more information on libvirt, see <ulink url="http://libvirt.org"/>.
+  </para>
+
+  <para>
+   You can find more details on libvirt XML format at
+   <ulink
+    url="http://libvirt.org/formatdomain.html"/>.
+  </para>
+
+  <para>
+   For more information on &xen; administration, see
+   <ulink
+    url="https://www.suse.com/documentation/sles11/book_xen/data/book_xen.html"/>.
+  </para>
+
+  <para>
+   For more information on virtualization with &kvm;, see
+   <ulink
+    url="https://www.suse.com/documentation/sles11/book_kvm/data/book_kvm.html"/>.
+  </para>
+ </sect1>
+ <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="common_copyright_quick.xml"/>
+ <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="common_gfdl1.2_i.xml"/>
+</article>

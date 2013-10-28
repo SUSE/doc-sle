@@ -1,0 +1,733 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.audit.setup">
+ <title>Setting Up the Linux Audit Framework</title>
+ <para>
+  This chapter shows how to set up a simple audit scenario. Every step
+  involved in configuring and enabling audit is explained in detail. After
+  you have learned to set up audit, consider a real-world example scenario
+  in <xref linkend="cha.audit.scenarios"/>.
+ </para>
+ <para>
+  To set up audit on &productname;, you need to complete the following
+  steps:
+ </para>
+ <procedure>
+  <title>Setting Up the Linux Audit Framework</title>
+  <step>
+   <para>
+    Make sure that all required packages are installed:
+    <systemitem class="resource"
+     >audit</systemitem>,
+    <systemitem class="resource">audit-libs</systemitem>, and optionally
+    <systemitem class="resource">audit-libs-python</systemitem>. To use the
+    log visualization as described in <xref linkend="sec.audit.viz"/>,
+    install <systemitem class="resource"
+     >gnuplot</systemitem> and
+    <systemitem class="resource">graphviz</systemitem> from the
+    &productname; media.
+   </para>
+  </step>
+  <step>
+   <para>
+    Determine the components to audit. Refer to
+    <xref linkend="sec.audit.choose"/> for details.
+   </para>
+  </step>
+  <step>
+   <para>
+    Check or modify the basic audit daemon configuration. Refer to
+    <xref
+     linkend="sec.audit.config"/> for details.
+   </para>
+  </step>
+  <step>
+   <para>
+    Enable auditing for system calls. Refer to
+    <xref linkend="sec.audit.syscall"/> for details.
+   </para>
+  </step>
+  <step>
+   <para>
+    Compose audit rules to suit your scenario. Refer to
+    <xref linkend="sec.audit.aurules"/> for details.
+   </para>
+  </step>
+  <step>
+   <para>
+    Generate logs and configure tailor-made reports. Refer to
+    <xref linkend="sec.audit.aurepo"
+    /> for details.
+   </para>
+  </step>
+  <step>
+   <para>
+    Configure optional log visualization. Refer to
+    <xref linkend="sec.audit.viz"/> for details.
+   </para>
+  </step>
+ </procedure>
+ <important>
+  <title>Controlling the Audit Daemon</title>
+  <para>
+   Before configuring any of the components of the audit system, make sure
+   that the audit daemon is not running by entering <command>rcauditd
+   status</command> as &rootuser;. On a default &productname; system, audit
+   is started on boot, so you need to turn it off by entering
+   <command>rcauditd stop</command>. Start the daemon after configuring it
+   with <command>rcauditd start</command>.
+  </para>
+ </important>
+ <sect1 id="sec.audit.choose">
+  <title>Determining the Components to Audit</title>
+
+  <para>
+   Before starting to create your own audit configuration, determine to
+   which degree you want to use it. Check the following general rules to
+   determine which use case best applies to you and your requirements:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     If you require a full security audit for CAPP/EAL certification, enable
+     full audit for system calls and configure watches on various
+     configuration files and directories, similar to the rule set featured
+     in <xref linkend="cha.audit.scenarios"/>. Proceed to
+     <xref
+      linkend="sec.audit.syscall"/>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     If you require an occasional audit of a system call instead of a
+     permanent audit for system calls, use <command>autrace</command>.
+     Proceed to <xref linkend="sec.audit.syscall"/>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     If you require file and directory watches to track access to important
+     or security-sensitive data, create a rule set matching these
+     requirements. Enable audit as described in
+     <xref linkend="sec.audit.syscall"/> and proceed to
+     <xref
+      linkend="sec.audit.aurules"/>.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+ <sect1 id="sec.audit.config">
+  <title>Configuring the Audit Daemon</title>
+
+  <para>
+   The basic setup of the audit daemon is done by editing
+   <filename>/etc/audit/auditd.conf</filename>. You may also use &yast; to
+   configure the basic settings by calling <menuchoice>
+   <guimenu>&yast;</guimenu> <guimenu>Security and Users</guimenu>
+   <guimenu>Linux Audit Framework (LAF)</guimenu> </menuchoice>. Use the
+   tabs <guimenu>Log File</guimenu> and <guimenu>Disk Space</guimenu> for
+   configuration.
+  </para>
+
+<screen>log_file = /var/log/audit/audit.log
+log_format = RAW
+log_group = root
+priority_boost = 4
+flush = INCREMENTAL
+freq = 20
+num_logs = 4
+disp_qos = lossy
+dispatcher = /sbin/audispd
+name_format = NONE
+#name = mydomain
+max_log_file = 5
+max_log_file_action = ROTATE
+space_left = 75
+space_left_action = SYSLOG
+action_mail_acct = root
+admin_space_left = 50
+admin_space_left_action = SUSPEND
+disk_full_action = SUSPEND
+disk_error_action = SUSPEND
+#tcp_listen_port =
+tcp_listen_queue = 5
+#tcp_client_ports = 1024-65535
+tcp_client_max_idle = 0</screen>
+
+  <para>
+   The default settings work reasonably well for many setups. Some values,
+   such as <literal>num_logs</literal>, <literal>max_log_file</literal>,
+   <literal>space_left</literal>, and <literal>admin_space_left</literal>
+   depend on the size of your deployment. If disk space is limited, you
+   might want to reduce the number of log files to keep if they are rotated
+   and you might want get an earlier warning if disk space is running out.
+   For a CAPP-compliant setup, adjust the values for
+   <literal>log_file</literal>, <literal>flush</literal>,
+   <literal>max_log_file</literal>, <literal>max_log_file_action</literal>,
+   <literal>space_left</literal>, <literal>space_left_action</literal>,
+   <literal>admin_space_left</literal>,
+   <literal>admin_space_left_action</literal>,
+   <literal>disk_full_action</literal>, and
+   <literal>disk_error_action</literal>, as described in
+   <xref linkend="sec.audit.auditd"/>. An example CAPP-compliant
+   configuration looks like this:
+  </para>
+
+<?dbfo-need height="15em"?>
+
+<screen>log_file = <replaceable>path_to_separate_partition</replaceable>/audit.log
+log_format = RAW
+priority_boost = 4
+flush = SYNC                       ### or DATA
+freq = 20
+num_logs = 4
+dispatcher = /sbin/audispd
+disp_qos = lossy
+max_log_file = 5
+max_log_file_action = KEEP_LOGS
+space_left = 75
+space_left_action = EMAIL
+action_mail_acct = root
+admin_space_left = 50
+admin_space_left_action = SINGLE   ### or HALT
+disk_full_action = SUSPEND         ### or HALT
+disk_error_action = SUSPEND        ### or HALT</screen>
+
+  <para>
+   The <literal>###</literal> precedes comments where you can choose from
+   several options. Do not add the comments to your actual configuration
+   files.
+  </para>
+
+  <tip>
+   <title>For More Information</title>
+   <para>
+    Refer to <xref linkend="sec.audit.auditd"/> for detailed background
+    information about the <filename>auditd.conf</filename> configuration
+    parameters.
+   </para>
+  </tip>
+ </sect1>
+ <sect1 id="sec.audit.syscall">
+  <title>Enabling Audit for System Calls</title>
+
+  <para>
+   A standard &productname; system has auditd running by default. There are
+   different levels of auditing activity available:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>Basic Logging</term>
+    <listitem>
+     <para>
+      Out of the box (without any further configuration) auditd logs only
+      events concerning its own configuration changes to
+      <filename>/var/log/audit/audit.log</filename>. No events (file access,
+      system call, etc.) are generated by the kernel audit component until
+      requested by auditctl. However, other kernel components and modules
+      may log audit events outside of the control of auditctl and these
+      appear in the audit log. By default, the only module that generates
+      audit events is &aa;.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Advanced Logging with System Call Auditing</term>
+    <listitem>
+     <para>
+      To audit system calls and get meaningful file watches, you need to
+      enable audit contexts for system calls.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   As you need system call auditing capabilities even when you are
+   configuring plain file or directory watches, you need to enable audit
+   contexts for system calls. To enable audit contexts for the duration of
+   the current session only, execute <command>auditctl -e 1</command> as
+   &rootuser;. To disable this feature, execute <command>auditctl -e
+   0</command> as &rootuser;.
+  </para>
+
+  <para>
+   To enable audit contexts for system calls permanently, open the
+   <filename>/etc/sysconfig/auditd</filename> configuration file as
+   &rootuser; and set <envar>AUDITD_DISABLE_CONTEXTS</envar> to
+   <literal>no</literal>. Then restart the audit daemon with the
+   <command>rcauditd restart</command> command. To turn this feature off
+   temporarily, use <command>auditctl -e 0</command>. To turn it off
+   permanently, set <envar>AUDITD_DISABLE_CONTEXTS</envar> to
+   <literal>yes</literal>.
+  </para>
+ </sect1>
+ <sect1 id="sec.audit.aurules">
+  <title>Setting Up Audit Rules</title>
+
+  <para>
+   Using audit rules, determine which aspects of the system should be
+   analyzed by audit. Normally this includes important databases and
+   security-relevant configuration files. You may also analyze various
+   system calls in detail if a broad analysis of your system is required. A
+   very detailed example configuration that includes most of the rules that
+   are needed in a CAPP compliant environment is available in
+   <xref linkend="cha.audit.scenarios"/>.
+  </para>
+
+  <para>
+   Audit rules can be passed to the audit daemon on the
+   <command>auditctl</command> command line as well as by composing a rule
+   set in <filename>/etc/audit/audit.rules</filename> which is processed
+   whenever the audit daemon is started. To customize
+   <filename>/etc/audit/audit.rules</filename> either edit it directly, or
+   use &yast;: <menuchoice> <guimenu>Security and Users</guimenu>
+   <guimenu>Linux Audit Framework (LAF)</guimenu> <guimenu>Rules for
+   'auditctl'</guimenu> </menuchoice>. Rules passed on the commandline are
+   not persistent and have to be re-entered when the audit daemon is
+   restarted.
+  </para>
+
+  <para>
+   A simple rule set for very basic auditing on a few important files and
+   directories could look like this:
+  </para>
+
+<screen># basic audit system parameters
+-D
+-b 8192
+-f 1
+-e 1
+
+# some file and directory watches with keys
+-w /var/log/audit/ -k LOG_audit
+-w /etc/audit/auditd.conf -k CFG_audit_conf -p rxwa
+-w /etc/audit.rules -k CFG_audit_rules -p rxwa
+
+-w /etc/passwd -k CFG_passwd -p rwxa
+-w /etc/sysconfig/ -k CFG_sysconfig  
+
+# an example system call rule
+-a entry,always -S umask
+
+### add your own rules</screen>
+
+  <para>
+   When configuring the basic audit system parameters (such as the backlog
+   parameter <literal>-b</literal>) test these settings with your intended
+   audit rule set to determine whether the backlog size is appropriate for
+   the level of logging activity caused by your audit rule set. If your
+   chosen backlog size is too small, your system might not be able to handle
+   the audit load and consult the failure flag (<literal>-f</literal>) when
+   the backlog limit is exceeded.
+  </para>
+
+  <important>
+   <title>Choosing the Failure Flag</title>
+   <para>
+    When choosing the failure flag, note that <option>-f 2</option> tells
+    your system to perform an immediate shutdown without flushing any
+    pending data to disk when the limits of your audit system are exceeded.
+    Because this shutdown is not a clean shutdown, restrict the use of
+    <option>-f 2</option> to only the most security-conscious environments
+    and use <option>-f 1</option> (system continues to run, issues a warning
+    and audit stops) for any other setup to avoid loss of data or data
+    corruption.
+   </para>
+  </important>
+
+  <para>
+   Directory watches produce less verbose output than separate file watches
+   for the files under these directories. To get detailed logging for your
+   system configuration in <filename>/etc/sysconfig</filename>, for example,
+   add watches for each individual file. Audit does not support globbing,
+   which means you cannot just create a rule that says <literal>-w
+   /etc/*</literal> and watches anything below <filename>/etc</filename>.
+  </para>
+
+  <para>
+   For better identification in the log file, a key has been added to each
+   of the file and directory watches. Using the key, it is easier to comb
+   the logs for events related to a certain rule. When creating keys,
+   distinguish between mere log file watches and configuration file watches
+   by using an appropriate prefix with the key, in this case
+   <literal>LOG</literal> for a log file watch and <literal>CFG</literal>
+   for a configuration file watch. Using the filename as part of the key
+   also makes it easier for you to identify events of this type in the log
+   file.
+  </para>
+
+  <para>
+   Another thing to bear in mind when creating file and directory watches is
+   that audit cannot deal with files that do not exist when the rules are
+   created. Any file that is added to your system while audit is already
+   running is not watched unless you extend the rule set to watch this new
+   file.
+  </para>
+
+  <para>
+   For more information about creating custom rules, refer to
+   <xref linkend="sec.audit.rules"
+   />.
+  </para>
+
+  <important>
+   <title>Changing Audit Rules</title>
+   <para>
+    After you change audit rules, always restart the audit daemon with
+    <command>rcauditd restart</command> to reread the changed rules.
+   </para>
+<!-- 2011-08-25 toba: Stave Grubb has it that there is no need to stop the
+       daemon before making changes to the rules.
+   <para>
+    Never change audit rules in a running audit system. Always stop the
+    audit daemon with <command>rcauditd stop</command> before touching the
+    audit configuration and reread the audit configuration by restarting the
+    daemon with <command>rcauditd start</command>.
+   </para>
+   -->
+  </important>
+ </sect1>
+ <sect1 id="sec.audit.aurepo">
+  <title>Configuring Audit Reports</title>
+
+  <para>
+   To avoid having to dig through the raw audit logs to get an impression of
+   what your system is currently doing, run custom audit reports at certain
+   intervals. Custom audit reports enable you to focus on areas of interest
+   and get meaningful statistics on the nature and frequency of the events
+   you are monitoring. To analyze individual events in detail, use the
+   ausearch tool.
+  </para>
+
+  <para>
+   Before setting up audit reporting, consider the following:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     What types of events do you want to monitor by generating regular
+     reports? Select the appropriate aureport command lines as described in
+     <xref linkend="sec.audit.aureport.gen"/>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     What do you want to do with the audit reports? Decide whether to create
+     graphical charts from the data accumulated or whether it should be
+     transferred into any sort of spreadsheet or database. Set up the
+     aureport command line and further processing similar to the examples
+     shown in <xref linkend="sec.audit.viz"/> if you want to visualize your
+     reports.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     When and at which intervals should the reports run? Set up appropriate
+     automated reporting using cron.
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   For this example, assume that you are interested in finding out about any
+   attempts to access your audit, PAM, and system configuration. Proceed as
+   follows to find out about file events on your system:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Generate a full summary report of all events and check for any
+     anomalies in the summary report, for example, have a look at the
+     <quote>failed syscalls</quote> record, because these might have failed
+     due to insufficient permissions to access a file or a file not being
+     there at all:
+    </para>
+<screen><command>aureport</command>
+
+Summary Report
+======================
+Range of time in logs: 03/02/09 14:13:38.225 - 17/02/09 16:30:10.352
+Selected time for report: 03/02/09 14:13:38 - 17/02/09 16:30:10.352
+Number of changes in configuration: 24
+Number of changes to accounts, groups, or roles: 0
+Number of logins: 9
+Number of failed logins: 15
+Number of authentications: 19
+Number of failed authentications: 578
+Number of users: 3
+Number of terminals: 15
+Number of host names: 4
+Number of executables: 20
+Number of files: 279
+Number of AVC's: 0
+Number of MAC events: 0
+Number of failed syscalls: 994
+Number of anomaly events: 0
+Number of responses to anomaly events: 0
+Number of crypto events: 0
+Number of keys: 2
+Number of process IDs: 1238
+Number of events: 5435</screen>
+   </step>
+   <step>
+    <para>
+     Run a summary report for failed events and check the
+     <quote>files</quote> record for the number of failed file access
+     events:
+    </para>
+<screen><command>aureport <option>--failed</option></command>
+
+Failed Summary Report
+======================
+Range of time in logs: 03/02/09 14:13:38.225 - 17/02/09 16:30:10.352
+Selected time for report: 03/02/09 14:13:38 - 17/02/09 16:30:10.352
+Number of changes in configuration: 0
+Number of changes to accounts, groups, or roles: 0
+Number of logins: 0
+Number of failed logins: 15
+Number of authentications: 0
+Number of failed authentications: 578
+Number of users: 1
+Number of terminals: 7
+Number of host names: 4
+Number of executables: 12
+Number of files: 77
+Number of AVC's: 0
+Number of MAC events: 0
+Number of failed syscalls: 994
+Number of anomaly events: 0
+Number of responses to anomaly events: 0
+Number of crypto events: 0
+Number of keys: 2
+Number of process IDs: 713
+Number of events: 1589</screen>
+   </step>
+   <step>
+    <para>
+     To list the files that could not be accessed, run a summary report of
+     failed file events:
+    </para>
+<screen><command>aureport <option>-f -i --failed --summary</option></command>
+
+Failed File Summary Report
+===========================
+total  file                
+===========================
+80  /var                   
+80  spool                  
+80  cron                   
+80  lastrun                
+46  /usr/lib/locale/en_GB.UTF-8/LC_CTYPE
+45  /usr/lib/locale/locale-archive      
+38  /usr/lib/locale/en_GB.UTF-8/LC_IDENTIFICATION
+38  /usr/lib/locale/en_GB.UTF-8/LC_MEASUREMENT   
+38  /usr/lib/locale/en_GB.UTF-8/LC_TELEPHONE     
+38  /usr/lib/locale/en_GB.UTF-8/LC_ADDRESS       
+38  /usr/lib/locale/en_GB.UTF-8/LC_NAME          
+38  /usr/lib/locale/en_GB.UTF-8/LC_PAPER         
+38  /usr/lib/locale/en_GB.UTF-8/LC_MESSAGES      
+38  /usr/lib/locale/en_GB.UTF-8/LC_MONETARY      
+38  /usr/lib/locale/en_GB.UTF-8/LC_COLLATE       
+38  /usr/lib/locale/en_GB.UTF-8/LC_TIME          
+38  /usr/lib/locale/en_GB.UTF-8/LC_NUMERIC       
+8  /etc/magic.mgc                           
+...</screen>
+    <para>
+     To focus this summary report on a few files or directories of interest
+     only, such as <filename>/etc/audit/auditd.conf</filename>,
+     <filename>/etc/pam.d</filename>, and
+     <filename>/etc/sysconfig</filename>, use a command similar to the
+     following:
+    </para>
+<screen><command>aureport -f -i --failed --summary |grep -e "/etc/audit/auditd.conf" -e "/etc/pam.d/" -e "/etc/sysconfig"</command>
+
+1  /etc/sysconfig/displaymanager</screen>
+   </step>
+   <step>
+    <para>
+     From the summary report, then proceed to isolate these items of
+     interest from the log and find out their event IDs for further
+     analysis:
+    </para>
+<screen><command>aureport -f -i --failed |grep -e "/etc/audit/auditd.conf" -e "/etc/pam.d/" -e "/etc/sysconfig"</command>
+
+993. 17/02/09 16:47:34 /etc/sysconfig/displaymanager readlink no /bin/vim-normal root 7887
+994. 17/02/09 16:48:23 /etc/sysconfig/displaymanager getxattr no /bin/vim-normal root 7889</screen>
+   </step>
+   <step>
+    <para>
+     Use the event ID to get a detailed record for each item of interest:
+    </para>
+<screen><command>ausearch -a <replaceable>7887</replaceable> -i</command>
+----
+time->Tue Feb 17 16:48:23 2009
+type=PATH msg=audit(1234885703.090:7889): item=0 name="/etc/sysconfig/displaymanager" inode=369282 dev=08:06 mode=0100644 ouid=0 ogid=0 rdev=00:00
+type=CWD msg=audit(1234885703.090:7889):  cwd="/root"
+type=SYSCALL msg=audit(1234885703.090:7889): arch=c000003e syscall=191 success=no exit=-61 a0=7e1e20 a1=7f90e4cf9187 a2=7fffed5b57d0 a3=84 items=1 ppid=25548 pid=23045 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts2 ses=1166 comm="vim" exe="/bin/vim-normal" key=(null)</screen>
+   </step>
+  </procedure>
+
+  <tip>
+   <title>Focusing on a Certain Time Frame</title>
+   <para>
+    If you are interested in events during a particular period of time, trim
+    down the reports by using start and end dates and times with your
+    <command>aureport</command> commands (<option>-ts</option> and
+    <option>-te</option>). For more information, refer to
+    <xref
+     linkend="sec.audit.aureport.gen"/>.
+   </para>
+  </tip>
+
+  <para>
+   All steps (except for the last one) can be run automatically and would
+   easily be scriptable and configured as cron jobs. Any of the
+   <literal>--failed --summary</literal> reports could be transformed easily
+   into a bar chart that plots files versus failed access attempts. For more
+   information about visualizing audit report data, refer to
+   <xref linkend="sec.audit.viz"/>.
+  </para>
+ </sect1>
+ <sect1 id="sec.audit.viz">
+  <title>Configuring Log Visualization</title>
+
+  <para>
+   Using the scripts <command>mkbar</command> and <command>mkgraph</command>
+   you can illustrate your audit statistics with various graphs and charts.
+   As with any other <command>aureport</command> command, the plotting
+   commands are scriptable and can easily be configured to run as cron jobs.
+  </para>
+
+  <para>
+   <command>mkbar</command> and <command>mkgraph</command> were created by
+   Steve Grubb at Red Hat. They are available from
+   <ulink url="http://people.redhat.com/sgrubb/audit/visualize/"/>. Because
+   the current version of audit in &productname; does not ship with these
+   scripts, proceed as follows to make them available on your system:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Download the scripts to &rootuser;'s <filename>~/bin</filename>
+     directory:
+    </para>
+<screen>wget http://people.redhat.com/sgrubb/audit/visualize/mkbar -O ~/bin/mkbar
+wget http://people.redhat.com/sgrubb/audit/visualize/mkgraph -O ~/bin/mkgraph</screen>
+   </step>
+   <step>
+    <para>
+     Adjust the file permissions to read, write, and execute for &rootuser;:
+    </para>
+<screen>chmod 744 ~/bin/mk{bar,graph}</screen>
+   </step>
+  </procedure>
+
+  <para>
+   To plot summary reports, such as the ones discussed in
+   <xref linkend="sec.audit.aurepo"/>, use the script
+   <command>mkbar</command>. Some example commands could look like the
+   following:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>Create a Summary of Events</term>
+    <listitem>
+<screen>aureport -e -i --summary | mkbar events</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Create a Summary of File Events</term>
+    <listitem>
+<screen>aureport -f -i --summary | mkbar files</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Create a Summary of Login Events</term>
+    <listitem>
+<screen>aureport -l -i --summary | mkbar login</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Create a Summary of User Events</term>
+    <listitem>
+<screen>aureport -u -i --summary | mkbar users</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Create a Summary of System Call Events</term>
+    <listitem>
+<screen>aureport -s -i --summary | mkbar syscalls</screen>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   To create a summary chart of failed events of any of the above event
+   types, just add the <option>--failed</option> option to the respective
+   <command>aureport</command> command. To cover a certain period of time
+   only, use the <option>-ts</option> and <option>-te</option> options on
+   aureport. Any of these commands can be tweaked further by narrowing down
+   its scope using grep or egrep and regular expressions. See the comments
+   in the <command>mkbar</command> script for an example. Any of the above
+   commands produces a PNG file containing a bar chart of the requested
+   data.
+  </para>
+
+  <para>
+   To illustrate the relationship between different kinds of audit objects,
+   such as users and system calls, use the script
+   <command>mkgraph</command>. Some example commands could look like the
+   following:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>Users versus Executables</term>
+    <listitem>
+<screen>LC_ALL=C aureport -u -i | awk '/^[0-9]/ { print $4" "$7 }' | sort | uniq | mkgraph users_vs_exec</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Users versus Files</term>
+    <listitem>
+<screen>LC_ALL=C aureport -f -i | awk '/^[0-9]/ { print $8" "$4 }' | sort | uniq | mkgraph users_vs_files</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>System Calls versus Commands</term>
+    <listitem>
+<screen>LC_ALL=C aureport -s -i | awk '/^[0-9]/ { print $4" "$6 }' | sort | uniq | mkgraph syscall_vs_com</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>System Calls versus Files</term>
+    <listitem>
+<screen>LC_ALL=C aureport -s -i | awk '/^[0-9]/ { print $5" "$4 }' | sort | uniq | mkgraph | syscall_vs_file</screen>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Graphs can also be combined to illustrate complex relationships. See the
+   comments in the <command>mkgraph</command> script for further information
+   and an example. The graphs produced by this script are created in
+   PostScript format by default, but you can change the output format by
+   changing the <envar>EXT</envar> variable in the script from
+   <literal>ps</literal> to <literal>png</literal> or
+   <literal>jpg</literal>. To cover a certain period of time only, use the
+   <option>-ts</option> and <option>-te</option> options on aureport.
+  </para>
+ </sect1>
+</chapter>

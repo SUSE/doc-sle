@@ -1,0 +1,834 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter  PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+
+<chapter id="cha.security.policykit">
+ <title>Authorization with &pk;</title>
+ <abstract>
+  <para>&pk; (formerly known as PolicyKit) is a toolkit for defining and 
+    handling authorizations. <remark>toms 2013-10-23: Add abstract</remark></para>
+ </abstract>
+ <sect1 id="sec.security.policykit.oview">
+    <title>Conceptual Overview</title>
+    <para> &pk; is an application framework that acts as a negotiator between the unprivileged user
+      session and the privileged system context. Whenever a process from the user session tries to
+      carry out an action in the system context, &pk; is queried. Based on its
+      configuration&mdash;specified in a so-called <quote>policy</quote>&mdash;the answer could be
+        <quote>yes</quote>, <quote>no</quote>, or <quote>needs authentication</quote>. Unlike
+      classical privilege authorization programs such as sudo, &pk; does not grant &rootuser;
+      permissions to an entire session, but only to the action in question. </para>
+  <para>After a users has started its session (by user's graphical
+    environment), each session is comprised of the <emphasis>authority</emphasis> 
+    and an <emphasis>authentication agent</emphasis>. The authority is
+    implemented as a service on the system message bus, whereas the 
+    authentication agent is used to authenticate the current user (which
+    started the session). The current user has to prove its
+    authenticity, for example, via its passphrase.
+  </para>
+   
+  <para>To configure &pk;, system administrators can create a set of
+     <emphasis>authorization rules</emphasis> to control authorization
+     policy. What <emphasis>action</emphasis> is performed is definied
+     by the applications.</para>
+
+  <remark>toms 2013-10-02: Add graphic about system architecture</remark>
+
+  <para>
+   Each existing policy has a speaking name (its identifier), which is used
+   with the command line tools and the graphical user interface.
+  </para>
+
+  <sect2 id="sec.security.policykit.oview.authorizations">
+   <title>Available Policies and Supported Applications</title>
+   <para>
+    At the moment, not all applications requiring privileges make use of
+    &pk;. Find the most important policies available on &productnamereg;
+    below, sorted into the categories where they are used.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>PulseAudio</term>
+     <listitem>
+      <simplelist>
+       <member>Set scheduling priorities for the PulseAudio daemon</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry os="sled">
+     <term>smppd</term>
+     <listitem>
+      <simplelist>
+       <member>Control dial connections</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>CUPS</term>
+     <listitem>
+      <simplelist>
+       <member>Add, remove, edit, enable or disable printers</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry os="sled">
+     <term>Backup Manager</term>
+     <listitem>
+      <simplelist>
+       <member>Modify schedule</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>GNOME</term>
+     <listitem>
+      <simplelist>
+       <member>Modify system and mandatory values with GConf</member>
+       <member>Change the system time</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry os="sles">
+     <term>libvirt</term>
+     <listitem>
+      <simplelist>
+       <member>Manage and monitor local virtualized systems</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry os="sled">
+     <term>&nm;</term>
+     <listitem>
+      <simplelist>
+       <member>Apply and modify connections</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>&pk;</term>
+     <listitem>
+      <simplelist>
+       <member>Read and change privileges for other users</member>
+       <member>Modify defaults</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>PackageKit</term>
+     <listitem>
+      <simplelist>
+       <member>Update and remove packages</member>
+       <member>Change and refresh repositories</member>
+       <member>Install local files</member>
+       <member>Rollback</member>
+       <member>Import repository keys</member>
+       <member>Accepting EULAs</member>
+       <member>Setting the network proxy</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry os="sled">
+     <term>smppd</term>
+     <listitem>
+      <simplelist>
+       <member>Controlling dial-up connections</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>System</term>
+     <listitem>
+      <simplelist>
+       <member>Wake on LAN</member>
+       <member>Mount or unmount fixed, hotpluggable and encrypted
+       devices</member>
+       <member>Eject and decrypt removable media</member>
+       <member>Enable or disable WLAN</member>
+       <member>Enable or disable Bluetooth</member>
+       <member>Device access</member>
+       <member>Stop, suspend, hibernate and restart the system</member>
+       <member>Undock a docking station</member>
+       <member>Change power-management settings</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>&yast;</term>
+     <listitem>
+      <simplelist>
+       <member>Register product</member>
+       <member>Change the system time and language</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.security.policykit.types">
+   <title>Authorization Types</title>
+   <para>
+    Every time a &pk;-enabled process carries out a privileged operation,
+    &pk; is asked whether this process is entitled to do so. &pk; answers
+    according to the policy defined for this process. The answers can be
+    <literal>yes</literal>, <literal>no</literal>, or
+    <literal>authentication needed</literal>. By default, a policy contains
+    <literal>implicit</literal> privileges, which automatically apply to all
+    users. It is also possible to specify <literal>explicit</literal>
+    privileges which apply to a specific user.
+   </para>
+   <sect3 id="sec.security.policykit.policies.implicit">
+    <title>Implicit Privileges</title>
+    <para>
+     Implicit privileges can be defined for any active and inactive
+     sessions. An active session is the one in which you are currently
+     working. It becomes inactive when you switch to another console for
+     example. When setting implicit privileges to <quote>no</quote>, no user
+     is authorized, whereas <quote>yes</quote> authorizes all users.
+     However, in most cases it is useful to demand authentication.
+    </para>
+<!-- <?dbfo-need height="15em"?>-->
+    <para>
+     A user can either authorize by authenticating as &rootuser; or by
+     authenticating as self. Both authentication methods exist in four
+     variants:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>Authentication</term>
+      <listitem>
+       <para>
+        The user always has to authenticate.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>One Shot Authentication</term>
+      <listitem>
+       <para>
+        The authentication is bound to the instance of the program currently
+        running. Once the program is restarted, the user is required to
+        authenticate again.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Keep Session Authentication</term>
+      <listitem>
+       <para>
+        The authentication dialog box offers a check button
+        <guimenu>Remember authorization for this session</guimenu>. If
+        checked, the authentication is valid until the user logs out.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Keep Indefinitely Authentication</term>
+      <listitem>
+       <para>
+        The authentication dialog box offers a check button
+        <guimenu>Remember authorization</guimenu>. If checked, the user has
+        to authenticate only once.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+   <sect3 id="sec.security.policykit.policies.explicit">
+    <title>Explicit Privileges</title>
+    <para>
+     Explicit privileges can be granted to specific users. They can either
+     be granted without limitations, or, when using constraints, limited to
+     an active session and/or a local console.
+    </para>
+    <para>
+     It is not only possible to grant privileges to a user, a user can also
+     be blocked. Blocked users will not be able to carry out an action
+     requiring authorization, even though the default implicit policy allows
+     authorization by authentication.
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 id="sec.security.policykit.policies.default">
+   <title>Default Privileges</title>
+   <para>
+    Each application supporting &pk; comes with a default set of implicit
+    policies defined by the application's developers. Those policies are the
+    so-called <quote>upstream defaults</quote>. The privileges defined by
+    the upstream defaults are not necessarily the ones that are activated by
+    default on &suse; systems. &productname; comes with a predefined set of
+    privileges that override the upstream defaults:
+   </para>
+    
+    <variablelist>
+      <varlistentry>
+        <term><filename>/etc/polkit-default-privs.standard</filename></term>
+        <listitem>
+          <para>Defines privileges suitable for most desktop systems<phrase os="sled;osuse"
+            >. It is active by default.</phrase></para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><filename>/etc/polkit-default-privs.restrictive</filename></term>
+        <listitem>
+          <para>Designed for machines administrated centrally<phrase os="sles"
+            >. It is active by default.</phrase>
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+    
+   <para>
+    To switch between the two sets of default privileges, adjust the value
+    of <varname>POLKIT_DEFAULT_PRIVS</varname> to either
+    <literal>restrictive</literal> or <literal>standard</literal> in
+    <filename>/etc/sysconfig/security</filename>. Then run the command
+    <command>set_polkit_default_privs</command> as &rootuser;.
+   </para>
+   <para>
+    Do not modify the two file in the list above. In order to define your own custom set of privileges, use
+    <filename>/etc/polkit-default-privs.local</filename>. For details, refer
+    to <xref linkend="sec.security.policykit.change.modify_config.implicit"></xref>.
+   </para>
+  </sect2>
+ </sect1>
+ 
+ <sect1 id="sec.security.security.policykit.change">
+  <title>Modifying and Setting Privileges</title>
+
+  <para>
+   To modify implicit privileges or to set explicit ones, you can either use
+   the graphical <guimenu>Authorizations</guimenu> tool available with GNOME
+   or KDE, use the command line tools shipped with &pk;, or modify the
+   configuration files. While the GUI and the command line tools are a good
+   solution for making temporary changes, editing the configuration files
+   should be the preferred way to make permanent changes.
+  </para>
+
+  <sect2 id="sec.security.policykit.change.gui">
+   <title>Using the Graphical <guimenu>Authorizations</guimenu> Tool</title>
+   <tip>
+    <title>Using the Authorizations Tool</title>
+    <para>
+     <guimenu>Authorizations</guimenu> is a graphical tool and therefore not
+     installed when the respective GNOME or KDE desktop environment is not
+     installed. In this case you need to install the package
+     <systemitem>PolicyKit-gnome</systemitem> (GNOME) or
+     <systemitem>libpolkit-qt0</systemitem> (KDE)
+     <remark>taroth 2013-02-22: 
+     check</remark>
+     in order to use the tool.
+    </para>
+   </tip>
+   <para>
+    Start the Authorizations tool
+<!--either via the GNOME main menu by
+    selecting <menuchoice> <guimenu>More Applications</guimenu>
+    <guimenu>Tools</guimenu> <guimenu>Authorizations</guimenu> </menuchoice>
+    or -->
+    from a desktop environment by pressing &altf2; and entering
+    <command>polkit-gnome-authorization</command> or
+    <command>polkit-kde-authorization</command>, respectively.
+   </para>
+   <figure id="fig.policykit.change.gui">
+    <title>The <guimenu>Authorizations</guimenu> Main Window (GNOME)</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata width="90%" fileref="polkit_auth_gnome.png" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="polkit_auth_gnome.png" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    The <guimenu>Authorizations</guimenu> window is divided into two panes:
+    The left-hand pane shows all policies available in a tree view, while
+    the right-hand pane displays details for the policy selected and offers
+    means to change it.
+   </para>
+   <para>
+    The KDE and GNOME <guimenu>Authorizations</guimenu> dialogs are very
+    similar. The most noticeable difference is the location where details
+    about the chosen policy are displayed: the GNOME dialog displays them in
+    a dedicated <guimenu>Actions</guimenu> section on the right-hand pane.
+    It holds the following information:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      <guimenu>Identifier</guimenu>: Unique string used by &pk; to identify
+      the policy.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <guimenu>Description</guimenu>: this information explaining the
+      purpose of the policy.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <guimenu>Vendor</guimenu>: A link to the organization that has issued
+      this policy.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    The KDE dialog shows the identifier string directly in the tree view on
+    the left-hand pane, together with a short description, which is also
+    displayed at the top of the right-hand pane, together with the vendor
+    link.
+   </para>
+   <para>
+    Alter any settings from the right-hand pane, as described below:
+   </para>
+   <variablelist>
+<!--<varlistentry>
+     <term><guimenu>Action</guimenu>
+     </term>
+     <listitem>
+      <para>
+       Only available in the GNOME Authorizations tool. 
+       Lists details of the chosen policy. The <guimenu>Identifier</guimenu>
+       is the unique string used by &pk; to identify the policy.
+       <guimenu>Description</guimenu> explains the purpose of the policy and
+       <guimenu>Vendor</guimenu> displays a link to the organization that
+       has issued this policy.
+      </para>
+     </listitem>
+    </varlistentry>-->
+    <varlistentry>
+     <term><guimenu>Implicit Authorizations</guimenu>
+     </term>
+     <listitem>
+      <para>
+       In the GNOME dialog, click <guimenu>Edit</guimenu> to choose an
+       authorization type, as explained in
+       <xref linkend="sec.security.policykit.policies.implicit"/>. In KDE, you can
+       directly select the authorization types from the drop-down list.
+      </para>
+      <para>
+       Click <guimenu>Revert To Defaults</guimenu> to restore the system
+       defaults.
+      </para>
+      <note>
+       <title>Restrictions of the <guimenu>Revert to Defaults</guimenu> function on &productname;</title>
+       <para>
+        With <guimenu>Revert to Defaults</guimenu>, the
+        <guimenu>Authorization</guimenu> tool always operates on the
+        upstream defaults. To instead restore the defaults shipped with
+        &productname;, refer to
+        <xref linkend="sec.security.policykit.change.defaults"/>.
+       </para>
+      </note>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><guimenu>Explicit Authorizations</guimenu>
+     </term>
+     <listitem>
+      <para>
+       In this section you can <guimenu>Grant</guimenu> privileges to
+       existing users or <guimenu>Block</guimenu> users. In both cases,
+       choose a user and a <guimenu>Constraint</guimenu>. Users with a UID
+       of less than 1000 are only shown when <guimenu>Show System
+       Users</guimenu> is checked. To delete an authorization, choose it
+       from the list and click <guimenu>Revoke</guimenu>.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.security.policykit.change.cmd_tools">
+   <title>Using the Command Line Tools</title>
+   <para>
+    &pk; comes with command line tools for changing privileges and executing 
+    commands as another user. Each existing policy has got a
+    speaking, unique name with which it can be identified and which is used
+    with the command line tools. List all available policies with the
+    command <command>pkaction</command>.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Listing and Modifying Privileges (<command>pkaction</command>)</term>
+     <listitem>
+      <para>
+       When invoked with no parameters, the command
+       <command>polkit-action</command> shows a list of all policies. By
+       adding the <option>--show-overrides</option> option, you can list all
+       policies that differ from the default values. To reset the privileges
+       for a given action to the (upstream) defaults, use the option
+       <option>--reset-defaults&nbsp;<replaceable>ACTION</replaceable></option>.
+       See <command>man 1 polkit-action</command> for more information.
+      </para>
+       <para>If you want to display the needed authorization for a given policy 
+         (for example, the <literal>org.freedesktop.login1.reboot</literal>) use 
+         <command>pkaction</command> as follows:</para>
+       <screen>pkaction -v --action-id org.freedesktop.login1.reboot
+org.freedesktop.login1.reboot:
+  description:       Reboot the system
+  message:           Authentication is required to allow rebooting the system
+  vendor:            The systemd Project
+  vendor_url:        http://www.freedesktop.org/wiki/Software/systemd
+  icon:              
+  implicit any:      auth_admin_keep
+  implicit inactive: auth_admin_keep
+  implicit active:   yes</screen>
+      
+      <para>The keyword <literal>auth_admin_keep</literal> means, the user has to 
+        enter its passphrase.</para>
+      <note>
+       <title>Restrictions of <command>pkaction</command> on &productname;</title>
+       <para>
+        <command>pkaction</command> always operates on the upstream
+        defaults. Therefore it cannot be used to list or restore the
+        defaults shipped with &productname;. To do so, refer to
+        <xref linkend="sec.security.policykit.change.defaults"/>.
+       </para>
+      </note>
+     </listitem>
+    </varlistentry>
+    
+    <!--  -->
+    <!--
+     <varlistentry>
+      <term>Checking Authorization of a Process <command>pkcheck</command></term>
+      <listitem>
+        <para></para>
+      </listitem>
+     </varlistentry>
+    -->
+     <varlistentry>
+     <term>Listing, Granting, Blocking, and Revoking Explicit Privileges</term>
+     <listitem>
+       <remark>toms 2013-10-24: No equivalent pkauth available, right?</remark>
+<screen>polkit-auth</screen>
+      <para>
+       To print a list of explicit privileges for a specific user, use the
+       following command:
+      </para>
+<screen>polkit-auth --explicit-detail --user&nbsp;<replaceable>USER</replaceable></screen>
+      <para>
+       Replace <replaceable>USER</replaceable> with a valid username. If the
+       <option>--user</option> option is left out, the command shows the
+       privileges for the user that executes the command. See <command>man 1
+       polkit-auth</command> for more information.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.security.policykit.change.modify_config">
+   <title>Modifying Configuration Files</title>
+   <para>
+    Adjusting privileges by modifying configuration files is useful when you
+    want to deploy the same set of policies to different machines, for
+    example to the computers of a specific team. It is possible to change
+    implicit as well as explicit privileges by modifying configuration
+    files.
+   </para>
+   <sect3 id="sec.security.policykit.change.modify_config.implicit">
+    <title>Modifying Configuration Files for Implicit Privileges</title>
+    <para>
+     &productname; ships with two sets of default authorizations, located in
+     <filename>/etc/polkit-default-privs.standard</filename> and
+     <filename>/etc/polkit-default-privs.restrictive</filename>. For more
+     information, refer to
+     <xref linkend="sec.security.policykit.policies.default"></xref>.
+    </para>
+    <para>
+     In order to define your custom set of privileges, use
+     <filename>/etc/polkit-default-privs.local</filename>. Privileges
+     defined here will always take precedence over the ones defined in the
+     other configuration files. To define a privilege, add a line for each
+     policy with the following format:
+    </para>
+<screen><replaceable>&lt;privilege_identifier&gt;</replaceable>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<replaceable>&lt;any session&gt;</replaceable>:<replaceable>&lt;inactive session&gt;</replaceable>:<replaceable>&lt;active session&gt;</replaceable></screen>
+    <para>
+     For example:
+    </para>
+<screen>org.freedesktop.policykit.modify-defaults&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;auth_admin_keep_always</screen>
+    <para>
+     For a list of all privilege identifiers, run the command
+     <command>polkit-action</command>. The following values are valid for
+     the <literal>session</literal> parameters:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>yes</literal>
+      </term>
+      <listitem>
+       <para>
+        grant privilege
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>no</literal>
+      </term>
+      <listitem>
+       <para>
+        block
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>auth_self</literal>
+      </term>
+      <listitem>
+       <para>
+        user needs to authenticate with own password every time the
+        privilege is requested
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>auth_self_keep_session</literal>
+      </term>
+      <listitem>
+       <para>
+        user needs to authenticate with own password once per session,
+        privilege is granted for the whole session
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>auth_self_keep_always</literal>
+      </term>
+      <listitem>
+       <para>
+        user needs to authenticate with own password once, privilege is
+        granted for the current and for future sessions
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>auth_admin</literal>
+      </term>
+      <listitem>
+       <para>
+        user needs to authenticate with &rootuser; password every time the
+        privilege is requested
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>auth_admin_keep_session</literal>
+      </term>
+      <listitem>
+       <para>
+        user needs to authenticate with &rootuser; password once per
+        session, privilege is granted for the whole session
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>auth_admin_keep_always</literal>
+      </term>
+      <listitem>
+       <para>
+        user needs to authenticate with &rootuser; password once, privilege
+        is granted for the current and for future sessions
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <para>
+     After editing <filename>/etc/polkit-default-privs.local</filename>,
+     execute <command>set_polkit_default_privs</command> to activate your
+     settings.
+    </para>
+   </sect3>
+   <sect3 id="sec.security.policykit.change.modify_config.explicit">
+    <title>Modifying Configuration Files for Explicit Privileges</title>
+    <remark>toms 2013-10-24: The file /etc/PolicyKit/PolicyKit.conf doesn't exit anymore. 
+      Is this section obsolete now?
+    </remark>
+    <para>
+     Explicit privileges can be set in
+     <filename>/etc/PolicyKit/PolicyKit.conf</filename>. This configuration
+     file is written in XML using the &pk; DTD. The file that is shipped
+     with &productname; already contains the necessary headers and the root
+     element <literal>&lt;config&gt;</literal>. Place your edits inside the
+     <literal>&lt;config&gt;</literal> tags.
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>match</literal>
+      </term>
+      <listitem>
+       <para>
+        Specify an action or a user. <literal>match</literal> knows two
+        attributes, <literal>user</literal> and <literal>action</literal>,
+        but only a single attribute is allowed. Use nested
+        <literal>match</literal> statements to combine attributes. POSIX
+        Extended Regular Expressions are allowed as attribute values.
+       </para>
+       <variablelist>
+        <varlistentry>
+         <term><literal>user=<replaceable>USER</replaceable></literal>
+         </term>
+         <listitem>
+          <para>
+           Specify one or more login names. Separate multiple names by the
+           <quote>|</quote> symbol.
+          </para>
+         </listitem>
+        </varlistentry>
+        <varlistentry>
+         <term><literal>action=<replaceable>policy</replaceable></literal>
+         </term>
+         <listitem>
+          <para>
+           Specify a policy by it's unique identifier. To get a list of all
+           available policy identifiers use the command
+           <command>polkit-action</command>.
+          </para>
+         </listitem>
+        </varlistentry>
+       </variablelist>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>return</literal>
+      </term>
+      <listitem>
+       <para>
+        Specify the answer &pk; will return. Takes a single attribute,
+        <literal>result=<replaceable>value</replaceable></literal> with one
+        of the values listed under
+        <xref linkend="sec.security.policykit.change.modify_config.implicit"/>.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>define_admin_auth</literal>
+      </term>
+      <listitem>
+       <para>
+        Specify users or groups allowed to authorize with their own password
+        where normally the &rootuser; password would be required. Takes the
+        attributes <literal>user=<replaceable>USER</replaceable></literal>
+        or <literal>group=<replaceable>GROUP</replaceable></literal>, but
+        only one may be used at a time. Multiple attribute values must be
+        separated by <quote>|</quote>, Extended POSIX Regular Expressions
+        are not supported. Applies to all policies when used at the top
+        level, or to specific policies when used within
+        <literal>&lt;match&gt;</literal> statements.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <example id="ex.policykit.change.modify_config.explicit">
+     <title>An example <filename>/etc/PolicyKit/PolicyKit.conf</filename> file</title>
+     <screen>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE pkconfig PUBLIC "-//freedesktop//DTD PolicyKit Configuration 1.0//EN"
+"http://hal.freedesktop.org/releases/PolicyKit/1.0/config.dtd"&gt;<co id="polkit_conf.header"/>
+&lt;config version="0.1"&gt;<co id="polkit_conf.config"/>
+  &lt;match action="org.freedesktop.packagekit.system-update"&gt;<co id="polkit_conf.ex1"/>
+    &lt;match user="&exampleuser;"&gt;
+      &lt;return result="yes"/&gt;
+    &lt;/match&gt;
+  &lt;/match&gt;
+  &lt;match action="org.freedesktop.policykit.*"&gt;<co id="polkit_conf.ex2"/>
+    &lt;match user="&exampleuser;|&exampleuserII;"&gt;
+      &lt;return result="no"/&gt;
+    &lt;/match&gt;
+  &lt;/match&gt;
+  &lt;define_admin_auth group="administrators"/&gt;<co id="polkit_conf.admin_auth_group"/>
+&lt;/config&gt;</screen>
+     <calloutlist>
+      <callout arearefs="polkit_conf.header">
+       <para>
+        The first three lines of the config file are the XML header. These
+        lines are already present in the template file, leave them
+        untouched.
+       </para>
+      </callout>
+      <callout arearefs="polkit_conf.config">
+       <para>
+        The XML root element must always be present. The attribute
+        <literal>version</literal> is mandatory, currently the only valid
+        value is <literal>0.1</literal>. Already present in the template
+        file.
+       </para>
+      </callout>
+      <callout arearefs="polkit_conf.ex1">
+       <para>
+        A statement granting the user
+        <systemitem class="username">&exampleuser;</systemitem> the
+        privilege to update packages via PackageKit without having to
+        authorize.
+       </para>
+      </callout>
+      <callout arearefs="polkit_conf.ex2">
+       <para>
+        Withdraw privileges for all &pk;-related policies from the users
+        <systemitem class="username">&exampleuser;</systemitem> and
+        <systemitem class="username">&exampleuserII;</systemitem>.
+       </para>
+      </callout>
+      <callout arearefs="polkit_conf.admin_auth_group">
+       <para>
+        This statement allows all members of the group
+        <systemitem class="groupname">administrators</systemitem> to
+        authenticate with their own password whenever authentication with
+        the &rootuser; password would be required. Since this statement is
+        not nested within constraining <literal>match</literal> statements,
+        it applies to all policies.
+       </para>
+      </callout>
+     </calloutlist>
+    </example>
+   </sect3>
+  </sect2>
+
+  <sect2 id="sec.security.policykit.change.defaults">
+   <title>Restoring the Default Privileges</title>
+   <para>
+    &productname; comes with a predefined set of privileges that is
+    activated by default and thus overrides the upstream defaults. For
+    details, refer to <xref linkend="sec.security.policykit.policies.default"/>.
+   </para>
+   <para>
+    Since the graphical &pk; tools and the command line tools always operate
+    on the upstream defaults, &productname; includes an additional
+    command-line tool, <command>set_polkit_default_privs</command>. It
+    resets privileges to the values defined in
+    <filename>/etc/polkit-default-privs.*</filename>. However, the command
+    <command>set_polkit_default_privs</command> will only reset policies
+    that are set to the upstream defaults.
+   </para>
+   <procedure>
+    <title>Restoring the &productname; Defaults</title>
+    <step>
+     <para>
+      Make sure <filename>/etc/polkit-default-privs.local</filename> does
+      not contain any overrides of the default policies.
+     </para>
+     <important>
+      <title>Custom Policy Configuration</title>
+      <para>
+       Policies defined in
+       <filename>/etc/polkit-default-privs.local</filename> will be applied
+       on top of the defaults during the next step.
+      </para>
+     </important>
+    </step>
+    <step>
+     <para>
+      To reset all policies to the upstream defaults first and then apply
+      the &productname; defaults:
+     </para>
+<screen>rm -f /var/lib/PolicyKit-public/* &amp;&amp; set_polkit_default_privs</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+</chapter>

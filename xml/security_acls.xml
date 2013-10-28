@@ -1,0 +1,861 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.security.acls">
+ <title>Access Control Lists in Linux</title><indexterm class="startofrange" id="idx.ACLs">
+ <primary>ACLs</primary></indexterm>
+ <abstract>
+  <para>
+   POSIX ACLs (access control lists) can be used as an expansion of the
+   traditional permission concept for file system objects. With ACLs,
+   permissions can be defined more flexibly than with the traditional
+   permission concept.
+  </para>
+ </abstract><indexterm id="idx.file_systems_access_control_lists" class="startofrange">
+ <primary>file systems</primary>
+ <secondary>ACLs</secondary></indexterm><indexterm id="idx.permissions_ACLs" class="startofrange">
+ <primary>permissions</primary>
+ <secondary>ACLs</secondary></indexterm>
+ <para>
+  The term <emphasis>POSIX ACL</emphasis> suggests that this is a true POSIX
+  (<emphasis>portable operating system interface</emphasis>) standard. The
+  respective draft standards POSIX 1003.1e and POSIX 1003.2c have been
+  withdrawn for several reasons. Nevertheless, ACLs (as found on many
+  systems belonging to the UNIX family) are based on these drafts and the
+  implementation of file system ACLs (as described in this chapter) follows
+  these two standards, as well.
+ </para>
+ <sect1 id="sec.security.acls.traditional">
+  <title>Traditional File Permissions</title>
+
+  <para>
+   Find detailed information about the traditional file permissions in the
+   GNU Coreutils Info page, Node <emphasis>File permissions</emphasis>
+   (<command>info coreutils "File permissions"</command>). More advanced
+   features are the setuid, setgid, and sticky bit.
+  </para>
+
+  <sect2 id="sec.security.acls.traditional.setuid">
+   <title>The setuid Bit</title>
+   <para>
+    In certain situations, the access permissions may be too restrictive.
+    Therefore, Linux has additional settings that enable the temporary
+    change of the current user and group identity for a specific action. For
+    example, the <command>passwd</command> program normally requires root
+    permissions to access <filename>/etc/passwd</filename>. This file
+    contains some important information, like the home directories of users
+    and user and group IDs. Thus, a normal user would not be able to change
+    <filename>passwd</filename>, because it would be too dangerous to grant
+    all users direct access to this file. A possible solution to this
+    problem is the <emphasis>setuid</emphasis> mechanism. setuid (set user
+    ID) is a special file attribute that instructs the system to execute
+    programs marked accordingly under a specific user ID. Consider the
+    <command>passwd</command> command:
+   </para>
+<screen>-rwsr-xr-x  1 root shadow 80036 2004-10-02 11:08 /usr/bin/passwd</screen>
+   <para>
+    You can see the <literal>s</literal> that denotes that the setuid bit is
+    set for the user permission. By means of the setuid bit, all users
+    starting the <command>passwd</command> command execute it as
+    <systemitem class="username">root</systemitem>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.acls.traditional.setgid">
+   <title>The setgid Bit</title>
+   <para>
+    The setuid bit applies to users. However, there is also an equivalent
+    property for groups: the <emphasis>setgid</emphasis> bit. A program for
+    which this bit was set runs under the group ID under which it was saved,
+    no matter which user starts it. Therefore, in a directory with the
+    setgid bit, all newly created files and subdirectories are assigned to
+    the group to which the directory belongs. Consider the following example
+    directory:
+   </para>
+<screen>drwxrws--- 2 &exampleuser; archive 48 Nov 19 17:12  backup</screen>
+   <para>
+    You can see the <literal>s</literal> that denotes that the setgid bit is
+    set for the group permission. The owner of the directory and members of
+    the group <systemitem class="groupname"
+     >archive</systemitem> may
+    access this directory. Users that are not members of this group are
+    <quote>mapped</quote> to the respective group. The effective group ID of
+    all written files will be
+    <systemitem class="groupname">archive</systemitem>. For example, a
+    backup program that runs with the group ID
+    <systemitem class="groupname">archive</systemitem> is able to access
+    this directory even without root privileges.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.acls.traditional.sticky">
+   <title>The Sticky Bit</title>
+   <para>
+    There is also the <emphasis>sticky bit</emphasis>. It makes a difference
+    whether it belongs to an executable program or a directory. If it
+    belongs to a program, a file marked in this way is loaded to RAM to
+    avoid needing to get it from the hard disk each time it is used. This
+    attribute is used rarely, because modern hard disks are fast enough. If
+    this bit is assigned to a directory, it prevents users from deleting
+    each other's files. Typical examples include the
+    <filename>/tmp</filename> and <filename>/var/tmp</filename> directories:
+   </para>
+<screen>drwxrwxrwt 2 root root 1160 2002-11-19 17:15 /tmp</screen>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.acls.intro">
+  <title>Advantages of ACLs</title>
+
+  <para>
+   Traditionally, three permission sets are defined for each file object on
+   a Linux system. These sets include the read (<literal>r</literal>), write
+   (<literal>w</literal>), and execute (<literal>x</literal>) permissions
+   for each of three types of users&mdash;the file owner, the group, and
+   other users. In addition to that, it is possible to set the <emphasis>set
+   user id</emphasis>, the <emphasis>set group id</emphasis>, and the
+   <emphasis>sticky</emphasis> bit. This lean concept is fully adequate for
+   most practical cases. However, for more complex scenarios or advanced
+   applications, system administrators formerly had to use a number of
+   workarounds to circumvent the limitations of the traditional permission
+   concept.
+  </para>
+
+  <para>
+   ACLs can be used as an extension of the traditional file permission
+   concept. They allow the assignment of permissions to individual users or
+   groups even if these do not correspond to the original owner or the
+   owning group. Access control lists are a feature of the Linux kernel and
+   are currently supported by ReiserFS, Ext2, Ext3, JFS, and XFS. Using
+   ACLs, complex scenarios can be realized without implementing complex
+   permission models on the application level.
+  </para>
+
+  <para>
+   The advantages of ACLs are evident if you want to replace a Windows
+   server with a Linux server. Some of the connected workstations may
+   continue to run under Windows even after the migration. The Linux system
+   offers file and print services to the Windows clients with Samba. With
+   Samba supporting access control lists, user permissions can be configured
+   both on the Linux server and in Windows with a graphical user interface
+   (only Windows NT and later). With <command>winbindd</command>, part of
+   the samba suite, it is even possible to assign permissions to users only
+   existing in the Windows domain without any account on the Linux server.
+  </para>
+ </sect1>
+ <sect1 id="sec.security.acls.defs">
+  <title>Definitions</title><indexterm>
+
+  <primary>ACLs</primary>
+
+  <secondary>definitions</secondary></indexterm>
+
+  <variablelist>
+   <varlistentry>
+    <term>User Class</term>
+    <listitem>
+     <para>
+      The conventional POSIX permission concept uses three
+      <emphasis>classes</emphasis> of users for assigning permissions in the
+      file system: the owner, the owning group, and other users. Three
+      permission bits can be set for each user class, giving permission to
+      read (<literal>r</literal>), write (<literal>w</literal>), and execute
+      (<literal>x</literal>).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ACL</term>
+    <listitem>
+     <para>
+      <indexterm>
+      <primary>ACLs</primary>
+      <secondary>access</secondary>
+      </indexterm> The user and group access permissions for all kinds of
+      file system objects (files and directories) are determined by means of
+      ACLs.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Default ACL</term>
+    <listitem><indexterm>
+     <primary>ACLs</primary>
+     <secondary>default</secondary></indexterm>
+     <para>
+      Default ACLs can only be applied to directories. They determine the
+      permissions a file system object inherits from its parent directory
+      when it is created.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ACL Entry</term>
+    <listitem>
+     <para>
+      Each ACL consists of a set of ACL entries. An ACL entry contains a
+      type, a qualifier for the user or group to which the entry refers, and
+      a set of permissions. For some entry types, the qualifier for the
+      group or users is undefined.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.security.acls.handle">
+  <title>Handling ACLs</title><indexterm>
+
+  <primary>ACLs</primary>
+
+  <secondary>handling</secondary></indexterm><indexterm>
+
+  <primary>ACLs</primary>
+
+  <secondary>structure</secondary></indexterm>
+
+  <para>
+   <xref linkend="tab.entrytype"/> summarizes the six possible types of ACL
+   entries, each defining permissions for a user or a group of users. The
+   <emphasis>owner</emphasis> entry defines the permissions of the user
+   owning the file or directory. The <emphasis>owning group</emphasis> entry
+   defines the permissions of the file's owning group. The superuser can
+   change the owner or owning group with <command>chown</command> or
+   <command>chgrp</command>, in which case the owner and owning group
+   entries refer to the new owner and owning group. Each <emphasis>named
+   user</emphasis> entry defines the permissions of the user specified in
+   the entry's qualifier field. Each <emphasis>named group</emphasis> entry
+   defines the permissions of the group specified in the entry's qualifier
+   field. Only the named user and named group entries have a qualifier field
+   that is not empty. The <emphasis>other</emphasis> entry defines the
+   permissions of all other users.
+  </para>
+
+  <para>
+   The <emphasis>mask</emphasis> entry further limits the permissions
+   granted by named user, named group, and owning group entries by defining
+   which of the permissions in those entries are effective and which are
+   masked. If permissions exist in one of the mentioned entries as well as
+   in the mask, they are effective. Permissions contained only in the mask
+   or only in the actual entry are not effective&mdash;meaning the
+   permissions are not granted. All permissions defined in the owner and
+   owning group entries are always effective. The example in
+   <xref linkend="tab.mask"/> demonstrates this mechanism.
+  </para>
+
+  <para>
+   There are two basic classes of ACLs: A <emphasis>minimum</emphasis> ACL
+   contains only the entries for the types owner, owning group, and other,
+   which correspond to the conventional permission bits for files and
+   directories. An <emphasis>extended</emphasis> ACL goes beyond this. It
+   must contain a mask entry and may contain several entries of the named
+   user and named group types.
+  </para>
+
+  <table
+   id="tab.entrytype">
+   <title>ACL Entry Types</title>
+   <tgroup cols="2">
+    <thead>
+     <row>
+      <entry>
+       <para>
+        Type
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Text Form
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        owner
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>user::rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        named user
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>user:name:rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        owning group
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>group::rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        named group
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>group:name:rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        mask
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>mask::rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        other
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>other::rwx</literal>
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <table id="tab.mask">
+   <title>Masking Access Permissions</title>
+   <tgroup cols="3">
+    <thead>
+     <row>
+      <entry>
+       <para>
+        Entry Type
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Text Form
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Permissions
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        named user
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>user:geeko:r-x</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>r-x</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        mask
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>mask::rw-</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>rw-</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para/>
+      </entry>
+      <entry>
+       <para>
+        effective permissions:
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>r--</literal>
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 id="sec.security.acls.handle.fmbits">
+   <title>ACL Entries and File Mode Permission Bits</title><indexterm>
+   <primary>ACLs</primary>
+   <secondary>permission bits</secondary></indexterm>
+   <para>
+    <xref linkend="fig.acls.map.mini"/> and
+    <xref linkend="fig.acls.map.ext"/> illustrate the two cases of a minimum
+    ACL and an extended ACL. The figures are structured in three
+    blocks&mdash;the left block shows the type specifications of the ACL
+    entries, the center block displays an example ACL, and the right block
+    shows the respective permission bits according to the conventional
+    permission concept (for example, as displayed by <command>ls</command>
+    <option>-l</option>). In both cases, the <emphasis>owner
+    class</emphasis> permissions are mapped to the ACL entry owner.
+    <emphasis>Other class</emphasis> permissions are mapped to the
+    respective ACL entry. However, the mapping of the <emphasis>group
+    class</emphasis> permissions is different in the two cases.
+   </para>
+   <figure id="fig.acls.map.mini">
+    <title>Minimum ACL: ACL Entries Compared to Permission Bits</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="acls_map_mini.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="acls_map_mini.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    In the case of a minimum ACL&mdash;without mask&mdash;the group class
+    permissions are mapped to the ACL entry owning group. This is shown in
+    <xref linkend="fig.acls.map.mini"/>. In the case of an extended
+    ACL&mdash;with mask&mdash;the group class permissions are mapped to the
+    mask entry. This is shown in <xref linkend="fig.acls.map.ext"/>.
+   </para>
+   <figure
+    id="fig.acls.map.ext">
+    <title>Extended ACL: ACL Entries Compared to Permission Bits</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="acls_map_ext.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="acls_map_ext.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <remark>Oops. We need to change the example users in the pngs! -rwalter</remark>
+   <para>
+    This mapping approach ensures the smooth interaction of applications,
+    regardless of whether they have ACL support. The access permissions that
+    were assigned by means of the permission bits represent the upper limit
+    for all other <quote>fine adjustments</quote> made with an ACL. Changes
+    made to the permission bits are reflected by the ACL and vice versa.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.acls.handle.accacl">
+   <title>A Directory with an ACL</title><indexterm>
+   <primary>ACLs</primary>
+   <secondary>access</secondary></indexterm>
+   <para>
+    With <command>getfacl</command> and <command>setfacl</command> on the
+    command line, you can access ACLs. The usage of these commands is
+    demonstrated in the following example.
+   </para>
+   <para>
+    Before creating the directory, use the <command>umask</command> command
+    to define which access permissions should be masked each time a file
+    object is created. The command <command>umask</command>
+    <option>027</option> sets the default permissions by giving the owner
+    the full range of permissions (<literal>0</literal>), denying the group
+    write access (<literal>2</literal>), and giving other users no
+    permissions at all (<literal>7</literal>). <command>umask</command>
+    actually masks the corresponding permission bits or turns them off. For
+    details, consult the <command>umask</command> man page.
+   </para>
+   <para>
+    <command>mkdir mydir</command> creates the <filename>mydir</filename>
+    directory with the default permissions as set by
+    <command>umask</command>. Use <command>ls <option>-dl
+    mydir</option></command> to check whether all permissions were assigned
+    correctly. The output for this example is:
+   </para>
+<screen>drwxr-x--- ... tux project3 ... mydir</screen>
+   <para>
+    With <command>getfacl <option>mydir</option></command>, check the
+    initial state of the ACL. This gives information like:
+   </para>
+<screen># file: mydir 
+# owner: tux 
+# group: project3 
+user::rwx 
+group::r-x 
+other::---</screen>
+   <para>
+    <indexterm>
+    <primary>commands</primary>
+    <secondary>getfacl</secondary>
+    </indexterm> The first three output lines display the name, owner, and
+    owning group of the directory. The next three lines contain the three
+    ACL entries owner, owning group, and other. In fact, in the case of this
+    minimum ACL, the <command>getfacl</command> command does not produce any
+    information you could not have obtained with <command>ls</command>.
+   </para>
+   <para>
+    Modify the ACL to assign read, write, and execute permissions to an
+    additional user <literal>geeko</literal> and an additional group
+    <literal>mascots</literal> with:
+   </para>
+<screen>setfacl -m user:geeko:rwx,group:mascots:rwx mydir</screen><indexterm>
+   <primary>commands</primary>
+   <secondary>setfacl</secondary></indexterm>
+   <para>
+    The option <option>-m</option> prompts <command>setfacl</command> to
+    modify the existing ACL. The following argument indicates the ACL
+    entries to modify (multiple entries are separated by commas). The final
+    part specifies the name of the directory to which these modifications
+    should be applied. Use the <command>getfacl</command> command to take a
+    look at the resulting ACL.
+   </para>
+<screen># file: mydir 
+# owner: tux 
+# group: project3 
+user::rwx 
+user:geeko:rwx 
+group::r-x
+group:mascots:rwx 
+mask::rwx 
+other::---</screen>
+   <para>
+    <indexterm>
+    <primary>ACLs</primary>
+    <secondary>masks</secondary>
+    </indexterm> In addition to the entries initiated for the user
+    <literal>geeko</literal> and the group <literal>mascots</literal>, a
+    mask entry has been generated. This mask entry is set automatically so
+    that all permissions are effective. <command>setfacl</command>
+    automatically adapts existing mask entries to the settings modified,
+    unless you deactivate this feature with <literal>-n</literal>. mask
+    defines the maximum effective access permissions for all entries in the
+    group class. This includes named user, named group, and owning group.
+    The group class permission bits displayed by <command>ls</command>
+    <option>-dl mydir</option> now correspond to the <literal>mask</literal>
+    entry.
+   </para>
+<screen>drwxrwx---+ ... tux project3 ... mydir</screen>
+   <para>
+    The first column of the output contains an additional
+    <literal>+</literal> to indicate that there is an
+    <emphasis>extended</emphasis> ACL for this item.
+   </para>
+   <para>
+    According to the output of the <command>ls</command> command, the
+    permissions for the mask entry include write access. Traditionally, such
+    permission bits would mean that the owning group (here
+    <literal>project3</literal>) also has write access to the directory
+    <filename>mydir</filename>. However, the effective access permissions
+    for the owning group correspond to the overlapping portion of the
+    permissions defined for the owning group and for the mask&mdash;which is
+    <literal>r-x</literal> in our example (see <xref linkend="tab.mask"/>).
+    As far as the effective permissions of the owning group in this example
+    are concerned, nothing has changed even after the addition of the ACL
+    entries.
+   </para>
+   <para>
+    Edit the mask entry with <command>setfacl</command> or
+    <command>chmod</command>. For example, use <command>chmod <option>g-w
+    mydir</option></command>. <command>ls <option>-dl
+    mydir</option></command> then shows:
+   </para>
+<screen>drwxr-x---+ ... tux project3 ... mydir</screen>
+   <para>
+    <command>getfacl <option>mydir</option></command> provides the following
+    output:
+   </para>
+<screen># file: mydir 
+# owner: tux 
+# group: project3 
+user::rwx 
+user:geeko:rwx          # effective: r-x
+group::r-x 
+group:mascots:rwx       # effective: r-x 
+mask::r-x 
+other::---</screen>
+   <para>
+    After executing the <command>chmod</command> command to remove the write
+    permission from the group class bits, the output of the
+    <command>ls</command> command is sufficient to see that the mask bits
+    must have changed accordingly: write permission is again limited to the
+    owner of <filename>mydir</filename>. The output of the
+    <command>getfacl</command> confirms this. This output includes a comment
+    for all those entries in which the effective permission bits do not
+    correspond to the original permissions, because they are filtered
+    according to the mask entry. The original permissions can be restored at
+    any time with <command>chmod <option>g+w mydir</option></command>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.acls.handle.defacl">
+   <title>A Directory with a Default ACL</title><indexterm>
+   <primary>ACLs</primary>
+   <secondary>default</secondary></indexterm>
+   <para>
+    Directories can have a default ACL, which is a special kind of ACL
+    defining the access permissions that objects in the directory inherit
+    when they are created. A default ACL affects both subdirectories and
+    files.
+   </para>
+   <sect3 id="sec.security.acls.handle.defacl.eff">
+    <title>Effects of a Default ACL</title><indexterm>
+    <primary>ACLs</primary>
+    <secondary>effects</secondary></indexterm>
+    <para>
+     There are two ways in which the permissions of a directory's default
+     ACL are passed to the files and subdirectories:
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       A subdirectory inherits the default ACL of the parent directory both
+       as its default ACL and as an ACL.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       A file inherits the default ACL as its ACL.
+      </para>
+     </listitem>
+    </itemizedlist>
+    <para>
+     All system calls that create file system objects use a
+     <literal>mode</literal> parameter that defines the access permissions
+     for the newly created file system object. If the parent directory does
+     not have a default ACL, the permission bits as defined by the
+     <literal>umask</literal> are subtracted from the permissions as passed
+     by the <literal>mode</literal> parameter, with the result being
+     assigned to the new object. If a default ACL exists for the parent
+     directory, the permission bits assigned to the new object correspond to
+     the overlapping portion of the permissions of the
+     <literal>mode</literal> parameter and those that are defined in the
+     default ACL. The <literal>umask</literal> is disregarded in this case.
+    </para>
+   </sect3>
+   <sect3 id="sec.security.acls.handle.defacl.prac">
+    <title>Application of Default ACLs</title>
+    <para>
+     The following three examples show the main operations for directories
+     and default ACLs:
+    </para>
+    <orderedlist>
+     <listitem>
+      <para>
+       Add a default ACL to the existing directory
+       <filename>mydir</filename> with:
+      </para>
+<screen>setfacl -d -m group:mascots:r-x mydir</screen>
+      <para>
+       The option <literal>-d</literal> of the <command>setfacl</command>
+       command prompts <command>setfacl</command> to perform the following
+       modifications (option <literal>-m</literal>) in the default ACL.
+      </para>
+      <para>
+       Take a closer look at the result of this command:
+      </para>
+<screen>getfacl mydir
+
+# file: mydir 
+# owner: tux 
+# group: project3 
+user::rwx 
+user:geeko:rwx 
+group::r-x
+group:mascots:rwx 
+mask::rwx 
+other::--- 
+default:user::rwx
+default:group::r-x 
+default:group:mascots:r-x 
+default:mask::r-x
+default:other::---</screen>
+      <para>
+       <command>getfacl</command> returns both the ACL and the default ACL.
+       The default ACL is formed by all lines that start with
+       <literal>default</literal>. Although you merely executed the
+       <command>setfacl</command> command with an entry for the
+       <literal>mascots</literal> group for the default ACL,
+       <command>setfacl</command> automatically copied all other entries
+       from the ACL to create a valid default ACL. Default ACLs do not have
+       an immediate effect on access permissions. They only come into play
+       when file system objects are created. These new objects inherit
+       permissions only from the default ACL of their parent directory.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       In the next example, use <command>mkdir</command> to create a
+       subdirectory in <filename>mydir</filename>, which inherits the
+       default ACL.
+      </para>
+<screen>mkdir mydir/mysubdir
+
+getfacl mydir/mysubdir 
+
+# file: mydir/mysubdir 
+# owner: tux 
+# group: project3 
+user::rwx 
+group::r-x 
+group:mascots:r-x 
+mask::r-x
+other::--- 
+default:user::rwx 
+default:group::r-x
+default:group:mascots:r-x 
+default:mask::r-x 
+default:other::---</screen>
+      <para>
+       As expected, the newly-created subdirectory
+       <filename>mysubdir</filename> has the permissions from the default
+       ACL of the parent directory. The ACL of <filename>mysubdir</filename>
+       is an exact reflection of the default ACL of
+       <filename>mydir</filename>. The default ACL that this directory will
+       hand down to its subordinate objects is also the same.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Use <command>touch</command> to create a file in the
+       <filename>mydir</filename> directory, for example, <command>touch
+       <option>mydir/myfile</option></command>. <command>ls <option>-l
+       mydir/myfile</option></command> then shows:
+      </para>
+<screen>-rw-r-----+ ... tux project3 ... mydir/myfile</screen>
+      <para>
+       The output of <command>getfacl
+       <option>mydir/myfile</option></command> is:
+      </para>
+<screen># file: mydir/myfile 
+# owner: tux 
+# group: project3
+user::rw- 
+group::r-x          # effective:r-- 
+group:mascots:r-x   # effective:r-- 
+mask::r-- 
+other::---</screen>
+      <para>
+       <command>touch</command> uses a <literal>mode</literal> with the
+       value <literal>0666</literal> when creating new files, which means
+       that the files are created with read and write permissions for all
+       user classes, provided no other restrictions exist in
+       <command>umask</command> or in the default ACL (see
+       <xref
+        linkend="sec.security.acls.handle.defacl.eff"/>). In
+       effect, this means that all access permissions not contained in the
+       <literal>mode</literal> value are removed from the respective ACL
+       entries. Although no permissions were removed from the ACL entry of
+       the group class, the mask entry was modified to mask permissions not
+       set in <literal>mode</literal>.
+      </para>
+      <para>
+       This approach ensures the smooth interaction of applications (such as
+       compilers) with ACLs. You can create files with restricted access
+       permissions and subsequently mark them as executable. The
+       <command>mask</command> mechanism guarantees that the right users and
+       groups can execute them as desired.
+      </para>
+     </listitem>
+    </orderedlist>
+   </sect3>
+  </sect2>
+
+  <sect2 id="sec.security.acls.handle.alg">
+   <title>The ACL Check Algorithm</title><indexterm>
+   <primary>ACLs</primary>
+   <secondary>check algorithm</secondary></indexterm>
+   <para>
+    A check algorithm is applied before any process or application is
+    granted access to an ACL-protected file system object. As a basic rule,
+    the ACL entries are examined in the following sequence: owner, named
+    user, owning group or named group, and other. The access is handled in
+    accordance with the entry that best suits the process. Permissions do
+    not accumulate.
+   </para>
+   <para>
+    Things are more complicated if a process belongs to more than one group
+    and would potentially suit several group entries. An entry is randomly
+    selected from the suitable entries with the required permissions. It is
+    irrelevant which of the entries triggers the final result <quote>access
+    granted</quote>. Likewise, if none of the suitable group entries contain
+    the required permissions, a randomly selected entry triggers the final
+    result <quote>access denied</quote>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.acls.future">
+  <title>ACL Support in Applications</title><indexterm>
+
+  <primary>ACLs</primary>
+
+  <secondary>support</secondary></indexterm>
+
+  <para>
+   ACLs can be used to implement very complex permission scenarios that meet
+   the requirements of modern applications. The traditional permission
+   concept and ACLs can be combined in a smart manner. The basic file
+   commands (<command>cp</command>, <command>mv</command>,
+   <command>ls</command>, etc.) support ACLs, as do Samba and Konqueror.
+  </para>
+
+  <para>
+   Unfortunately, many editors and file managers still lack ACL support.
+   When copying files with Emacs, for instance, the ACLs of these files are
+   lost. When modifying files with an editor, the ACLs of files are
+   sometimes preserved and sometimes not, depending on the backup mode of
+   the editor used. If the editor writes the changes to the original file,
+   the ACL is preserved. If the editor saves the updated contents to a new
+   file that is subsequently renamed to the old filename, the ACLs may be
+   lost, unless the editor supports ACLs. Except for the star archiver,
+   there are currently no backup applications that preserve ACLs.
+  </para>
+ </sect1>
+ <sect1
+  id="sec.security.acls.info">
+  <title>For More Information</title>
+
+  <para>
+   For more information about ACLs, see the man pages for
+   <command>getfacl(1)</command>, <command>acl(5)</command>, and
+   <command>setfacl(1)</command>.
+  </para><indexterm class="endofrange" startref="idx.file_systems_access_control_lists"/><indexterm class="endofrange" startref="idx.permissions_ACLs"/><indexterm class="endofrange" startref="idx.ACLs"/>
+ </sect1>
+</chapter>

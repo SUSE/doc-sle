@@ -1,0 +1,668 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<!-- fs 2009-02-25: Todo Code 11:
+
+* split Chapter 2 (apparmor_profiles.xml) into:
+  - basic profile (basic file rules, and profile syntax)
+  - advanced (all the newer stuff, owner rules, link pairs,
+    unattached profiles, ...)
+* External Local Profiles and Hats (in appendix?)
+* /sys/kernel/security/apparmor/matching (for scripts):
+  pattern=aadfa audit perms=rwxamlk/ user::other
+
+  pattern=aadfa - means the matching is done by the aadfa engine, the old
+                engine was individual rule based on pcre.  The aadfa
+                engine is a lot faster and cleaner kernel side but
+                requires the user side to do significantly more work
+                setting things up.
+
+                Basically this tells the parser which set of routines to
+
+                use.
+  audit - means that rule auditing and quieting is supported
+  perms=rwxamlk/ - is the list of perms supported.  / means that directory
+                 are match by trailing / in policy.  This wasn't the
+                 case pre AppArmor 2.1 (opensuse 10.3).
+                 10.3 perms string looks like
+                     pattern=aadfa perms=rwxamlz
+                 the z is a bug it is supposed to be k, but it was also
+                 had another bug because it was missing /, so z now = k/
+                 to the tools.
+
+                 if you look at SP2 perms it will look like
+                    pattern=aadfa perms=rwxml
+                 because it doesn't support everything that 10.3 does
+
+  user::other - indicates the permission are support for both user and
+              other matching.  Internally AA does something very similar
+              to unix dac permission checking of user, group, other,
+              except AA's is user, extended user acl, other.
+
+              owner rules set the user set, none owner rules set the
+              user and other set.  By the way it is actually possible to
+              write an other rule.
+
+                 other /bin/foo r,   # only matches files not owned by
+                                       the user, nor matched by extended
+                                       owner checks.
+              But the syntax isn't set in stone yet, and I didn't add
+              support to the tools yet.
+
+              The extended permission acl (which replaces unix group
+              check) will allow for specifying who the file is owned by.
+
+                 owner=root /bin/foo rw,  # only allow access if the
+                                            file is owned by root.
+  
+* the ability to drop/migrate events out of the events db
+* mount rules (implemented)?
+
+-->
+<chapter id="cha.apparmor.concept">
+ <title>Immunizing Programs</title>
+ <para>
+  Effective hardening of a computer system requires minimizing the number of
+  programs that mediate privilege, then securing the programs as much as
+  possible. With &aa;, you only need to profile the programs that are
+  exposed to attack in your environment, which drastically reduces the
+  amount of work required to harden your computer. &aa; profiles enforce
+  policies to make sure that programs do what they are supposed to do, but
+  nothing else.
+ </para>
+ <para>
+  &aareg; provides immunization technologies that protect applications from
+  the inherent vulnerabilities they possess. After installing &aa;, setting
+  up &aa; profiles, and rebooting the computer, your system becomes
+  immunized because it begins to enforce the &aa; security policies.
+  Protecting programs with &aa; is referred to as
+  <emphasis>immunizing</emphasis>.
+ </para>
+ <para>
+  Administrators need only concern themselves with the applications that are
+  vulnerable to attacks, and generate profiles for these. Hardening a system
+  thus comes down to building and maintaining the &aa; profile set and
+  monitoring any policy violations or exceptions logged by &aa;'s reporting
+  facility.
+ </para>
+ <para>
+  Users should not notice &aa; at all. It runs <quote>behind the
+  scenes</quote> and does not require any user interaction. Performance is
+  not noticeably affected by &aa;. If some activity of the application is
+  not covered by an &aa; profile or if some activity of the application is
+  prevented by &aa;, the administrator needs to adjust the profile of this
+  application to cover this kind of behavior.
+ </para>
+ <para>
+  &aa; sets up a collection of default application profiles to protect
+  standard Linux services. To protect other applications, use the &aa;
+  tools to create profiles for the applications that you want protected.
+  This chapter introduces the philosophy of immunizing programs. Proceed to
+  <xref
+   linkend="cha.apparmor.profiles"/>,
+  <xref linkend="cha.apparmor.yast"/>, or
+  <xref linkend="cha.apparmor.commandline"/> if you are ready to build and
+  manage &aa; profiles.
+ </para>
+ <para>
+  &aa; provides streamlined access control for network services by
+  specifying which files each program is allowed to read, write, and
+  execute, and which type of network it is allowed to access. This ensures
+  that each program does what it is supposed to do, and nothing else. &aa;
+  quarantines programs to protect the rest of the system from being damaged
+  by a compromised process.
+ </para>
+ <para>
+  &aa; is a host intrusion prevention or mandatory access control scheme.
+  Previously, access control schemes were centered around users because they
+  were built for large timeshare systems. Alternatively, modern network
+  servers largely do not permit users to log in, but instead provide a
+  variety of network services for users (such as Web, mail, file, and print
+  servers). &aa; controls the access given to network services and other
+  programs to prevent weaknesses from being exploited.
+ </para>
+ <tip>
+  <title>Background Information for &aa;</title>
+  <para>
+   To get a more in-depth overview of &aa; and the overall concept behind
+   it, refer to <xref
+    linkend="sec.apparmor.intro.background"></xref>.
+  </para>
+ </tip>
+ <sect1 id="sec.apparmor.concept.tools">
+  <title>Introducing the &aa; Framework</title>
+
+  <para>
+   This section provides a very basic understanding of what is happening
+   <quote>behind the scenes</quote> (and under the hood of the &yast;
+   interface) when you run &aa;.
+  </para>
+
+  <para>
+   An &aa; profile is a plain text file containing path entries and access
+   permissions. See <xref linkend="sec.apparmor.profiles.parts"/> for a
+   detailed reference profile. The directives contained in this text file
+   are then enforced by the &aa; routines to quarantine the process or
+   program.
+  </para>
+
+  <para>
+   The following tools interact in the building and enforcement of &aa;
+   profiles and policies:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>aa-unconfined</command> / <command>unconfined</command>
+    </term>
+    <listitem>
+     <para>
+      <command>aa-unconfined</command> detects any application running on
+      your system that listens for network connections and is not protected
+      by an &aa; profile. Refer to
+      <xref linkend="sec.apparmor.commandline.profiling.summary.unconfined"/>
+      for detailed information about this tool.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>aa-autodep</command> / <command>autodep</command>
+    </term>
+    <listitem>
+     <para>
+      <command>aa-autodep</command> creates a basic framework of a profile
+      that needs to be fleshed out before it is put to use in production.
+      The resulting profile is loaded and put into complain mode, reporting
+      any behavior of the application that is not (yet) covered by &aa;
+      rules. Refer to
+      <xref linkend="sec.apparmor.commandline.profiling.summary.autodep"/>
+      for detailed information about this tool.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>aa-genprof</command> / <command>genprof</command>
+    </term>
+    <listitem>
+     <para>
+      <command>aa-genprof</command> generates a basic profile and asks you
+      to refine this profile by executing the application and generating log
+      events that need to be taken care of by &aa; policies. You are guided
+      through a series of questions to deal with the log events that have
+      been triggered during the application's execution. After the profile
+      has been generated, it is loaded and put into enforce mode. Refer to
+      <xref
+       linkend="sec.apparmor.commandline.profiling.summary.genprof"/>
+      for detailed information about this tool.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>aa-logprof</command> / <command>logprof</command>
+    </term>
+    <listitem>
+     <para>
+      <command>aa-logprof</command> interactively scans and reviews the log
+      entries generated by an application that is confined by an &aa;
+      profile in complain mode. It assists you in generating new entries in
+      the profile concerned. Refer to
+      <xref linkend="sec.apparmor.commandline.profiling.summary.logprof"/>
+      for detailed information about this tool.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>aa-complain</command> / <command>complain</command>
+    </term>
+    <listitem>
+     <para>
+      <command>aa-complain</command> toggles the mode of an &aa; profile
+      from enforce to complain. Exceptions to rules set in a profile are
+      logged, but the profile is not enforced. Refer to
+      <xref linkend="sec.apparmor.commandline.profiling.summary.complain"/>
+      for detailed information about this tool.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>aa-enforce</command> / <command>enforce</command>
+    </term>
+    <listitem>
+     <para>
+      <command>aa-enforce</command> toggles the mode of an &aa; profile from
+      complain to enforce. Exceptions to rules set in a profile are logged,
+      but not permitted&mdash;the profile is enforced. Refer to
+      <xref
+       linkend="sec.apparmor.commandline.profiling.summary.enforce"/>
+      for detailed information about this tool.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Once a profile has been built and is loaded, there are two ways in which
+   it can get processed:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>aa-complain</command> / <command>complain</command>
+    </term>
+    <listitem>
+     <para>
+      In complain mode, violations of &aa; profile rules, such as the
+      profiled program accessing files not permitted by the profile, are
+      detected. The violations are permitted, but also logged. To improve
+      the profile, turn complain mode on, run the program through a suite of
+      tests to generate log events that characterize the program's access
+      needs, then postprocess the log with the &aa; tools (&yast; or
+      <command>aa-logprof</command>) to transform log events into improved
+      profiles.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>aa-enforce</command> / <command>enforce</command>
+    </term>
+    <listitem>
+     <para>
+      In enforce mode, violations of &aa; profile rules, such as the
+      profiled program accessing files not permitted by the profile, are
+      detected. The violations are logged and not permitted. The default is
+      for enforce mode to be enabled. To log the violations only, but still
+      permit them, use complain mode. Enforce toggles with complain mode.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.apparmor.concept.determine">
+  <title>Determining Programs to Immunize</title>
+
+  <para>
+   Now that you have familiarized yourself with &aa;, start selecting the
+   applications for which to build profiles. Programs that need profiling
+   are those that mediate privilege. The following programs have access to
+   resources that the person using the program does not have, so they grant
+   the privilege to the user when used:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>cron Jobs</term>
+    <listitem>
+     <para>
+      Programs that are run periodically by cron. Such programs read input
+      from a variety of sources and can run with special privileges,
+      sometimes with as much as &rootuser; privilege. For example, cron can
+      run <command>/usr/sbin/logrotate</command> daily to rotate, compress,
+      or even mail system logs. For instructions for finding these types of
+      programs, refer to
+      <xref xrefstyle="SectTitleOnPage" linkend="sec.apparmor.concept.cron"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Web Applications</term>
+    <listitem>
+     <para>
+      Programs that can be invoked through a Web browser, including CGI Perl
+      scripts, PHP pages, and more complex Web applications. For
+      instructions for finding these types of programs, refer to
+      <xref xrefstyle="SectTitleOnPage" linkend="sec.apparmor.concept.network.web"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Network Agents</term>
+    <listitem>
+     <para>
+      Programs (servers and clients) that have open network ports. User
+      clients, such as mail clients and Web browsers mediate privilege.
+      These programs run with the privilege to write to the user's home
+      directory and they process input from potentially hostile remote
+      sources, such as hostile Web sites and e-mailed malicious code. For
+      instructions for finding these types of programs, refer to
+      <xref xrefstyle="SectTitleOnPage" linkend="sec.apparmor.concept.network.agents"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Conversely, unprivileged programs do not need to be profiled. For
+   instance, a shell script might invoke the <command>cp</command> program
+   to copy a file. Because <command>cp</command> does not have its own
+   profile, it inherits the profile of the parent shell script, so can copy
+   any files that the parent shell script's profile can read and write.
+  </para>
+ </sect1>
+ <sect1 id="sec.apparmor.concept.cron">
+  <title>Immunizing cron Jobs</title>
+
+  <para>
+   To find programs that are run by cron, inspect your local cron
+   configuration. Unfortunately, cron configuration is rather complex, so
+   there are numerous files to inspect. Periodic cron jobs are run from
+   these files:
+  </para>
+
+<screen>/etc/crontab 
+/etc/cron.d/* 
+/etc/cron.daily/* 
+/etc/cron.hourly/*
+/etc/cron.monthly/* 
+/etc/cron.weekly/*
+</screen>
+
+  <para>
+   For &rootuser;'s cron jobs, edit the tasks with <command>crontab
+   -e</command> and list &rootuser;'s cron tasks with <command>crontab
+   -l</command>. You must be &rootuser; for these to work.
+  </para>
+
+  <para>
+   Once you find these programs, you can use the <guimenu>Add Profile
+   Wizard</guimenu> to create profiles for them. Refer to
+   <xref xrefstyle="SectTitleOnPage" linkend="sec.apparmor.yast.wizard"/>.
+  </para>
+ </sect1>
+ <sect1 id="sec.apparmor.concept.network">
+  <title>Immunizing Network Applications</title>
+
+  <para>
+   An automated method for finding network server daemons that should be
+   profiled is to use the <command>aa-unconfined</command> tool.
+
+
+<!-- fs 2011-11-09 - see bnc #722915
+     (reporting is not available in 12.1 (aa-eventd isn't maintained upstream,
+      and doesn't understand the (not-so-)new audit.log format))
+   You can
+   also simply view a report of this information in the &yast; module (refer
+   to
+   <xref xrefstyle="HeadingOnPage" linkend="sec.apparmor.managing.config_reports.view.audit"/>
+   for instructions).
+-->
+
+  </para>
+
+  <para>
+   The <command>aa-unconfined</command> tool uses the command
+   <command>netstat -nlp</command> to inspect your open ports from inside
+   your computer, detect the programs associated with those ports, and
+   inspect the set of &aa; profiles that you have loaded.
+   <command>aa-unconfined</command> then reports these programs along with
+   the &aa; profile associated with each program, or reports
+   <quote>none</quote> (if the program is not confined).
+  </para>
+
+  <note>
+   <para>
+    If you create a new profile, you must restart the program that has been
+    profiled to have it be effectively confined by &aa;.
+   </para>
+  </note>
+
+<?dbfo-need height="4em"?>
+
+  <para>
+   Below is a sample <command>aa-unconfined</command> output:
+  </para>
+
+<!-- FIXME: update required.  portmap is gone -->
+<screen>2325 /sbin/portmap not confined 
+3702<co id="co.apparmor.concept.network.id"/> /usr/sbin/sshd<co id="co.apparmor.concept.network.string"/> confined
+   by '/usr/sbin/sshd<co id="co.apparmor.concept.network.confine"/> (enforce)' 
+4040 /usr/sbin/ntpd confined by '/usr/sbin/ntpd (enforce)' 
+4373 /usr/lib/postfix/master confined by '/usr/lib/postfix/master (enforce)' 
+4505 /usr/sbin/httpd2-prefork confined by '/usr/sbin/httpd2-prefork (enforce)'
+5274 /sbin/dhcpcd not confined 
+5592 /usr/bin/ssh not confined 
+7146 /usr/sbin/cupsd confined by '/usr/sbin/cupsd (complain)'</screen>
+
+  <calloutlist>
+   <callout arearefs="co.apparmor.concept.network.id">
+    <para>
+     The first portion is a number. This number is the process ID number
+     (PID) of the listening program.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.concept.network.string">
+    <para>
+     The second portion is a string that represents the absolute path of the
+     listening program
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.concept.network.confine">
+    <para>
+     The final portion indicates the profile confining the program, if any.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <note>
+   <para>
+    <command>aa-unconfined</command> requires &rootuser; privileges and
+    should not be run from a shell that is confined by an &aa; profile.
+   </para>
+  </note>
+
+  <para>
+   <command>aa-unconfined</command> does not distinguish between one network
+   interface and another, so it reports all unconfined processes, even those
+   that might be listening to an internal LAN interface.
+  </para>
+
+  <para>
+   Finding user network client applications is dependent on your user
+   preferences. The <command>aa-unconfined</command> tool detects and
+   reports network ports opened by client applications, but only those
+   client applications that are running at the time the
+   <command>aa-unconfined</command> analysis is performed. This is a problem
+   because network services tend to be running all the time, while network
+   client applications tend only to be running when the user is interested
+   in them.
+  </para>
+
+  <para>
+   Applying &aa; profiles to user network client applications is also
+   dependent on user preferences. Therefore, we leave the profiling of user
+   network client applications as an exercise for the user.
+  </para>
+
+<?dbfo-need height="20em"?>
+
+  <para>
+   To aggressively confine desktop applications, the
+   <command>aa-unconfined</command> command supports a
+   <option>paranoid</option> option, which reports all processes running and
+   the corresponding &aa; profiles that might or might not be associated
+   with each process. The user can then decide whether each of these
+   programs needs an &aa; profile.
+  </para>
+
+  <para>
+   If you have new or modified profiles, you can submit them to the
+   <ulink
+    url="mailto:apparmor-general@forge.novell.com">apparmor-general@forge.novell.com</ulink>
+   mailing list along with a use case for the application behavior that you
+   exercised. The &aa; team reviews and may submit the work into
+   <phrase os="sles;sled;osuse">&productname;</phrase><phrase
+    os="slert">&slert;</phrase>.
+   We cannot guarantee that every profile will be included, but we make a
+   sincere effort to include as much as possible so that end users can
+   contribute to the security profiles that ship in
+   <phrase os="sles;sled;osuse">&productname;</phrase><phrase
+    os="slert">&slert;</phrase>.
+  </para>
+
+  <para os="sles;osuse;sled">
+   Alternatively, use the &aa; profile repository to make your profiles
+   available to other users and to download profiles created by other &aa;
+   users and the &aa; developers. Refer to
+   <xref
+    linkend="cha.apparmor.repos"/> for more information on how to
+   use the &aa; profile repository.
+  </para>
+
+  <sect2 id="sec.apparmor.concept.network.web">
+   <title>Immunizing Web Applications</title>
+   <para>
+    To find Web applications, investigate your Web server configuration. The
+    Apache Web server is highly configurable and Web applications can be
+    stored in many directories, depending on your local configuration.
+    <phrase os="sles;sled;osuse">&productname;</phrase><phrase os="slert"
+     >&slert;</phrase>,
+    by default, stores Web applications in
+    <filename>/srv/www/cgi-bin/</filename>. To the maximum extent possible,
+    each Web application should have an &aa; profile.
+   </para>
+   <para>
+    Once you find these programs, you can use the &aa; <guimenu>Add Profile
+    Wizard</guimenu> to create profiles for them. Refer to
+    <xref xrefstyle="SectTitleOnPage" linkend="sec.apparmor.yast.wizard"/>.
+   </para>
+   <para>
+    Because CGI programs are executed by the Apache Web server, the profile
+    for Apache itself, <filename>usr.sbin.httpd2-prefork</filename> for
+    Apache2 on
+    <phrase os="sles;sled;osuse"
+     >&productname;</phrase><phrase os="slert">&slert;</phrase>,
+    must be modified to add execute permissions to each of these programs.
+    For instance, adding the line
+    <literal>/srv/www/cgi-bin/my_hit_counter.pl rpx</literal> grants Apache
+    permission to execute the Perl script
+    <filename>my_hit_counter.pl</filename> and requires that there be a
+    dedicated profile for <filename>my_hit_counter.pl</filename>. If
+    <filename>my_hit_counter.pl</filename> does not have a dedicated profile
+    associated with it, the rule should say
+    <literal>/srv/www/cgi-bin/my_hit_counter.pl rix</literal> to cause
+    <filename>my_hit_counter.pl</filename> to inherit the
+    <filename>usr.sbin.httpd2-prefork</filename> profile.
+   </para>
+<?dbfo-need height="20em"?>
+   <para>
+    Some users might find it inconvenient to specify execute permission for
+    every CGI script that Apache might invoke. Instead, the administrator
+    can grant controlled access to collections of CGI scripts. For instance,
+    adding the line <literal>/srv/www/cgi-bin/*.{pl,py,pyc} rix</literal>
+    allows Apache to execute all files in
+    <literal>/srv/www/cgi-bin/</literal> ending in <filename>.pl</filename>
+    (Perl scripts) and <filename>.py</filename> or <filename>.pyc</filename>
+    (Python scripts). As above, the <literal>ix</literal> part of the rule
+    causes Python scripts to inherit the Apache profile, which is
+    appropriate if you do not want to write individual profiles for each
+    Python script.
+   </para>
+   <note>
+    <para>
+     If you want the subprocess confinement module
+     (<filename>apache2-mod-apparmor</filename>) functionality when Web
+     applications handle Apache modules (<filename>mod_perl</filename> and
+     <filename>mod_php</filename>), use the ChangeHat features when you add
+     a profile in &yast; or at the command line. To take advantage of the
+     subprocess confinement, refer to
+     <xref xrefstyle="SectTitleOnPage" linkend="sec.apparmor.hat.apache"/>.
+    </para>
+   </note>
+   <para>
+    Profiling Web applications that use <filename>mod_perl</filename> and
+    <filename>mod_php</filename> requires slightly different handling. In
+    this case, the <quote>program</quote> is a script interpreted directly
+    by the module within the Apache process, so no exec happens. Instead,
+    the &aa; version of Apache calls <command>change_hat()</command> using
+    a subprofile (a <quote>hat</quote>) corresponding to the name of the URI
+    requested.
+   </para>
+   <note>
+    <para>
+     The name presented for the script to execute might not be the URI,
+     depending on how Apache has been configured for where to look for
+     module scripts. If you have configured your Apache to place scripts in
+     a different place, the different names appear in log file when &aa;
+     complains about access violations. See
+     <xref
+	linkend="cha.apparmor.managing"/>.
+    </para>
+   </note>
+<?dbfo-need height="20em"?>
+   <para>
+    For <filename>mod_perl</filename> and <filename>mod_php</filename>
+    scripts, this is the name of the Perl script or the PHP page requested.
+    For example, adding this subprofile allows the
+    <filename>localtime.php</filename> page to execute and access the local
+    system time:
+   </para>
+   <remark condition="clarity">
+    2007-08-28 - jjaeger: someone, please check
+    </remark>
+<screen>/usr/bin/httpd2-prefork {
+  # ...
+  ^/cgi-bin/localtime.php {
+    /etc/localtime                  r,
+    /srv/www/cgi-bin/localtime.php  r,
+    /usr/lib/locale/**              r,
+  }
+}
+</screen>
+   <para>
+    If no subprofile has been defined, the &aa; version of Apache applies
+    the <systemitem>DEFAULT_URI</systemitem> hat. This subprofile is
+    basically sufficient to display an HTML Web page. The
+    <systemitem>DEFAULT_URI</systemitem> hat that &aa; provides by default
+    is the following:
+   </para>
+<?dbfo-need height="4em"?>
+<screen>^DEFAULT_URI {
+    /usr/sbin/suexec2                  mixr,
+    /var/log/apache2/**                rwl,
+    @{HOME}/public_html                r,
+    @{HOME}/public_html/**             r,
+    /srv/www/htdocs                    r,
+    /srv/www/htdocs/**                 r,
+    /srv/www/icons/*.{gif,jpg,png}     r,
+    /srv/www/vhosts                    r,
+    /srv/www/vhosts/**                 r,
+    /usr/share/apache2/**              r,
+    /var/lib/php/sess_*                rwl }
+    </screen>
+   <para>
+    To use a single &aa; profile for all Web pages and CGI scripts served
+    by Apache, a good approach is to edit the
+    <systemitem>DEFAULT_URI</systemitem> subprofile.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.concept.network.agents">
+   <title>Immunizing Network Agents</title>
+   <para>
+    To find network server daemons and network clients (such as fetchmail,
+    Firefox, &amarok; or Banshee) that need to be profiled, you should
+    inspect the open ports on your machine, consider the programs that are
+    answering on those ports, and provide profiles for as many of those
+    programs as possible. If you provide profiles for all programs with open
+    network ports, an attacker cannot get to the file system on your machine
+    without passing through a &aa; profile policy.
+   </para>
+   <para>
+    Scan your server for open network ports manually from outside the
+    machine using a scanner (such as nmap), or from inside the machine using
+    the <command>netstat --inet -n -p</command> command. Then, inspect the
+    machine to determine which programs are answering on the discovered open
+    ports.
+   </para>
+   <tip>
+    <para>
+     Refer to the man page of the <command>netstat</command> command for a
+     detailed reference of all possible options.
+    </para>
+   </tip>
+  </sect2>
+ </sect1>
+</chapter>

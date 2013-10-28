@@ -1,0 +1,1716 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.apparmor.profiles">
+ <title>Profile Components and Syntax</title>
+ <para>
+  Building &aa; profiles to confine an application is very straightforward
+  and intuitive. &aa; ships with several tools that assist in profile
+  creation. It does not require you to do any programming or script
+  handling. The only task that is required of the administrator is to
+  determine a policy of strictest access and execute permissions for each
+  application that needs to be hardened.
+ </para>
+ <para>
+  Updates or modifications to the application profiles are only required if
+  the software configuration or the desired range of activities changes.
+  &aa; offers intuitive tools to handle profile updates and modifications.
+ </para>
+ <para>
+  You are ready to build &aa; profiles after you select the programs to
+  profile. To do so, it is important to understand the components and syntax
+  of profiles. &aa; profiles contain several building blocks that help build
+  simple and reusable profile code:
+ </para>
+ <variablelist>
+  <varlistentry>
+   <term><literal>#include</literal> Files</term>
+   <listitem>
+    <para>
+     <literal>#include</literal> statements are used to pull in parts of
+     other &aa; profiles to simplify the structure of new profiles.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Abstractions</term>
+   <listitem>
+    <para>
+     Abstractions are <literal>#include</literal> statements grouped by
+     common application tasks.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Program Chunks</term>
+   <listitem>
+    <para>
+     Program chunks are <literal>#include</literal> statements that contain
+     chunks of profiles that are specific to program suites.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Capability Entries</term>
+   <listitem>
+    <para>
+     Capability entries are profile entries for any of the POSIX.1e Linux
+     capabilities allowing a fine-grained control over what a confined
+     process is allowed to do through system calls that require privileges.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Network Access Control Entries</term>
+   <listitem>
+    <para>
+     Network Access Control Entries mediate network access based on the
+     address type and family.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Local Variable Definitions</term>
+   <listitem>
+    <para>
+     Local variables define shortcuts for paths.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>File Access Control Entries</term>
+   <listitem>
+    <para>
+     File Access Control Entries specify the set of files an application can
+     access.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>rlimit Entries</term>
+   <listitem>
+    <para>
+     rlimit entries set and control an application's resource limits.
+    </para>
+   </listitem>
+  </varlistentry>
+ </variablelist>
+ <para>
+  For help determining the programs to profile, refer to
+  <xref xrefstyle="ChapTitleOnPage" linkend="sec.apparmor.concept.determine"/>.
+  To start building &aa; profiles with &yast;, proceed to
+  <xref linkend="cha.apparmor.yast"/>. To build profiles using the &aa;
+  command line interface, proceed to
+  <xref linkend="cha.apparmor.commandline"/>.
+ </para>
+ <sect1 id="sec.apparmor.profiles.parts">
+  <title>Breaking a &aa; Profile into Its Parts</title>
+
+  <para>
+   The easiest way of explaining what a profile consists of and how to
+   create one is to show the details of a sample profile, in this case for a
+   hypothetical application called <command>/usr/bin/foo</command>:
+  </para>
+
+<screen>#include &lt;tunables/global><co id="co.apparmor.profiles.vardef"/>
+
+# a comment naming the application to confine
+/usr/bin/foo<co id="co.apparmor.profiles.path"/>
+{<co id="co.apparmor.profiles.brack"/>
+   #include &lt;abstractions/base><co id="co.apparmor.profiles.incl"/>
+
+   capability setgid<co id="co.apparmor.profiles.capent"/>,
+   network inet tcp<co id="co.apparmor.profiles.netd"/>,
+
+   link /etc/sysconfig/foo -> /etc/foo.conf,<co id="co.apparmor.profiles.lp"/>
+   /bin/mount            ux,
+   /dev/{,u}<co id="co.apparmor.profiles.ext"/>random     r,
+   /etc/ld.so.cache      r,
+   /etc/foo/*            r,
+   /lib/ld-*.so*         mr,
+   /lib/lib*.so*         mr,
+   /proc/[0-9]**         r,
+   /usr/lib/**           mr,
+   /tmp/<co id="co.apparmor.profiles.pathent"/>                r,
+   /tmp/foo.pid          wr,
+   /tmp/foo.*            lrw,
+   /@{HOME}<co id="co.apparmor.profiles.variable"/>/.foo_file   rw,
+   /@{HOME}/.foo_lock    kw,
+   owner<co id="co.apparmor.profiles.owner"/> /shared/foo/** rw,
+   /usr/bin/foobar       cx,<co id="co.apparmor.profiles.cx"/>
+   /bin/**               px -> bin_generic,<co id="co.apparmor.profiles.named"/>
+
+
+   # a comment about foo's local (children)profile for /usr/bin/foobar.
+
+   profile /usr/bin/foobar<co id="co.apparmor.profiles.local"/> {
+      /bin/bash          rmix,
+      /bin/cat           rmix,
+      /bin/more          rmix,
+      /var/log/foobar*   rwl,
+      /etc/foobar        r,
+   } 
+
+  # foo's hat, bar.
+   ^bar<co id="co.apparmor.profiles.hat"/> {
+    /lib/ld-*.so*         mr,
+    /usr/bin/bar          px,
+    /var/spool/*          rwl,
+   } 
+}
+</screen>
+
+  <calloutlist>
+   <callout arearefs="co.apparmor.profiles.vardef">
+    <para>
+     This loads a file containing variable definitions.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.path">
+    <para>
+     The normalized path to the program that is confined.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.brack">
+    <para>
+     The curly braces (<literal>{}</literal>) serve as a container for
+     include statements, subprofiles, path entries, capability entries, and
+     network entries.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.incl">
+    <para>
+     This directive pulls in components of &aa; profiles to simplify
+     profiles.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.capent">
+    <para>
+     Capability entry statements enable each of the 29 POSIX.1e draft
+     capabilities.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.netd">
+    <para>
+     A directive determining the kind of network access allowed to the
+     application. For details, refer to
+     <xref
+      linkend="sec.apparmor.profiles.nac"/>.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.lp">
+    <para>
+     A link pair rule specifying the source and the target of a link. See
+     <xref
+      linkend="sec.apparmor.profiles.perm.link_pair"/> for more
+     information.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.ext">
+    <para>
+     The curly braces (<literal>{}</literal>) make this rule apply to the
+     path both with and without the content enclosed by the braces.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.pathent">
+    <para>
+     A path entry specifying what areas of the file system the program can
+     access. The first part of a path entry specifies the absolute path of a
+     file (including regular expression globbing) and the second part
+     indicates permissible access modes (for example <literal>r</literal>
+     for read, <literal>w</literal> for write, and <literal>x</literal> for
+     execute). A whitespace of any kind (spaces or tabs) can precede
+     pathnames or separate the pathname from the access modes. Spaces
+     between the access mode and the trailing comma are optional. Find a
+     comprehensive overview of the available access modes in
+     <xref
+      linkend="sec.apparmor.profiles.perm"/>.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.variable">
+    <para>
+     This variable expands to a value that can be changed without changing
+     the entire profile.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.owner">
+    <para>
+     An owner conditional rule, granting read and write permission on files
+     owned by the user. Refer to
+     <xref
+      linkend="sec.apparmor.profiles.perm.owner"/> for more
+     information.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.cx">
+    <para>
+     This entry defines a transition to the local profile
+     <literal>/usr/bin/foobar</literal>. Find a comprehensive overview of
+     the available execute modes in
+     <xref
+      linkend="sec.apparmor.profiles.exec"/>.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.named">
+    <para>
+     A named profile transition to the profile bin_generic located in the
+     global scope. See
+     <xref
+      linkend="sec.apparmor.profiles.exec.named"/> for details.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.local">
+    <para>
+     The local profile <literal>/usr/bin/foobar</literal> is defined in this
+     section.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.hat">
+    <para>
+     This section references a <quote>hat</quote> subprofile of the
+     application. For more details on &aa;'s ChangeHat feature, refer to
+     <xref
+      linkend="cha.apparmor.hat"/>.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   When a profile is created for a program, the program can access only the
+   files, modes, and POSIX capabilities specified in the profile. These
+   restrictions are in addition to the native Linux access controls.
+  </para>
+
+  <formalpara>
+   <title>Example:</title>
+   <para>
+    To gain the capability <systemitem>CAP_CHOWN</systemitem>, the program
+    must have both access to <systemitem>CAP_CHOWN</systemitem> under
+    conventional Linux access controls (typically, be a &rootuser;-owned
+    process) and have the capability <systemitem>chown</systemitem> in its
+    profile. Similarly, to be able to write to the file
+    <filename>/foo/bar</filename> the program must have both the correct
+    user ID and mode bits set in the files attributes (see the
+    <systemitem>chmod</systemitem> and <systemitem>chown</systemitem> man
+    pages) and have <literal>/foo/bar w</literal> in its profile.
+   </para>
+  </formalpara>
+
+  <para>
+   Attempts to violate &aa; rules are recorded in
+   <filename>/var/log/audit/audit.log</filename> if the
+   <systemitem
+    class="resource">audit</systemitem> package is installed
+   or otherwise in <filename>/var/log/messages</filename>. In many cases,
+   &aa; rules prevent an attack from working because necessary files are
+   not accessible and, in all cases, &aa; confinement restricts the damage
+   that the attacker can do to the set of files permitted by &aa;.
+  </para>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.types">
+  <title>Profile Types</title>
+
+  <para>
+   &aa; knows four different types of profiles: standard profiles,
+   unattached profiles, local profiles and hats. Standard and unattached
+   profiles are stand-alone profiles, each stored in a file under
+   <filename>/etc/apparmor.d/</filename>. Local profiles and hats are
+   children profiles embedded inside of a parent profile used to provide
+   tighter or alternate confinement for a subtask of an application.
+  </para>
+
+  <sect2 id="sec.apparmor.profiles.types.attached">
+   <title>Standard Profiles</title>
+   <para>
+    The default &aa; profile is attached to a program by its name, so a
+    profile name must match the path to the application it is to confine.
+   </para>
+<screen>/usr/bin/foo {
+...
+}
+</screen>
+   <para>
+    This profile will be automatically used whenever an unconfined process
+    executes <filename>/usr/bin/foo</filename>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.types.unattached">
+   <title>Unattached Profiles</title>
+   <para>
+    Unattached profiles do not reside in the file system namespace and
+    therefore are not automatically attached to an application. The name of
+    an unattached profile is preceded by the keyword
+    <literal>profile</literal>. You can freely choose a profile name, except
+    for the following limitations: the name must not begin with a
+    <literal>:</literal> or <literal>.</literal> character. If it contains a
+    whitespace, it must be quoted. If the name begins with a
+    <literal>/</literal>, the profile is considered to be a standard
+    profile, so the following two profiles are identical:
+   </para>
+<screen>profile /usr/bin/foo {
+...
+}
+/usr/bin/foo {
+...
+}</screen>
+   <para>
+    Unattached profiles are never used automatically, nor can they be
+    transitioned to through a <literal>px</literal> rule. They need to be
+    attached to a program by either using a named profile transition (see
+    <xref linkend="sec.apparmor.profiles.exec.named"/>) or with the
+    <literal>change_profile</literal> rule (see
+    <xref linkend="sec.apparmor.profiles.types.change"/>).
+   </para>
+   <para>
+    Unattached profiles are useful for specialized profiles for system
+    utilities that generally should not be confined by a system-wide profile
+    (for example, <literal>/bin/bash</literal>). They can also be used to
+    set up roles or to confine a user.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.types.local">
+   <title>Local Profiles</title>
+   <para>
+    Local profiles provide a convenient way to provide specialized
+    confinement for utility programs launched by a confined application.
+    They are specified just like standard profiles except they are embedded
+    in a parent profile and begin with the <literal>profile</literal>
+    keyword:
+   </para>
+<screen>/parent/profile {
+   ...
+   profile local/profile {
+      ...
+   }
+}</screen>
+   <para>
+    To transition to a local profile, either use a <literal>cx</literal>
+    rule (see <xref linkend="sec.apparmor.profiles.exec.cx"/>) or a named
+    profile transition (see
+    <xref linkend="sec.apparmor.profiles.exec.named"/>).
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.types.hat">
+   <title>Hats</title>
+   <para>
+    &aa; "hats" are a local profiles with some additional restrictions and
+    an implicit rule allowing for <literal>change_hat</literal> to be used
+    to transition to them. Refer to <xref linkend="cha.apparmor.hat"/> for a
+    detailed description.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.types.change">
+   <title>Change rules</title>
+   <para>
+    &aa; provides <literal>change_hat</literal> and
+    <literal>change_profile</literal> rules that control domain
+    transitioning. <literal>change_hat</literal> are specified by defining
+    hats in a profile, while <literal>change_profile</literal> rules refer
+    to another profile and start with the keyword
+    <literal>change_profile</literal>:
+   </para>
+<screen>change_profile /usr/bin/foobar,</screen>
+   <para>
+    Both <literal>change_hat</literal> and <literal>change_profile</literal>
+    provide for an application directed profile transition, without having
+    to launch a separate application. <literal>change_profile</literal>
+    provides a generic one way transition between any of the loaded
+    profiles. <literal>change_hat</literal> provides for a returnable parent
+    child transition where an application can switch from the parent profile
+    to the hat profile and if it provides the correct secret key return to
+    the parent profile at a later time.
+   </para>
+   <para>
+    <literal>change_profile</literal> is best used in situations where an
+    application goes through a trusted setup phase and then can lower its
+    privilege level. Any resources mapped or opened during the start-up
+    phase may still be accessible after the profile change, but the new
+    profile will restrict the opening of new resources, and will even limit
+    some of the resources opened before the switch. Specifically, memory
+    resources will still be available while capability and file resources
+    (as long as they are not memory mapped) can be limited.
+   </para>
+   <para>
+    <literal>change_hat</literal> is best used in situations where an
+    application runs a virtual machine or an interpreter that does not
+    provide direct access to the applications resources (e.g. Apache's
+    <literal>mod_php</literal>). Since <literal>change_hat</literal> stores
+    the return secret key in the application's memory the phase of reduced
+    privilege should not have direct access to memory. It is also important
+    that file access is properly separated, since the hat can restrict
+    accesses to a file handle but does not close it. If an application does
+    buffering and provides access to the open files with buffering, the
+    accesses to these files may not be seen by the kernel and hence not
+    restricted by the new profile.
+   </para>
+   <warning>
+    <title>Safety of Domain Transitions</title>
+    <para>
+     The <literal>change_hat</literal> and <literal>change_profile</literal>
+     domain transitions are less secure than a domain transition done
+     through an exec because they do not affect a processes memory mappings,
+     nor do they close resources that have already been opened.
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.includes">
+  <title><literal>#include</literal> Statements</title>
+
+  <para>
+   <literal>#include</literal> statements are directives that pull in
+   components of other &aa; profiles to simplify profiles. Include files
+   retrieve access permissions for programs. By using an include, you can
+   give the program access to directory paths or files that are also
+   required by other programs. Using includes can reduce the size of a
+   profile.
+  </para>
+
+  <para>
+   By default, &aa; adds <filename>/etc/apparmor.d</filename> to the path in
+   the <literal>#include</literal> statement. &aa; expects the include files
+   to be located in <filename>/etc/apparmor.d</filename>. Unlike other
+   profile statements (but similar to C programs),
+   <literal>#include</literal> lines do not end with a comma.
+  </para>
+
+  <para>
+   To assist you in profiling your applications, &aa; provides three
+   classes of <literal>#include</literal>s: abstractions, program chunks and
+   tunables.
+  </para>
+
+  <sect2 id="sec.apparmor.profiles.includes.abstractions">
+   <title>Abstractions</title>
+   <para>
+    Abstractions are <literal>#include</literal>s that are grouped by common
+    application tasks. These tasks include access to authentication
+    mechanisms, access to name service routines, common graphics
+    requirements, and system accounting. Files listed in these abstractions
+    are specific to the named task. Programs that require one of these files
+    usually require some of the other files listed in the abstraction file
+    (depending on the local configuration as well as the specific
+    requirements of the program). Find abstractions in
+    <filename>/etc/apparmor.d/abstractions</filename>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.includes.chunks">
+   <title>Program Chunks</title>
+   <para>
+    The program-chunks directory
+    (<filename>/etc/apparmor.d/program-chunks</filename>) contains some
+    chunks of profiles that are specific to program suites and not generally
+    useful outside of the suite, thus are never suggested for use in
+    profiles by the profile wizards (<command>aa-logprof</command> and
+    <command>aa-genprof</command>). Currently, program chunks are only
+    available for the postfix program suite.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.includes.tunables">
+   <title>Tunables</title>
+   <para>
+    The tunables directory (<filename>/etc/apparmor.d/tunables</filename>)
+    contains global variable definitions. When used in a profile, these
+    variables expand to a value that can be changed without changing the
+    entire profile. Add all the tunables definitions that should be
+    available to every profile to
+    <filename>/etc/apparmor.d/tunables/global</filename>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.capabilities">
+  <title>Capability Entries (POSIX.1e)</title>
+
+  <para>
+   Capability statements are simply the word <literal>capability</literal>
+   followed by the name of the POSIX.1e capability as defined in the
+   <systemitem>capabilities(7)</systemitem> man page.
+  </para>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.nac">
+  <title>Network Access Control</title>
+
+  <para>
+   &aa; allows mediation of network access based on the address type and
+   family. The following illustrates the network access rule syntax:
+  </para>
+
+<screen>network [[&lt;domain><co id="co.apparmor.profiles.nac.dom"/>][&lt;type<co id="co.apparmor.profiles.nac.type"/>>][&lt;protocol<co id="co.apparmor.profiles.nac.proto"/>>]]</screen>
+
+  <calloutlist>
+   <callout arearefs="co.apparmor.profiles.nac.dom">
+    <para>
+     Supported domains: <literal>inet</literal>, <literal>ax25</literal>,
+     <literal>ipx</literal>, <literal>appletalk</literal>,
+     <literal>netrom</literal>, <literal>bridge</literal>,
+     <literal>x25</literal>, <literal>inet6</literal>,
+     <literal>rose</literal>, <literal>netbeui</literal>,
+     <literal>security</literal>, <literal>key</literal>,
+     <literal>packet</literal>, <literal>ash</literal>,
+     <literal>econet</literal>, <literal>atmsvc</literal>,
+     <literal>sna</literal>, <literal>irda</literal>,
+     <literal>pppox</literal>, <literal>wanpipe</literal>,
+     <literal>bluetooth</literal>
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.type">
+    <para>
+     Supported types: <literal>stream</literal>, <literal>dgram</literal>,
+     <literal>seqpacket</literal>, <literal>rdm</literal>,
+     <literal>raw</literal>, <literal>packet</literal>
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.proto">
+    <para>
+     Supported protocols: <literal>tcp</literal>, <literal>udp</literal>,
+     <literal>icmp</literal>
+    </para>
+   </callout>
+  </calloutlist>
+
+  <remark condition="clarity">
+    2007-08-30 - jjaeger: someone tell me whether the llc, iucv, tpc and dccp
+    issues finally get fixed?
+    </remark>
+
+  <remark condition="clarity">
+    2007-09-12 - jjaeger: not fixed by Sep 12, check for next release. 
+    </remark>
+
+  <remark condition="clarity">
+    2008-05-28 - fs: not fixed in 2.3, check for next release. Add "can" to
+   the list of unsupported protocols 
+    </remark>
+
+  <para>
+   The &aa; tools support only family and type specification. The &aa;
+   module emits only <literal>network <replaceable>domain</replaceable>
+   <replaceable>type</replaceable></literal> in <quote>access denied</quote>
+   messages. And only these are output by the profile generation tools, both
+   &yast; and command line.
+  </para>
+
+  <para>
+   The following examples illustrate possible network-related rules to be
+   used in &aa; profiles. Note that the syntax of the last two are not
+   currently supported by the &aa; tools.
+  </para>
+
+<?dbfo-need height="15em"?>
+
+<screen>network<co id="co.apparmor.profiles.nac.nw"/>,
+network inet<co id="co.apparmor.profiles.nac.inet"/>,
+network inet6<co id="co.apparmor.profiles.nac.inet6"/>,
+network inet stream<co id="co.apparmor.profiles.nac.istream"/>,
+network inet tcp<co id="co.apparmor.profiles.nac.itcp"/>,
+network tcp<co id="co.apparmor.profiles.nac.tcp"/>, 
+</screen>
+
+  <calloutlist>
+   <callout arearefs="co.apparmor.profiles.nac.nw">
+    <para>
+     Allow all networking. No restrictions applied with regards to domain,
+     type, or protocol.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.inet">
+    <para>
+     Allow general use of IPv4 networking.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.inet6">
+    <para>
+     Allow general use of IPv6 networking.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.istream">
+    <para>
+     Allow the use of IPv4 TCP networking.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.itcp">
+    <para>
+     Allow the use of IPv4 TCP networking, paraphrasing the rule above.
+    </para>
+   </callout>
+   <callout arearefs="co.apparmor.profiles.nac.tcp">
+    <para>
+     Allow the use of both IPv4 and IPv6 TCP networking.
+    </para>
+   </callout>
+  </calloutlist>
+ </sect1>
+ <sect1 role="General" id="sec.apparmor.profiles.glob">
+  <title>Paths and Globbing</title>
+
+  <para>
+   &aa; explicitly distinguishes directory path names from file path names.
+   Use a trailing <literal>/</literal> for any directory path that needs to
+   be explicitly distinguished:
+  </para>
+
+  <remark condition="clarity">
+    2007-09-12 - jjaeger: comment by jj - consider for next release:
+    Is it worth mentioning that AA allows traversal of directory without
+    requiring a trailing / r, ...  
+    </remark>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/some/random/example/*   r</filename>
+    </term>
+    <listitem>
+     <para>
+      Allow read access to files in the
+      <filename>/some/random/example</filename> directory.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/some/random/example/   r</filename>
+    </term>
+    <listitem>
+     <para>
+      Allow read access to the directory only.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/some/**/   r</filename>
+    </term>
+    <listitem>
+     <para>
+      Give read access to any directories below <filename>/some</filename>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/some/random/example/**   r</filename>
+    </term>
+    <listitem>
+     <para>
+      Give read access to files and directories under
+      <filename>/some/random/example</filename>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/some/random/example/**[^/]   r</filename>
+    </term>
+    <listitem>
+     <para>
+      Give read access to files under
+      <filename>/some/random/example</filename>. Explicitly exclude
+      directories (<literal>[^/]</literal>).
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Globbing (or regular expression matching) is when you modify the
+   directory path using wild cards to include a group of files or
+   subdirectories. File resources can be specified with a globbing syntax
+   similar to that used by popular shells, such as csh, Bash, and zsh.
+  </para>
+
+  <informaltable>
+   <tgroup cols="2">
+    <tbody>
+     <row>
+      <entry colname="1">
+       <para>
+        <literal>*</literal>
+       </para>
+      </entry>
+      <entry colname="2">
+       <para>
+        Substitutes for any number of any characters, except
+        <literal>/</literal>.
+       </para>
+       <para>
+        Example: An arbitrary number of file path elements.
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry colname="1">
+       <para>
+        <literal>**</literal>
+       </para>
+      </entry>
+      <entry colname="2">
+       <para>
+        Substitutes for any number of characters, including
+        <literal>/</literal>.
+       </para>
+       <para>
+        Example: An arbitrary number of path elements, including entire
+        directories.
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry colname="1">
+       <para>
+        <literal>?</literal>
+       </para>
+      </entry>
+      <entry colname="2">
+       <para>
+        Substitutes for any single character, except <literal>/</literal>.
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry colname="1">
+       <para>
+        <literal>[abc]</literal>
+       </para>
+      </entry>
+      <entry colname="2">
+       <para>
+        Substitutes for the single character <literal>a</literal>,
+        <literal>b</literal>, or <literal>c</literal>.
+       </para>
+       <para>
+        Example: a rule that matches <literal>/home[01]/*/.plan</literal>
+        allows a program to access <filename>.plan</filename> files for
+        users in both <filename>/home0</filename> and
+        <filename>/home1</filename>.
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry colname="1">
+       <para>
+        <literal>[a-c]</literal>
+       </para>
+      </entry>
+      <entry colname="2">
+       <para>
+        Substitutes for the single character <literal>a</literal>,
+        <literal>b</literal>, or <literal>c</literal>.
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry colname="1">
+       <para>
+        <literal>{ab,cd}</literal>
+       </para>
+      </entry>
+      <entry colname="2">
+       <para>
+        Expands to one rule to match <literal>ab</literal> and one rule to
+        match <literal>cd</literal>.
+       </para>
+       <para>
+        Example: a rule that matches <literal>/{usr,www}/pages/**</literal>
+        grants access to Web pages in both <filename>/usr/pages</filename>
+        and <filename>/www/pages</filename>.
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>[ ^a ]</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Substitutes for any character except <literal>a</literal>.
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </informaltable>
+
+  <sect2 id="sec.apparmor.profiles.glob.variables">
+   <title>Using Variables in Profiles</title>
+   <para>
+    &aa; allows to use variables holding paths in profiles. Use global
+    variables to make your profiles portable and local variables to create
+    shortcuts for paths.
+   </para>
+   <para>
+    A typical example of when global variables come in handy are network
+    scenarios in which user home directories are mounted in different
+    locations. Instead of rewriting paths to home directories in all
+    affected profiles, you only need to change the value of a variable.
+    Global variables are defined under
+    <filename>/etc/apparmor.d/tunables</filename> and have to be made
+    available via an <literal>#include</literal> statement. Find the
+    variable definitions for this use case (<envar>@{HOME}</envar> and
+    <envar>@{HOMEDIRS}</envar>) in the
+    <filename>/etc/apparmor.d/tunables/home</filename> file.
+   </para>
+   <para>
+    Local variables are defined at the head of a profile. This is useful to
+    provide the base of for a chrooted path, for example:
+   </para>
+<screen>@{CHROOT_BASE}=/tmp/foo
+/sbin/syslog-ng {
+...
+# chrooted applications
+@{CHROOT_BASE}/var/lib/*/dev/log w,
+@{CHROOT_BASE}/var/log/** w,
+...
+}</screen>
+   <note>
+    <para>
+     With the current &aa; tools, variables can only be used when manually
+     editing and maintaining a profile.
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.glob.alias">
+   <title>Alias rules</title>
+   <para>
+    Alias rules provide an alternative way to manipulate profile path
+    mappings to site specific layouts. They are an alternative form of path
+    rewriting to using variables, and are done post variable resolution:
+   </para>
+<screen>alias /home/ -> /mnt/users/</screen>
+   <note>
+    <para>
+     With the current &aa; tools, alias rules can only be used when manually
+     editing and maintaining a profile. Whats more, they are deactivated by
+     disabled. Enable alias rules by editing
+     <filename>/etc/apparmor.d/tunables/alias</filename>
+    </para>
+   </note>
+  </sect2>
+ </sect1>
+<?dbfo-need height="20em"?>
+ <sect1 role="General" id="sec.apparmor.profiles.perm">
+  <title>File Permission Access Modes</title>
+
+  <para>
+   File permission access modes consist of combinations of the following
+   modes:
+  </para>
+
+  <informaltable>
+   <tgroup cols="2">
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        <literal>r</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Read mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>w</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Write mode (mutually exclusive to <literal>a</literal>)
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>a</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Append mode (mutually exclusive to <literal>w</literal>)
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>k</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        File locking mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>l</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Link mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>link <replaceable>file</replaceable> ->
+        <replaceable>target</replaceable></literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Link pair rule (cannot be combined with other access modes)
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </informaltable>
+
+  <sect2 id="sec.apparmor.profiles.perm.r">
+   <title>Read Mode (r)</title>
+   <para>
+    Allows the program to have read access to the resource. Read access is
+    required for shell scripts and other interpreted content and determines
+    if an executing process can core dump.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.w">
+   <title>Write Mode (w)</title>
+   <para>
+    Allows the program to have write access to the resource. Files must have
+    this permission if they are to be unlinked (removed).
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.a">
+   <title>Append Mode (a)</title>
+   <para>
+    Allows a program to write to the end of a file. In contrast to the
+    <literal>w</literal> mode, the append mode does not include the ability
+    to overwrite data, to rename, or to remove a file. The append permission
+    is typically used with applications who need to be able to write to log
+    files, but which should not be able to manipulate any existing data in
+    the log files. As the append permission is just a subset of the
+    permissions associated with the write mode, the <literal>w</literal> and
+    <literal>a</literal> permission flags cannot be used together and are
+    mutually exclusive.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.k">
+   <title>File Locking Mode (k)</title>
+   <para>
+    The application can take file locks. Former versions of &aa; allowed
+    files to be locked if an application had access to them. By using a
+    separate file locking mode, &aa; makes sure locking is restricted only
+    to those files which need file locking and tightens security as locking
+    can be used in several denial of service attack scenarios.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.link">
+   <title>Link Mode (l)</title>
+   <para>
+    The link mode mediates access to hard links. When a link is created, the
+    target file must have the same access permissions as the link created
+    (with the exception that the destination does not need link access).
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.link_pair">
+   <title>Link Pair</title>
+   <para>
+    The link mode grants permission to create links to arbitrary files,
+    provided the link has a subset of the permissions granted by the target
+    (subset permission test). By specifying origin and destination, the link
+    pair rule provides greater control over how hard links are created. Link
+    pair rules by default do not enforce the link subset permission test
+    that the standard rules link permission requires. To force the rule to
+    require the test the <literal>subset</literal> keyword is used. The
+    following rules are equivalent:
+   </para>
+<screen>/link    l,
+link subset /link -> /**,
+</screen>
+   <note>
+    <para>
+     Currently link pair rules are not supported by &yast; and the command
+     line tools. Manually edit your profiles to use them. Updating such
+     profiles using the tools is safe, because the link pair entries will
+     not be touched.
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.owner">
+   <title>Owner Conditional Rules</title>
+   <para>
+    The file rules can be extended so that they can be conditional upon the
+    the user being the owner of the file (the fsuid has to match the file's
+    uid). For this purpose the <literal>owner</literal> keyword is prepended
+    to the rule. Owner conditional rules accumulate just as regular file
+    rules.
+   </para>
+<screen>owner /home/*/** rw</screen>
+   <para>
+    When using file ownership conditions with link rules the ownership test
+    is done against the target file so the user must own the file to be able
+    to link to it.
+   </para>
+   <note>
+    <title>Precedence of Regular File Rules</title>
+    <para>
+     Owner conditional rules are considered a subset of regular file rules.
+     If a regular file rule overlaps with an owner conditional file rule,
+     the resultant permissions will be that of the regular file rule.
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.perm.deny">
+   <title>Deny Rules</title>
+   <para>
+    Deny rules can be used to annotate or quiet known rejects. The profile
+    generating tools will not ask about a known reject treated with a deny
+    rule. Such a reject will also not show up in the audit logs when denied,
+    keeping the log files lean. If this is not desired, prepend the deny
+    entry with the keyword <literal>audit</literal>.
+   </para>
+   <para>
+    It is also possible to use deny rules in combination with allow rules.
+    This allows you to specify a broad allow rule, and then subtract a few
+    known files that should not be allowed. Deny rules can also be combined
+    with owner rules, to deny files owned by the user. The following example
+    allows read/write access to everything in a users directory except write
+    access to the .ssh/ files:
+   </para>
+<screen>deny /home/*/.ssh/** w,
+/home/*/** rw,</screen>
+   <para>
+    The extensive use of deny rules is generally not encouraged, because it
+    makes it much harder to understand what a profile does. However a
+    judicious use of deny rules can simplify profiles. Therefore the tools
+    only generate profiles denying specific files and will not make use of
+    globbing in deny rules. Manually edit your profiles to add deny rules
+    using globbing. Updating such profiles using the tools is safe, because
+    the deny entries will not be touched.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.exec">
+  <title>Execute Modes</title>
+
+  <para>
+   Execute modes, also named profile transitions, consist of the following
+   modes:
+  </para>
+
+  <informaltable>
+   <tgroup cols="2">
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        <literal>px</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Discrete profile execute mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>cx</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Discrete local profile execute mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>ux</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Unconstrained execute mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>ix</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Inherit execute mode
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>m</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Allow <literal>PROT_EXEC</literal> with <command>mmap(2)</command>
+        calls
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </informaltable>
+
+  <sect2 id="sec.apparmor.profiles.exec.px">
+   <title>Discrete Profile Execute Mode (px)</title>
+   <para>
+    This mode requires that a discrete security profile is defined for a
+    resource executed at an &aa; domain transition. If there is no profile
+    defined, the access is denied.
+   </para>
+   <warning>
+    <title>Using the Discrete Profile Execute Mode</title>
+    <para>
+     <literal>px</literal> does not scrub the environment of variables such
+     as <envar>LD_PRELOAD</envar>. As a result, the calling domain may have
+     an undue amount of influence over the called item.
+    </para>
+   </warning>
+   <para>
+    Incompatible with <literal>Ux</literal>, <literal>ux</literal>,
+    <literal>Px</literal>, and <literal>ix</literal>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.cx">
+   <title>Discrete Local Profile Execute Mode (cx)</title>
+   <para>
+    As <literal>px</literal>, but instead of searching the global profile
+    set, <literal>cx</literal> only searches the local profiles of the
+    current profile. This profile transition provides a way for an
+    application to have alternate profiles for helper applications.
+   </para>
+   <note>
+    <title>Limitations of the Discrete Local Profile Execute Mode (cx)</title>
+    <para>
+     Currently, cx transitions are limited to top level profiles and can not
+     be used in hats and children profiles. This restriction will be removed
+     in the future.
+    </para>
+   </note>
+   <para>
+    Incompatible with <literal>Ux</literal>, <literal>ux</literal>,
+    <literal>Px</literal>, <literal>px</literal>, <literal>Cx</literal>, and
+    <literal>ix</literal>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.ux">
+   <title>Unconstrained Execute Mode (ux)</title>
+   <para>
+    Allows the program to execute the resource without any &aa; profile
+    applied to the executed resource. This mode is useful when a confined
+    program needs to be able to perform a privileged operation, such as
+    rebooting the machine. By placing the privileged section in another
+    executable and granting unconstrained execution rights, it is possible
+    to bypass the mandatory constraints imposed on all confined processes.
+    For more information about what is constrained, see the
+    <systemitem>apparmor(7)</systemitem> man page.
+   </para>
+   <warning>
+    <title>Using Unconstrained Execute Mode (ux)</title>
+    <para>
+     Use <literal>ux</literal> only in very special cases. It enables the
+     designated child processes to be run without any &aa; protection.
+     <literal>ux</literal> does not scrub the environment of variables such
+     as <envar>LD_PRELOAD</envar>. As a result, the calling domain may have
+     an undue amount of influence over the called resource. Use this mode
+     only if the child absolutely must be run unconfined and
+     <envar>LD_PRELOAD</envar> must be used. Any profile using this mode
+     provides negligible security. Use at your own risk.
+    </para>
+   </warning>
+   <para>
+    This mode is incompatible with <literal>Ux</literal>,
+    <literal>px</literal>, <literal>Px</literal>, and <literal>ix</literal>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.clean">
+   <title>Clean Exec modes</title>
+   <para>
+    The clean exec modes allow the named program to run in
+    <literal>px</literal>, <literal>cx</literal> and <literal>ux</literal>
+    mode, but &aa; invokes the Linux kernel's <command>unsafe_exec</command>
+    routines to scrub the environment, similar to setuid programs. The clean
+    exec modes are specified with an uppercase letter:
+    <literal>Px</literal>, <literal>Cx</literal> and <literal>Ux</literal>.
+    See the man page of <command>ld.so(8)</command> for some information
+    about setuid and setgid environment scrubbing.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.ix">
+   <title>Inherit Execute Mode (ix)</title>
+   <para>
+    <literal>ix</literal> prevents the normal &aa; domain transition on
+    <command>execve(2)</command> when the profiled program executes the
+    named program. Instead, the executed resource inherits the current
+    profile.
+   </para>
+   <para>
+    This mode is useful when a confined program needs to call another
+    confined program without gaining the permissions of the target's profile
+    or losing the permissions of the current profile. There is no version to
+    scrub the environment because <literal>ix</literal> executions do not
+    change privileges.
+   </para>
+   <para>
+    Incompatible with <literal>cx</literal>, <literal>ux</literal>, and
+    <literal>px</literal>. Implies <literal>m</literal>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.m">
+   <title>Allow Executable Mapping (m)</title>
+   <para>
+    This mode allows a file to be mapped into memory using
+    <command>mmap(2)</command>'s <envar>PROT_EXEC</envar> flag. This flag
+    marks the pages executable. It is used on some architectures to provide
+    non executable data pages, which can complicate exploit attempts. &aa;
+    uses this mode to limit which files a well-behaved program (or all
+    programs on architectures that enforce non executable memory access
+    controls) may use as libraries, to limit the effect of invalid
+    <option>-L</option> flags given to <command>ld(1)</command> and
+    <envar>LD_PRELOAD</envar>, <envar>LD_LIBRARY_PATH</envar>, given to
+    <command>ld.so(8)</command>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.named">
+   <title>Named Profile Transitions</title>
+   <para>
+    By default, the <literal>px</literal> and <literal>cx</literal> (and
+    their clean exec variants, too) transition to a profile who's name
+    matches the executable name. With named profile transitions, you can
+    specify a profile to be transitioned to. This is useful if multiple
+    binaries need to share a single profile, or if they need to use a
+    different profile than their name would specify. Named profile
+    transitions can be used in conjunction with <literal>cx</literal>,
+    <literal>Cx</literal>, <literal>px</literal> and <literal>Px</literal>.
+    Currently there is a limit of twelve named profile transitions per
+    profile.
+   </para>
+   <para>
+    Named profile transitions use <literal>-></literal> to indicate the name
+    of the profile that needs to be transitioned to:
+   </para>
+<screen>/usr/bin/foo 
+{
+  /bin/** px -> shared_profile,
+  ...
+  /usr/*bash cx -> local_profile,
+  ...
+  profile local_profile 
+  {
+    ...
+  }
+}
+</screen>
+   <note>
+    <title>Difference Between Normal and Named Transitions</title>
+    <para>
+     When used with globbing, normal transitions provide a <quote>one to
+     many</quote> relationship&mdash;<literal>/bin/** px</literal> will
+     transition to <filename>/bin/ping</filename>,
+     <filename>/bin/cat</filename>, etc, depending on the program being run.
+    </para>
+    <para>
+     Named transitions provide a <quote>many to one</quote>
+     relationship&mdash;all programs that match the rule regardless of their
+     name will transition to the specified profile.
+    </para>
+    <para>
+     Named profile transitions show up in the log as having the mode
+     <literal>Nx</literal>. The name of the profile to be changed to is
+     listed in the <literal>name2</literal> field.
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.fallback">
+   <title>Inheritance Fallback for Profile Transitions</title>
+   <para>
+    The <literal>px</literal> and <literal>cx</literal> transitions specify
+    a hard dependency (if the specified profile does not exist, the exec
+    will fail). With the inheritance fallback, the execution will succeed
+    but inherit the current profile. To specify inheritance fallback,
+    <literal>ix</literal> is combined with <literal>cx</literal>,
+    <literal>Cx</literal>, <literal>px</literal> and <literal>Px</literal>
+    into the modes <literal>cix</literal>, <literal>Cix</literal>,
+    <literal>pix</literal> and <literal>Pix</literal>. The fallback modes
+    can be used with named profile transitions, too.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.apparmor.profiles.exec.variables">
+   <title>Variable Settings in Execution Modes</title>
+   <para>
+    When choosing one of the Px, Cx or Ux execution modes, take into account
+    that the following environment variables are removed from the
+    environment before the child process inherits it. As a consequence,
+    applications or processes relying on any of these variables do not work
+    anymore if the profile applied to them carries Px, Cx or Ux flags:
+   </para>
+<?dbfo-need height="10em"?>
+   <itemizedlist>
+    <listitem>
+     <para>
+      <envar>GCONV_PATH</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>GETCONF_DIR</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>HOSTALIASES</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_AUDIT</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_DEBUG</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_DEBUG_OUTPUT</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_DYNAMIC_WEAK</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_LIBRARY_PATH</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_ORIGIN_PATH</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_PRELOAD</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_PROFILE</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_SHOW_AUXV</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LD_USE_LOAD_BIAS</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LOCALDOMAIN</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>LOCPATH</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>MALLOC_TRACE</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>NLSPATH</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>RESOLV_HOST_CONF</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>RES_OPTIONS</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>TMPDIR</envar>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <envar>TZDIR</envar>
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.rlimit">
+  <title>Resource Limit Control</title>
+
+  <para>
+   &aa; provides the ability to set and control an application's resource
+   limits (rlimits, also known as ulimits). By default &aa; does not control
+   applications rlimits, and it will only control those limits specified in
+   the confining profile. For more information about resource limits, refer
+   to the <systemitem>setrlimit(2)</systemitem>,
+   <systemitem>ulimit(1)</systemitem>, or <systemitem>ulimit(3)</systemitem>
+   man pages.
+  </para>
+
+  <para>
+   &aa; leverages the system's rlimits and as such does not provide an
+   additional auditing that would normally occur. It also cannot raise
+   rlimits set by the system, &aa; rlimits can only reduce an application's
+   current resource limits.
+  </para>
+
+  <para>
+   The values will be inherited by the children of a process and will remain
+   even if a new profile is transitioned to or the application becomes
+   unconfined. So when an application transitions to a new profile, that
+   profile has the ability to further reduce the applications rlimits.
+  </para>
+
+  <para>
+   &aa;'s rlimit rules will also provide mediation of setting an
+   application's hard limits, should it try to raise them. The application
+   will not be able to raise its hard limits any further than specified in
+   the profile. The mediation of raising hard limits is not inherited as the
+   set value is, so that once the application transitions to a new profile
+   it is free to raise its limits as specified in the profile.
+  </para>
+
+  <para>
+   &aa;'s rlimit control does not affect an application's soft limits beyond
+   ensuring that they are less than or equal to the application's hard
+   limits.
+  </para>
+
+  <para>
+   &aa;'s hard limit rules have the general form of:
+  </para>
+
+<screen>set rlimit <replaceable>resource</replaceable> &lt;= <replaceable>value</replaceable>,</screen>
+
+  <para>
+   where <replaceable>resource</replaceable> and
+   <replaceable>value</replaceable> are to be replaced with the following
+   values:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>cpu</literal>
+    </term>
+    <listitem>
+     <para>
+      currently not supported
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>fsize</literal>, <literal>data</literal>, <literal>stack</literal>,
+      <literal>core</literal>, <literal>rss</literal>, <literal>as</literal>,
+      <literal>memlock</literal>, <literal>msgqueue</literal>
+    </term>
+    <listitem>
+     <para>
+      a number in bytes, or a number with a suffix where the suffix can be K
+      (kilobytes), M (megabytes), G (gigabytes), for example
+     </para>
+<screen>rlimit data &lt;= 100M,</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>fsize</literal>, <literal>nofile</literal>, <literal>locks</literal>,
+      <literal>sigpending</literal>, <literal>nproc</literal><superscript>*</superscript>,
+      <literal>rtprio</literal>
+    </term>
+    <listitem>
+     <para>
+      a number greater or equal to 0
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>nice</literal>
+    </term>
+    <listitem>
+     <para>
+      a value between -20 and 19
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   <superscript>*</superscript>The nproc rlimit is handled different than
+   all the other rlimits. Instead of indicating the standard process rlimit
+   it controls the maximum number of processes that can be running under the
+   profile at any given time. Once the limit is exceeded the creation of new
+   processes under the profile will fail until the number of currently
+   running processes is reduced.
+  </para>
+
+  <note>
+   <para>
+    Currently the tools can not be used to add rlimit rules to profiles. The
+    only way to add rlimit controls to a profile is to manually edit the
+    profile with a text editor. The tools will still work with profiles
+    containing rlimit rules and will not remove them, so it is safe to use
+    the tools to update profiles containing them.
+   </para>
+  </note>
+ </sect1>
+ <sect1 id="sec.apparmor.profiles.audit">
+  <title>Auditing Rules</title>
+
+  <para>
+   &aa; provides the ability to audit given rules so that when they are
+   matched an audit message will appear in the audit log. To enable audit
+   messages for a given rule, the <literal>audit</literal> keyword is
+   prepended to the rule:
+  </para>
+
+<screen>audit /etc/foo/*        rw,</screen>
+
+  <para>
+   If it is desirable to audit only a given permission the rule can be split
+   into two rules. The following example will result in audit messages when
+   files are opened for writing, but not when they are opened for just
+   reading:
+  </para>
+
+<screen>audit /etc/foo/*  w,
+/etc/foo/*        r,</screen>
+
+  <note>
+   <para>
+    Audit messages are not generated for every read or write of a file but
+    only when a file is opened for read or write.
+   </para>
+  </note>
+
+  <para>
+   Audit control can be combined with owner conditional file rules to
+   provide auditing when users access files they own (at the moment it is
+   not possible to audit files they don't own):
+  </para>
+
+<screen>audit owner /home/*/.ssh/**       rw,</screen>
+ </sect1>
+
+<!-- fs 2011-11-09 - see bnc #722915
+     ("set capabilities" was dropped upstream)
+ 
+ <sect1 id="sec.apparmor.profiles.set_capabilities">
+  <title>Setting Capabilities per Profile</title>
+
+  <para>
+   Normally &aa; only restricts existing native Linux controls and does not
+   grant additional privileges. Therefore a program, having been granted
+   write access to a file via its profile, would not be able to actually
+   write to this file as long as the mode bits are set to read-only.
+  </para>
+
+  <para>
+   The only exception to this strict rule is the <literal>set
+   capability</literal> rule. This provides the ability to give non-root
+   users administrative privileges, as defined in the
+   <systemitem>capabilities(7)</systemitem> man page. Contrary to setting a
+   program to setuid or using file system capabilities (that apply to single
+   programs only), the set capability rule allows the user to apply
+   capabilities to multiple programs running under a specific profile (by
+   using ix transitions). For security reasons, set capability rules will
+   not be inherited (once a program leaves the profile, it loses the
+   elevated privilege).
+  </para>
+
+  <warning>
+   <title>Use set capabilities Rules with Extreme Caution</title>
+   <para>
+    Using the set capabilities rules allows to give processes &rootuser;
+    privileges. Therefore these rules should be used with extreme caution
+    and only in exceptional cases.
+   </para>
+  </warning>
+
+  <para>
+   To set a capability in a profile the keyword <quote>set</quote> is
+   prepended to a capability rule. Setting a capability also implicitly adds
+   a capability rule allowing that capability.
+  </para>
+
+<screen>set capability cap_chown,</screen>
+
+  <note>
+   <para>
+    Currently the tools can not be used to add rlimit rules to profiles. The
+    only way to add rlimit controls to a profile is to manually edit the
+    profile with a text editor. The tools will still work with profiles
+    containing rlimit rules and will not remove them, so it is safe to use
+    the tools to update profiles containing them.
+   </para>
+  </note>
+ </sect1>
+-->
+</chapter>

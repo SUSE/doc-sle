@@ -1,0 +1,530 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<!--
+   Contact (2011-10-10): tonyj@suse.de
+-->
+<chapter id="cha.tuning.oprofile">
+ <title>&oprof;&mdash;System-Wide Profiler</title>
+<!--
+    http://oprofile.sourceforge.net/news/
+    http://linuxtips.pbwiki.com/Oprofile-Tutorial
+    http://www.centos.org/docs/5/html/Deployment_Guide-en-US/ch-oprofile.html
+    http://people.redhat.com/wcohen/FedoraCore2OProfileTutorial.txt
+
+    Info Provider: Vojtech Pavlik <vojtech@suse.de>
+-->
+ <abstract>
+  <para>
+   &oprof; is a profiler for dynamic program analysis. It investigates the
+   behaviour of a running program and gathers information. This information
+   can be viewed and gives hints for further optimizations.
+  </para>
+
+  <para>
+   It is not necessary to recompile or use wrapper libraries in order to use
+   &oprof;. Not even a Kernel patch is needed. Usually, when you profile an
+   application, a small overhead is expected, depending on work load and
+   sampling frequency.
+  </para>
+ </abstract>
+ <sect1 id="sec.tuning.oprofile.overview">
+  <title>Conceptual Overview</title>
+
+  <para>
+   &oprof; consists of a Kernel driver and a daemon for collecting data. It
+   makes use of the hardware performance counters provided on Intel, AMD,
+   and other processors. &oprof; is capable of profiling all code including
+   the Kernel, Kernel modules, Kernel interrupt handlers, system shared
+   libraries, and other applications.
+  </para>
+
+  <para>
+   Modern processors support profiling through the hardware by performance
+   counters. Depending on the processor, there can be many counters and each
+   of these can be programmed with an event to count. Each counter has a
+   value which determines how often a sample is taken. The lower the value,
+   the more often it is used.
+  </para>
+
+  <para>
+   During the post-processing step, all information is collected and
+   instruction addresses are mapped to a function name.
+  </para>
+ </sect1>
+ <sect1 id="sec.tuning.oprofile.install">
+  <title>Installation and Requirements</title>
+
+  <para>
+   In order to make use of &oprof;, install the
+   <systemitem class="resource">oprofile</systemitem> package. &oprof; works
+   on IA-64, AMD64, s390, and PPC64 processors.
+  </para>
+
+  <para>
+   It is useful to install the <filename>*-debuginfo</filename> package for
+   the respective application you want to profile. If you want to profile
+   the Kernel, you need the <filename>debuginfo</filename> package as well.
+  </para>
+ </sect1>
+ <sect1 id="sec.tuning.oprofile.utils">
+  <title>Available &oprof; Utilities</title>
+
+  <para>
+   &oprof; contains several utilities to handle the profiling process and
+   its profiled data. The following list is a short summary of programms
+   used in this chapter:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>opannotate</command>
+    </term>
+    <listitem>
+     <para>
+      Outputs annotated source or assembly listings mixed with profile
+      information.
+     </para>
+    </listitem>
+   </varlistentry>
+<!--<varlistentry>
+    <term><command>oparchive</command></term>
+    <listitem>
+     <para>Generates an archive with your measurements.</para>
+    </listitem>
+   </varlistentry>-->
+   <varlistentry>
+    <term><command>opcontrol</command>
+    </term>
+    <listitem>
+     <para>
+      Controls the profiling sessions (start or stop), dumps profile data,
+      and sets up parameters.
+     </para>
+    </listitem>
+   </varlistentry>
+<!--<varlistentry>
+    <term><command>opgprof</command></term>
+    <listitem>
+     <para>Produce profiled data in gprof format.</para>
+    </listitem>
+   </varlistentry>-->
+   <varlistentry>
+    <term><command>ophelp</command>
+    </term>
+    <listitem>
+     <para>
+      Lists available events with short descriptions.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>opimport</command>
+    </term>
+    <listitem>
+     <para>
+      Converts sample database files from a foreign binary format to the
+      native format.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>opreport</command>
+    </term>
+    <listitem>
+     <para>
+      Generates reports from profiled data.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.tuning.oprofile.using">
+  <title>Using &oprof;</title>
+
+  <para>
+   It is possible with &oprof; to profile both Kernel and applications. When
+   profiling the Kernel, tell &oprof; where to find the
+   <filename>vmlinuz*</filename> file. Use the <option>--vmlinux</option>
+   option and point it to <filename>vmlinuz*</filename> (usually in
+   <filename>/boot</filename>). If you need to profile Kernel modules,
+   &oprof; does this by default. However, make sure you read
+   <ulink url="http://oprofile.sourceforge.net/doc/kernel-profiling.html"/>.
+  </para>
+
+  <para>
+   Applications usually do not need to profile the Kernel, so better use the
+   <option>--no-vmlinux</option> option to reduce the amount of information.
+  </para>
+
+  <sect2>
+   <title>General Steps</title>
+   <para>
+    In its simplest form, start the daemon, collect data, stop the daemon,
+    and create your report. This method is described in detail in the
+    following procedure:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Open a shell and log in as &rootuser;.
+     </para>
+    </step>
+    <step>
+     <para>
+      Decide if you want to profile with or without the Linux Kernel:
+     </para>
+     <substeps>
+      <step>
+       <formalpara>
+        <title>Profile With the Linux Kernel</title>
+        <para>
+         Execute the following commands, because the
+         <command>opcontrol</command> command needs an uncompressed image:
+        </para>
+       </formalpara>
+<screen>cp /boot/vmlinux-`uname -r`.gz /tmp
+gunzip /tmp/vmlinux*.gz
+opcontrol --vmlinux=/tmp/vmlinux*
+</screen>
+      </step>
+      <step>
+       <formalpara>
+        <title>Profile Without the Linux Kernel</title>
+        <para>
+         Use the following command:
+        </para>
+       </formalpara>
+<screen>opcontrol --no-vmlinux</screen>
+       <para>
+        If you want to see which functions call other functions in the
+        output, use additionally the <option>--callgraph</option> option and
+        set a maximum <replaceable>DEPTH</replaceable>:
+       </para>
+<screen>opcontrol --no-vmlinux --callgraph <replaceable>DEPTH</replaceable></screen>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      Start the &oprof; daemon:
+     </para>
+<screen>opcontrol --start
+Using 2.6+ OProfile kernel interface.
+Using log file /var/lib/oprofile/samples/oprofiled.log
+Daemon started.
+Profiler running.</screen>
+    </step>
+    <step>
+     <para>
+      Start your application you want to profile right after the previous
+      step.
+     </para>
+    </step>
+    <step>
+     <para>
+      Stop the &oprof; daemon:
+     </para>
+<screen>opcontrol --stop</screen>
+    </step>
+    <step>
+     <para>
+      Dump the collected data to
+      <filename>/var/lib/oprofile/samples</filename>:
+     </para>
+<screen>opcontrol --dump</screen>
+    </step>
+    <step>
+     <para>
+      Create a report:
+     </para>
+<screen>opreport
+Overflow stats not available
+CPU: CPU with timer interrupt, speed 0 MHz (estimated)
+Profiling through timer interrupt
+          TIMER:0|
+  samples|      %|
+------------------
+    84877 98.3226 no-vmlinux
+...</screen>
+    </step>
+    <step>
+     <para>
+      Shutdown the &oprof; daemon:
+     </para>
+<screen>opcontrol --shutdown</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 id="sec.tuning.oprofile.events">
+   <title>Getting Event Configurations</title>
+   <para>
+    The general procedure for event configuration is as follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Use first the events <literal>CPU-CLK_UNHALTED</literal> and
+      <literal>INST_RETIRED</literal> to find optimization opportunities.
+     </para>
+    </step>
+    <step>
+     <para>
+      Use specific events to find bottlenecks. To list them, use the command
+      <command>opcontrol</command> <option>--list-events</option>.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    If you need to profile certain events, first check the available events
+    supported by your processor with the <command>ophelp</command> command
+    (example output generated from Intel Core i5 CPU):
+   </para>
+<screen><command>ophelp</command> 
+oprofile: available events for CPU type "Intel Architectural Perfmon"
+
+See Intel 64 and IA-32 Architectures Software Developer's Manual
+Volume 3B (Document 253669) Chapter 18 for architectural perfmon events
+This is a limited set of fallback events because oprofile doesn't know your CPU
+CPU_CLK_UNHALTED: (counter: all))
+        Clock cycles when not halted (min count: 6000) 
+INST_RETIRED: (counter: all))
+        number of instructions retired (min count: 6000) 
+LLC_MISSES: (counter: all))
+        Last level cache demand requests from this core that missed the LLC (min count: 6000) 
+        Unit masks (default 0x41)
+        ----------
+        0x41: No unit mask 
+LLC_REFS: (counter: all))
+        Last level cache demand requests from this core (min count: 6000) 
+        Unit masks (default 0x4f)
+        ----------
+        0x4f: No unit mask 
+BR_MISS_PRED_RETIRED: (counter: all))
+        number of mispredicted branches retired (precise) (min count: 500)</screen>
+   <para>
+    You can get the same output from <command>opcontrol</command>
+    <option>--list-events</option>.
+   </para>
+   <para>
+    Specify the performance counter events with the option
+    <option>--event</option>. Multiple options are possible. This option
+    needs an event name (from <command>ophelp</command>) and a sample rate,
+    for example:
+   </para>
+<screen>opcontrol --event=CPU_CLK_UNHALTED:100000</screen>
+   <warning>
+    <title>Be Careful with Low Sampling Rates with <literal>CPU_CLK_UNHALTED</literal></title>
+    <para>
+     Setting sampling rates is dangerous as small rates cause the system to
+     overload and freeze.
+    </para>
+   </warning>
+<!--
+  <example id="ex.tuning.oprofile.eventsyntax">
+   <title>Event Syntax</title>
+   <screen>NAME:COUNT:UNITMASK:KERNEL:USER</screen>
+  </example>
+  
+  <para>The description for each keyword is explained in the following
+   table:</para>
+  
+  <table id="tab.tuning.oprofile.eventsyntax">
+   <title>Syntax Description of Events</title>
+   <tgroup cols="2">
+    <thead>
+     <row>
+      <entry><para>Keyword</para></entry>
+      <entry><para>Description</para></entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry><para><literal>name</literal></para></entry>
+      <entry><para>Symbolic event name, for example <literal>CPU_CLK_UNHALTED</literal></para></entry>
+     </row>
+     <row>
+      <entry><para><literal>count</literal></para></entry>
+      <entry><para>Counter reset value, for example <literal>10000</literal></para></entry>
+     </row>
+     <row>
+      <entry><para><literal>unitmask</literal></para></entry>
+      <entry><para>Unit mask from the <command>ophelp</command> output,
+       for example <literal>0x41</literal></para></entry>
+     </row>
+      <row>
+      <entry><para><literal>kernel</literal></para></entry>
+      <entry><para>Profile kernel code? 0=no, 1=yes</para></entry>
+     </row>
+      <row>
+      <entry><para><literal>user</literal></para></entry>
+      <entry><para>Profile userspace code? 0=no, 1=yes</para></entry>
+     </row>
+   </tbody>
+   </tgroup>
+  </table>
+  
+  <para>Find detailed information about supported events in the directory 
+   <filename>/usr/share/oprofile/<replaceable>ARCH</replaceable>/<replaceable>PRODUCT</replaceable>/events</filename>.
+  </para>
+  -->
+<!--<para>The number of events that can be monitored depends on the number
+   of counters of your processor. Run the following command to determine
+   the available counters for your processor:</para>
+  <screen>ls -d /dev/oprofile/[0-9]*</screen>
+  <para>The following examples shows how to use the
+   <option>&#x2d;&#x2d;event</option> option:</para>-->
+  </sect2>
+ </sect1>
+ <sect1 id="sec.tuning.oprofile.gui">
+  <title>Using &oprof;'s GUI</title>
+
+  <para>
+   The GUI for &oprof; can be started as &rootuser; with
+   <command>oprof_start</command>, see
+   <xref linkend="fig.tuning.oprofile"/>. Select your events and change the
+   counter, if necessary. Every green line is added to the list of checked
+   events. Hover the mouse over the line to see a help text in the status
+   line below. Use the <guimenu>Configuration</guimenu> tab to set the
+   buffer and CPU size, the verbose option and others. Click on
+   <guimenu>Start</guimenu> to execute &oprof;.
+  </para>
+
+  <figure id="fig.tuning.oprofile">
+   <title>GUI for &oprof;</title>
+   <mediaobject>
+    <imageobject role="html">
+     <imagedata fileref="oprofile-gui.png" width="50%"/>
+    </imageobject>
+    <imageobject role="fo">
+     <imagedata fileref="oprofile-gui.png" width="45%"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+ </sect1>
+ <sect1 id="sec.tuning.oprofiles.report">
+  <title>Generating Reports</title>
+
+  <para>
+   Before generating a report, make sure &oprof; has dumped your data to the
+   <filename>/var/lib/oprofile/samples</filename> directory using the
+   command <command>opcontrol</command> <option>--dump</option>. A report
+   can be generated with the commands <command>opreport</command> or
+   <command>opannotate</command>.
+  </para>
+
+  <para>
+   Calling <command>oreport</command> without any options gives a complete
+   summary. With an executable as an argument, retrieve profile data only
+   from this executable. If you analyze applications written in C++, use the
+   <option>--demangle smart</option> option.
+  </para>
+
+  <para>
+   The <command>opannotate</command> generates output with annotations from
+   source code. Run it with the following options:
+  </para>
+
+<screen><command>opannotate</command> --source \
+   --base-dirs=<replaceable>BASEDIR</replaceable> \
+   --search-dirs=<replaceable></replaceable> \
+   --output-dir=annotated/ \
+   /lib/libfoo.so</screen>
+
+  <para>
+   The option <option>--base-dir</option> contains a comma separated list of
+   paths which is stripped from debug source files. This paths were searched
+   prior than looking in <option>--search-dirs</option>. The
+   <option>--search-dirs</option> option is also a comma separated list of
+   directories to search for source files.
+  </para>
+
+  <note>
+   <title>Inaccuracies in Annotated Source</title>
+   <para>
+    Due to compiler optimization, code can disappear and appear in a
+    different place. Use the information in
+    <ulink url="http://oprofile.sourceforge.net/doc/debug-info.html"/> to
+    fully understand its implications.
+   </para>
+  </note>
+ </sect1>
+ <sect1 id="sec.tuning.oprofile.moreinfo">
+  <title>For More Information</title>
+
+  <para>
+   This chapter only provides a short overview. Refer to the following links
+   for more information:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><ulink url="http://oprofile.sourceforge.net"/>
+    </term>
+    <listitem>
+     <para>
+      The project home page.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Manpages</term>
+    <listitem>
+     <para>
+      Details descriptions about the options of the different tools.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/share/doc/packages/oprofile/oprofile.html</filename>
+    </term>
+    <listitem>
+     <para>
+      Contains the &oprof; manual.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><ulink url="http://developer.intel.com/"/>
+    </term>
+    <listitem>
+     <para>
+      Architecture reference for Intel processors.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><ulink url="http://www.amd.com/us-en/assets/content_type/white_papers_and_tech_docs/22007.pdf"/>
+    </term>
+    <listitem>
+     <para>
+      Architecture reference for AMD Athlon/Opteron/Phenom/Turion.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><ulink url="http://www-01.ibm.com/chips/techlib/techlib.nsf/productfamilies/PowerPC/"/>
+    </term>
+    <listitem>
+     <para>
+      Architecture reference for PowerPC64 processors in IBM iSeries,
+      pSeries, and blade server systems.
+     </para>
+    </listitem>
+   </varlistentry>
+<!-- 2010-05-03: Disabled on behalf of jblunck -->
+<!--<varlistentry>
+    <term><xref linkend="cha.tuning.perfmon2"/></term>
+    <listitem>
+     <para>Consult this chapter for performance optimization with
+      performance monitoring unit (PMU) of your processor.</para>
+    </listitem>
+   </varlistentry>-->
+  </variablelist>
+ </sect1>
+</chapter>

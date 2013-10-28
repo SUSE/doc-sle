@@ -1,0 +1,1065 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.tuning.kexec">
+ <title>&kexec; and &kdump;</title>
+ <para>
+  &kexec; is a tool to boot to another kernel from the currently running
+  one. You can perform faster system reboots without any hardware
+  initialization. You can also prepare the system to boot to another kernel
+  if the system crashes.
+ </para>
+ <sect1 id="cha.tuning.kexec.intro">
+  <title>Introduction</title>
+
+  <para>
+   With &kexec;, you can replace the running kernel with another one without
+   a hard reboot. The tool is useful for several reasons:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     Faster system rebooting
+    </para>
+    <para>
+     If you need to reboot the system frequently, &kexec; can save you
+     significant time.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Avoiding unreliable firmware and hardware
+    </para>
+    <para>
+     Computer hardware is complex and serious problems may occur during the
+     system start-up. You cannot always replace unreliable hardware
+     immediately. &kexec; boots the kernel to a controlled environment with
+     the hardware already initialized. The risk of unsuccessful system start
+     is then minimized.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Saving the dump of a crashed kernel
+    </para>
+    <para>
+     &kexec; preserves the contents of the physical memory. After the
+     <emphasis>production</emphasis> kernel fails, the
+     <emphasis>capture</emphasis> kernel (an additional kernel running in a
+     reserved memory range) saves the state of the failed kernel. The saved
+     image can help you with the subsequent analysis.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Booting without &grub; or &lilo; configuration
+    </para>
+    <para>
+     When the system boots a kernel with &kexec;, it skips the boot loader
+     stage. Normal booting procedure can fail due to an error in the boot
+     loader configuration. With &kexec;, you do not depend on a working boot
+     loader configuration.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+ <sect1 id="cha.tuning.kexec.pkgs">
+  <title>Required Packages</title>
+
+  <para>
+   If you intend to use &kexec; on &productnamereg; to speed up reboots or
+   avoid potential hardware problems, you need to install the
+   <systemitem>kexec-tools</systemitem> package. It contains a script called
+   <command>kexec-bootloader</command>, which reads the boot loader
+   configuration and runs &kexec; with the same kernel options as the normal
+   boot loader does. <command>kexec-bootloader <option>-h</option>
+   </command> gives you the list of possible options.
+  </para>
+
+  <para>
+   To set up an environment that helps you obtain useful debug information
+   in case of a kernel crash, you need to install
+   <systemitem>makedumpfile</systemitem> in addition.
+  </para>
+
+  <para>
+   The preferred method to use &kdump; in &productname; is through the
+   &yast; &kdump; module. Install the package <literal>yast2-kdump</literal>
+   by entering <command>zypper install yast2-kdump</command> in the command
+   line as &rootuser;.
+  </para>
+ </sect1>
+ <sect1 id="cha.tuning.kexec.internals">
+  <title>&kexec; Internals</title>
+
+  <para>
+   The most important component of &kexec; is the
+   <filename>/sbin/kexec</filename> command. You can load a kernel with
+   &kexec; in two different ways:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <command>kexec <option>-l</option>
+     <replaceable>kernel_image</replaceable> </command> loads the kernel to
+     the address space of a production kernel for a regular reboot. You can
+     later boot to this kernel with <command>kexec
+     <option>-e</option></command>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>kexec <option>-p</option>
+     <replaceable>kernel_image</replaceable> </command> loads the kernel to
+     a reserved area of memory. This kernel will be booted automatically
+     when the system crashes.
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   If you want to boot another kernel and preserve the data of the
+   production kernel when the system crashes, you need to reserve a
+   dedicated area of the system memory. The production kernel never loads to
+   this area because it must be always available. It is used for the capture
+   kernel so that the memory pages of the production kernel can be
+   preserved. You reserve the area with <option>crashkernel</option> =
+   <replaceable>size@offset</replaceable> as a command line parameter of the
+   production kernel. Note that this is not a parameter of the capture
+   kernel. The capture kernel does not use &kexec; at all.
+  </para>
+
+  <para>
+   The capture kernel is loaded to the reserved area and waits for the
+   kernel to crash. Then &kdump; tries to invoke the capture kernel because
+   the production kernel is no longer reliable at this stage. This means
+   that even &kdump; can fail.
+  </para>
+
+  <para>
+   To load the capture kernel, you need to include the kernel boot
+   parameters. Usually, the initial RAM file system is used for booting. You
+   can specify it with <option>--initrd</option> =
+   <replaceable>filename</replaceable>. With <option>--append</option> =
+   <replaceable>cmdline</replaceable> , you append options to the command
+   line of the kernel to boot. It is helpful to include the command line of
+   the production kernel if these options are necessary for the kernel to
+   boot. You can simply copy the command line with <option>--append</option>
+   = <replaceable>"$(cat /proc/cmdline)"</replaceable> or add more options
+   with <option>--append</option> = <replaceable>"$(cat /proc/cmdline)
+   more_options"</replaceable> .
+  </para>
+
+  <para>
+   You can always unload the previously loaded kernel. To unload a kernel
+   that was loaded with the <option>-l</option> option, use the
+   <command>kexec <option>-u</option> </command> command. To unload a crash
+   kernel loaded with the <option>-p</option> option, use <command>kexec
+   <option>-p</option> <option>-u</option> </command> command.
+  </para>
+ </sect1>
+ <sect1 id="cha.tuning.kexec.basic_usage">
+  <title>Basic &kexec; Usage</title>
+
+  <para>
+   To verify if your &kexec; environment works properly, follow these steps:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Make sure no users are currently logged in and no important services
+     are running on the system.
+    </para>
+   </step>
+   <step>
+    <para>
+     Log in as &rootuser;.
+    </para>
+   </step>
+   <step>
+    <para>
+     Switch to runlevel 1 with <command>telinit <option>1</option>
+     </command>
+    </para>
+   </step>
+   <step id="step.kexec.usage.load.kernel">
+    <para>
+     Load the new kernel to the address space of the production kernel with
+     the following command:
+    </para>
+    <para>
+     <command>kexec <option>-l</option>
+     <replaceable>/boot/vmlinuz</replaceable>
+     <option>--append</option>=<replaceable>"$(cat
+     /proc/cmdline)"</replaceable>
+     <option>--initrd</option>=<replaceable>/boot/initrd</replaceable>
+     </command>
+    </para>
+   </step>
+   <step>
+    <para>
+     Unmount all mounted file systems except the root file system with
+     <command>umount <option>-a</option> </command>
+    </para>
+    <important>
+     <title>Unmounting Root Filesystem</title>
+     <para>
+      Unmounting all file systems will most likely produce a <literal>device
+      is busy</literal> warning message. The root file system cannot be
+      unmounted if the system is running. Ignore the warning.
+     </para>
+    </important>
+   </step>
+   <step>
+    <para>
+     Remount the root file system in read-only mode:
+    </para>
+    <para>
+     <command>mount <option>-o</option> <replaceable>remount,ro
+     /</replaceable></command>
+<!--
+    mdejmek: is it really remount,ro ??
+    2010-04-29, toba: yes, the command line is correct
+   -->
+    </para>
+   </step>
+   <step>
+    <para>
+     Initiate the reboot of the kernel that you loaded in
+     <xref linkend="step.kexec.usage.load.kernel"/> with <command>kexec
+     <option>-e</option></command>
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   It is important to unmount the previously mounted disk volumes in
+   read-write mode. The <systemitem>reboot</systemitem> system call acts
+   immediately upon calling. Hard drive volumes mounted in read-write mode
+   neither synchronize nor unmount automatically. The new kernel may find
+   them <quote>dirty</quote>. Read-only disk volumes and virtual file
+   systems do not need to be unmounted. Refer to
+   <filename>/etc/mtab</filename> to determine which file systems you need
+   to unmount.
+  </para>
+
+  <para>
+   The new kernel previously loaded to the address space of the older kernel
+   rewrites it and takes control immediately. It displays the usual start-up
+   messages. When the new kernel boots, it skips all hardware and firmware
+   checks. Make sure no warning messages appear. All the file systems are
+   supposed to be clean if they had been unmounted.
+  </para>
+ </sect1>
+ <sect1 id="cha.tuning.kexec.config">
+  <title>How to Configure &kexec; for Routine Reboots</title>
+
+  <para>
+   &kexec; is often used for frequent reboots. For example, if it takes a
+   long time to run through the hardware detection routines or if the
+   start-up is not reliable.
+  </para>
+
+  <note>
+   <title>Rebooting with &kexec;</title>
+<!-- 2010-03-12, toba: the following para to be removed in the future -->
+   <para>
+    In previous versions of &productnamereg;, you had to manually edit the
+    configuration file <filename>/etc/sysconfig/shutdown</filename> and the
+    init script <filename>/etc/init.d/halt</filename> to use &kexec; to
+    reboot the system. You no longer need to edit any system files, since
+    version 11 is already configured for &kexec; reboots.
+   </para>
+  </note>
+
+  <para>
+   Note that firmware as well as the boot loader are not used when the
+   system reboots with &kexec;. Any changes you make to the boot loader
+   configuration will be ignored until the computer performs a hard reboot.
+  </para>
+ </sect1>
+ <sect1 id="cha.tuning.kdump.basic">
+  <title>Basic &kdump; Configuration</title>
+
+  <para>
+   You can use &kdump; to save kernel dumps. If the kernel crashes, it is
+   useful to copy the memory image of the crashed environment to the file
+   system. You can then debug the dump file to find the cause of the kernel
+   crash. This is called <quote>core dump</quote>.
+  </para>
+
+  <para>
+   &kdump; works similar to &kexec; (see <xref
+linkend="cha.tuning.kexec"/>).
+   The capture kernel is executed after the running production kernel
+   crashes. The difference is that &kexec; replaces the production kernel
+   with the capture kernel. With &kdump;, you still have access to the
+   memory space of the crashed production kernel. You can save the memory
+   snapshot of the crashed kernel in the environment of the &kdump; kernel.
+  </para>
+
+  <tip>
+   <title>Dumps over Network</title>
+   <para>
+    In environments with limited local storage, you need to set up
+    kernel dumps over the network. &kdump; supports configuring the
+    specified network interface and bringing it up via
+    <systemitem>initrd</systemitem>. Both LAN and VLAN interfaces are
+    supported. You have to specify the network interface and the mode (dhcp
+    or static) either with &yast;, or using the
+    <option>KDUMP_NETCONFIG</option> option in the
+    <filename>/etc/sysconfig/kdump</filename> file. The third way is to build
+    <systemitem>initrd</systemitem>
+    manually, for example with
+   </para>
+<screen>/sbin/mkinitrd -D vlan0</screen>
+   <para>
+    for a dhcp VLAN interface, or
+   </para>
+<screen>/sbin/mkinitrd -I eth0</screen>
+   <para>
+    for a static LAN interface.
+   </para>
+  </tip>
+
+  <para>
+   You can either configure &kdump; manually or with &yast;.
+  </para>
+  
+  <important>
+   <title>Target Filesystem for &kdump; Must Be Mounted During Configuration</title>
+   <para>
+    When configuring &kdump;, you can specify a location to which the dumped
+    images will be saved (default: <filename>/var/crash</filename>). This
+    location must be mounted when configuring &kdump;, otherwise the
+    configuration will fail.
+   </para>
+  </important>
+  
+
+  <sect2 id="cha.tuning.kdump.basic.manual">
+   <title>Manual &kdump; Configuration</title>
+   <para>
+    &kdump; reads its configuration from the
+    <filename>/etc/sysconfig/kdump</filename> file. To make sure that
+    &kdump; works on your system, its default configuration is sufficient.
+    To use &kdump; with the default settings,follow these steps:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Append the following kernel command line option to your boot loader
+      configuration, and reboot the system:
+     </para>
+     <para>
+      <literal>crashkernel=</literal><replaceable>size@offset</replaceable>
+     </para>
+     <para>
+      You can find the corresponding values for
+      <replaceable>size</replaceable> and <replaceable>offset</replaceable>
+      in the following table:
+     </para>
+     <table>
+      <title>Recommended Values for Additional Kernel Command Line Parameters</title>
+      <tgroup cols="2">
+       <thead>
+        <row>
+         <entry>
+          <para>
+           Architecture
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Recommended value
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           i386 and x86-64
+          </para>
+         </entry>
+         <entry>
+          <simplelist>
+           <member><literal>crashkernel=256M</literal> for 0 - 12 GB
+           memory</member>
+           <member><literal>crashkernel=512M</literal> for 13 - 48 GB
+           memory</member>
+           <member><literal>crashkernel=1G</literal> for 49 - 128 GB
+           memory</member>
+           <member><literal>crashkernel=2G</literal> for 129 - 256 GB
+           memory</member>
+          </simplelist>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           IA64
+          </para>
+         </entry>
+         <entry>
+          <para>
+           crashkernel=256M (small systems) or crashkernel=512M (larger
+           systems)
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           ppc64
+          </para>
+         </entry>
+         <entry>
+          <para>
+           crashkernel=128M@4M or crashkernel=256M@4M (larger systems)
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           s390x
+          </para>
+         </entry>
+         <entry>
+          <para>
+           crashkernel=128M (small systems) or crashkernel=256M (larger systems)
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </step>
+    <step>
+     <para>
+      Enable &kdump; init script:
+     </para>
+     <para>
+      <command>chkconfig <replaceable>boot.kdump</replaceable>
+      <option>on</option></command>
+     </para>
+    </step>
+    <step>
+     <para>
+      You can edit the options in <filename>/etc/sysconfig/kdump</filename>.
+      Reading the comments will help you understand the meaning of
+      individual options.
+     </para>
+    </step>
+    <step>
+     <para>
+      Execute the init script once with <command>rckdump
+      <replaceable>start</replaceable></command>, or reboot the system.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    After configuring &kdump; with the default values, check if it works as
+    expected. Make sure that no users are currently logged in and no
+    important services are running on your system. Then follow these steps:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Switch to runlevel 1 with <command>telinit
+      <replaceable>1</replaceable></command>
+     </para>
+    </step>
+    <step>
+     <para>
+      Unmount all the disk file systems except the root file system with
+      <command>umount <option>-a</option></command>
+     </para>
+    </step>
+    <step>
+     <para>
+      Remount the root file system in read-only mode: <command>mount
+      <option>-o</option> <replaceable>remount,ro /</replaceable></command>
+     </para>
+    </step>
+    <step>
+     <para>
+      Invoke <quote>kernel panic</quote> with the <literal>procfs</literal>
+      interface to Magic SysRq keys:
+     </para>
+     <para>
+      <command>echo <replaceable>c
+      >/proc/sysrq-trigger</replaceable></command>
+     </para>
+    </step>
+   </procedure>
+   <important>
+    <title>The Size of Kernel Dumps</title>
+    <para>
+     The <literal>KDUMP_KEEP_OLD_DUMPS</literal> option controls the number
+     of preserved kernel dumps (default is 5). Without compression, the size
+     of the dump can take up to the size of the physical RAM memory. Make
+     sure you have sufficient space on the <filename>/var</filename>
+     partition.
+    </para>
+   </important>
+   <para>
+    The capture kernel boots and the crashed kernel memory snapshot is saved
+    to the file system. The save path is given by the
+    <literal>KDUMP_SAVEDIR</literal> option and it defaults to
+    <filename>/var/crash</filename>. If
+    <literal>KDUMP_IMMEDIATE_REBOOT</literal> is set to
+    <literal>yes</literal> , the system automatically reboots the production
+    kernel. Log in and check that the dump has been created under
+    <filename>/var/crash</filename>.
+   </para>
+   <warning>
+    <title>Screen Freezes in X11 Session</title>
+    <para>
+     When &kdump; takes control and you are logged in an X11 session, the
+     screen will freeze without any notice. Some &kdump; activity can be
+     still visible (for example, deformed messages of a booting kernel on
+     the screen).
+    </para>
+    <para>
+     Do not reset the computer because &kdump; always needs some time to
+     complete its task.
+    </para>
+   </warning>
+  </sect2>
+
+  <sect2 id="cha.tuning.kdump.basic.yast">
+   <title>&yast; Configuration</title>
+   <para>
+    In order to configure &kdump; with &yast;, you need to install the
+    <systemitem>yast2-kdump</systemitem> package. Then either start the
+    <guimenu>Kernel Kdump</guimenu> module in the <guimenu>System</guimenu>
+    category of &yastcc;, or enter <command>yast2 kdump</command> in the
+    command line as &rootuser;.
+   </para>
+   <figure id="fig.tuning.kdump.basic.yast.kdump1">
+    <title>YaST2 Kdump Module - Start-Up Page</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="yast2_kdump_startup.png" width="60%" format="PNG" />
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="yast2_kdump_startup.png" width="70%" format="PNG" />
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    In the <guimenu>Start-Up</guimenu> window, select <guimenu>Enable
+    Kdump</guimenu>. The default value for &kdump; memory is sufficient on
+    most systems.
+   </para>
+   <para>
+    Click <guimenu>Dump Filtering</guimenu> in the left pane, and check what
+    pages to include in the dump. You do not need to include the following
+    memory content to be able to debug kernel problems:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Pages filled with zero
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Cache pages
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      User data pages
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Free pages
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    In the <guimenu>Dump Target</guimenu> window, select the type of the
+    dump target and the URL where you want to save the dump. If you selected
+    a network protocol, such as FTP or SSH, you need to enter relevant
+    access information as well.
+   </para>
+   <para>
+    Fill the <guimenu>Email Notification</guimenu> window information if you
+    want &kdump; to inform you about its events via E-mail and confirm your
+    changes with <guimenu>OK</guimenu> after fine tuning &kdump; in the
+    <guimenu>Expert Settings</guimenu> window. &kdump; is now configured.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="cha.tuning.kdump.analyze">
+  <title>Analyzing the Crash Dump</title>
+
+  <para>
+   After you obtain the dump, it is time to analyze it. There are several
+   options.
+  </para>
+
+  <para>
+   The original tool to analyze the dumps is GDB. You can even use it in the
+   latest environments, although it has several disadvantages and
+   limitations:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     GDB was not specifically designed to debug kernel dumps.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     GDB does not support ELF64 binaries on 32-bit platforms.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     GDB does not understand other formats than ELF dumps (it cannot debug
+     compressed dumps).
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   That is why the <emphasis>crash</emphasis> utility was implemented. It
+   analyzes crash dumps and debugs the running system as well. It provides
+   functionality specific to debugging the Linux kernel and is much more
+   suitable for advanced debugging.
+  </para>
+
+  <para>
+   If you want to debug the Linux kernel, you need to install its debugging
+   information package in addition. Check if the package is installed on
+   your system with <command>zypper se kernel | grep debug</command>.
+  </para>
+
+  <important>
+   <title>Repository for Packages with Debugging Information</title>
+   <para>
+    If you subscribed your system for online updates, you can find
+    <quote>debuginfo</quote> packages in the
+    <literal>*-Debuginfo-Updates</literal> online installation repository
+    relevant for &productname; &productnumber;. Use &yast; to enable the
+    repository.
+   </para>
+  </important>
+
+  <para>
+   To open the captured dump in <literal>crash</literal> on the machine that
+   produced the dump, use a command like this:
+  </para>
+
+  <para>
+   <command>crash /boot/vmlinux-2.6.32.8-0.1-default.gz
+   /var/crash/2010-04-23-11\:17/vmcore</command>
+  </para>
+
+  <para>
+   The first parameter represents the kernel image. The second parameter is
+   the dump file captured by &kdump;. You can find this file under
+   <filename>/var/crash</filename> by default.
+  </para>
+
+  <sect2 id="cha.tuning.kdump.analyze.binformat">
+   <title>Kernel Binary Formats</title>
+   <para>
+    The Linux kernel comes in Executable and Linkable Format (ELF). This
+    file is usually called <literal>vmlinux</literal> and is directly
+    generated in the compilation process. Not all boot loaders, especially
+    on x86 (i386 and x86_64) architecture, support ELF binaries. The
+    following solutions exist on different architectures supported by
+    &productnamereg;.
+   </para>
+   <sect3 id="cha.tuning.kdump.analyze.binformat.x86">
+    <title>x86 (i386 and x86_64)</title>
+    <para>
+     Mostly for historic reasons, the Linux kernel consists of two parts:
+     the Linux kernel itself (<literal>vmlinux</literal>) and the setup code
+     run by the boot loader.
+    </para>
+    <para>
+     These two parts are linked together in a file called
+     <filename>bzImage</filename>, which can be found in the kernel source
+     tree. The file is now called <filename>vmlinuz</filename> (note
+     <literal>z</literal> vs. <literal>x</literal>) in the kernel package.
+    </para>
+    <para>
+     The ELF image is never directly used on x86. Therefore, the main kernel
+     package contains the <filename>vmlinux</filename> file in compressed
+     form called <filename>vmlinux.gz</filename>.
+    </para>
+    <para>
+     To sum it up, an x86 SUSE kernel package has two kernel files:
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       <filename>vmlinuz</filename> which is executed by the boot loader.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <filename>vmlinux.gz</filename>, the compressed ELF image that is
+       required by <emphasis>crash</emphasis> and GDB.
+      </para>
+     </listitem>
+    </itemizedlist>
+   </sect3>
+   <sect3 id="cha.tuning.kdump.analyze.binformat.IA64">
+    <title>IA64</title>
+    <para>
+     The <systemitem>elilo</systemitem> boot loader, which boots the Linux
+     kernel on the IA64 architecture, supports loading ELF images (even
+     compressed ones) out of the box. The IA64 kernel package contains only
+     one file called <filename>vmlinuz</filename>. It is a compressed ELF
+     image. <filename>vmlinuz</filename> on IA64 is the same as
+     <filename>vmlinux.gz</filename> on x86.
+    </para>
+   </sect3>
+   <sect3 id="cha.tuning.kdump.analyze.binformat.ppc">
+    <title>PPC and PPC64</title>
+    <para>
+     The <systemitem>yaboot</systemitem> boot loader on PPC also supports
+     loading ELF images, but not compressed ones. In the PPC kernel package,
+     there is an ELF Linux kernel file <filename>vmlinux</filename>.
+     Considering <emphasis>crash</emphasis>, this is the easiest
+     architecture.
+    </para>
+    <para>
+     If you decide to analyze the dump on another machine, you must check
+     both the architecture of the computer and the files necessary for
+     debugging.
+    </para>
+    <para>
+     You can analyze the dump on another computer only if it runs a Linux
+     system of the same architecture. To check the compatibility, use the
+     command <command>uname <option>-i</option></command> on both computers
+     and compare the outputs.
+    </para>
+    <para>
+     If you are going to analyze the dump on another computer, you also need
+     the appropriate files from the <systemitem>kernel</systemitem> and
+     <systemitem>kernel debug</systemitem> packages.
+    </para>
+    <procedure>
+     <step>
+      <para>
+       Put the kernel dump, the kernel image from
+       <filename>/boot</filename>, and its associated debugging info file
+       from <filename>/usr/lib/debug/boot</filename> into a single empty
+       directory.
+      </para>
+     </step>
+     <step>
+      <para>
+       Additionally, copy the kernel modules from
+       <filename>/lib/modules/$(uname -r)/kernel/</filename> and the
+       associated debug info files from
+       <filename>/usr/lib/debug/lib/modules/$(uname -r)/kernel/</filename>
+       into a subdirectory named <filename>modules</filename>.
+      </para>
+     </step>
+     <step>
+      <para>
+       In the directory with the dump, the kernel image, its debug info
+       file, and the <filename>modules</filename> subdirectory, launch the
+       crash utility: <command>crash <replaceable>vmlinux-version
+       vmcore</replaceable></command>.
+      </para>
+     </step>
+    </procedure>
+    <note>
+     <title>Support for Kernel Images</title>
+     <para>
+      Compressed kernel images (gzip, not the bzImage file) are supported by
+      SUSE packages of crash since &productnamereg; 11. For older versions,
+      you have to extract the <filename>vmlinux.gz</filename> (x86) or the
+      <filename>vmlinuz</filename> (IA64) to <filename>vmlinux</filename>.
+     </para>
+    </note>
+    <para>
+     Regardless of the computer on which you analyze the dump, the crash
+     utility will produce an output similar to this:
+    </para>
+<screen>&exampleuser;@&wsIV;:~&gt; crash /boot/vmlinux-2.6.32.8-0.1-default.gz
+/var/crash/2010-04-23-11\:17/vmcore
+
+crash 4.0-7.6
+Copyright (C) 2002, 2003, 2004, 2005, 2006, 2007, 2008  Red Hat, Inc.
+Copyright (C) 2004, 2005, 2006  IBM Corporation
+Copyright (C) 1999-2006  Hewlett-Packard Co
+Copyright (C) 2005, 2006  Fujitsu Limited
+Copyright (C) 2006, 2007  VA Linux Systems Japan K.K.
+Copyright (C) 2005  NEC Corporation
+Copyright (C) 1999, 2002, 2007  Silicon Graphics, Inc.
+Copyright (C) 1999, 2000, 2001, 2002  Mission Critical Linux, Inc.
+This program is free software, covered by the GNU General Public License,
+and you are welcome to change it and/or distribute copies of it under
+certain conditions.  Enter "help copying" to see the conditions.
+This program has absolutely no warranty.  Enter "help warranty" for details.
+
+GNU gdb 6.1
+Copyright 2004 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "x86_64-unknown-linux-gnu"...
+
+      KERNEL: /boot/vmlinux-2.6.32.8-0.1-default.gz
+   DEBUGINFO: /usr/lib/debug/boot/vmlinux-2.6.32.8-0.1-default.debug
+    DUMPFILE: /var/crash/2009-04-23-11:17/vmcore
+        CPUS: 2
+        DATE: Thu Apr 23 13:17:01 2010
+      UPTIME: 00:10:41
+LOAD AVERAGE: 0.01, 0.09, 0.09
+       TASKS: 42
+    NODENAME: eros
+     RELEASE: 2.6.32.8-0.1-default
+     VERSION: #1 SMP 2010-03-31 14:50:44 +0200
+     MACHINE: x86_64  (2999 Mhz)
+      MEMORY: 1 GB
+       PANIC: "SysRq : Trigger a crashdump"
+         PID: 9446
+     COMMAND: "bash"
+        TASK: ffff88003a57c3c0  [THREAD_INFO: ffff880037168000]
+         CPU: 1
+       STATE: TASK_RUNNING (SYSRQ)
+crash></screen>
+    <para>
+     The command output prints first useful data: There were 42 tasks
+     running at the moment of the kernel crash. The cause of the crash was a
+     SysRq trigger invoked by the task with PID 9446. It was a Bash process
+     because the <command>echo</command> that has been used is an internal
+     command of the Bash shell.
+    </para>
+    <para>
+     The <emphasis>crash</emphasis> utility builds upon GDB and provides
+     many useful additional commands. If you enter <command>bt</command>
+     without any parameters, the backtrace of the task running at the moment
+     of the crash is printed:
+    </para>
+<screen>
+crash> bt
+PID: 9446   TASK: ffff88003a57c3c0  CPU: 1   COMMAND: "bash"
+ #0 [ffff880037169db0] crash_kexec at ffffffff80268fd6
+ #1 [ffff880037169e80] __handle_sysrq at ffffffff803d50ed
+ #2 [ffff880037169ec0] write_sysrq_trigger at ffffffff802f6fc5
+ #3 [ffff880037169ed0] proc_reg_write at ffffffff802f068b
+ #4 [ffff880037169f10] vfs_write at ffffffff802b1aba
+ #5 [ffff880037169f40] sys_write at ffffffff802b1c1f
+ #6 [ffff880037169f80] system_call_fastpath at ffffffff8020bfbb
+    RIP: 00007fa958991f60  RSP: 00007fff61330390  RFLAGS: 00010246
+    RAX: 0000000000000001  RBX: ffffffff8020bfbb  RCX: 0000000000000001
+    RDX: 0000000000000002  RSI: 00007fa959284000  RDI: 0000000000000001
+    RBP: 0000000000000002   R8: 00007fa9592516f0   R9: 00007fa958c209c0
+    R10: 00007fa958c209c0  R11: 0000000000000246  R12: 00007fa958c1f780
+    R13: 00007fa959284000  R14: 0000000000000002  R15: 00000000595569d0
+    ORIG_RAX: 0000000000000001  CS: 0033  SS: 002b
+crash>
+</screen>
+    <para>
+     Now it is clear what happened: The internal <command>echo</command>
+     command of Bash shell sent a character to
+     <filename>/proc/sysrq-trigger</filename>. After the corresponding
+     handler recognized this character, it invoked the
+     <literal>crash_kexec()</literal> function. This function called
+     <literal>panic()</literal> and &kdump; saved a dump.
+    </para>
+    <para>
+     In addition to the basic GDB commands and the extended version of
+     <command>bt</command>, the crash utility defines many other commands
+     related to the structure of the Linux kernel. These commands understand
+     the internal data structures of the Linux kernel and present their
+     contents in a human readable format. For example, you can list the
+     tasks running at the moment of the crash with <command>ps</command>.
+     With <command>sym</command>, you can list all the kernel symbols with
+     the corresponding addresses, or inquire an individual symbol for its
+     value. With <command>files</command>, you can display all the open file
+     descriptors of a process. With <command>kmem</command>, you can display
+     details about the kernel memory usage. With <command>vm</command>, you
+     can inspect the virtual memory of a process, even at the level of
+     individual page mappings. The list of useful commands is very long and
+     many of these accept a wide range of options.
+    </para>
+    <para>
+     The commands that we mentioned reflect the functionality of the common
+     Linux commands, such as <command>ps</command> and
+     <command>lsof</command>. If you would like to find out the exact
+     sequence of events with the debugger, you need to know how to use GDB
+     and to have strong debugging skills. Both of these are out of the scope
+     of this document. In addition, you need to understand the Linux kernel.
+     Several useful reference information sources are given at the end of
+     this document.
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 id="cha.tuning.kdump.advanced">
+  <title>Advanced &kdump; Configuration</title>
+
+  <para>
+   The configuration for &kdump; is stored in
+   <filename>/etc/sysconfig/kdump</filename>. You can also use &yast; to
+   configure it. &kdump; configuration options are available under
+   <menuchoice><guimenu>System</guimenu> <guimenu>Kernel
+   Kdump</guimenu></menuchoice> in &yastcc;. The following &kdump; options
+   may be useful for you:
+  </para>
+
+  <para>
+   You can change the directory for the kernel dumps with the
+   <option>KDUMP_SAVEDIR</option> option. Keep in mind that the size of
+   kernel dumps can be very large. &kdump; will refuse to save the dump if
+   the free disk space, subtracted by the estimated dump size, drops below
+   the value specified by the <option>KDUMP_FREE_DISK_SIZE</option> option.
+   Note that KDUMP_SAVEDIR understands URL format
+   <replaceable>protocol://specification</replaceable>, where
+   <replaceable>protocol</replaceable> is one of <option>file</option>,
+   <option>ftp</option>, <option>sftp</option>, <option>nfs</option> or
+   <option>cifs</option>, and <option>specification</option> varies for each
+   protocol. For example, to save kernel dump on an FTP server, use the
+   following URL as a template:
+   <option>ftp://username:password@ftp.example.com:123/var/crash</option>.
+  </para>
+
+  <para>
+   Kernel dumps are usually huge and contain many pages that are not
+   necessary for analysis. With <literal>KDUMP_DUMPLEVEL</literal> option,
+   you can omit such pages. The option understands numeric value between 0
+   and 31. If you specify <replaceable>0</replaceable>, the dump size will
+   be largest. If you specify <replaceable>31</replaceable>, it will produce
+   the smallest dump. For a complete table of possible values, see the
+   manual page of <command>kdump</command> (<command>man 7 kdump</command>).
+  </para>
+
+  <para>
+   Sometimes it is very useful to make the size of the kernel dump smaller.
+   For example, if you want to transfer the dump over the network, or if you
+   need to save some disk space in the dump directory. This can be done with
+   <literal>KDUMP_DUMPFORMAT</literal> set to
+   <replaceable>compressed</replaceable>. The <command>crash</command>
+   utility supports dynamic decompression of the compressed dumps.
+  </para>
+
+  <important>
+   <title>Changes to &kdump; Configuration File</title>
+   <para>
+    You always need to execute <command>rckdump restart</command> after you
+    make manual changes to <filename>/etc/sysconfig/kdump</filename>.
+    Otherwise these changes will take effect next time you reboot the
+    system.
+   </para>
+  </important>
+ </sect1>
+ <sect1 id="cha.tuning.kdump.moreinfo">
+  <title>For More Information</title>
+
+  <para>
+   Since there is no single comprehensive reference to &kexec; and &kdump;
+   usage, you have to explore several resources to get the information you
+   need. Here are some of them:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     For the &kexec; utility usage, see the manual page of
+     <command>kexec</command> (<command>man 8 kexec</command>).
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     You can find general information about &kexec; at
+     <ulink
+      url="http://www.ibm.com/developerworks/linux/library/l-kexec.html"/>
+     . Might be slightly outdated.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     For more details on &kdump; specific to SUSE Linux, see
+     <ulink
+      url="http://ftp.suse.com/pub/people/tiwai/kdump-training/kdump-training.pdf"/>
+     .
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     An in-depth description of &kdump; internals can be found at
+     <ulink
+      url="http://lse.sourceforge.net/kdump/documentation/ols2oo5-kdump-paper.pdf"/>
+     .
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   For more details on <emphasis>crash</emphasis> dump analysis and
+   debugging tools, use the following resources:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     In addition to the info page of GDB (<command>info gdb</command>), you
+     might want to read the printable guides at
+     <ulink
+      url="http://sourceware.org/gdb/documentation/"/> .
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     A white paper with a comprehensive description of the crash utility
+     usage can be found at <ulink
+      url="http://people.redhat.com/anderson/crash_whitepaper/"/>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     The crash utility also features a comprehensive online help. Just write
+     <command>help <replaceable>command</replaceable></command> to display
+     the online help for <command>command</command>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     If you have the necessary Perl skills, you can use Alicia to make the
+     debugging easier. This Perl-based front end to the crash utility can be
+     found at <ulink
+      url="http://alicia.sourceforge.net/"/> .
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     If you prefer Python instead, you may want to install Pykdump. This
+     package helps you control GDB through Python scripts and can be
+     downloaded from <ulink url="http://sf.net/projects/pykdump"/> .
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     A very comprehensive overview of the Linux kernel internals is given in
+     <citetitle>Understanding the Linux Kernel</citetitle> by Daniel P.
+     Bovet and Marco Cesati (ISBN 978-0-596-00565-8).
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

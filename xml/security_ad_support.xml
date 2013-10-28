@@ -1,0 +1,939 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<!--PM's doc requirements:
+ 
+ * AD configuration (m)
+ 
+ * Active Directory integration (authentication and authorization, file access)
+   (m)
+   Plan for documentation integration with Likewise Enterprise (i)
+   Document integration with Nautilus and file share access and writes (m)
+     -> user must have group of /var/lib/samba/usershares 
+        -> don't know how to tell AD about this.
+     -> net usershare add: cannot convert name "Everyone" to a SID.
+
+ ===========================================================================
+
+ * Time synchronization: -> in there (done)
+ 1.NTP in AD environment (d)
+ 2.Time sync troubleshooting (d)
+ @maintainer: first topic could probably also be covered in net_xntp.xml -
+ check with maintainer of that file where this would fit best
+
+ ===========================================================================
+
+ This is DONE.
+ *  Server based automounting of home directories 
+ 1.Configuration and usage description (m)
+ 2.Firewall configuration for SMB support (m)
+ 3.Kerberos support description (d)
+
+ This is related to #300967: Mount Server Home Directory Automatically with
+ Authentication. 
+ Everything that's being done there to ensure that the users will be able to
+ access their home directories when hosted on CIFS.
+ 
+@maintainer: not sure if the last issue needs to be covered here, most of it
+    should probably go to net_samba.xml and maybe part of it to pam.xml
+2010-09-02, ke: Mention this feature below (FIXME + fate#300967) and describe
+    it in net_samba.xml.  Also check security_pam.xml.  DONE.
+
+-->
+<chapter id="cha.security.ad">
+ <title>Active Directory Support</title>
+ <para>
+  Active Directory* (AD) is a directory-service based on LDAP, Kerberos, and
+  other services that is used by Microsoft Windows to manage resources,
+  services, and people. In an MS Windows network, AD provides information
+  about these objects, restricts access to them, and enforces policies.
+  &productnamereg; lets you join existing AD domains and integrate your
+  Linux machine into a Windows environment.
+ </para>
+ <sect1 id="sec.security.ad.integrate">
+  <title>Integrating Linux and AD Environments</title>
+
+  <para>
+   With a Linux client (configured as an Active Directory client) that is
+   joined to an existing Active Directory domain, benefit from various
+   features not available on a pure &productname; Linux client:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>Browsing Shared Files and Folders with SMB</term>
+    <listitem>
+     <para>
+      Both Nautilus (the GNOME file manager) and Dolphin or Konqueror (its
+      KDE counterparts) support browsing shared resources through SMB.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Sharing Files and Folders with SMB</term>
+    <listitem>
+     <para>
+      Both Nautilus, Dolphin, and Konqueror support sharing folders and
+      files as in Windows.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Accessing and Manipulating User Data on the Windows Server</term>
+    <listitem>
+     <para>
+      Through Nautilus and Konqueror, users are able to access their Windows
+      user data and can edit, create, and delete files and folders on the
+      Windows server. Users can access their data without having to enter
+      their password multiple times.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Offline Authentication</term>
+    <listitem>
+     <para>
+      Users are able to log in and access their local data on the Linux
+      machine even if they are offline or the AD server is unavailable for
+      other reasons.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Windows Password Change</term>
+    <listitem>
+     <para>
+      This port of AD support in Linux enforces corporate password policies
+      stored in Active Directory. The display managers and console support
+      password change messages and accept your input. You can even use the
+      Linux <command>passwd</command> command to set Windows passwords.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Single-Sign-On through Kerberized Applications</term>
+    <listitem>
+     <para>
+      Many applications of both desktops are Kerberos-enabled
+      (<emphasis>kerberized</emphasis>), which means they can transparently
+      handle authentication for the user without the need for password
+      reentry at Web servers, proxies, groupware applications, or other
+      locations.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   A brief technical background for most of these features is given in the
+   following section. <phrase os="sled">For directions for file and printer
+   sharing, refer to the <xref
+     linkend="book.gnomeuser"/> and the
+   <xref linkend="book.kdeuser"/>, where you can learn more about AD
+   enablement in the GNOME and KDE application worlds.</phrase>
+  </para>
+ </sect1>
+ <sect1 id="sec.security.ad.background">
+  <title>Background Information for Linux AD Support</title>
+
+  <para>
+   Many system components need to interact flawlessly in order to integrate
+   a Linux client into an existing Windows Active Directory domain.
+   <xref linkend="fig.ad.schema"/> highlights the most prominent ones. The
+   following sections focus on the underlying processes of the key events in
+   AD server and client interaction.
+  </para>
+
+  <figure id="fig.ad.schema">
+   <title>Active Directory Authentication Schema</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="sled10_ad_schema.svg" width="75%" format="SVG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="sled10_ad_schema.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   To communicate with the directory service, the client needs to share at
+   least two protocols with the server:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>LDAP</term>
+    <listitem>
+     <para>
+      LDAP is a protocol optimized for managing directory information. A
+      Windows domain controller with AD can use the LDAP protocol to
+      exchange directory information with the clients. To learn more about
+      LDAP in general and about the open source port of it, OpenLDAP, refer
+      to <xref linkend="cha.security.ldap"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Kerberos</term>
+    <listitem>
+     <para>
+      Kerberos is a third-party trusted authentication service. All its
+      clients trust Kerberos's authorization of another client's identity,
+      enabling kerberized single-sign-on (SSO) solutions. Windows supports a
+      Kerberos implementation, making Kerberos SSO possible even with Linux
+      clients. <phrase os="sled;sles">To learn more about Kerberos in Linux,
+      refer to <xref
+        linkend="cha.security.kerberos"/>.</phrase>
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   The following client components process account and authentication data:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>Winbind</term>
+    <listitem>
+     <para>
+      The most central part of this solution is the winbind daemon that is a
+      part of the Samba project and handles all communication with the AD
+      server.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>NSS (<emphasis>Name Service Switch</emphasis>)</term>
+    <listitem>
+     <para>
+      NSS routines provide name service information. Naming service for both
+      users and groups is provided by <filename>nss_winbind</filename>. This
+      module directly interacts with the winbind daemon.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>PAM (<emphasis>Pluggable Authentication Modules</emphasis>)</term>
+    <listitem>
+     <para>
+      User authentication for AD users is done by the
+      <filename>pam_winbind</filename> module. The creation of user homes
+      for the AD users on the Linux client is handled by
+      <filename>pam_mkhomedir</filename>. The
+      <filename>pam_winbind</filename> module directly interacts with
+      winbindd. To learn more about PAM in general, refer to
+      <xref linkend="cha.pam"
+      />.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Applications that are PAM-aware, like the login routines and the GNOME
+   and KDE display managers, interact with the PAM and NSS layer to
+   authenticate against the Windows server. Applications supporting Kerberos
+   authentication (such as file managers, Web browsers, or e-mail clients)
+   use the Kerberos credential cache to access user's Kerberos tickets,
+   making them part of the SSO framework.
+  </para>
+
+  <sect2 id="sec.security.ad.background.domain_join">
+   <title>Domain Join</title>
+   <para>
+    During domain join, the server and the client establish a secure
+    relation. On the client, the following tasks need to be performed to
+    join the existing LDAP and Kerberos SSO environment provided by the
+    Window domain controller. The entire join process is handled by the
+    &yast; Domain Membership module, which can be run during installation or
+    in the installed system:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      The Windows domain controller providing both LDAP and KDC (Key
+      Distribution Center) services is located.
+     </para>
+    </step>
+    <step>
+     <para>
+      A machine account for the joining client is created in the directory
+      service.
+     </para>
+    </step>
+    <step>
+     <para>
+      An initial ticket granting ticket (TGT) is obtained for the client and
+      stored in its local Kerberos credential cache. The client needs this
+      TGT to get further tickets allowing it to contact other services, like
+      contacting the directory server for LDAP queries.
+     </para>
+    </step>
+    <step>
+     <para>
+      NSS and PAM configurations are adjusted to enable the client to
+      authenticate against the domain controller.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    During client boot, the winbind daemon is started and retrieves the
+    initial Kerberos ticket for the machine account. winbindd automatically
+    refreshes the machine's ticket to keep it valid. To keep track of the
+    current account policies, winbindd periodically queries the domain
+    controller.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ad.background.logon">
+   <title>Domain Login and User Homes</title>
+   <para>
+    The login managers of GNOME and KDE (GDM and KDM) have been extended to
+    allow the handling of AD domain login. Users can choose to log into the
+    primary domain the machine has joined or to one of the trusted domains
+    with which the domain controller of the primary domain has established a
+    trust relationship.
+   </para>
+   <para>
+    User authentication is mediated by a number of PAM modules as described
+    in <xref
+     linkend="sec.security.ad.background"/>. The
+    <filename>pam_winbind</filename> module used to authenticate clients
+    against Active Directory or NT4 domains is fully aware of Windows error
+    conditions that might prohibit a user's login. The Windows error codes
+    are translated into appropriate user-readable error messages that PAM
+    gives at login through any of the supported methods (GDM, KDM, console,
+    and SSH):
+   </para>
+   <remark>rwalter: the terms in this list are capitalized inconsistently. Are they the direct error
+    messages or can I make them consistent?</remark>
+   <variablelist>
+    <varlistentry>
+     <term><literal>Password has expired</literal>
+     </term>
+     <listitem>
+      <para>
+       The user sees a message stating that the password has expired and
+       needs to be changed. The system prompts for a new password and
+       informs the user if the new password does not comply with corporate
+       password policies (for example the password is too short, too simple,
+       or already in the history). If a user's password change fails, the
+       reason is shown and a new password prompt is given.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Account disabled</literal>
+     </term>
+     <listitem>
+      <para>
+       The user sees an error message stating that the account has been
+       disabled and to contact the system administrator.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Account locked out</literal>
+     </term>
+     <listitem>
+      <para>
+       The user sees an error message stating that the account has been
+       locked and to contact the system administrator.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Password has to be changed</literal>
+     </term>
+     <listitem>
+      <para>
+       The user can log in but receives a warning that the password needs to
+       be changed soon. This warning is sent three days before that password
+       expires. After expiration, the user cannot log in.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Invalid workstation</literal>
+     </term>
+     <listitem>
+      <para>
+       When a user is restricted to specific workstations and the current
+       &productname; machine is not among them, a message appears that this
+       user cannot log in from this workstation.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Invalid logon hours</literal>
+     </term>
+     <listitem>
+      <para>
+       When a user is only allowed to log in during working hours and tries
+       to log in outside working hours, a message informs the user that
+       logging in is not possible at that time.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Account expired</literal>
+     </term>
+     <listitem>
+      <para>
+       An administrator can set an expiration time for a specific user
+       account. If that user tries to log in after expiration, the user gets
+       a message that the account has expired and cannot be used to log in.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    During a successful authentication, <filename>pam_winbind</filename>
+    acquires a ticket granting ticket (TGT) from the Kerberos server of
+    Active Directory and stores it in the user's credential cache. It also
+    renews the TGT in the background, requiring no user interaction.
+   </para>
+   <para>
+    &productname; supports local home directories for AD users. If
+    configured through &yast; as described in
+    <xref linkend="sec.security.ad.config"/>, user homes are created at the
+    first login of a Windows (AD) user into the Linux client. These home
+    directories look and feel entirely the same as standard Linux user home
+    directories and work independently of the AD domain controller. Using a
+    local user home, it is possible to access a user's data on this machine
+    (even when the AD server is disconnected) as long as the Linux client
+    has been configured to perform offline authentication.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ad.background.offline">
+   <title>Offline Service and Policy Support</title>
+   <para>
+    Users in a corporate environment must have the ability to become roaming
+    users (for example, to switch networks or even work disconnected for
+    some time). To enable users to log in to a disconnected machine,
+    extensive caching was integrated into the winbind daemon. The winbind
+    daemon enforces password policies even in the offline state. It tracks
+    the number of failed login attempts and reacts according to the policies
+    configured in Active Directory. Offline support is disabled by default
+    and must be explicitly enabled in the &yast; Domain Membership module.
+   </para>
+   <para>
+    When the domain controller has become unavailable, the user can still
+    access network resources (other than the AD server itself) with valid
+    Kerberos tickets that have been acquired before losing the connection
+    (as in Windows). Password changes cannot be processed unless the domain
+    controller is online. While disconnected from the AD server, a user
+    cannot access any data stored on this server. When a workstation has
+    become disconnected from the network entirely and connects to the
+    corporate network again later, &productname; acquires a new Kerberos
+    ticket as soon as the user has locked and unlocked the desktop (for
+    example, using a desktop screen saver).
+   </para>
+  </sect2>
+ </sect1>
+<?dbfo-need height="15em"?>
+ <sect1 id="sec.security.ad.config">
+  <title>Configuring a Linux Client for Active Directory</title>
+
+  <para>
+   Before your client can join an AD domain, some adjustments must be made
+   to your network setup to ensure the flawless interaction of client and
+   server.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>DNS</term>
+    <listitem>
+     <para>
+      Configure your client machine to use a DNS server that can forward DNS
+      requests to the AD DNS server. Alternatively, configure your machine
+      to use the AD DNS server as the name service data source.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>NTP</term>
+    <listitem>
+     <para>
+      To succeed with Kerberos authentication, the client must have its time
+      set accurately. It is highly recommended to use a central NTP time
+      server for this purpose (this can be also the NTP server running on
+      your Active Directory domain controller). If the clock skew between
+      your Linux host and the domain controller exceeds a certain limit,
+      Kerberos authentication fails and the client is logged in using the
+      weaker NTLM (NT LAN Manager) authentication. For more details about
+      using active directory for time synchronization, see
+      <xref linkend="proc.ad.join"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>DHCP</term>
+    <listitem>
+     <para>
+      If your client uses dynamic network configuration with DHCP, configure
+      DHCP to provide the same IP and hostname to the client. If possible,
+      use static IP addresses.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Firewall</term>
+    <listitem>
+     <para>
+      To browse your network neighborhood, either disable the firewall
+      entirely or mark the interface used for browsing as part of the
+      internal zone.
+     </para>
+     <para>
+      To change the firewall settings on your client, log in as &rootuser;
+      and start the &yast; firewall module. Select
+      <guimenu>Interfaces</guimenu>. Select your network interface from the
+      list of interfaces and click <guimenu>Change</guimenu>. Select
+      <guimenu>Internal Zone</guimenu> and apply your settings with
+      <guimenu>OK</guimenu>. Leave the firewall settings with <menuchoice>
+      <guimenu>Next</guimenu> <guimenu>Finish</guimenu> </menuchoice>. To
+      disable the firewall, just check the <guimenu>Disable Firewall
+      Automatic Starting</guimenu> option, and leave the firewall module
+      with <menuchoice> <guimenu>Next</guimenu> <guimenu>Finish</guimenu>
+      </menuchoice>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>AD Account</term>
+    <listitem>
+     <para>
+      You cannot log in to an AD domain unless the AD administrator has
+      provided you with a valid user account for that domain. Use the AD
+      username and password to log in to the AD domain from your Linux
+      client.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Join an existing AD domain during installation (or by later activating
+   SMB user authentication with &yast; in the installed system).
+   <phrase os="sled">The domain join during installation is covered in
+   <xref linkend="sec.i.yast2.user"/>.</phrase><phrase os="sles">The domain
+   join during installation is covered in
+   <xref linkend="sec.i.yast2.conf.manual.user_auth"
+    />.</phrase>
+  </para>
+
+  <note>
+   <para>
+    Currently only a domain administrator account, such as
+    <literal>Administrator</literal>, can join &productname; into Active
+    Directory.
+   </para>
+  </note>
+
+  <para>
+   To join an AD domain in a running system, proceed as follows:
+  </para>
+
+  <procedure id="proc.ad.join">
+   <title>Joining an AD Domain</title>
+   <step>
+    <para>
+     Log in as &rootuser; and start &yast;.
+    </para>
+   </step>
+   <step>
+    <para>
+     Start <menuchoice> <guimenu>Network Services</guimenu> <guimenu>Windows
+     Domain Membership</guimenu> </menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter the domain to join at <guimenu>Domain or Workgroup</guimenu> in
+     the <guimenu>Windows Domain Membership</guimenu> screen (see
+     <xref linkend="fig.ad.smbclient"/>). If the DNS settings on your host
+     are properly integrated with the Windows DNS server, enter the AD
+     domain name in its DNS format
+     (<literal>mydomain.mycompany.com</literal>). If you enter the short
+     name of your domain (also known as the pre&ndash;Windows 2000 domain
+     name), &yast; must rely on NetBIOS name resolution instead of DNS to
+     find the correct domain controller.
+<!-- 2010-02-05, toba: cannot find the Browse button in SLES 11 SP1,
+     commenting out...
+
+     To select from a list of available
+     domains instead, use <guimenu>Browse</guimenu> to list the NetBIOS
+     domains then select the desired domain.
+
+     -->
+    </para>
+    <figure id="fig.ad.smbclient">
+     <title>Determining Windows Domain Membership</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="ad_sambaclient.png" width="75%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="ad_sambaclient.png" width="75%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+   <step>
+    <para>
+     Check <guimenu>Also Use SMB Information for Linux
+     Authentication</guimenu> to use the SMB source for Linux
+     authentication.
+    </para>
+   </step>
+   <step>
+    <para>
+     Check <guimenu>Create Home Directory on Login</guimenu> to
+     automatically create a local home directory for your AD user on the
+     Linux machine.
+    </para>
+   </step>
+   <step>
+    <para>
+     Check <guimenu>Offline Authentication</guimenu> to allow your domain
+     users to log in even if the AD server is temporarily unavailable, or if
+     you do not have a network connection.
+    </para>
+   </step>
+   <step>
+    <para>
+     Select <guimenu>Expert Settings</guimenu>, if you want to change the
+     UID and GID ranges for the Samba users and groups. Let DHCP retrieve
+     the WINS server only if you need it. This is the case when some of your
+     machines are resolved only by the WINS system.
+    </para>
+   </step>
+   <step>
+    <para>
+     Configure NTP time synchronization for your AD environment by selecting
+     <guimenu>NTP Configuration</guimenu> and entering an appropriate server
+     name or IP address. This step is obsolete if you have already entered
+     the appropriate settings in the stand-alone &yast; NTP configuration
+     module.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>OK</guimenu> and confirm the domain join when prompted
+     for it.
+    </para>
+   </step>
+   <step>
+    <para>
+     Provide the password for the Windows administrator on the AD server and
+     click <guimenu>OK</guimenu> (see <xref linkend="fig.ad.join1"/>).
+    </para>
+    <figure id="fig.ad.join1">
+     <title>Providing Administrator Credentials</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="ad_join1.png" width="30%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="ad_join1.png" width="30%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+  </procedure>
+
+  <para>
+   After you have joined the AD domain, you can log in to it from your
+   workstation using the display manager of your desktop or the console.
+  </para>
+ </sect1>
+ <sect1 id="sec.security.ad.login">
+  <title>Logging In to an AD Domain</title>
+
+  <para>
+   Provided your machine has been configured to authenticate against Active
+   Directory and you have a valid Windows user identity, you can log in to
+   your machine using the AD credentials. Login is supported for both
+   desktop environments (GNOME and KDE), the console, SSH, and any other
+   PAM-aware application.
+  </para>
+
+  <important>
+   <title>Offline Authentication</title>
+   <para>
+    &productname; supports offline authentication, allowing you to remain
+    logged in to your client machine even if the client machine is
+    disconnected from the network.
+   </para>
+  </important>
+
+<?dbfo-need height="15em"?>
+
+  <sect2 id="sec.security.ad.login.gui">
+   <title>GDM and KDM</title>
+   <para>
+    To authenticate a GNOME client machine against an AD server, proceed as
+    follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Select the domain.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enter your Windows username and press <keycap>Enter</keycap>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enter your Windows password and press <keycap>Enter</keycap>.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    To authenticate a KDE client machine against an AD server, proceed as
+    follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Select the domain.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enter your Windows username.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enter your Windows password and press <keycap>Enter</keycap>.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    If configured to do so, &productname; creates a user home directory on
+    the local machine on the first login of each AD authenticated user. This
+    allows you to benefit from the AD support of &productname; while still
+    having a fully functional Linux machine at your disposal.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ad.login.console">
+   <title>Console Login</title>
+   <para>
+    As well as logging into the AD client machine using a graphical
+    front-end, you can log in using the text-based console login or even
+    remotely using SSH.
+   </para>
+   <para>
+    To log in to your AD client from a console, enter
+    <literal><replaceable>DOMAIN</replaceable>\<replaceable>user</replaceable></literal>
+    at the <literal>login:</literal> prompt and provide the password.
+   </para>
+   <para>
+    To remotely log in to your AD client machine using SSH, proceed as
+    follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      At the login prompt, enter:
+     </para>
+<screen>ssh <replaceable>DOMAIN</replaceable>\\<replaceable>user</replaceable>@<replaceable>hostname</replaceable></screen>
+     <para>
+      The <literal>\</literal> domain and login delimiter is escaped with
+      another <literal>\</literal> sign.
+     </para>
+    </step>
+    <step>
+     <para>
+      Provide the user's password.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.ad.passwd">
+  <title>Changing Passwords</title>
+
+  <para>
+   &productname; has the ability to help a user choose a suitable new
+   password that meets the corporate security policy. The underlying PAM
+   module retrieves the current password policy settings from the domain
+   controller, informing the user about the specific password quality
+   requirements a user account typically has by means of a message on login.
+   Like its Windows counterpart, &productname; presents a message
+   describing:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     Password history settings
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Minimum password length requirements
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Minimum password age
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Password complexity
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   The password change process cannot succeed unless all requirements have
+   been successfully met. Feedback about the password status is given both
+   through the display managers and the console.
+  </para>
+
+  <para>
+   GDM and KDM provide feedback about password expiration and the prompt for
+   new passwords in an interactive mode. To change passwords in the display
+   managers, just provide the password information when prompted.
+  </para>
+
+  <para>
+   To change your Windows password, you can use the standard Linux utility,
+   <command>passwd</command>, instead of having to manipulate this data on
+   the server. To change your Windows password, proceed as follows:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Log in at the console.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter <literal>passwd</literal>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter your current password when prompted.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter the new password.
+    </para>
+   </step>
+   <step>
+    <para>
+     Reenter the new password for confirmation. If your new password does
+     not comply with the policies on the Windows server, this feedback is
+     given to you and you are prompted for another password.
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   To change your Windows password from the GNOME desktop, proceed as
+   follows:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Click the <guimenu>Computer</guimenu> icon on the left edge of the
+     panel.
+    </para>
+   </step>
+   <step>
+    <para>
+     Select <guimenu>Control Center</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     From the <guimenu>Personal</guimenu> section, select
+     <menuchoice><guimenu>About Me</guimenu> <guimenu>Change
+     Password</guimenu></menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter your old password.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter and confirm the new password.
+    </para>
+   </step>
+   <step>
+    <para>
+     Leave the dialog with <guimenu>Close</guimenu> to apply your settings.
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   To change your Windows password from the KDE desktop, proceed as follows:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Select <guimenu>Configure Desktop</guimenu> from the main menu.
+    </para>
+   </step>
+   <step>
+    <para>
+     Select <guimenu>About Me</guimenu> from the <guimenu>Personal</guimenu>
+     section.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>Password &amp; User Account</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>Change Password</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter your current password.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter and confirm the new password and apply your settings with
+     <guimenu>OK</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Leave the configuration dialog with <menuchoice>
+     <guimenu>File</guimenu> <guimenu>Quit</guimenu> </menuchoice>.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+</chapter>

@@ -1,0 +1,1463 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.systemd">
+  <title>The &systemd; daemon</title>
+  <para>
+   The program &systemd; is the process with process ID 1. It is responsible
+   for initializing the system in the required way.  &systemd; is started
+   directly by the Kernel and resists signal&nbsp;9, which normally kills
+   processes. All other programs are either started directly by &systemd; or
+   by one of its child processes.
+  </para>
+  <note>
+   <title>Using System V init rather than &systemd;</title>
+   <para>
+    Being fully compatible, both &systemd; and System V init (SysV init) can
+    act as a drop-in replacement for each other. If you prefer to use the
+    SysV init rather than &systemd;, press <keycap>F5</keycap> on the boot
+    screen and choose <guimenu>System V</guimenu>. To make this a permanent
+    choice, install the package <systemitem
+    class="resource">sysvinit-init</systemitem> which will replace the
+    <systemitem class="resource">systemd-init</systemitem> package.
+   </para>
+  </note>
+  <para>
+   Starting with &productname; 12 &systemd; is a replacement for the popular
+   SysV init daemon. &systemd; is fully compatible with SysV init (by
+   supporting init scripts). One of the main advantages of &systemd; is the
+   fact that it considerably speeds up boot time by aggressively paralleling
+   service starts. Furthermore, &systemd; only starts a service when it is
+   really needed. For example, the printing daemon <systemitem
+   class="daemon">cupsd</systemitem> is not started during boot time, but
+   rather when a user prints a document for the first time after having booted
+   the system. &systemd; also supports Kernel Control Groups (cgroups),
+   snapshotting and restoring the system state and more. See <ulink
+   url="http://www.freedesktop.org/wiki/Software/systemd/"/> for details.
+  </para>
+
+  <!-- fs 2012-06-20:
+       according to fcrozat:
+        * too complex
+        * it is up to packagers to enable such behaviour (socket activation on
+          demand) and we don't have a lot of packages doing so atm
+  
+  <para>
+   Services depend on each other. For example the <systemitem
+   class="daemon">sshd</systemitem> daemon requires the network to be set up
+   before it can be started. Each service provides a socket accepting
+   connections or a mount point in the filesystem. Starting <systemitem
+   class="daemon">sshd</systemitem> is only successful if all sockets it
+   connects to, are available. Using SysV results in serializing the
+   services start-up&mdash;a service is not started until all other services it
+   depends on, have been successfully started.
+  </para>
+  <para>
+   &systemd; has a different approach. It provides provide sockets and mount
+   points for all services. Afterwards all services are started at once and
+   get <quote>their</quote> socket passed on execution.  This allows to
+   considerably speed up the boot process by starting all services in
+   parallel. 
+  </para>
+
+  -->
+  
+  <sect1 id="sec.boot.systemd.basics">
+   <title>Basic Usage</title>
+   <para>
+    The SysV init system utilized several different commands to handle
+    services&mdash; the init scripts, <command>insserv</command>,
+    <command>telinit</command> and others. &systemd; makes it easier to manage
+    services, since there is only one command to memorize for the majority of
+    service handling tasks: <command>systemctl</command>.It uses the command
+    plus subcommand notation like <command>git</command> or
+    <command>zypper</command>:
+   </para>
+   <screen>systemctl <replaceable>[general OPTIONS]</replaceable> <replaceable>subcommand</replaceable> <replaceable>[subcommand OPTIONS]</replaceable></screen>
+   <para>
+    See <command>man 1 systemctl</command> for a complete manual.
+   </para>
+
+   
+   <tip>
+    <title>Terminal Output and Bash Completion</title>
+    <para>
+     If the output goes to a terminal (and not to a pipe or a file, for
+     example) &systemd; commands send long output to a pager by default. Use
+     the <option>--no-pager</option> option to turn off paging mode.
+    </para>
+    <para>
+     &systemd; also supports bash-completion, allowing you to enter the first
+     letters of a subcommand and then hit <keycap function="tab"/> to
+     automatically complete it. This feature is only available in the
+     <systemitem>bash</systemitem> Shell and requires the installation of the
+     package <systemitem class="resource">bash-completion</systemitem>.
+    </para>
+   </tip>
+   
+   
+   <sect2 id="sec.boot.systemd.basics.services">
+    <title>Managing Services in a Running System</title>
+    <para>
+     Subcommands for managing services are the same as for managing a service
+     with SysV init (<command>start</command>, <command>stop</command>,
+     ...). The general syntax for service management commands is as follows:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>&systemd;</term>
+      <listitem>
+       <screen>systemctl reload|restart|start|status|stop|<replaceable>...</replaceable> <replaceable>&lt;my_service(s)></replaceable>.service</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>SysV init</term>
+      <listitem>
+       <screen>rc<replaceable>&lt;my_service(s)></replaceable> reload|restart|start|status|stop|<replaceable>...</replaceable></screen>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <para>
+     &systemd; allows to manage several services in one go. Instead of
+     executing init scripts one after the other as with SysV init, execute a
+     command like the following:
+    </para>
+    <screen>systemctl start <replaceable>&lt;my_1st_service></replaceable>.service <replaceable>&lt;my_2nd_service></replaceable>.service</screen>
+    <para>
+     The following table shows a list of the most important service management
+     commands for &systemd; and SysV init:
+    </para>
+    <table rowsep="1">
+     <title>Service Management Commands</title>
+     <tgroup cols="3">
+      <colspec colnum="1" colname="1" colwidth="50*"/>
+      <colspec colnum="2" colname="2" colwidth="30*"/>
+      <colspec colnum="3" colname="3" colwidth="20*"/>
+      <thead>
+       <row>
+        <entry colname="1">
+         <para>
+          Task
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          &systemd; Subcommand
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          SysV init Subcommand
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row>
+        <entry colname="1">
+         <para>
+          Starting
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>start</screen>
+        </entry>
+        <entry colname="3">
+         <screen>start</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Stopping
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>stop</screen>
+        </entry>
+        <entry colname="3">
+         <screen>stop</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Restarting
+         </para>
+         <para>
+          <emphasis>Shuts down services and starts them afterwards. If a
+          service is not yet running it will be started.</emphasis>
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>restart</screen>
+        </entry>
+        <entry colname="3">
+         <screen>restart</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Restarting conditionally
+         </para>
+         <para>
+          <emphasis>Restarts services if they are currently running. Does
+          nothing for services that are not running.</emphasis>
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>try-restart</screen>
+        </entry>
+        <entry colname="3">
+         <screen>try-restart</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>Reloading</para>
+         <para>
+          <emphasis>Tells services to reload their configuration files without
+          interrupting operation. Use case: Tell Apache to reload a modified
+          <filename>httpd.conf</filename> configuration file. Note that not
+          all services support reloading.</emphasis>
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>reload</screen>
+        </entry>
+        <entry colname="3">
+         <screen>reload</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Reloading or restarting
+         </para>
+         <para>
+          <emphasis>Reloads services if reloading is supported, otherwise
+          restarts them. Services is not yet running it will be
+          started.</emphasis>
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>reload-or-restart</screen>
+        </entry>
+        <entry colname="3">
+         <screen>n/a</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Reloading or restarting conditionally
+         </para>
+         <para>
+          <emphasis>Reloads services if reloading is supported, otherwise
+          restarts them if currently running.  Does nothing for services
+          that are not running.</emphasis>
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>reload-or-try-restart</screen>
+        </entry>
+        <entry colname="3">
+         <screen>n/a</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Getting detailed status information
+         </para>
+         <para>
+          <emphasis>Lists information about the status of services. The
+          &systemd; command shows details such as description, executable,
+          status, cgroup, and messages last issued by a service (see <xref
+          linkend="sec.boot.systemd.basics.services_debugging"/>). The level
+          of details displayed with the SysV init differs from service to
+          service.</emphasis>
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>status</screen>
+        </entry>
+        <entry colname="3">
+         <screen>status</screen>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Getting short status information
+         </para>
+         <para>
+          <emphasis>Shows whether services are active or not.</emphasis> 
+         </para>
+        </entry>
+        <entry colname="2">
+         <screen>is-active</screen>
+        </entry>
+        <entry colname="3">
+         <screen>status</screen>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+   </sect2>
+   
+   <sect2 id="sec.boot.systemd.basics.services_debugging">
+    <title>Debugging Services</title>
+    <para>
+     By default, &systemd; is not overly verbose. If a service was started
+     successfully, no output will be produced. In case of a failure, a short
+     error message will be displayed. However, <command>systemctl
+     status</command> provides means to debug start-up as well as operation of
+     a service.
+    </para>
+    <para>
+     &systemd; comes with its own logging mechanism (<quote>The
+     Journal</quote>) that logs system messages. This allows to display the
+     service messages together with status messages. The
+     <command>status</command> command works similar to
+     <command>tail</command> and can also display the log messages in
+     different formats, making it a powerful debugging tool.
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>Show Service Start-Up Failure</term>
+      <listitem>
+       <para>
+        Whenever a service fails to start, use <command>systemctl status
+        <replaceable>&lt;my_service></replaceable>.service</command> to get a
+        detailed error message:
+       </para>
+       <screen>&wwwname;: ~ # systemctl start apache2.service
+Job failed. See system journal and 'systemctl status' for details.
+&wwwname;: ~ # systemctl status apache2.service
+   Loaded: loaded (/lib/systemd/system/apache2.service; disabled)
+   Active: failed (Result: exit-code) since Mon, 04 Jun 2012 16:52:26 +0200; 29s ago
+   Process: 3088 ExecStart=/usr/sbin/start_apache2 -D SYSTEMD -k start (code=exited, status=1/FAILURE)
+   CGroup: name=systemd:/system/apache2.service
+
+Jun 04 16:52:26 g144 start_apache2[3088]: httpd2-prefork: Syntax error on line
+205 of /etc/apache2/httpd.conf: Syntax error on li...alHost></screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Show Last <replaceable>n</replaceable> Service Messages</term>
+      <listitem>
+       <para>
+        The default behavior of the <command>status</command> subcommand is
+        displaying the last ten messages a service issued. To change the
+        number of messages to show, use the
+        <option>--lines=<replaceable>n</replaceable></option> parameter,
+       </para>
+       <screen>systemctl status ntp.service
+systemctl --lines=20 status ntp.service</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Show Service Messages in Append Mode</term>
+      <listitem>
+       <para>
+        To display a <quote>live stream</quote> of service messages, use the
+        <option>--follow</option> option, which works just like <command>tail
+        <option>-f</option></command>:  
+       </para>
+       <screen>systemctl --follow status ntp.service</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Messages Output Format</term>
+      <listitem>
+       <para>
+        The <option>--output=<replaceable>mode</replaceable></option>
+        parameter allows to change the output format of service messages. The
+        most important modes available are:
+       </para>
+       <variablelist>
+        <varlistentry>
+         <term><option>short</option></term>
+         <listitem>
+          <para>
+           The default format. Shows the log messages with a human readable
+           timestamp.
+          </para>
+         </listitem>
+        </varlistentry>
+        <varlistentry>
+         <term><option>verbose</option></term>
+         <listitem>
+          <para>
+           Full output with all fields.
+          </para>
+         </listitem>
+        </varlistentry>
+        <varlistentry>
+         <term><option>cat</option></term>
+         <listitem>
+          <para>
+           Terse output without time stamps.
+          </para>
+         </listitem>
+        </varlistentry>
+       </variablelist>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect2>
+   
+   
+   <sect2 id="sec.boot.systemd.basics.services_enabling">
+    <title>Permanently Enabling/Disabling Services</title>
+    <para>
+     The service management commands mentioned in the previous section let you
+     manipulate services for the current session. &systemd; also lets you
+     permanently enable or disable services, so they are automatically
+     started when requested or are always unavailable. You can either do this
+     by using &yast;, or on the command line. 
+    </para>
+    
+    <sect3 id="sec.boot.systemd.basics.services_enabling.cmd">
+     <title>Enabling/Disabling Services on the Command Line</title>
+     <para>
+      The following table  shows a list of enabling and disabling commands for
+      &systemd; and SysV init:
+     </para>
+     
+     <important>
+      <title>Service Start</title>
+      <para>
+       When enabling a service on the command line, it is not started
+       automatically. It is scheduled to be started with the next system
+       start-up or runlevel/target change. In order to immediately start a
+       service after having enabled it, explicitly run <command>systemctl
+       start <replaceable>&lt;my_service></replaceable>.service</command> or
+       <command>rc<replaceable>&lt;my_service></replaceable> start</command>.
+      </para>
+     </important>
+     
+    <table rowsep="1">
+     <title>Commands for Enabling and Disabling Services</title>
+     <tgroup cols="3">
+      <colspec colnum="1" colname="1" colwidth="32*"/>
+      <colspec colnum="2" colname="2" colwidth="40*"/>
+      <colspec colnum="3" colname="3" colwidth="28*"/>
+      <thead>
+       <row>
+        <entry colname="1">
+         <para>
+          Task
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          &systemd; subcommand
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          SysV init subcommand
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row>
+        <entry colname="1">
+         <para>
+          Enabling
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          <command>systemctl enable <replaceable>&lt;my_service(s)></replaceable>.service</command>
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          <command>insserv <replaceable>&lt;my_service(s)></replaceable></command>
+         </para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Disabling
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          <command>systemctl disable <replaceable>&lt;my_service(s)></replaceable>.service</command>
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          <command>insserv <option>-r</option> <replaceable>&lt;my_service(s)></replaceable></command>
+         </para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Checking
+         </para>
+         <para>
+          <emphasis>Shows whether a service is enabled or not.</emphasis> 
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          <command>systemctl is-enabled <replaceable>&lt;my_service></replaceable>.service</command>
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          n/a
+         </para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Re-Enabling
+         </para>
+         <para>
+          <emphasis>Similar to restarting a service, this commands first
+          disables and then enables a service. Useful to re-enable a service
+          with its defaults.</emphasis> 
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          <command>systemctl reenable <replaceable>&lt;my_service></replaceable>.service</command>
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          n/a
+         </para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Masking
+         </para>
+         <para>
+          <emphasis>When <quote>disabling</quote> a service, it can still
+          be started manually. To completely disable a service, you need to
+          mask it. Use with care.</emphasis> 
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          <command>systemctl mask <replaceable>&lt;my_service></replaceable>.service</command>
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          n/a
+         </para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Unmasking
+         </para>
+         <para>
+          <emphasis>A service that has been masked can only be used again
+          after it has been unmasked.</emphasis> 
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          <command>systemctl unmask <replaceable>&lt;my_service></replaceable>.service</command>
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          n/a
+         </para>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+   </sect3>
+   <sect3 id="sec.boot.runlevel.edit">
+<!--   <sect3 id="sec.boot.systemd.basics.services_enabling.yast"> -->
+    <title>Enabling/Disabling Services with &yast;</title>
+    <para>
+     Start the &yast; module with <menuchoice>
+     <guimenu>&yast;</guimenu> <guimenu>System</guimenu>
+     <guimenu>&ycc_runlevel;</guimenu> </menuchoice>. In the default view, the
+     <guimenu>Simple Mode</guimenu>, it displays an overview listing all the
+     available services and the current status of each service (see <xref
+     linkend="fig.yast2.runlevel"/>). The left column shows the name of the
+     service, the center column indicates its current status and the right
+     column gives a short description. For the selected service, a more
+     detailed description is provided in the lower part of the window. To
+     enable a service, select it in the table then select
+     <guimenu>Enable</guimenu>. The same steps apply to disable a service.
+    </para>
+    <para>
+     The <guimenu>Expert Mode</guimenu> provides detailed control over the
+     runlevels (refer to <xref linkend="sec.boot.systemd.targets"/> for more
+     information on runlevels). The runlevel into which the system boots by
+     default is displayed at the top. Normally it defaults to runlevel&nbsp;5
+     (full multiuser mode with network and X). A suitable alternative might be
+     runlevel&nbsp;3 (full multiuser mode with network). Runlevel&nbsp;4 is
+     undefined to allow creation of a custom runlevel.
+   </para>
+   <para>
+    To enable or disable individual services use the table in this window. It
+    lists the services available, shows whether they are currently enabled on
+    your system and, if so, for which runlevels. To define the runlevels in
+    which a service should be started, select the respective row with the
+    mouse and activate the checkboxes below that represent the runlevels. A
+    brief description of the currently selected service or daemon is provided
+    below the table overview.
+   </para>
+   <warning>
+    <title>Faulty Runlevel Settings May Damage Your System</title>
+    <para>
+     Faulty runlevel settings may make your system unusable. Before applying
+     your changes, make absolutely sure that you know their consequences.
+    </para>
+   </warning>
+   <figure id="fig.yast2.runlevel">
+    <title>&ycc_runlevel;</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="yast2_runlevel.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="yast2_runlevel.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    With <guimenu>Start/Stop/Refresh</guimenu>, decide whether a service
+    should be activated. <guimenu>Refresh status</guimenu> checks the current
+    status. <guimenu>Set/Reset</guimenu> lets you enable or disable a service
+    in the same manner as with the <guimenu>Simple Mode</guimenu>
+    interface. Selecting <guimenu>OK</guimenu> saves the changed settings to
+    disk.
+   </para>
+   </sect3>
+  </sect2>
+ </sect1>
+   
+ <sect1 id="sec.boot.systemd.boot">
+   <title>System Start and Target Management</title>
+   <para>
+    The entire process of starting the system and shutting it down is
+    maintained by &systemd;. From this point of view, the Kernel can be
+    considered a background process to maintain all other processes and adjust
+    CPU time and hardware access according to requests from other programs.
+  </para>
+
+  <sect2 id="sec.boot.systemd.targets">
+   <title>Targets vs. Runlevels</title>
+   <para>
+    With SysV init the system was booted into a so called
+    <quote>Runlevel</quote>. A runlevel defines how the system is started and
+    what services are available in the running system. Runlevels are numbered,
+    the most commonly known ones are <literal>0</literal> (shutting down the
+    system), <literal>3</literal> (multiuser with network) and
+    <literal>5</literal> (multiuser with network and displaymanager).
+   </para>
+   <para>
+    &systemd; introduces a new concept by using so-called <quote>target
+    units</quote>. However, it remains fully compatible to the runlevel
+    concept. Target units are named rather than numbered and serve specific
+    purposes. For example, the targets
+    <systemitem>local-fs.target</systemitem> and
+    <systemitem>swap.target</systemitem> mount local filesystems and swap
+    spaces.
+   </para>
+   <para>
+    The target <systemitem>graphical.target</systemitem> provides a multiuser
+    system with network and displaymanager capabilities and is equivalent to
+    runlevel 5. Complex targets, such as
+    <systemitem>graphical.target</systemitem> act as <quote>meta</quote>
+    targets by combining a subset of other targets. Since &systemd; makes it
+    easy to create custom targets by combining existing targets, it offers
+    great flexibility.
+   </para>
+   <para>
+    The following list shows a list of the most important &systemd; target
+    units. For a full list refer to <command>man 7 systemd.special</command>. 
+   </para>
+   <variablelist>
+    <title>Selected &systemd; Target Units</title>
+    <varlistentry>
+     <term><systemitem>default.target</systemitem></term>
+     <listitem>
+      <para>
+       The target that is booted by default. Not a <quote>real</quote> target,
+       but rather a symlink to another target like
+       <systemitem>graphic.target</systemitem>. Can be permanently changed via
+       &yast; (see <xref linkend="sec.boot.runlevel.edit"/>). To change it for
+       a session, use the Kernel command line option
+       <literal>systemd.unit=<replaceable>&lt;my_target>.target</replaceable></literal>
+       at the boot prompt.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>emergency.target</systemitem></term>
+     <listitem>
+      <para>
+       Starts an emergency shell on the console. Only use it at the boot
+       prompt as <literal>systemd.unit=emergency.target</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>graphical.target</systemitem></term>
+     <listitem>
+      <para>
+       Starts a system with network, multi-user support and a displaymanager.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>halt.target</systemitem></term>
+     <listitem>
+      <para>
+       Shuts down the system.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>mail-transfer-agent.target</systemitem></term>
+     <listitem>
+      <para>
+       Starts all services necessary for sending and receiving mails.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>multi-user.target</systemitem></term>
+     <listitem>
+      <para>
+       Starts a multi-user system with network.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>reboot.target</systemitem></term>
+     <listitem>
+      <para>
+       Reboots the system.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>rescue.target</systemitem></term>
+     <listitem>
+      <para>
+       Starts a single user system without network.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   
+   <para>
+    In order to remain compatible to the SysV init runlevel system,
+    &systemd; provides special targets named
+    <literal>runlevel<replaceable>X</replaceable>.target</literal> mapping the
+    corresponding runlevels numbered <replaceable>X</replaceable>.
+   </para>
+   <table rowsep="1">
+    <title>SysV Runlevels and &systemd; Target Units</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="20*"/>
+     <colspec colnum="2" colname="2" colwidth="40*"/>
+     <colspec colnum="3" colname="3" colwidth="40*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>SysV runlevel</para>
+       </entry>
+       <entry>
+        <para>&systemd; target</para>
+       </entry>
+       <entry>
+        <para>Purpose</para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>0</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel0.target</systemitem>,
+         <systemitem>halt.target</systemitem>,
+         <systemitem>poweroff.target</systemitem>
+        </para>
+       </entry>
+       <entry>
+        <para>System shutdown</para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>1, S</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel1.target</systemitem>,
+         <systemitem>rescue.target</systemitem>,
+        </para>
+       </entry>
+       <entry>
+        <para>Single user mode</para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>2</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel2.target</systemitem>,
+         <systemitem>multi-user.target</systemitem>,
+        </para>
+       </entry>
+       <entry>
+        <para>Local multiuser without remote network</para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>3</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel3.target</systemitem>,
+         <systemitem>multi-user.target</systemitem>,
+        </para>
+       </entry>
+       <entry>
+        <para>Full multiuser with network</para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>4</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel4.target</systemitem>
+        </para>
+       </entry>
+       <entry>
+        <para>Unused/User Defined</para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>5</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel5.target</systemitem>,
+         <systemitem>graphical.target</systemitem>,
+        </para>
+       </entry>
+       <entry>
+        <para>Full multiuser with network and displaymanager</para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>6</para>
+       </entry>
+       <entry>
+        <para>
+         <systemitem>runlevel6.target</systemitem>,
+         <systemitem>reboot.target</systemitem>,
+        </para>
+       </entry>
+       <entry>
+        <para>System reboot</para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+      
+   <important>
+    <title>&systemd; Ignores <filename>/etc/inittab</filename></title>
+    <para>
+     The runlevels in a SysV init system are configured in
+     <filename>/etc/inittab</filename>. &systemd; does
+     <emphasis>not</emphasis> use this configuration. Please refer to <xref
+     linkend="sec.boot.systemd.custom"/> for instructions on how to create
+     your own bootable target.
+    </para>
+   </important>
+
+   <sect3 id="sec.boot.systemd.targets.commands">
+    <title>Commands to Change Targets</title>
+    <para>
+     Use the following commands to operate with target units:
+    </para>
+    <informaltable rowsep="1">
+     <tgroup cols="3">
+      <colspec colnum="1" colname="1" colwidth="20*"/>
+      <colspec colnum="2" colname="2" colwidth="50*"/>
+      <colspec colnum="3" colname="3" colwidth="30*"/>
+      <thead>
+       <row>
+        <entry colname="1">
+         <para>
+          Task
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          &systemd; command
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          SysV init command
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row>
+        <entry colname="1">
+         <para>
+          Change the current target/runlevel
+         </para>
+        </entry>
+        <entry colname="2">
+         <para><command>systemctl isolate <replaceable>&lt;my_target></replaceable>.target</command></para>
+        </entry>
+        <entry colname="3">
+         <para><command>telinit <replaceable>X</replaceable></command></para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Change to the default target/runlevel
+         </para>
+        </entry>
+        <entry colname="2">
+         <para><command>systemctl default</command></para>
+        </entry>
+        <entry colname="3">
+         <para>n/a</para>
+        </entry>
+       </row>
+       <row>
+        <entry colname="1">
+         <para>
+          Get the current target/runlevel
+         </para>
+        </entry>
+        <entry colname="2">
+         <para><command>systemctl list-units --type=target</command></para>
+         <para>
+          With &systemd; there is usually more than one active target. The
+          command lists all targets currently active.
+         </para>
+        </entry>
+        <entry colname="3">
+         <para><command>who -r</command></para>
+         <para>or</para>
+         <para><command>runlevel</command></para>
+        </entry>
+       </row>
+
+       <row>
+        <entry colname="1">
+         <para>
+          Change the default runlevel persistently
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          Use the &yast; runlevel editor or run the following command:
+         </para>
+         <para><command>ln -sf /lib/systemd/system/<replaceable>&lt;my_target>.target</replaceable> /etc/systemd/system/default.target</command></para>
+        </entry>
+        <entry colname="3">
+         <para>
+          Use the &yast; runlevel editor or change the line
+         </para>
+         <para><command>id:<replaceable>X</replaceable>:initdefault:</command></para>
+         <para>
+          in <filename>/etc/inittab</filename>
+         </para>
+        </entry>
+       </row>
+
+       <row>
+        <entry colname="1">
+         <para>
+          Change the default runlevel for the current boot process
+         </para>
+        </entry>
+        <entry colname="2">
+         <para>
+          Enter the following option at the boot prompt
+         </para>
+         <para><command>systemd.unit=<replaceable>&lt;my_target.target></replaceable></command></para>
+        </entry>
+        <entry colname="3">
+         <para>
+          Enter the desired runlevel number at the boot prompt.
+         </para>
+        </entry>
+       </row>
+
+       <row>
+        <entry colname="1">
+         <para>
+          Show a target's/runlevel's dependencies
+         </para>
+        </entry>
+        <entry colname="2">
+         <para><command>systemctl show -p "Requires" <replaceable>&lt;my_target.target></replaceable></command></para>
+         <para><command>systemctl show -p "Wants" <replaceable>&lt;my_target.target></replaceable></command></para>
+         <para>
+          <quote>Requires</quote> lists the hard dependencies (the ones that
+          must be resolved), whereas <quote>Wants</quote> lists the soft
+          dependencies (the ones that get resolved if possible).
+         </para>
+        </entry>
+        <entry colname="3">
+         <para>
+          n/a
+         </para>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </informaltable>
+   </sect3>
+  </sect2>
+  
+  <sect2 id="sec.boot.systemd.custom">
+   <title>Custom Targets</title>
+   <para>
+    On SysV init &suse; systems, runlevel 4 is unused to allow
+    administrators to create their own runlevel configuration. &systemd;
+    allows ro create any number of custom targets. It's suggested to start by
+    adapting an existing target such as
+    <systemitem>graphical.target</systemitem>.
+   </para>
+   <warning>
+    <title>Avoiding Overwritten Customizations</title>
+    <para>
+     Always do &systemd; customization in <filename>/etc/systemd</filename>,
+     <emphasis>never</emphasis> in <filename>/lib/systemd</filename>.
+     Otherwise your changes will be overwritten by the next update of &systemd;.
+    </para>
+   </warning>
+   <procedure>
+    <title>Create a Custom Target</title>
+    <step>
+     <para>
+      Copy the configuration file
+      <filename>/lib/systemd/system/graphical.target</filename> to
+      <filename>/etc/systemd/system/<replaceable>&lt;my_target></replaceable>.target</filename>
+      and adjust it according to your needs.
+     </para>
+    </step>
+    <step>
+     <para>
+      The configuration file copied in the previous step already covers the
+      required (<quote>hard</quote>) dependencies for the target. To also
+      cover the wanted (<quote>soft</quote>) dependencies, create a directory
+      <filename>/etc/systemd/system/<replaceable>&lt;my_target></replaceable>.target.wants</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      For each wanted service create a symbolic link from
+      <filename>/lib/systemd/system</filename> into
+      <filename>/etc/systemd/system/<replaceable>&lt;my_target></replaceable>.target.wants</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Once you have finished setting up the target, reload the &systemd;
+      configuration to make the new target available:
+     </para>
+     <screen>systemctl daemon-reload</screen>
+    </step>
+   </procedure>
+
+   
+  </sect2>
+  <sect2 id="sec.boot.systemd.debug">
+   <title>Debugging System Start-Up</title>
+   <para>
+    &systemd; offers means to analyze the system start-up process. You can
+    conveniently review the list of all services and their status (rather than
+    having to parse <filename>/varlog/</filename>). &systemd; also allows to
+    scan the start-up procedure to find out how much time each service start-up
+    consumes. 
+   </para>
+   
+   <sect3 id="sec.boot.systemd.debug.review">
+    <title>Review Start-Up of Services</title>
+    <para>
+     To review the complete list of services that have been started since
+     booting the system, just enter the command
+     <command>systemctl</command>. It lists all active services like shown
+     below (shortened). To get more information on a specific
+     service, use <command>systemctl status
+     <replaceable>&lt;my_service></replaceable>.service</command>.
+    </para>
+    <example>
+     <title>List Active Services</title>
+     <screen>&wsIname;: ~ # systemctl
+UNIT                                LOAD   ACTIVE SUB       JOB DESCRIPTION
+[...]
+systemd-random-seed-load.path       loaded active waiting       Random Seed
+acpid.service                       loaded active running       ACPI Event Daemon
+apache2.service                     loaded failed failed        apache
+avahi-daemon.service                loaded active running       Avahi mDNS/DNS-SD Stack
+bluez-coldplug.service              loaded active exited        LSB: handles udev coldplug of bluetooth dongles
+console-kit...-system-start.service loaded active exited        Console System Startup Logging
+cron.service                        loaded active running       Command Scheduler
+cups.service                        loaded active running       CUPS Printing Service
+[...]
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
+SUB    = The low-level unit activation state, values depend on unit type.
+JOB    = Pending job for the unit.
+
+107 units listed. Pass --all to see inactive units, too.</screen>
+    </example>
+    <para>
+     To restrict the output to services that failed to start, use the
+     <option>--failed</option> option:
+    </para>
+    <example>
+     <title>List Failed Services</title>
+     <screen>&wsIname;: ~ # systemctl --failed
+UNIT                   LOAD   ACTIVE SUB    JOB DESCRIPTION
+apache2.service        loaded failed failed     apache
+NetworkManager.service loaded failed failed     Network Manager
+plymouth-start.service loaded failed failed     Show Plymouth Boot Screen
+
+[...]</screen>
+    </example>
+   </sect3>
+   <sect3 id="sec.boot.systemd.debug.time">
+    <title>Debug Start-Up Time</title>
+    <para>
+     To debug system start-up time, &systemd; offers the
+     <command>systemd-analyze</command> command. It shows the total start-up
+     time, a list of services ordered by start-up time and can also generate an
+     SVG graphic showing the time services took to start in relation to the
+     other services. 
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>Listing the System's Start-Up Time</term>
+      <listitem>
+       <screen>&wsIname;: ~ # systemd-analyze
+Startup finished in 2666ms (kernel) + 21961ms (userspace) = 24628ms</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Listing the Services Start-Up Time</term>
+      <listitem>
+       <screen>&wsIname;: ~ # systemd-analyze blame
+  6472ms systemd-modules-load.service
+  5833ms remount-rootfs.service
+  4597ms network.service
+  4254ms systemd-vconsole-setup.service
+  4096ms postfix.service
+  2998ms xdm.service
+  2483ms localnet.service
+  2470ms SuSEfirewall2_init.service
+  2189ms avahi-daemon.service
+  2120ms systemd-logind.service
+  1210ms xinetd.service
+  1080ms ntp.service
+[...]
+    75ms fbset.service
+    72ms purge-kernels.service
+    47ms dev-vda1.swap
+    38ms bluez-coldplug.service
+    35ms splash_early.service</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Services Start-Up Time Graphics</term>
+      <listitem>
+       <screen>&wsIname;: ~ # systemd-analyze plot > &wsIname;-startup.svg</screen>
+       <informalfigure>
+        <mediaobject>
+         <imageobject role="fo">
+          <imagedata fileref="systemd_startup.svg" width="75%" format="SVG"/>
+         </imageobject>
+         <imageobject role="html">
+          <imagedata fileref="systemd_startup.svg" width="75%" format="PNG"/>
+         </imageobject>
+        </mediaobject>
+       </informalfigure>
+       </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+
+   <sect3 id="sec.boot.systemd.debug.complete">
+    <title>Review the Complete Start-Up Process</title>
+    <para>
+     Above mentioned commands let you review the services that started and the
+     time it took to start them. If you need to know more details, you can
+     tell &systemd; to verbosely log the complete start-up procedure by
+     entering the following parameters at the boot prompt:
+    </para>
+    <screen>systemd.log_level=debug systemd.log_target=kmsg</screen>
+    <para>
+     Now &systemd; writes its log messages into the kernel ring buffer. View
+     that buffer with <command>dmesg</command>:
+    </para>
+    <screen>dmesg | less</screen>
+   </sect3>
+   
+   
+  </sect2>
+ </sect1>
+
+ <sect1 id="sec.boot.systemd.advanced">
+  <title>Advanced Usage</title>
+  <para>
+   The following sections cover advanced topics for system administrators. For
+   even more advanced &systemd; documentation, please refer Lennart Pöttering's
+   series about &systemd; for administrators at <ulink
+   url="http://0pointer.de/blog/projects"/>.
+  </para>
+  
+  <sect2 id="sec.boot.systemd.advanced.logging">
+   <title>System Log</title>
+   <para>
+    <xref linkend="sec.boot.systemd.basics.services_debugging"/> explains how
+    to view log messages for given service. However, displaying log messages
+    is not restricted to service logs. You can also access and query the
+    complete log written by &systemd;&mdash;the so-called
+    <quote>Journal</quote>. Use the command
+    <command>systemd-journalctl</command> to display the complete log starting
+    with the oldest entries. Refer to <command>man 1
+    systemd-journalctl</command> for options such as applying filters or
+    changing the output format.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.boot.systemd.advanced.snapshots">
+   <title>Snapshots</title>
+   <para>
+    You can save the current state of &systemd; to a named snapshot and later
+    revert to it with the <command>isolate</command> subcommand. This is
+    useful when testing services or custom targets, because it allows you to
+    return to a defined state at any time. A snapshot is only available in the
+    current session and will automatically be deleted on reboot. A snapshot
+    name must end in <filename>.snapshot</filename>.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Create a Snapshot</term>
+     <listitem>
+      <screen>systemctl snapshot <replaceable>&lt;my_snapshot></replaceable>.snapshot</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Delete a Snapshot</term>
+     <listitem>
+      <screen>systemctl delete <replaceable>&lt;my_snapshot></replaceable>.snapshot</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>View a Snapshot</term>
+     <listitem>
+      <screen>systemctl show <replaceable>&lt;my_snapshot></replaceable>.snapshot</screen>
+     </listitem>
+    </varlistentry>    
+    <varlistentry>
+     <term>Activate a Snapshot</term>
+     <listitem>
+      <screen>systemctl isolate <replaceable>&lt;my_snapshot></replaceable>.snapshot</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+  <sect2 id="sec.boot.systemd.advanced.cgroups">
+   <title>Kernel Control Groups (cgroups)</title>
+   <para>
+    On a traditional SysV init system it is not always possible to clearly
+    assign a process to the service that spawned it. Some services such as
+    Apache, spawn a lot of 3rd party processes (e.g. CGI or Java processes),
+    which themselves spawn more processes. This makes a clear assignment
+    difficult or even impossible. Additionally, a service may not terminate
+    correctly, leaving some of its children alive.
+   </para>
+   <para>
+    &systemd; solves this problem by placing each service into its own
+    cgroup. cgroups are a Kernel feature that allows aggregating processes
+    and all their children into hierarchical organized groups. &systemd; names
+    each cgroup after its service. Since a
+    non-privileged process it not allowed to <quote>leave</quote> its cgroup,
+    this provides an effective way to label all processes spawned by a service
+    with the name of the service.
+   </para>
+   <para>
+    To list all processes belonging to a service, use the command
+    <command>systemd-cgls</command>. The result will look like the following
+    (shortened) example:
+   </para>
+   <example>
+    <title>List all Processes Belonging to a Service</title>
+    <screen>~ # systemd-cgls --no-pager
+├ user
+│ └ root
+│   └ 1
+│     ├ 2279 sshd: root@pts/0
+│     ├ 2282 -bash
+│     └ 2541 systemd-cgls --no-pager
+└ system
+  ├ 1 /sbin/init splash showopts
+  ├ apache2.service
+  │ ├ 2535 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf -D SYSTEMD -k start
+  │ ├ 2536 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf -D SYSTEMD -k start
+  │ ├ 2537 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf -D SYSTEMD -k start
+  │ ├ 2538 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf -D SYSTEMD -k start
+  │ ├ 2539 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf -D SYSTEMD -k start
+  │ └ 2540 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf -D SYSTEMD -k start
+  ├ xdm.service
+  │ ├ 2250 /usr/bin/xdm
+  │ ├ 2253 /usr/bin/X -nolisten tcp -br vt7 -auth /var/lib/xdm/authdir/authfiles/A:0-ii8Goo
+  │ ├ 2263 -:0         
+  │ └ 2276 /usr/bin/xconsole -notify -nostdin -verbose -exitOnFail
+  ├ ntp.service
+  │ └ 2202 /usr/sbin/ntpd -p /var/run/ntp/ntpd.pid -g -u ntp:ntp -c /etc/ntp.conf
+  ├ sshd.service
+  │ └ 1743 /usr/sbin/sshd -D
+    </screen>
+   </example>
+   <para>
+    See <xref linkend="cha.tuning.cgroups"/> for more information about cgroups.
+   </para>
+  </sect2>
+  <sect2 id="sec.boot.systemd.advanced.kill">
+   <title>Killing Services (Sending Signals)</title>
+   <para>
+    As explained in <xref linkend="sec.boot.systemd.advanced.cgroups"/>, it is
+    not always possible to assign a process to its parent service process in a
+    SysV init system. This makes it difficult to terminate a service and all
+    of its children. Child processes that have not been killed will remain as
+    zombie processes.
+   </para>
+   <para>
+    &systemd;'s concept of to confine each service into a cgroup makes it
+    possible to clearly identify all child processes of a service and
+    therefore allows to send a signal to each of these processes. Use
+    <command>systemctl kill</command> to send signals to services.  For a list
+    of available signals refer to <command>man 7 signals</command>.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Sending <systemitem>SIGTERM</systemitem> to a Service</term>
+     <listitem>
+      <para>
+       <systemitem>SIGTERM</systemitem> is the default signal that is sent.
+      </para>
+      <screen>systemctl kill <replaceable>&lt;my_service></replaceable>.service</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Sending <replaceable>SIGNAL</replaceable> to a Service</term>
+     <listitem>
+      <para>
+       Use the <option>-s</option> option to specify the signal that should be
+       sent. 
+      </para>
+      <screen>systemctl kill -s <replaceable>SIGNAL</replaceable> <replaceable>&lt;my_service></replaceable>.service</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Selecting Processes</term>
+     <listitem>
+      <para>
+       By default the <command>kill</command> command send the signal
+       to <option>all</option> processes of the specified cgroup. You can
+       restrict it to the <option>control</option> or the <option>main</option>
+       process. The latter is for example useful to force a service to reload
+       its configuration by sending <systemitem>SIGHUP</systemitem>:
+      </para>
+      <screen>systemctl kill -s SIGHUP --kill-who=main <replaceable>&lt;my_service></replaceable>.service</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ 
+ <sect1 id="sec.boot.systemd.info">
+  <title>More information</title>
+  <para>
+   For more information on &systemd; refer to the following online resources:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>Homepage</term>
+    <listitem>
+     <para>
+      <ulink url="http://www.freedesktop.org/wiki/Software/systemd"/>
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>&systemd; for Administrators</term>
+    <listitem>
+     <para>
+      Lennart Pöttering, one of the &systemd; authors, has written a series of
+      blog entries (13 at the time of writing this chapter).  Find them at
+      <ulink url="http://0pointer.de/blog/projects"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Control Centre: The &systemd; Linux init system</term>
+    <listitem>
+     <para>
+      <ulink url="http://www.h-online.com/open/features/Control-Centre-The-systemd-Linux-init-system-1565543.html"/>
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Booting up: Tools and tips for &systemd;, a Linux init tool</term>
+    <listitem>
+     <para>
+      <ulink url="http://www.h-online.com/open/features/Booting-up-Tools-and-tips-for-systemd-1570630.html"/>
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ 
+</chapter>

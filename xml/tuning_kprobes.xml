@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.tuning.kprobes">
+ <title>Kernel Probes</title>
+<!--
+    http://sourceware.org/systemtap/kprobes/
+    http://lwn.net/Articles/132196/
+    http://www-users.cs.umn.edu/~boutcher/kprobes/
+
+    Info Provider: Vojtech Pavlik <vojtech@suse.de>
+-->
+<!--mdejmek: generally would you write Kprobes or kprobes? We should stay consistent here-->
+<!--toba: i replaced Kprobes with Kernel probes. Kprobes is a group of (kprobes,
+jprobe, or kretprobes -->
+ <para>
+  Kernel probes are a set of tools to collect Linux kernel debugging and
+  performance information. Developers and system administrators usually use
+  them either to debug the kernel, or to find system performance
+  bottlenecks. The reported data can then be used to tune the system for
+  better performance.
+ </para>
+ <para>
+  You can insert these probes into any kernel routine, and specify a handler
+  to be invoked after a particular break-point is hit. The main advantage of
+  kernel probes is that you no longer need to rebuild the kernel and reboot
+  the system after you make changes in a probe.
+ </para>
+ <para>
+  To use kernel probes, you typically need to write or obtain a specific
+  kernel module. Such module includes both the <emphasis>init</emphasis> and
+  the <emphasis>exit</emphasis> function. The init function (such as
+  <systemitem>register_kprobe()</systemitem>) registers one or more probes,
+  while the exit function unregisters them. The registration function
+  defines <emphasis>where</emphasis> the probe will be inserted and
+  <emphasis>which handler</emphasis> will be called after the probe is hit.
+  To register or unregister a group of probes at one time, you can use
+  relevant
+  <literal>register_&lt;<replaceable>probe_type</replaceable>&gt;probes()</literal>
+  or
+  <literal>unregister_&lt;<replaceable>probe_type</replaceable>&gt;probes()</literal>
+  functions.
+ </para>
+ <para>
+  Debugging and status messages are typically reported with the
+  <systemitem>printk</systemitem> kernel routine.
+  <systemitem>printk</systemitem> is a kernel-space equivalent of a
+  user-space <systemitem>printf</systemitem> routine. For more information
+  on <systemitem>printk</systemitem>, see
+  <ulink
+   url="http://www.win.tue.nl/~aeb/linux/lk/lk-2.html#ss2.8">Logging
+  kernel messages</ulink>. Normally, you can view these messages by
+  inspecting <filename>/var/log/messages</filename> or
+  <filename>/var/log/syslog</filename>. For more information on log files,
+  see <xref linkend="cha.tuning.logfiles" />.
+ </para>
+ <sect1 id="cha.tuning.kprobes.supparch">
+  <title>Supported Architectures</title>
+
+  <para>
+   Kernel probes are <emphasis>fully</emphasis> implemented on the following
+   architectures:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     i386
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     x86_64 (AMD-64, EM64T)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ppc64
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     arm
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ppc
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   Kernel probes are <emphasis>partially</emphasis> implemented on the
+   following architectures:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     ia64 (does not support probes on instruction
+     <systemitem>slot1</systemitem>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     sparc64 (return probes not yet implemented)
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+ <sect1 id="cha.tuning.kprobes.types">
+  <title>Types of Kernel Probes</title>
+
+  <para>
+   There are three types of kernel probes: <emphasis>kprobes</emphasis>,
+   <emphasis>jprobes</emphasis>, and <emphasis>kretprobes</emphasis>.
+   Kretprobes are sometimes referred to as <emphasis>return
+   probes</emphasis>. You can find vivid source code examples of all three
+   type of kernel probes in the
+   <filename>/usr/src/linux/samples/kprobes/</filename> directory (package
+   <systemitem>kernel-source</systemitem>).
+  </para>
+
+  <sect2 id="cha.tuning.kprobes.types.kprobe">
+   <title>Kprobe</title>
+   <para>
+    Kprobe can be attached to any instruction in the Linux kernel. When it
+    is registered, it inserts a break-point at the first bytes of the probed
+    instruction. When the processor hits this break-point, the processor
+    registers are saved, and the processing passes to kprobes. First, a
+    <emphasis>pre-handler</emphasis> is executed, then the probed
+    instruction is stepped, and, finally a <emphasis>post-handler</emphasis>
+<!-- mdejmek: I think you mean "an instruction is stopped" here, right?-->
+<!-- toba: no, 'stepped' is correct: instruction by instruction is run
+    and inspected => stepped (step by step) -->
+    is executed. The control is then passed to the instruction following the
+    probe point.
+   </para>
+  </sect2>
+
+  <sect2 id="cha.tuning.kprobes.types.jprobe">
+   <title>Jprobe</title>
+   <para>
+    Jprobe is implemented through the kprobe mechanism. It is inserted on a
+    function's entry point and allows direct access to the arguments of the
+    function which is being probed. Its handler routine must have the same
+    argument list and return value as the probed function. It also has to
+    end by calling the <systemitem>jprobe_return()</systemitem> function.
+   </para>
+   <para>
+    When jprobe is hit, the processor registers are saved, and the
+    instruction pointer is directed to the jprobe handler routine. The
+    control
+<!-- mdejmek: what does control mean here? Is it the name of a function?-->
+<!-- toba: the control over the code execution -->
+    then passes to the handler with the same register contents as the
+    function being probed. Finally, the handler calls the
+    <systemitem>jprobe_return()</systemitem> function, and switches the
+    control back to the control function.
+   </para>
+   <para>
+    In general, you can insert multiple probes on one function. Jprobe is,
+    however, limited to only one instance per function.
+   </para>
+  </sect2>
+
+  <sect2 id="cha.tuning.kprobes.types.kretprobe">
+   <title>Return Probe</title>
+   <para>
+    Return probes are also implemented through kprobes. When the
+    <systemitem>register_kretprobe()</systemitem> function is called, a
+    kprobe is attached to the entry of the probed function.
+<!--mdejmek: sounds weird to me; maybe: ...a kprobe is attached to the entry of the probed function?-->
+<!--toba: you are probably right, i've fixed it -->
+    After hitting the probe, the Kernel probes mechanism saves the probed
+    function return address and calls a user-defined return handler. The
+    control is then passed back to the probed function.
+   </para>
+   <para>
+    Before you call <systemitem>register_kretprobe()</systemitem>, you need
+    to set a <systemitem>maxactive</systemitem> argument, which specifies
+    how many instances of the function can be probed at the same time. If
+    set too low, you will miss a certain number of probes.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="cha.tuning.kprobes.api">
+  <title>Kernel probes API</title>
+
+  <para>
+   Kprobe's programming interface consists of functions, which are used to
+   register and unregister all used kernel probes, and associated probe
+   handlers. For a more detailed description of these functions and their
+   arguments, see the information sources in
+   <xref linkend="cha.tuning.kprobes.moreinfo" />.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><systemitem>register_kprobe()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inserts a break-point on a specified address. When the break-point is
+      hit, the <systemitem>pre_handler</systemitem> and
+      <systemitem>post_handler</systemitem> are called.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>register_jprobe()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inserts a break-point in the specified address. The address has to be
+      the address of the first instruction of the probed function. When the
+      break-point is hit, the specified handler is run. The handler should
+      have the same argument list and return type as the probed.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>register_kretprobe()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inserts a return probe for the specified function. When the probed
+      function returns, a specified handler is run. This function returns 0
+      on success, or a negative error number on failure.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>unregister_kprobe()</systemitem>, <systemitem>unregister_jprobe()</systemitem>, <systemitem>unregister_kretprobe()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Removes the specified probe. You can use it any time after the probe
+      has been registered.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>register_kprobes()</systemitem>, <systemitem>register_jprobes()</systemitem>, <systemitem>register_kretprobes()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inserts each of the probes in the specified array.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>unregister_kprobes()</systemitem>, <systemitem>unregister_jprobes()</systemitem>, <systemitem>unregister_kretprobes()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Removes each of the probes in the specified array.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>disable_kprobe()</systemitem>, <systemitem>disable_jprobe()</systemitem>, <systemitem>disable_kretprobe()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Disables the specified probe temporarily.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>enable_kprobe()</systemitem>, <systemitem>enable_jprobe()</systemitem>, <systemitem>enable_kretprobe()</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Enables temporarily disabled probes.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="cha.tuning.kprobes.debugfs">
+  <title>Debugfs Interface</title>
+
+  <para>
+   With recent Linux kernels, the Kernel probes instrumentation uses the
+   kernel debugfs interface. It helps you list all registered probes and
+   globally switch all the probes on or off.
+  </para>
+
+  <sect2 id="cha.tuning.kprobes.debugfs.list">
+   <title>How to List Registered Kernel Probes</title>
+   <para>
+    The list of all currently registered kprobes is in the
+    <filename>/sys/kernel/debug/kprobes/list</filename> file.
+   </para>
+<screen>&wsIIIname;:~ # cat /sys/kernel/debug/kprobes/list
+c015d71a  k  vfs_read+0x0   [DISABLED]
+c011a316  j  do_fork+0x0
+c03dedc5  r  tcp_v4_rcv+0x0</screen>
+   <para>
+    The first column lists the address in the kernel where the probe is
+    inserted. The second column prints the type of the probe:
+    <literal>k</literal> for kprobe, <literal>j</literal> for jprobe, and
+    <literal>r</literal> for return probe. The third column specifies the
+    symbol, offset and optional module name of the probe. The following
+    optional columns include the status information of the probe. If the
+    probe is inserted on a virtual address which is not valid anymore, it is
+    marked with <literal>[GONE]</literal>. If the probe is temporarily
+    disabled, it is marked with <literal>[DISABLED]</literal>.
+   </para>
+  </sect2>
+
+  <sect2 id="cha.tuning.kprobes.debugfs.switch">
+   <title>How to Switch All Kernel Probes On or Off</title>
+   <para>
+    The <filename>/sys/kernel/debug/kprobes/enabled</filename> file
+    represents a switch with which you can globally and forcibly turn on or
+    off all the registered kernel probes. To turn them off, simply enter
+   </para>
+<screen>echo "0" > /sys/kernel/debug/kprobes/enabled</screen>
+   <para>
+    on the command line as &rootuser;. To turn them on again, enter
+   </para>
+<screen>echo "1" > /sys/kernel/debug/kprobes/enabled</screen>
+   <para>
+    Note that this way you do not change the status of the probes. If a
+    probe is temporarily disabled, it will not be enabled automatically but
+    will remain in the <literal>[DISABLED]</literal> state after entering
+    the latter command.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="cha.tuning.kprobes.moreinfo">
+  <title>For More Information</title>
+
+  <para>
+   To learn more about kernel probes, look at the following sources of
+   information:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     Thorough but more technically oriented information about kernel probes
+     is in <filename>/usr/src/linux/Documentation/kprobes.txt</filename>
+     (package <systemitem>kenrel-source</systemitem>).
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Examples of all three types of probes (together with related
+     <filename>Makefile</filename>) are in the
+     <filename>/usr/src/linux/samples/kprobes/</filename> directory (package
+     <systemitem>kenrel-source</systemitem>).
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     In-depth information about Linux kernel modules and
+     <systemitem>printk</systemitem> kernel routine is in
+     <ulink
+       url="http://tldp.org/LDP/lkmpg/2.6/html/lkmpg.html">The
+     Linux Kernel Module Programming Guide</ulink>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Practical but slightly outdated information about practical use of
+     kernel probes is in
+     <ulink
+       url="http://www.ibm.com/developerworks/library/l-kprobes.html">Kernel
+     debugging with Kprobes</ulink>
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.tuning.io">
+ <title>Tuning I/O Performance</title>
+ <para>
+  I/O scheduling controls how input/output operations will be submitted to
+  storage. &productname; offers various I/O algorithms&mdash;called
+  <literal>elevators</literal>&mdash; suiting different workloads. Elevators
+  can help to reduce seek operations, can prioritize I/O requests, or make
+  sure, and I/O request is carried out before a given deadline.
+ </para>
+ <para>
+  Choosing the best suited I/O elevator not only depends on the workload,
+  but on the hardware, too. Single ATA disk systems, SSDs, RAID arrays, or
+  network storage systems, for example, each require different tuning
+  strategies.
+ </para>
+ <sect1 id="cha.tuning.io.switch">
+  <title>Switching I/O Scheduling</title>
+
+  <para>
+   &productname; lets you set a default I/O scheduler at boot-time, which
+   can be changed on the fly per block device. This makes it possible to set
+   different algorithms for e.g. the device hosting the system partition and
+   the device hosting a database.
+  </para>
+
+  <para>
+   By default the <systemitem class="resource">CFQ</systemitem> (Completely
+   Fair Queuing) scheduler is used. Change this default by entering the boot
+   parameter
+  </para>
+
+  <screen>elevator=<replaceable>SCHEDULER</replaceable></screen>
+
+  <para>
+   where <replaceable>SCHEDULER</replaceable> is one of
+   <option>cfq</option>, <option>noop</option>, or
+   <option>deadline</option>. See
+   <xref
+    linkend="cha.tuning.io.schedulers"/> for details.
+  </para>
+
+  <para>
+   To change the elevator for a specific device in the running system, run
+   the following command:
+  </para>
+
+  <screen>echo <replaceable>SCHEDULER</replaceable> > /sys/block/<replaceable>DEVICE</replaceable>/queue/scheduler</screen>
+
+  <para>
+   where <replaceable>SCHEDULER</replaceable> is one of
+   <option>cfq</option>, <option>noop</option>, or <option>deadline</option>
+   and <replaceable>DEVICE</replaceable> the block device
+   (<systemitem>sda</systemitem> for example).
+  </para>
+
+  <note os="sles" arch="zseries">
+   <title>Default Schedulter on IBM &zseries;</title>
+   <para>
+    On IBM &zseries; the default I/O scheduler for a storage device is set
+    by the device driver.
+   </para>
+  </note>
+ </sect1>
+ <sect1 id="cha.tuning.io.schedulers">
+  <title>Available I/O Elevators</title>
+
+  <para>
+   In the following elevators available on &productname; are listed. Each
+   elevator has a set of tunable parameters, which can be set with the
+   following command:
+  </para>
+
+  <screen>echo <replaceable>VALUE</replaceable> > /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/<replaceable>TUNABLE</replaceable></screen>
+
+  <para>
+   where <replaceable>VALUE</replaceable> is the desired value for the
+   <replaceable>TUNABLE</replaceable> and <replaceable>DEVICE</replaceable>
+   the block device.
+  </para>
+
+  <para>
+   To find out which elevator is the current default, run the following
+   command. The currently selected scheduler is listed in brackets:
+  </para>
+
+  <screen>&wsI;:~ # cat /sys/block/sda/queue/scheduler
+noop deadline [cfq]</screen>
+
+  <sect2 id="sec.tuning.io.schedulers.cfq">
+   <title><systemitem class="resource">CFQ</systemitem> (Completely Fair Queuing)</title>
+   <para>
+    <systemitem class="resource">CFQ</systemitem> is a fairness-oriented
+    scheduler and is used by default on &productname;. The algorithm assigns
+    each thread a time slice in which it is allowed to submit I/O to disk.
+    This way each thread gets a fair share of I/O throughput. It also allows
+    assigning tasks I/O priorities which are taken into account during
+    scheduling decisions (see <command>man 1 ionice</command>). The
+    <systemitem class="resource">CFQ</systemitem> scheduler has the
+    following tunable parameters:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><filename>
+      /sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/slice_idle
+     </filename>
+     </term>
+     <listitem>
+      <para>
+       When a task has no more I/O to submit in its time slice, the I/O
+       scheduler waits for a while before scheduling the next thread to
+       improve locality of I/O. For media where locality does not play a big
+       role (SSDs, SANs with lots of disks) setting
+       <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/slice_idle</filename>
+       to <literal>0</literal> can improve the throughput considerably.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>
+      /sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/quantum
+     </filename>
+     </term>
+     <listitem>
+      <para>
+       This option limits the maximum number of requests that are being
+       processed by the device at once. The default value is
+       <literal>4</literal>. For a storage with several disks, this setting
+       can unnecessarily limit parallel processing of requests. Therefore,
+       increasing the value can improve performance although this can cause
+       that the latency of some I/O may be increased due to more requests
+       being buffered inside the storage. When changing this value, you can
+       also consider tuning
+       <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/slice_async_rq</filename>
+       (the default value is <literal>2</literal>) which limits the maximum
+       number of asynchronous requests&mdash;usually writing
+       requests&mdash;that are submitted in one time slice.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>
+      /sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/low_latency
+     </filename>
+     </term>
+     <listitem>
+      <para>
+       For workloads where the latency of I/O is crucial, setting
+       <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/low_latency</filename>
+       to <literal>1</literal> can help.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.tuning.io.schedulers.noop">
+   <title><systemitem class="resource">NOOP</systemitem></title>
+   <para>
+    A trivial scheduler that just passes down the I/O that comes to it.
+    Useful for checking whether complex I/O scheduling decisions of other
+    schedulers are not causing I/O performance regressions.
+   </para>
+   <para>
+    In some cases it can be helpful for devices that do I/O scheduling
+    themselves, as intelligent storage, or devices that do not depend on
+    mechanical movement, like SSDs. Usually, the
+    <systemitem
+     class="resource">DEADLINE</systemitem> I/O scheduler is
+    a better choice for these devices, but due to less overhead
+    <systemitem
+     class="resource">NOOP</systemitem> may produce better
+    performance on certain workloads.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.tuning.io.schedulers.deadline">
+   <title><systemitem class="resource">DEADLINE</systemitem></title>
+   <para>
+    <systemitem class="resource">DEADLINE</systemitem> is a latency-oriented
+    I/O scheduler. Each I/O request has got a deadline assigned. Usually,
+    requests are stored in queues (read and write) sorted by sector numbers.
+    The <systemitem class="resource">DEADLINE</systemitem> algorithm
+    maintains two additional queues (read and write) where the requests are
+    sorted by deadline. As long as no request has timed out, the
+    <quote>sector</quote> queue is used. If timeouts occur, requests from
+    the <quote>deadline</quote> queue are served until there are no more
+    expired requests. Generally, the algorithm prefers reads over writes.
+   </para>
+   <para>
+    This scheduler can provide a superior throughput over the
+    <systemitem
+     class="resource">CFQ</systemitem> I/O scheduler in
+    cases where several threads read and write and fairness is not an issue.
+    For example, for several parallel readers from a SAN and for databases
+    (especially when using <quote>TCQ</quote> disks). The
+    <systemitem
+     class="resource">DEADLINE</systemitem> scheduler has
+    the following tunable parameters:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/writes_starved</filename>
+     </term>
+     <listitem>
+      <para>
+       Controls how many reads can be sent to disk before it is possible to
+       send writes. A value of <literal>3</literal> means, that three read
+       operations are carried out for one write operation.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/read_expire</filename>
+     </term>
+     <listitem>
+      <para>
+       Sets the deadline (current time plus the read_expire value) for read
+       operations in milliseconds. The default is 500.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/write_expire</filename>
+     </term>
+     <listitem>
+      <para>
+       <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/read_expire</filename>
+       Sets the deadline (current time plus the read_expire value) for read
+       operations in milliseconds. The default is 500.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 id="cha.tuning.io.barrier">
+  <title>I/O Barrier Tuning</title>
+
+  <para>
+   Most file systems (XFS, ext3, ext4, reiserfs) send write barriers to disk
+   after fsync or during transaction commits. Write barriers enforce proper
+   ordering of writes, making volatile disk write caches safe to use (at
+   some performance penalty). If your disks are battery-backed in one way or
+   another, disabling barriers may safely improve performance.
+  </para>
+
+  <para>
+   Sending write barriers can be disabled using the
+   <option>barrier=0</option> mount option (for ext3, ext4, and reiserfs),
+   or using the <option>nobarrier</option> mount option (for XFS).
+  </para>
+
+  <warning>
+   <para>
+    Disabling barriers when disks cannot guarantee caches are properly
+    written in case of power failure can lead to severe file system
+    corruption and data loss.
+   </para>
+  </warning>
+ </sect1>
+</chapter>

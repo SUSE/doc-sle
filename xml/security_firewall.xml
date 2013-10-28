@@ -1,0 +1,777 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.security.firewall">
+ <title>Masquerading and Firewalls</title><indexterm>
+ <primary>security</primary>
+ <secondary>firewalls</secondary></indexterm><indexterm>
+ <primary>firewalls</primary></indexterm><indexterm>
+ <primary>firewalls</primary>
+ <secondary>packet filters</secondary></indexterm><indexterm>
+ <primary>packet filters</primary>
+ <see>firewalls</see></indexterm>
+ <para>
+  Whenever Linux is used in a network environment, you can use the kernel
+  functions that allow the manipulation of network packets to maintain a
+  separation between internal and external network areas. The Linux
+  <systemitem>netfilter</systemitem> framework provides the means to
+  establish an effective firewall that keeps different networks apart. With
+  the help of iptables&mdash;a generic table structure for the definition of
+  rule sets&mdash;precisely control the packets allowed to pass a network
+  interface. Such a packet filter can be set up quite easily with the help
+  of SuSEfirewall2 and the corresponding &yast; module.
+ </para><indexterm>
+ <primary>firewalls</primary>
+ <secondary>SuSEfirewall2</secondary></indexterm>
+ <sect1 id="sec.security.firewall.iptables">
+  <title>Packet Filtering with iptables</title>
+
+  <para>
+   The components <systemitem>netfilter</systemitem> and
+   <systemitem>iptables</systemitem> are responsible for the filtering and
+   manipulation of network packets as well as for network address
+   translation (NAT). The filtering criteria and any actions associated with
+   them are stored in chains, which must be matched one after another by
+   individual network packets as they arrive. The chains to match are stored
+   in tables. The <command>iptables</command> command allows you to alter
+   these tables and rule sets.
+  </para>
+
+  <para>
+   The Linux kernel maintains three tables, each for a particular category
+   of functions of the packet filter:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>filter</term>
+    <listitem>
+     <para>
+      This table holds the bulk of the filter rules, because it implements
+      the <emphasis>packet filtering</emphasis> mechanism in the stricter
+      sense, which determines whether packets are let through
+      (<literal>ACCEPT</literal>) or discarded (<literal>DROP</literal>),
+      for example.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>nat</term>
+    <listitem>
+     <para>
+      This table defines any changes to the source and target addresses of
+      packets. Using these functions also allows you to implement
+      <emphasis>masquerading</emphasis>, which is a special case of NAT used
+      to link a private network with the Internet.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>mangle</term>
+    <listitem>
+     <para>
+      The rules held in this table make it possible to manipulate values
+      stored in IP headers (such as the type of service).
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   These tables contain several predefined chains to match packets:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>PREROUTING</term>
+    <listitem>
+     <para>
+      This chain is applied to incoming packets.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>INPUT</term>
+    <listitem>
+     <para>
+      This chain is applied to packets destined for the system's internal
+      processes.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>FORWARD</term>
+    <listitem>
+     <para>
+      This chain is applied to packets that are only routed through the
+      system.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>OUTPUT</term>
+    <listitem>
+     <para>
+      This chain is applied to packets originating from the system itself.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>POSTROUTING</term>
+    <listitem>
+     <para>
+      This chain is applied to all outgoing packets.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   <xref linkend="fig.fire.table"/> illustrates the paths along which a
+   network packet may travel on a given system. For the sake of simplicity,
+   the figure lists tables as parts of chains, but in reality these chains
+   are held within the tables themselves.
+  </para>
+
+  <para>
+   In the simplest of all possible cases, an incoming packet destined for
+   the system itself arrives at the <literal>eth0</literal> interface. The
+   packet is first referred to the <literal>PREROUTING</literal> chain of
+   the <literal>mangle</literal> table then to the
+   <literal>PREROUTING</literal> chain of the <literal>nat</literal> table.
+   The following step, concerning the routing of the packet, determines that
+   the actual target of the packet is a process of the system itself. After
+   passing the <literal>INPUT</literal> chains of the
+   <literal>mangle</literal> and the <literal>filter</literal> table, the
+   packet finally reaches its target, provided that the rules of the
+   <literal>filter</literal> table are actually matched.
+  </para>
+
+  <figure id="fig.fire.table">
+   <title>iptables: A Packet's Possible Paths</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata width="75%" fileref="fire_tables.svg" format="SVG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata width="65%" fileref="fire_tables.png" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+ </sect1>
+ <sect1 id="sec.security.firewall.masq">
+  <title>Masquerading Basics</title><indexterm>
+
+  <primary>routing</primary>
+
+  <secondary>masquerading</secondary></indexterm><indexterm>
+
+  <primary>masquerading</primary></indexterm><indexterm>
+
+  <primary>IP addresses</primary>
+
+  <secondary>masquerading</secondary></indexterm><indexterm>
+
+  <primary>NAT</primary>
+
+  <see>masquerading</see></indexterm>
+
+  <para>
+   Masquerading is the Linux-specific form of NAT (network address
+   translation). It can be used to connect a small LAN (where hosts use IP
+   addresses from the private range&mdash;see
+   <xref
+    linkend="sec.basicnet.addresses.route"/>) with the Internet
+   (where official IP addresses are used). For the LAN hosts to be able to
+   connect to the Internet, their private addresses are translated to an
+   official one. This is done on the router, which acts as the gateway
+   between the LAN and the Internet. The underlying principle is a simple
+   one: The router has more than one network interface, typically a network
+   card and a separate interface connecting with the Internet. While the
+   latter links the router with the outside world, one or several others
+   link it with the LAN hosts. With these hosts in the local network
+   connected to the network card (such as <literal>eth0</literal>) of the
+   router, they can send any packets not destined for the local network to
+   their default gateway or router.
+  </para>
+
+  <important>
+   <title>Using the Correct Network Mask</title>
+   <para>
+    When configuring your network, make sure both the broadcast address and
+    the netmask are the same for all local hosts. Failing to do so prevents
+    packets from being routed properly.
+   </para>
+  </important>
+
+  <para>
+   As mentioned, whenever one of the LAN hosts sends a packet destined for
+   an Internet address, it goes to the default router. However, the router
+   must be configured before it can forward such packets. For security
+   reasons, this is not enabled in a default installation. To enable it, set
+   the variable <systemitem>IP_FORWARD</systemitem> in the file
+   <filename>/etc/sysconfig/sysctl</filename> to
+   <systemitem>IP_FORWARD=yes</systemitem>.
+  </para>
+
+  <para>
+   The target host of the connection can see your router, but knows nothing
+   about the host in your internal network where the packets originated.
+   This is why the technique is called masquerading. Because of the address
+   translation, the router is the first destination of any reply packets.
+   The router must identify these incoming packets and translate their
+   target addresses, so packets can be forwarded to the correct host in the
+   local network.
+  </para>
+
+  <para>
+   With the routing of inbound traffic depending on the masquerading table,
+   there is no way to open a connection to an internal host from the
+   outside. For such a connection, there would be no entry in the table. In
+   addition, any connection already established has a status entry assigned
+   to it in the table, so the entry cannot be used by another connection.
+  </para>
+
+  <para>
+   As a consequence of all this, you might experience some problems with a
+   number of application protocols, such as ICQ, cucme, IRC (DCC, CTCP), and
+   FTP (in PORT mode). Web browsers, the standard FTP program, and many
+   other programs use the PASV mode. This passive mode is much less
+   problematic as far as packet filtering and masquerading are concerned.
+  </para>
+ </sect1>
+ <sect1 id="sec.security.firewall.fw">
+  <title>Firewalling Basics</title><indexterm>
+
+  <primary>firewalls</primary>
+
+  <secondary>packet filters</secondary></indexterm>
+
+  <para>
+   <emphasis>Firewall</emphasis> is probably the term most widely used to
+   describe a mechanism that provides and manages a link between networks
+   while also controlling the data flow between them. Strictly speaking, the
+   mechanism described in this section is called a <emphasis>packet
+   filter</emphasis>. A packet filter regulates the data flow according to
+   certain criteria, such as protocols, ports, and IP addresses. This allows
+   you to block packets that, according to their addresses, are not supposed
+   to reach your network. To allow public access to your Web server, for
+   example, explicitly open the corresponding port. However, a packet filter
+   does not scan the contents of packets with legitimate addresses, such as
+   those directed to your Web server. For example, if incoming packets were
+   intended to compromise a CGI program on your Web server, the packet
+   filter would still let them through.
+  </para>
+
+  <para>
+   A more effective but more complex mechanism is the combination of several
+   types of systems, such as a packet filter interacting with an application
+   gateway or proxy. In this case, the packet filter rejects any packets
+   destined for disabled ports. Only packets directed to the application
+   gateway are accepted. This gateway or proxy pretends to be the actual
+   client of the server. In a sense, such a proxy could be considered a
+   masquerading host on the protocol level used by the application. One
+   example for such a proxy is Squid, an HTTP and FTP proxy server. To use
+   Squid, the browser must be configured to communicate via the proxy. Any
+   HTTP pages or FTP files requested are served from the proxy cache and
+   objects not found in the cache are fetched from the Internet by the
+   proxy.
+  </para>
+
+  <para>
+   The following section focuses on the packet filter that comes with
+   &productname;. For further information about packet filtering and
+   firewalling, read the Firewall HOWTO included in the
+   <systemitem class="resource">howto</systemitem> package. If this package
+   is installed, read the HOWTO with
+  </para>
+
+<screen>less /usr/share/doc/howto/en/txt/Firewall-HOWTO.gz</screen>
+ </sect1>
+ <sect1 id="sec.security.firewall.SuSE">
+  <title>SuSEfirewall2</title><indexterm>
+
+  <primary>firewalls</primary>
+
+  <secondary>SuSEfirewall2</secondary></indexterm><indexterm>
+
+  <primary>masquerading</primary>
+
+  <secondary>configuring with SuSEfirewall2</secondary></indexterm>
+
+  <para>
+   SuSEfirewall2 is a script that reads the variables set in
+   <filename>/etc/sysconfig/SuSEfirewall2</filename> to generate a set of
+   iptables rules. It defines three security zones, although only the first
+   and the second one are considered in the following sample configuration:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>External Zone</term>
+    <listitem>
+     <para>
+      Given that there is no way to control what is happening on the
+      external network, the host needs to be protected from it. In most
+      cases, the external network is the Internet, but it could be another
+      insecure network, such as a WLAN.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Internal Zone</term>
+    <listitem>
+     <para>
+      This refers to the private network, in most cases the LAN. If the
+      hosts on this network use IP addresses from the private range (see
+      <xref linkend="sec.basicnet.addresses.route"/>), enable network
+      address translation (NAT), so hosts on the internal network can access
+      the external one. All ports are open in the internal zone. The main
+      benefit of putting interfaces into the internal zone (rather than
+      stopping the firewall) is that the firewall still runs, so when you
+      add new interfaces, they will be put into the external zone by
+      default. That way an interface is not accidentally <quote>open</quote>
+      by default.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Demilitarized Zone (DMZ)</term>
+    <listitem>
+     <para>
+      While hosts located in this zone can be reached both from the external
+      and the internal network, they cannot access the internal network
+      themselves. This setup can be used to put an additional line of
+      defense in front of the internal network, because the DMZ systems are
+      isolated from the internal network.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Any kind of network traffic not explicitly allowed by the filtering rule
+   set is suppressed by iptables. Therefore, each of the interfaces with
+   incoming traffic must be placed into one of the three zones. For each of
+   the zones, define the services or protocols allowed. The rule set is only
+   applied to packets originating from remote hosts. Locally generated
+   packets are not captured by the firewall.
+  </para>
+
+  <para>
+   The configuration can be performed with &yast; (see
+   <xref
+   linkend="sec.security.firewall.SuSE.yast"/>). It can also be
+   made manually in the file
+   <filename>/etc/sysconfig/SuSEfirewall2</filename>, which is well
+   commented. Additionally, a number of example scenarios are available in
+   <filename>/usr/share/doc/packages/SuSEfirewall2/EXAMPLES</filename>.
+  </para>
+
+  <sect2 id="sec.security.firewall.SuSE.yast">
+   <title>Configuring the Firewall with &yast;</title>
+   <important>
+    <title>Automatic Firewall Configuration</title>
+    <para>
+     After the installation, &yast; automatically starts a firewall on all
+     configured interfaces. If a server is configured and activated on the
+     system, &yast; can modify the automatically-generated firewall
+     configuration with the options <guimenu>Open Ports on Selected
+     Interface in Firewall</guimenu> or <guimenu>Open Ports on
+     Firewall</guimenu> in the server configuration modules. Some server
+     module dialogs include a <guimenu>Firewall Details</guimenu> button for
+     activating additional services and ports. The &yast; firewall
+     configuration module can be used to activate, deactivate, or
+     reconfigure the firewall.
+    </para>
+   </important>
+   <para>
+    The &yast; dialogs for the graphical configuration can be accessed from
+    the &yast; Control Center. Select <menuchoice> <guimenu>Security and
+    Users</guimenu> <guimenu>Firewall</guimenu></menuchoice>. The
+    configuration is divided into seven sections that can be accessed
+    directly from the tree structure on the left side.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Start-Up</term>
+     <listitem>
+      <para>
+       Set the start-up behavior in this dialog. In a default installation,
+       SuSEfirewall2 is started automatically. You can also start and stop
+       the firewall here. To implement your new settings in a running
+       firewall, use <guimenu>Save Settings and Restart Firewall
+       Now</guimenu>.
+      </para>
+      <figure id="fig.yast2.firewall_1" os="osuse">
+       <title>The &yast; Firewall Configuration</title>
+       <mediaobject>
+        <imageobject role="fo">
+         <imagedata fileref="yast2_firewall_1.png" width="75%" format="PNG"/>
+        </imageobject>
+        <imageobject role="html">
+         <imagedata fileref="yast2_firewall_1.png" width="75%" format="PNG"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Interfaces</term>
+     <listitem>
+      <para>
+       All known network interfaces are listed here. To remove an interface
+       from a zone, select the interface, press <guimenu>Change</guimenu>,
+       and choose <guimenu>No Zone Assigned</guimenu>. To add an interface
+       to a zone, select the interface, press <guimenu>Change</guimenu> and
+       choose any of the available zones. You may also create a special
+       interface with your own settings by using <guimenu>Custom</guimenu>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Allowed Services</term>
+     <listitem>
+      <para>
+       You need this option to offer services from your system to a zone
+       from which it is protected. By default, the system is only protected
+       from external zones. Explicitly allow the services that should be
+       available to external hosts. After selecting the desired zone in
+       <guimenu>Allowed Services for Selected Zone</guimenu>, activate the
+       services from the list.
+<?dbfo-need height="15em"?>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Masquerading</term>
+     <listitem>
+      <para>
+       Masquerading hides your internal network from external networks (such
+       as the Internet) while enabling hosts in the internal network to
+       access the external network transparently. Requests from the external
+       network to the internal one are blocked and requests from the
+       internal network seem to be issued by the masquerading server when
+       seen externally. If special services of an internal machine need to
+       be available to the external network, add special redirect rules for
+       the service.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Broadcast</term>
+     <listitem>
+      <para>
+       In this dialog, configure the UDP ports that allow broadcasts. Add
+       the required port numbers or services to the appropriate zone,
+       separated by spaces. See also the file
+       <filename>/etc/services</filename>.
+      </para>
+      <para>
+       The logging of broadcasts that are not accepted can be enabled here.
+       This may be problematic, because Windows hosts use broadcasts to know
+       about each other and so generate many packets that are not accepted.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>IPsec Support</term>
+     <listitem>
+      <para>
+       Configure whether the IPsec service should be available to the
+       external network in this dialog. Configure which packets are trusted
+       under <guimenu>Details</guimenu>.
+      </para>
+      <para>
+       There is another functionality under <guimenu>Details</guimenu>:
+       IPsec packets are packed in an encrypted format, so they have to be
+       decrypted and you can configure the way the firewall will handle the
+       decrypted packets. If you select <guimenu>Internal Zone</guimenu>,
+       the decrypted IPsec packets will be trusted as if they came from the
+       Internal Zone - although they could possibly come from the external
+       one. Choose <guimenu>Same Zone as Original Source Network</guimenu>
+       to avoid this situation.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Logging Level</term>
+     <listitem>
+      <para>
+       There are two rules for logging: accepted and not accepted packets.
+       Packets that are not accepted are DROPPED or REJECTED. Select from
+       <guimenu>Log All</guimenu>, <guimenu>Log Only Critical</guimenu>, or
+       <guimenu>Do Not Log Any</guimenu>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Custom Rules</term>
+     <listitem>
+      <para>
+       Here, set special firewall rules that allow connections, matching
+       specified criteria such as source network, protocol, destination
+       port, and source port. Configure such rules for external, internal,
+       and demilitarized zones.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    When finished with the firewall configuration, exit this dialog with
+    <guimenu>Next</guimenu>. A zone-oriented summary of your firewall
+    configuration then opens. In it, check all settings. All services,
+    ports, and protocols that have been allowed and all custom rules are
+    listed in this summary. To modify the configuration, use
+    <guimenu>Back</guimenu>. Press <guimenu>Finish</guimenu> to save your
+    configuration.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.firewall.SuSE.man">
+   <title>Configuring Manually</title>
+   <para>
+    The following paragraphs provide step-by-step instructions for a
+    successful configuration. Each configuration item is marked as to
+    whether it is relevant to firewalling or masquerading. Use port range
+    (for example, <literal>500:510</literal>) whenever appropriate. Aspects
+    related to the DMZ (demilitarized zone) as mentioned in the
+    configuration file are not covered here. They are applicable only to a
+    more complex network infrastructure found in larger organizations
+    (corporate networks), which require extensive configuration and in-depth
+    knowledge about the subject.
+   </para>
+   <para>
+    First, use the &yast; module &ycc_runlevel; to enable SuSEfirewall2 in
+    your runlevel (3 or 5 most likely). It sets the symlinks for the
+    SuSEfirewall2_* scripts in the <filename>/etc/init.d/rc?.d/</filename>
+    directories.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><systemitem>FW_DEV_EXT</systemitem> (firewall, masquerading) </term>
+     <listitem>
+      <para>
+       The device linked to the Internet. For a modem connection, enter
+       <literal>ppp0</literal>. For an ISDN link, use
+       <literal>ippp0</literal>. DSL connections use
+       <literal>dsl0</literal>. Specify <literal>auto</literal> to use the
+       interface that corresponds to the default route.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_DEV_INT</systemitem> (firewall, masquerading) </term>
+     <listitem>
+      <para>
+       The device linked to the internal, private network (such as
+       <literal>eth0</literal>). Leave this blank if there is no internal
+       network and the firewall protects only the host on which it runs.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_ROUTE</systemitem> (firewall, masquerading) </term>
+     <listitem>
+      <para>
+       If you need the masquerading function, set this to
+       <literal>yes</literal>. Your internal hosts will not be visible to
+       the outside, because their private network addresses (e.g.,
+       <literal>192.168.x.x</literal>) are ignored by Internet routers.
+      </para>
+      <para>
+       For a firewall without masquerading, set this to
+       <literal>yes</literal> if you want to allow access to the internal
+       network. Your internal hosts need to use officially registered IP
+       addresses in this case. Normally, however, you should
+       <emphasis>not</emphasis> allow access to your internal network from
+       the outside.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_MASQUERADE</systemitem> (masquerading) </term>
+     <listitem>
+      <para>
+       Set this to <literal>yes</literal> if you need the masquerading
+       function. This provides a virtually direct connection to the Internet
+       for the internal hosts. It is more secure to have a proxy server
+       between the hosts of the internal network and the Internet.
+       Masquerading is not needed for services that a proxy server provides.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_MASQ_NETS</systemitem> (masquerading) </term>
+     <listitem>
+      <para>
+       Specify the hosts or networks to masquerade, leaving a space between
+       the individual entries. For example:
+      </para>
+<screen>FW_MASQ_NETS="192.168.0.0/24 192.168.10.1"</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_PROTECT_FROM_INT</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       Set this to <literal>yes</literal> to protect your firewall host from
+       attacks originating in your internal network. Services are only
+       available to the internal network if explicitly enabled. Also see
+       <systemitem>FW_SERVICES_INT_TCP</systemitem> and
+       <systemitem>FW_SERVICES_INT_UDP</systemitem>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_SERVICES_EXT_TCP</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       Enter the TCP ports that should be made available. Leave this blank
+       for a normal workstation at home that should not offer any services.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_SERVICES_EXT_UDP</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       Leave this blank unless you run a UDP service and want to make it
+       available to the outside. The services that use UDP include include
+       DNS servers, IPsec, TFTP, DHCP and others. In that case, enter the
+       UDP ports to use.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+<!-- fate#100068 -->
+     <term><systemitem>FW_SERVICES_ACCEPT_EXT</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       List services to allow from the Internet. This is a more generic form
+       of the <systemitem>FW_SERVICES_EXT_TCP</systemitem> and
+       <systemitem>FW_SERVICES_EXT_UDP</systemitem> settings, and more
+       specific than <systemitem>FW_TRUSTED_NETS</systemitem>. The notation
+       is a space-separated list of
+       <option><replaceable>net</replaceable>,<replaceable>protocol</replaceable>[,<replaceable>dport</replaceable>][,<replaceable>sport</replaceable>]</option>,
+       for example <literal>0/0,tcp,22</literal> or
+       <literal>0/0,tcp,22,,hitcount=3,blockseconds=60,recentname=ssh</literal>,
+       which means: allow a maximum of three SSH connects per minute from
+       one IP address.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_SERVICES_INT_TCP</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       With this variable, define the services available for the internal
+       network. The notation is the same as for
+       <systemitem>FW_SERVICES_EXT_TCP</systemitem>, but the settings are
+       applied to the <emphasis>internal</emphasis> network. The variable
+       only needs to be set if <systemitem>FW_PROTECT_FROM_INT</systemitem>
+       is set to <literal>yes</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_SERVICES_INT_UDP</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       See <systemitem>FW_SERVICES_INT_TCP</systemitem>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+<!-- fate#100068 -->
+     <term><systemitem>FW_SERVICES_ACCEPT_INT</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       List services to allow from internal hosts. See
+       <systemitem>FW_SERVICES_ACCEPT_EXT.</systemitem>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+<!-- Bug 380696 -->
+<!-- 11.0 -->
+     <term><systemitem>FW_SERVICES_ACCEPT_RELATED_*</systemitem> (firewall) </term>
+     <listitem>
+      <para>
+       This is how the SuSEfirewall2 implementation considers packets
+       <literal>RELATED</literal> by netfilter.
+      </para>
+      <para>
+       For example, to allow finer grained filtering of Samba broadcast
+       packets, <literal>RELATED</literal> packets are not accepted
+       unconditionally. Variables starting with
+       <systemitem>FW_SERVICES_ACCEPT_RELATED_</systemitem> allow
+       restricting <literal>RELATED</literal> packets handling to certain
+       networks, protocols and ports.
+      </para>
+      <para>
+       This means that adding connection tracking modules (conntrack
+       modules) to <systemitem>FW_LOAD_MODULES</systemitem> does not
+       automatically result in accepting the packets tagged by those
+       modules. Additionally, you must set variables starting with
+       <systemitem>FW_SERVICES_ACCEPT_RELATED_</systemitem> to a suitable
+       value.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>FW_CUSTOMRULES</systemitem> (firewall)</term>
+     <listitem>
+      <para>
+       Uncomment this variable to install custom rules. Find examples in
+       <filename>/etc/sysconfig/scripts/SuSEfirewall2-custom</filename>.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    <indexterm>
+    <primary>log files</primary>
+    <secondary>messages</secondary>
+    </indexterm> After configuring the firewall, test your setup. The
+    firewall rule sets are created by entering <command>rcSuSEfirewall2
+    start</command> as <systemitem class="username"
+     >root</systemitem>.
+    Then use <command>telnet</command>, for example, from an external host
+    to see whether the connection is actually denied. After that, review
+    <filename>/var/log/messages</filename>, where you should see something
+    like this:
+   </para>
+<screen>Mar 15 13:21:38 linux kernel: SFW2-INext-DROP-DEFLT IN=eth0 
+OUT= MAC=00:80:c8:94:c3:e7:00:a0:c9:4d:27:56:08:00 SRC=192.168.10.0 
+DST=192.168.10.1 LEN=60 TOS=0x10 PREC=0x00 TTL=64 ID=15330 DF PROTO=TCP 
+SPT=48091 DPT=23 WINDOW=5840 RES=0x00 SYN URGP=0 
+OPT (020405B40402080A061AFEBC0000000001030300)
+</screen>
+   <para>
+    Other packages to test your firewall setup are Nmap (portscanner) or
+    OpenVAS (Open Vulnerability Assessment System). The documentation of
+    Nmap is found at <filename>/usr/share/doc/packages/nmap</filename> after
+    installing the package and the documentation of openVAS resides at
+    <ulink
+    url="http://www.openvas.org"/>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.firewall.info">
+  <title>For More Information</title>
+
+  <para>
+   The most up-to-date information and other documentation about the
+   <systemitem>SuSEfirewall2</systemitem> package is found in
+   <filename>/usr/share/doc/packages/SuSEfirewall2</filename>. The home page
+   of the netfilter and iptables project,
+   <ulink url="http://www.netfilter.org"/>, provides a large collection of
+   documents in many languages.
+  </para>
+ </sect1>
+</chapter>

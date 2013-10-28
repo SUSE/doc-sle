@@ -1,0 +1,803 @@
+<?xml version="1.0"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.xen.network">
+ <title>Virtual Networking</title>
+<!--
+ - fully integrated into system, configured with yast
+ - xen scripts are only delivered for reference
+ - configuration defined in sxp
+ - three scripts network-bridge
+                 network-router
+                 network-nat
+ - helper scripts xen-script-common.sh
+                  xen-network-common.sh
+ - network manual start possible:
+ network-bridge start netdev=phy_dev bridge=bridge_name vif=vif_number -->
+<!--
+> When I boot the SLED vm it cannot see the Win 2003 DNS Server.
+> The SLED's and Windows Firewall are disabled. (Triple checked )
+
+Andrin mentioned switching off TX checksums (ethtool -K eth0 tx off )on the
+virtual nic. Sounds promising. And like a
+bug that should be fixed sooner than later.
+I will try if it helps in my setup.
+ -->
+ <para>
+  All &vmguest; need some means to communicate either with other &vmguest;
+  systems or with a local network. The network interface to the &vmguest;
+  system is made of a split device driver, which means, that any virtual
+  Ethernet device has a corresponding network interface in &dom0;. This
+  interface is set up to access a virtual network that is run in &dom0;. The
+  bridged virtual network is fully integrated into the system configuration
+  of &productname; and can be configured with &yast;.
+ </para>
+ <para>
+  When installing a &xen; &vmhost;, a bridged network configuration will be
+  proposed during normal network configuration. The user can choose to
+  change the configuration during the installation and customize it to the
+  local needs.
+ </para>
+ <para>
+  If desired, &xen; &vmhost; can be installed after performing a default
+  Physical Server installation using the <systemitem>Install Hypervisor and
+  Tools</systemitem> module in &yast;. This module will prepare the system
+  for hosting virtual machines, including invocation of the default bridge
+  networking proposal.
+ </para>
+ <para>
+  In case the necessary packages for a &xen; &vmhost; are installed manually
+  with <systemitem>rpm</systemitem> or <systemitem>zypper</systemitem>, the
+  remaining system configuration has to be done by the administrator
+  manually or with the help of &yast;.
+ </para>
+ <para>
+  The network scripts that are provided by &xen; are not used by default in
+  &productname;. They are only delivered for reference but disabled. The
+  network configuration that is used in &productname; is done by means of
+  the &yast; system configuration similar to the configuration of network
+  interfaces in &productname;.
+ </para>
+ <sect1 id="sec.xen.vbridge">
+  <title>Virtual Bridges</title>
+
+  <para>
+   When using &productname; the system configures one bridge for each
+   physical network device by default. For each virtual bridge, a physical
+   Ethernet device is enslaved, and the IP address assigned to the bridge.
+  </para>
+
+  <para>
+   To add a new bridge, for example, after installing an additional Ethernet
+   device, or to create a bridge that is not connected to a real network,
+   proceed as follows:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Start <menuchoice><guimenu>yast2</guimenu> <guimenu>Network
+     Devices</guimenu> <guimenu>Network Settings</guimenu></menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click on the tab <guimenu>Overview</guimenu> and press
+     <guimenu>Add</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Select <guimenu>Device Type</guimenu> <guimenu>Bridge</guimenu>. The
+     parameter <guimenu>Configuration Name</guimenu> will be set to the next
+     free number. Click <guimenu>Next</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Either use <guimenu>Dynamic Address (DHCP)</guimenu> as selected by
+     default, or assign a static IP address to the bridge. Using
+     <guimenu>Dynamic Address</guimenu> is only useful, when also assigning
+     a device to the bridge that is connected to some DHCP server.
+    </para>
+    <para>
+     If you intend to create a virtual bridge that has no connection to a
+     real Ethernet device, use <guimenu>Statically assigned IP
+     Address</guimenu>. In this case, it is a good idea to use addresses
+     from the private IP address ranges, for example,
+     <literal>192.168.x.x</literal> or <literal>10.x.x.x</literal>.
+    </para>
+    <para>
+     To create a bridge that should only serve as a connection between the
+     different guests without connection to the host system, set the IP
+     address to <literal>0.0.0.0</literal> and the netmask to
+     <literal>255.255.255.255</literal>. The network scripts handle this
+     special address as an unset IP address.
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   After the bridge is created, it may be used by any of the &xen; &vmguest;
+   systems. A purely virtual bridge without connection to a real network
+   device is good to provide fast network connections between different
+   &vmguest; systems. If you provide a <systemitem>DHCP</systemitem> server
+   on &dom0; that also defines routing information to the respective guest
+   for the bridge, the network setup of the respective &vmguest; is
+   simplified.
+  </para>
+ </sect1>
+ <sect1 id="sec.xen.vdevices">
+  <title>Network Devices for Guest Systems</title>
+
+<!--Jim: I did not find the qemu-ifup script used to create HVM vif bridges.
+  could you give me a hint how ioemu devices are set up? -->
+
+<!-- answer: 
+  There is a question to me at beginning of this section.  Answer:
+  /etc/xen/qemu-ifup is the script used to configure vif devices for hvm
+  guests.  Essentially it just hooks the qemu tap device to the bridge.
+  -->
+
+  <para>
+   The &xen; hypervisor is able to provide different types of network
+   interfaces to the &vmguest; systems. The preferred network device should
+   be a paravirtualized network interface. This yields the highest transfer
+   rates with the lowest requirements to the system. Up to eight network
+   interfaces may be provided for each &vmguest;.
+  </para>
+
+  <para>
+   Systems that are not aware of paravirtualized hardware, may not have this
+   option. To connect systems to a network that can only run fully
+   virtualized, several emulated network interfaces are available. The
+   following emulations are at your disposal:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     Realtek 8139 (PCI). This is the default emulated network card.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     AMD PCnet32 (PCI)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     NE2000 (PCI)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     NE2000 (ISA)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Intel e100 (PCI)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Intel e1000 (PCI)
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   All the network interfaces are just software interfaces. Because every
+   network interface must have a unique MAC address, an address range has
+   been assigned to Xensource that can be used by these interfaces.
+  </para>
+
+  <tip>
+   <title>Virtual Network Interfaces and MAC Addresses</title>
+   <para>
+    The default configuration of MAC addresses in virtualized environments
+    just creates a random MAC address that looks like 00:16:3E:xx:xx:xx.
+    Normally, the amount of available MAC addresses should be big enough to
+    get only unique addresses. However, if you have a very big installation,
+    or if you want to make sure that no problems arise from random MAC
+    address assignment, you can also manually assign these addresses.
+   </para>
+  </tip>
+
+  <para>
+   For debugging or system management purposes, it may be useful to know
+   which virtual interface in &dom0; is connected to which Ethernet device
+   in a running guest. This information may be read from the device naming
+   in &dom0;. All virtual devices follow the rule <literal>vif&lt;domain
+   number>.&lt;interface_number></literal>.
+  </para>
+
+  <para>
+   For example, if you want to know the device name for the third interface
+   (eth2) of the &vmguest; with id 5, the device in &dom0; would be
+   <literal>vif5.2</literal>. To obtain a list of all available interfaces,
+   run the command <command>ip a</command>.
+  </para>
+
+  <para>
+   The device naming does not contain any information to which bridge this
+   interface is connected. However, this information is available in &dom0;.
+   To get an overview about which interface is connected to which bridge,
+   run the command <command>brctl show</command>. The output may look like
+   the following:
+  </para>
+
+<screen># brctl show
+bridge name     bridge id               STP enabled     interfaces
+br0             8000.001cc0309083       no              eth0
+                                                        vif2.1
+br1             8000.000476f060cc       no              eth1
+                                                        vif2.0
+br2             8000.000000000000       no
+  </screen>
+
+  <para>
+   In this example, there are three configured bridges: br0, br1 and br2.
+   Currently, br0 and br1 each have a real Ethernet device added: eth0 and
+   eth1, respectively. There is one &vmguest; running with the id 2 that has
+   two Ethernet devices available. eth0 on the &vmguest; is bridged with
+   eth1 on the &vmhost; and eth1 on the &vmguest; is connected to eth0 on
+   the &vmhost;. At this time, the third bridge with name br2 is not
+   connected to any &vmguest; nor real Ethernet device.
+  </para>
+ </sect1>
+ <sect1 id="sec.xen.net.host_route">
+  <title>Host Based Routing in Xen</title>
+
+  <para>
+   &xen; can be set up to use host based routing in the controlling &dom0;.
+   Unfortunately, this is not yet well supported from &yast; and requires
+   quite an amount of manual editing of configuration files. Thus, this is a
+   task, that requires an advanced administrator.
+  </para>
+
+  <para>
+   The following configuration will only work when using fixed IP addresses.
+   Using DHCP is not practicable with this procedure, because the IP address
+   must be known to both, the &vmguest; and the &vmhost; system.
+  </para>
+
+  <para>
+   The easiest way to create a routed guest is to change the networking from
+   a bridged to a routed network. As a requirement to the following
+   procedures, a &vmguest; with a bridged network setup must be installed.
+   For example, the &vmhost; is named &xenhost; with the IP &xenhostip;, and
+   the &vmguest; has the name &xenguest; with the IP &xenguestip;.
+  </para>
+
+  <procedure id="proc.xen.network.route.ipv4">
+   <title>Configuring a routed IPv4 &vmguest;</title>
+   <step>
+    <para>
+     Make sure that &xenguest; is shut down. Either use
+     <systemitem>virt-manager</systemitem> or the respective
+     <systemitem>xm</systemitem> commands to shutdown and check.
+    </para>
+   </step>
+   <step>
+    <para>
+     Prepare the network configuration on the &vmhost; &xenhost;:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Create a hotplug interface that will be used to route the traffic. To
+       accomplish this, create a file named
+       <filename>/etc/sysconfig/network/ifcfg-&xenguest;.0</filename> with
+       the following content:
+      </para>
+<screen>NAME="Xen guest &xenguest;"
+BOOTPROTO="static"
+STARTMODE="hotplug"
+     </screen>
+     </step>
+     <step>
+      <para>
+       Edit the file <filename>/etc/sysconfig/SuSEfirewall2</filename> and
+       add the following configurations:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Add &xenguest;.0 to the devices in FW_DEV_EXT:
+        </para>
+<screen>FW_DEV_EXT="br0 &xenguest;.0"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Switch on the routing in the firewall:
+        </para>
+<screen>FW_ROUTE="yes"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Tell the firewall, which address should be forwarded:
+        </para>
+<screen>FW_FORWARD="&xenguestip;/32,0/0"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Finally, restart the firewall with the command:
+        </para>
+<screen>rcSuSEfirewall2 restart</screen>
+       </listitem>
+      </itemizedlist>
+     </step>
+     <step>
+      <para>
+       Add a static route to the interface of &xenguest;. To accomplish
+       this, add the following line to the end of
+       <filename>/etc/sysconfig/network/routes</filename>:
+      </para>
+<screen>&xenguestip;  -  -  &xenguest;.0</screen>
+     </step>
+     <step>
+      <para>
+       To make sure that the switches and routers that the &vmhost; is
+       connected to know about the routed interface, activate
+       <literal>proxy_arp</literal> on &xenhost;. Add the following lines to
+       <filename>/etc/sysctl.conf</filename>:
+      </para>
+<screen>net.ipv4.conf.default.proxy_arp = 1
+net.ipv4.conf.all.proxy_arp = 1</screen>
+     </step>
+     <step>
+      <para>
+       Activate all changes with the commands:
+      </para>
+<screen>/etc/init.d/boot.sysctl start
+rcnetwork restart</screen>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Proceed with configuring the &xen; configuration of the &vmguest;.
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Change the vif interface configuration for &xenguest; as described in
+       <xref linkend="sec.xen.manage.vmachine"/>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Remove the entry:
+      </para>
+<screen>(bridge br0)</screen>
+     </step>
+     <step>
+      <para>
+       Add the following line to the configuration:
+      </para>
+<screen>(vifname &xenguest;.0)</screen>
+     </step>
+     <step>
+      <para>
+       Change the script that is used to set up the interface to the
+       following:
+      </para>
+<screen>(script /etc/xen/scripts/vif-route-ifup)</screen>
+     </step>
+     <step>
+      <para>
+       Activate the new configuration and start the &vmguest;.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     The remaining configuration tasks must be accomplished from inside the
+     &vmguest;.
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Open a console to the &vmguest; either with
+       <command>virt-manager</command> or with <command>xm console</command>
+       and log in.
+      </para>
+     </step>
+     <step>
+      <para>
+       Check that the guest IP is set to &xenguestip;.
+      </para>
+     </step>
+     <step>
+      <para>
+       Provide &vmguest; with a host route and a default gateway to the
+       &vmhost; Server. Do this by adding the following lines to
+       <filename>/etc/sysconfig/network/routes</filename>:
+      </para>
+<screen>&xenhostip; - - eth0
+default &xenhostip; - -    
+     </screen>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Finally, test the network connection from the &vmguest; to the world
+     outside as well as from the network to your &vmguest;.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 id="sec.xen.net.masquerade">
+  <title>Creating a Masqueraded Network Setup</title>
+
+  <para>
+   Creating a masqueraded network setup is quite similar to the routed
+   setup. However, there is no proxy_arp needed, and some firewall rules are
+   different. To create a masqueraded network to a guest &xennatguest; with
+   the IP address &xennatip; where the host has its external interface on
+   <literal>br0</literal>, proceed as follows. For easier configuration,
+   only the already installed guest is modified to use a masqueraded
+   network:
+  </para>
+
+  <procedure>
+   <title>Configuring a masqueraded IPv4 VM Guest</title>
+   <step>
+    <para>
+     Shutdown the &vmguest; system with <command>virt-manager</command> or
+     <command>xm shutdown</command>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Prepare the network configuration on the &vmhost;:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Create a hotplug interface that will be used to route the traffic. To
+       accomplish this, create a file named
+       <filename>/etc/sysconfig/network/ifcfg-&xennatguest;.0</filename>
+       with the following content:
+      </para>
+<screen>NAME="Xen guest &xennatguest;"
+BOOTPROTO="static"
+STARTMODE="hotplug"
+     </screen>
+     </step>
+     <step>
+      <para>
+       Edit the file <filename>/etc/sysconfig/SuSEfirewall2</filename> and
+       add the following configurations:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Add &xennatguest;.0 to the devices in FW_DEV_DMZ:
+        </para>
+<screen>FW_DEV_DMZ="&xennatguest;.0"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Switch on the routing in the firewall:
+        </para>
+<screen>FW_ROUTE="yes"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Switch on masquerading in the firewall:
+        </para>
+<screen>FW_MASQUERADE="yes"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Tell the firewall, which network should be masqueraded:
+        </para>
+<screen>FW_MASQ_NETS="&xennatip;/32"</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Remove the networks from the masquerading exceptions:
+        </para>
+<screen>FW_NOMASQ_NETS=""</screen>
+       </listitem>
+       <listitem>
+        <para>
+         Finally, restart the firewall with the command:
+        </para>
+<screen>rcSuSEfirewall2 restart</screen>
+       </listitem>
+      </itemizedlist>
+     </step>
+     <step>
+      <para>
+       Add a static route to the interface of &xennatguest;. To accomplish
+       this, add the following line to the end of
+       <filename>/etc/sysconfig/network/routes</filename>:
+      </para>
+<screen>&xennatip; - - &xennatguest;.0</screen>
+     </step>
+     <step>
+      <para>
+       Activate all changes with the command:
+      </para>
+<screen>rcnetwork restart</screen>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Proceed with configuring the &xen; configuration of the &vmguest;.
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Change the vif interface configuration for &xennatguest; as described
+       in <xref linkend="sec.xen.manage.vmachine"/>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Remove the entry:
+      </para>
+<screen>(bridge br0)</screen>
+     </step>
+     <step>
+      <para>
+       Add the following line to the configuration:
+      </para>
+<screen>(vifname &xennatguest;.0)</screen>
+     </step>
+     <step>
+      <para>
+       Change the script that is used to set up the interface to the
+       following:
+      </para>
+<screen>(script /etc/xen/scripts/vif-route-ifup)</screen>
+     </step>
+     <step>
+      <para>
+       Activate the new configuration and start the &vmguest;.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     The remaining configuration tasks has to be accomplished from inside
+     the &vmguest;.
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Open a console to the &vmguest; either with
+       <command>virt-manager</command> or with <command>xm console</command>
+       and log in.
+      </para>
+     </step>
+     <step>
+      <para>
+       Check whether the guest IP is set to &xennatip;.
+      </para>
+     </step>
+     <step>
+      <para>
+       Provide &vmguest; with a host route and a default gateway to the
+       &vmhost; Server. Do this by adding the following lines to
+       <filename>/etc/sysconfig/network/routes</filename>:
+      </para>
+<screen>&xenhostip; - - eth0
+default &xenhostip; - -    
+     </screen>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Finally, test the network connection from the &vmguest; to the outside
+     world.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+<!-- TODO: remove next when done with previous two sections -->
+ <sect1 id="sec.xen.net_special">
+  <title>Special Configurations</title>
+
+  <para>
+   There are many network configuration possibilities available to &xen;.
+   The following configurations are not activated by default:
+  </para>
+
+  <sect2 id="sec.xen.net.throttle">
+   <title>Bandwidth Throttling in Virtual Networks</title>
+   <para>
+    With &xen;, you may limit the network transfer rate a virtual guest may
+    use to access a bridge. This configuration option is not available from
+    a graphical user interface at this time. To configure this, you will
+    have to modify the &vmguest; configuration as described in
+    <xref
+    linkend="sec.xen.manage.vmachine"/>.
+   </para>
+   <para>
+    In the configuration file, first search for the device that is connected
+    to the virtual bridge. The configuration looks like the following:
+   </para>
+<screen>...
+(device
+    (vif
+        (bridge br0)
+        (mac 00:16:3e:4f:94:a9)
+        (backend 0)
+        (uuid bf840a86-6aa9-62df-f8df-a7cf8c192c24)
+        (script /etc/xen/scripts/vif-bridge)
+    )
+)
+... </screen>
+   <para>
+    To add a maximum transfer rate, add a parameter
+    <systemitem>rate</systemitem> to this configuration as in:
+   </para>
+<screen>...
+(device
+    (vif
+        (bridge br0)
+        (mac 00:16:3e:4f:94:a9)
+        (rate 100Mb/s)
+        (backend 0)
+        (uuid bf840a86-6aa9-62df-f8df-a7cf8c192c24)
+        (script /etc/xen/scripts/vif-bridge)
+    )
+)
+...   </screen>
+   <para>
+    Note, that the rate is either <literal>Mb/s</literal> (megabit per
+    second) or <literal>MB/s</literal> (megabyte per second). In the above
+    example, the maximum transfer rate of the virtual interface is 100
+    megabit. By default, there is no limitation to the bandwidth of a guest
+    to the virtual bridge.
+   </para>
+   <para>
+    It is even possible to fine tune the behavior by specifying the time
+    window that is used to define the granularity of the credit
+    replenishment:
+   </para>
+<screen>...
+(device
+    (vif
+        (bridge br0)
+        (mac 00:16:3e:4f:94:a9)
+        (rate 100Mb/s@20ms)
+        (backend 0)
+        (uuid bf840a86-6aa9-62df-f8df-a7cf8c192c24)
+        (script /etc/xen/scripts/vif-bridge)
+    )
+)
+...   </screen>
+  </sect2>
+
+  <sect2 id="sec.xen.net.monitor">
+   <title>Monitoring the Network Traffic</title>
+   <para>
+    To monitor the traffic on a specific interface, the little application
+    <systemitem>iftop</systemitem> is a nice program that displays the
+    current network traffic in a terminal.
+   </para>
+   <para>
+    When running a &xen; &vmhost;, you have to define the interface that is
+    monitored. The interface that &dom0; uses to get access to the physical
+    network is the bridge device, for example <systemitem>br0</systemitem>.
+    This, however, may vary on your system. To monitor all traffic to the
+    physical interface, run a terminal as &rootuser; and use the command:
+   </para>
+<screen>iftop -i br0</screen>
+   <para>
+    To monitor the network traffic of a special network interface of a
+    specific &vmguest;, just supply the correct virtual interface. For
+    example, to monitor the first ethernet device of the domain with id 5,
+    use the command:
+   </para>
+<screen>іftop -i vif5.0</screen>
+   <para>
+    To quit <command>iftop</command>, press the key <keycap>Q</keycap>. More
+    options and possibilities are available in the manual page <command>man
+    8 iftop</command>.
+   </para>
+  </sect2>
+
+
+  <sect2 id="sec.xen.net.vlan">
+   <title>Using VLAN Interfaces</title>
+   <para>
+    Sometimes, it is necessary to create a private connection either between
+    two &xen; hosts or between a number of &vmguest; systems. For example,
+    if you want to migrate &vmguest; to hosts in a different network
+    segment, or if you want to create a private bridge that only &vmguest;
+    systems may connect to, even when running on different &vmhost; systems.
+    An easy way to build such connections is to set up VLAN networks.
+   </para>
+   <para>
+    VLAN interfaces are commonly set up on the &vmhost; and either just
+    interconnect the different &vmhost; systems, or they may be set up as
+    physical interface to an otherwise virtual only bridge. It is even
+    possible to create a bridge with a VLAN as physical interface that has
+    no IP address in the &vmhost;. That way, the guest systems have no
+    possibility to access &dom0; over this network.
+   </para>
+   <para>
+    Run the &yast; module <menuchoice><guimenu>Network
+    Devices</guimenu><guimenu>Network Settings</guimenu></menuchoice>.
+    Follow this procedure to actually set up the VLAN device:
+   </para>
+   <procedure>
+    <title>Setting up VLAN Interfaces with &yast;</title>
+    <step>
+     <para>
+      Press <guimenu>Add</guimenu> to create a new network interface.
+     </para>
+    </step>
+    <step>
+     <para>
+      In the <guimenu>Hardware Dialog</guimenu>, select <guimenu>Device
+      Type</guimenu> <guimenu>VLAN</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Change the value of <guimenu>Configuration Name</guimenu> to the ID of
+      your VLAN. Note that VLAN ID <literal>1</literal> is commonly used for
+      managing purposes.
+     </para>
+    </step>
+    <step>
+     <para>
+      Press <guimenu>Next</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Select the interface that the VLAN device should connect to below
+      <guimenu>Real Interface for VLAN</guimenu>.
+     </para>
+     <para>
+      If the desired interface does not appear in the list, first set up the
+      this interface without IP Address.
+     </para>
+    </step>
+    <step>
+     <para>
+      Select the desired method for assigning an IP address to the VLAN
+      device.
+     </para>
+    </step>
+    <step>
+     <para>
+      Press <guimenu>Next</guimenu> to finish the configuration.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    It is also possible to use the VLAN interface as physical interface of a
+    bridge. This makes it possible to connect several &vmhost; only networks
+    and allows to live migrate &vmguest; systems that are connected to such
+    a network.
+   </para>
+   <para>
+    &yast; does not always allow to set no IP address. However, this may be
+    a desired feature especially if &vmhost; only networks should be
+    connected. In this case, use the special address
+    <literal>0.0.0.0</literal> with netmask
+    <literal>255.255.255.255</literal>. The system scripts handle this
+    address as no IP address set.
+   </para>
+  </sect2>
+ </sect1>
+</chapter>

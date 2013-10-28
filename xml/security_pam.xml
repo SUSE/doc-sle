@@ -1,0 +1,817 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.pam">
+ <title>Authentication with PAM</title><indexterm class="startofrange"
+  id="idx.Authentifizierung_PAM">
+ <primary>authentication</primary>
+ <secondary>PAM</secondary></indexterm><indexterm>
+ <primary>Pluggable Authentication Modules</primary>
+ <see>PAM</see></indexterm><indexterm class="startofrange" id="idx.PAM">
+ <primary>PAM</primary></indexterm>
+ <abstract>
+  <para>
+   Linux uses PAM (pluggable authentication modules) in the authentication
+   process as a layer that mediates between user and application. PAM
+   modules are available on a systemwide basis, so they can be requested by
+   any application. This chapter describes how the modular authentication
+   mechanism works and how it is configured.
+  </para>
+ </abstract>
+ <sect1 id="sec.security.pam.whatis">
+  <title>What is PAM?</title>
+
+  <para>
+   System administrators and programmers often want to restrict access to
+   certain parts of the system or to limit the use of certain functions of
+   an application. Without PAM, applications must be adapted every time a
+   new authentication mechanism, such as LDAP, Samba, or Kerberos, is
+   introduced. This process, however, is rather time-consuming and
+   error-prone. One way to avoid these drawbacks is to separate applications
+   from the authentication mechanism and delegate authentication to
+   centrally managed modules. Whenever a newly required authentication
+   scheme is needed, it is sufficient to adapt or write a suitable
+   <emphasis>PAM module</emphasis> for use by the program in question.
+  </para>
+
+  <para>
+   The PAM concept consists of:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <emphasis>PAM modules</emphasis>, which are a set of shared libraries
+     for a specific authentication mechanism.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     A <emphasis>module stack</emphasis> with of one or more PAM modules.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     A PAM-aware <emphasis>service</emphasis> which needs authentication by
+     using a module stack or PAM modules. Usually a service is a familiar
+     name of the corresponding application, like <command>login</command> or
+     <command>su</command>. The service name <literal>other</literal> is a
+     reserved word for default rules.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <emphasis>Module arguments</emphasis>, with which the execution of a
+     single PAM module can be influenced.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     A mechanism evaluating each <emphasis>result</emphasis> of a single PAM
+     module execution. A positive value executes the next PAM module. The
+     way a negative value is dealt with, depends on the configuration&mdash;
+     <quote>no influence, proceed</quote> up to <quote>terminate
+     immediately</quote> and anything in between are valid options.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+ <sect1 id="sec.pam.struc.files">
+  <title>Structure of a PAM Configuration File</title>
+
+  <para>
+   PAM can be configured in two ways:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>File based configuration (<filename>/etc/pam.conf</filename>)</term>
+    <listitem>
+     <para>
+      The configuration of each service is stored in
+      <filename>/etc/pam.conf</filename>. However, for maintenance and
+      usability reasons, this configuration scheme is not used in
+      &productname;.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Directory based configuration (<filename>/etc/pam.d/</filename>)</term>
+    <listitem>
+     <para>
+      Every service (or program) that relies on the PAM mechanism has its
+      own configuration file in the <filename>/etc/pam.d/</filename>
+      directory. For example, the service for
+      <systemitem class="daemon">sshd</systemitem> can be found in the
+      <filename>/etc/pam.d/sshd</filename> file.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   The files under <filename>/etc/pam.d/</filename> define the PAM modules
+   used for authentication. Each file consists of lines, which define a
+   service, and each line consists of a maximum of four components:
+  </para>
+
+  <screen><replaceable>TYPE</replaceable><replaceable>CONTROL</replaceable><replaceable>MODULE_PATH</replaceable><replaceable>MODULE_ARGS</replaceable></screen>
+
+  <para>
+   The components have the following meaning:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><replaceable>TYPE</replaceable>
+    </term>
+    <listitem>
+     <para>
+      Declares the type of the service. PAM modules are processed as stacks.
+      Different types of modules have different purposes. For example, one
+      module checks the password, another verifies the location from which
+      the system is accessed, and yet another reads user-specific settings.
+      PAM knows about four different types of modules:
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><literal>auth</literal>
+       </term>
+       <listitem>
+        <para>
+         Check the user's authenticity, traditionally by querying a
+         password. However, this can also be achieved with the help of a
+         chip card or through biometrics (for example, fingerprints or iris
+         scan).
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>account</literal>
+       </term>
+       <listitem>
+        <para>
+         Modules of this type check if the user has general permission to
+         use the requested service. As an example, such a check should be
+         performed to ensure that no one can log in with the username of an
+         expired account.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>password</literal>
+       </term>
+       <listitem>
+        <para>
+         The purpose of this type of module is to enable the change of an
+         authentication token. In most cases, this is a password.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>session</literal>
+       </term>
+       <listitem>
+        <para>
+         Modules of this type are responsible for managing and configuring
+         user sessions. They are started before and after authentication to
+         log login attempts and configure the user's specific environment
+         (mail accounts, home directory, system limits, etc.).
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><replaceable>CONTROL</replaceable>
+    </term>
+    <listitem>
+     <para>
+      Indicates the behavior of a PAM module. Each module can have the
+      following control flags:
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><literal>required</literal>
+       </term>
+       <listitem>
+        <para>
+         A module with this flag must be successfully processed before the
+         authentication may proceed. After the failure of a module with the
+         <literal>required</literal> flag, all other modules with the same
+         flag are processed before the user receives a message about the
+         failure of the authentication attempt.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>requisite</literal>
+       </term>
+       <listitem>
+        <para>
+         Modules having this flag must also be processed successfully, in
+         much the same way as a module with the <literal>required</literal>
+         flag. However, in case of failure a module with this flag gives
+         immediate feedback to the user and no further modules are
+         processed. In case of success, other modules are subsequently
+         processed, just like any modules with the
+         <literal>required</literal> flag. The <literal>requisite</literal>
+         flag can be used as a basic filter checking for the existence of
+         certain conditions that are essential for a correct authentication.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>sufficient</literal>
+       </term>
+       <listitem>
+        <para>
+         After a module with this flag has been successfully processed, the
+         requesting application receives an immediate message about the
+         success and no further modules are processed, provided there was no
+         preceding failure of a module with the <literal>required</literal>
+         flag. The failure of a module with the
+         <literal>sufficient</literal> flag has no direct consequences, in
+         the sense that any subsequent modules are processed in their
+         respective order.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>optional</literal>
+       </term>
+       <listitem>
+        <para>
+         The failure or success of a module with this flag does not have any
+         direct consequences. This can be useful for modules that are only
+         intended to display a message (for example, to tell the user that
+         mail has arrived) without taking any further action.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><literal>include</literal>
+       </term>
+       <listitem>
+        <para>
+         If this flag is given, the file specified as argument is inserted
+         at this place.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><replaceable>MODULE_PATH</replaceable>
+    </term>
+    <listitem>
+     <para>
+      Contains a full filename of a PAM module. It does not need to be
+      specified explicitly, as long as the module is located in the default
+      directory <filename>/lib/security</filename> (for all 64-bit platforms
+      supported by &productnamereg;, the directory is
+      <filename>/lib64/security</filename>).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><replaceable>MODULE_ARGS</replaceable>
+    </term>
+    <listitem>
+     <para>
+      Contains a space-separated list of options to influence the behavior
+      of a PAM module, such as <option>debug</option> (enables debugging) or
+      <option>nullok</option> (allows the use of empty passwords).
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   In addition, there are global configuration files for PAM modules under
+   <filename>/etc/security</filename>, which define the exact behavior of
+   these modules (examples include <filename>pam_env.conf</filename> and
+   <filename>time.conf</filename>). Every application that uses a PAM module
+   actually calls a set of PAM functions, which then process the information
+   in the various configuration files and return the result to the
+   requesting application.
+  </para>
+
+  <para>
+   To facilitate the creation and maintenance of PAM modules, common default
+   configuration files for the types <literal>auth</literal>,
+   <literal>account</literal>, <literal>password</literal>, and
+   <literal>session</literal> modules have been introduced. These are
+   retrieved from every application's PAM configuration. Updates to the
+   global PAM configuration modules in <filename>common-*</filename> are
+   thus propagated across all PAM configuration files without requiring the
+   administrator to update every single PAM configuration file.
+  </para>
+
+  <para>
+   The global PAM configuration files are maintained using the
+   <command>pam-config</command> tool. This tool automatically adds new
+   modules to the configuration, changes the configuration of existing ones
+   or deletes modules (or options) from the configurations. Manual
+   intervention in maintaining PAM configurations is minimized or no longer
+   required.
+  </para>
+
+  <note>
+   <title>64-Bit and 32-Bit Mixed Installations</title>
+   <para>
+    When using a 64-bit operating system, it is possible to also include a
+    runtime environment for 32-bit applications. In this case, make sure
+    that you install both versions of the PAM modules.
+   </para>
+  </note>
+ </sect1>
+ <sect1 id="sec.pam.struc.format">
+  <title>The PAM Configuration of sshd</title>
+
+  <para>
+   Consider the PAM configuration of sshd as an example:
+  </para>
+
+  <example id="dat.pam.sshd">
+   <title>PAM Configuration for sshd (<filename>/etc/pam.d/sshd</filename>)</title>
+<!-- FIXME: On 11.4, this file contains more entries -->
+<screen>#%PAM-1.0 <co id="co.security.pam.sshd.pam-line"/>
+auth     requisite      pam_nologin.so <co id="co.security.pam.sshd.pam_nologin"/>
+auth     include        common-auth <co id="co.security.pam.sshd.common-auth"/>
+account  requisite      pam_nologin.so <xref xrefstyle="select:nopage" linkend="co.security.pam.sshd.pam_nologin"/>
+account  include        common-account <xref xrefstyle="select:nopage" linkend="co.security.pam.sshd.common-auth"/>
+password include        common-password <xref linkend="co.security.pam.sshd.common-auth" xrefstyle="select:nopage"/>
+session  required       pam_loginuid.so <co id="co.security.pam.sshd.pam_loginuid"/>
+session  include        common-session <xref linkend="co.security.pam.sshd.common-auth" xrefstyle="select:nopage"/></screen>
+   <calloutlist>
+    <callout arearefs="co.security.pam.sshd.pam-line">
+     <para>
+      Declares the version of this configuration file for PAM 1.0. This is
+      merely a convention, but could be used in the future to check the
+      version.
+     </para>
+    </callout>
+    <callout arearefs="co.security.pam.sshd.pam_nologin">
+     <para>
+      Checks, if <filename>/etc/nologin</filename> exists. If it does, no
+      user other than <systemitem class="username">root</systemitem> may log
+      in.
+     </para>
+    </callout>
+    <callout arearefs="co.security.pam.sshd.common-auth">
+     <para>
+      Refers to the configuration files of four module types:
+      <filename>common-auth</filename>, <filename>common-account</filename>,
+      <filename>common-password</filename>, and
+      <filename>common-session</filename>. These four files hold the default
+      configuration for each module type.
+     </para>
+    </callout>
+    <callout arearefs="co.security.pam.sshd.pam_loginuid">
+     <para>
+      Sets the login uid process attribute for the process that was
+      authenticated.
+     </para>
+    </callout>
+   </calloutlist>
+  </example>
+
+  <para>
+   By including the configuration files instead of adding each module
+   separately to the respective PAM configuration, you automatically get an
+   updated PAM configuration when an administrator changes the defaults.
+   Formerly, you had to adjust all configuration files manually for all
+   applications when changes to PAM occurred or a new application was
+   installed. Now the PAM configuration is made with central configuration
+   files and all changes are automatically inherited by the PAM
+   configuration of each service.
+  </para>
+
+  <para>
+   <indexterm>
+   <primary>users</primary>
+   <secondary>/etc/passwd</secondary>
+   </indexterm> The first include file (<filename>common-auth</filename>)
+   calls three modules of the <literal>auth</literal> type:
+   <systemitem class="library">pam_env.so</systemitem>,
+   <systemitem
+    class="library">pam_gnome_keyring.so</systemitem> and
+   <systemitem class="library"
+    >pam_unix2.so</systemitem>. See
+   <xref linkend="dat.pam.common-auth"/>.
+  </para>
+
+  <example id="dat.pam.common-auth">
+   <title>Default Configuration for the <literal>auth</literal> Section (<filename>common-auth</filename>)</title>
+<!-- pam_gnome_keyring.so is not listed on SLE11 SP1 -->
+   <screen
+>auth    required        pam_env.so           <co id="co.security.pam.sshd.pam_env"/>
+auth    required        pam_unix2.so         <co id="co.security.pam.sshd.pam_unix2"/></screen>
+  </example>
+
+  <calloutlist>
+   <callout arearefs="co.security.pam.sshd.pam_env">
+    <para>
+     <systemitem class="library">pam_env.so</systemitem> loads
+     <filename>/etc/security/pam_env.conf</filename> to set the environment
+     variables as specified in this file. It can be used to set the
+     <envar>DISPLAY</envar> variable to the correct value, because the
+     <systemitem class="library">pam_env</systemitem> module knows about the
+     location from which the login is taking place.
+    </para>
+   </callout>
+   <callout arearefs="co.security.pam.sshd.pam_unix2">
+    <para>
+     <systemitem class="library">pam_unix2</systemitem> checks the user's
+     login and password against <filename>/etc/passwd</filename> and
+     <filename>/etc/shadow</filename>.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   The whole stack of <literal>auth</literal> modules is processed before
+   sshd gets any feedback about whether the login has succeeded. All modules
+   of the stack having the <literal>required</literal> control flag must be
+   processed successfully before sshd receives a message about the positive
+   result. If one of the modules is not successful, the entire module stack
+   is still processed and only then is sshd notified about the negative
+   result.
+  </para>
+
+  <para>
+   As soon as all modules of the <literal>auth</literal> type have been
+   successfully processed, another include statement is processed, in this
+   case, that in <xref
+    linkend="dat.pam.common-account"/>.
+   <filename>common-account</filename> contains just one module,
+   <literal>pam_unix2</literal>. If <literal>pam_unix2</literal> returns the
+   result that the user exists, sshd receives a message announcing this
+   success and the next stack of modules (<literal>password</literal>) is
+   processed, shown in <xref linkend="dat.pam.common-password"/>.
+  </para>
+
+  <example id="dat.pam.common-account">
+   <title>Default Configuration for the <literal>account</literal> Section (<filename>common-account</filename>)</title>
+   <screen>account required        pam_unix2.so</screen>
+  </example>
+
+  <example id="dat.pam.common-password">
+   <title>Default Configuration for the <literal>password</literal> Section (<filename>common-password</filename>)</title>
+<!-- On SLE11 SP1, there is no "optional", only these two: -->
+   <screen
+>password requisite      pam_pwcheck.so  nullok cracklib
+password required       pam_unix2.so    nullok use_authtok</screen>
+  </example>
+
+  <remark>bg: now, this is a bit problematic. When sticking with the ssh
+  example, pam_pwcheck will never be used, because this (according to
+  the man page) provides only functionality for the password changing
+  management group. The following is not nice, but I hope it is slightly
+  improved... </remark>
+
+  <para>
+   Again, the PAM configuration of sshd involves just an include statement
+   referring to the default configuration for <literal>password</literal>
+   modules located in <filename>common-password</filename>. These modules
+   must successfully be completed (control flags
+   <literal>requisite</literal> and <literal>required</literal>) whenever
+   the application requests the change of an authentication token.
+  </para>
+
+  <para>
+   Changing a password or another authentication token requires a security
+   check. This is achieved with the <filename>pam_pwcheck</filename> module.
+   The <filename>pam_unix2</filename> module used afterwards carries over
+   any old and new passwords from <filename>pam_pwcheck</filename>, so the
+   user does not need to authenticate again after changing the password.
+   This procedure makes it impossible to circumvent the checks carried out
+   by <filename>pam_pwcheck</filename>. Whenever the
+   <literal>account</literal> or the <literal>auth</literal> type are
+   configured to complain about expired passwords, the
+   <literal>password</literal> modules should also be used.
+  </para>
+
+  <example id="dat.pam.common-session">
+   <title>Default Configuration for the <literal>session</literal> Section (<filename>common-session</filename>)</title>
+<!-- On SLE11 SP1, there are these three only: -->
+   <screen>session required        pam_limits.so
+session required        pam_unix2.so
+session optional        pam_umask.so</screen>
+  </example>
+
+  <para>
+   As the final step, the modules of the <literal>session</literal> type
+   (bundled in the <filename>common-session</filename> file) are called to
+   configure the session according to the settings for the user in question.
+   The <filename>pam_limits</filename> module loads the file
+   <filename>/etc/security/limits.conf</filename>, which may define limits
+   on the use of certain system resources. The
+   <filename>pam_unix2</filename> module is processed again. The
+   <filename>pam_umask</filename> module can be used to set the file mode
+   creation mask. Since this module carries the <literal>optional</literal>
+   flag, a failure of this module would not affect the successful completion
+   of the entire session module stack. The <literal>session</literal>
+   modules are called a second time when the user logs out.
+  </para>
+ </sect1>
+ <sect1 id="sec.pam.struc.conf">
+  <title>Configuration of PAM Modules</title>
+
+  <para>
+   Some of the PAM modules are configurable. The configuration files are
+   located in <filename>/etc/security</filename>. This section briefly
+   describes the configuration files relevant to the sshd
+   example&mdash;<filename>pam_env.conf</filename> and
+   <filename>limits.conf</filename>.
+  </para>
+
+  <sect2 id="sec.pam.struc.conf.pamenv">
+   <title>pam_env.conf</title>
+   <para>
+    <filename>pam_env.conf</filename> can be used to define a standardized
+    environment for users that is set whenever the
+    <systemitem>pam_env</systemitem> module is called. With it, preset
+    environment variables using the following syntax:
+   </para>
+   <screen><replaceable>VARIABLE</replaceable>  [DEFAULT=<replaceable>value</replaceable>]  [OVERRIDE=<replaceable>value</replaceable>]</screen>
+   <variablelist>
+    <varlistentry>
+     <term><replaceable>VARIABLE</replaceable>
+     </term>
+     <listitem>
+      <para>
+       Name of the environment variable to set.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>[DEFAULT=&lt;value&gt;]</systemitem>
+     </term>
+     <listitem>
+      <para>
+       Default <replaceable>value</replaceable> the administrator wants to
+       set.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>[OVERRIDE=&lt;value&gt;]</systemitem>
+     </term>
+     <listitem>
+      <para>
+       Values that may be queried and set by
+       <systemitem>pam_env</systemitem>, overriding the default value.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    A typical example of how <systemitem>pam_env</systemitem> can be used is
+    the adaptation of the <envar>DISPLAY</envar> variable, which is changed
+    whenever a remote login takes place. This is shown in
+    <xref linkend="dat.pam.pamenv"/>.
+   </para>
+   <example id="dat.pam.pamenv">
+    <title>pam_env.conf</title>
+    <screen>
+REMOTEHOST     DEFAULT=localhost OVERRIDE=@{PAM_RHOST}
+DISPLAY        DEFAULT=${REMOTEHOST}:0.0 OVERRIDE=${DISPLAY}
+</screen>
+   </example>
+   <para>
+    The first line sets the value of the <envar>REMOTEHOST</envar> variable
+    to <literal>localhost</literal>, which is used whenever
+    <filename>pam_env</filename> cannot determine any other value. The
+    <envar>DISPLAY</envar> variable in turn contains the value of
+    <envar>REMOTEHOST</envar>. Find more information in the comments in
+    <filename>/etc/security/pam_env.conf</filename>.
+   </para>
+  </sect2>
+
+<!-- pam_mount is a stand-alone package -->
+
+  <sect2>
+   <title>pam_mount.conf</title>
+   <para>
+    The purpose of <systemitem>pam_mount</systemitem> is to mount user home
+    directories during the login process, and to unmount them during logout
+    in an environment where a central file server keeps all the home
+    directories of users. With this method, it is not necessary to mount a
+    complete <filename>/home</filename> directory where all the user home
+    directories would be accessible. Instead, only the home directory of the
+    user who is about to log in, is mounted.
+   </para>
+   <para>
+    After installing <systemitem>pam_mount</systemitem>, a template of
+    <filename>pam_mount.conf.xml</filename> is available in
+    <filename>/etc/security</filename>. The description of the various
+    elements can be found in the manual page <command>man 5
+    pam_mount.conf</command>.
+   </para>
+   <para>
+    A basic configuration of this feature can be done with &yast;. Select
+    <menuchoice><guimenu>Network Settings</guimenu> <guimenu>Windows Domain
+    Membership</guimenu> <guimenu>Expert Settings</guimenu></menuchoice> to
+    add the file server; see <xref linkend="sec.samba.client.inst"/>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.pam.struc.pamlimits">
+   <title>limits.conf</title>
+   <para>
+    System limits can be set on a user or group basis in
+    <filename>limits.conf</filename>, which is read by the
+    <systemitem>pam_limits</systemitem> module. The file allows you to set
+    hard limits, which may not be exceeded at all, and soft limits, which
+    may be exceeded temporarily. For more information about the syntax and
+    the options, see the comments in
+    <filename>/etc/security/limits.conf</filename>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.pam.pam-config">
+  <title>Configuring PAM Using pam-config</title>
+
+  <para>
+   The <command>pam-config</command> tool helps you configure the global PAM
+   configuration files (<filename>/etc/pam.d/common-*-pc</filename>) as well
+   as several selected application configurations. For a list of supported
+   modules, use the <command>pam-config --list-modules</command> command.
+   Use the <command>pam-config</command> command to maintain your PAM
+   configuration files. Add new modules to your PAM configurations, delete
+   other modules or modify options to these modules. When changing global
+   PAM configuration files, no manual tweaking of the PAM setup for
+   individual applications is required.
+  </para>
+
+  <para>
+   A simple use case for <command>pam-config</command> involves the
+   following:
+  </para>
+
+  <procedure>
+   <step>
+    <formalpara>
+     <title>Auto-generate a fresh Unix-style PAM configuration.</title>
+     <para>
+      Let pam-config create the simplest possible setup which you can extend
+      later on. The <command>pam-config --create</command> command creates a
+      simple UNIX authentication configuration. Pre-existing configuration
+      files not maintained by pam-config are overwritten, but backup copies
+      are kept as <literal>*.pam-config-backup</literal>.
+     </para>
+    </formalpara>
+   </step>
+   <step>
+    <formalpara>
+     <title>Add a new authentication method.</title>
+     <para>
+      Adding a new authentication method (for example, LDAP) to your stack
+      of PAM modules comes down to a simple <command>pam-config --add
+      --ldap</command> command. LDAP is added wherever appropriate across
+      all <filename>common-*-pc</filename> PAM configuration files.
+     </para>
+    </formalpara>
+   </step>
+   <step>
+    <formalpara>
+     <title>Add debugging for test purposes.</title>
+     <para>
+      To make sure the new authentication procedure works as planned, turn
+      on debugging for all PAM-related operations. The <command>pam-config
+      --add --ldap-debug</command> turns on debugging for LDAP-related PAM
+      operations. Find the debugging output in
+      <filename>/var/log/messages</filename>.
+     </para>
+    </formalpara>
+   </step>
+   <step>
+    <formalpara>
+     <title>Query your setup.</title>
+     <para>
+      Before you finally apply your new PAM setup, check if it contains all
+      the options you wanted to add. The <command>pam-config --query
+      --<replaceable>module</replaceable></command> lists both the type and
+      the options for the queried PAM module.
+     </para>
+    </formalpara>
+   </step>
+   <step>
+    <formalpara>
+     <title>Remove the debug options.</title>
+     <para>
+      Finally, remove the debug option from your setup when you are entirely
+      satisfied with the performance of it. The <command>pam-config --delete
+      --ldap-debug</command> command turns off debugging for LDAP
+      authentication. In case you had debugging options added for other
+      modules, use similar commands to turn these off.
+     </para>
+    </formalpara>
+   </step>
+  </procedure>
+
+  <para>
+   For more information on the <command>pam-config</command> command and the
+   options available, refer to the manual page of
+   <command>pam-config(8)</command>.
+  </para>
+ </sect1>
+ <sect1 id="sec.pam.manual-config">
+  <title>Manually Configuring PAM</title>
+
+  <remark condition="generic">
+   2011-07-18 - fs: Fate #310739
+  </remark>
+
+  <para>
+   If you prefer to manually create or maintain your PAM configuration
+   files, you need to make sure to disable <command>pam-config</command> for
+   these files.
+  </para>
+
+  <para>
+   When you create your PAM configuration files from scratch using the
+   <command>pam-config --create</command> command, it creates symbolic links
+   from the <filename>common-<replaceable>*</replaceable></filename> to the
+   <filename>common-<replaceable>*</replaceable>-pc</filename> files.
+   <command>pam-config</command> only modifies the
+   <filename>common-<replaceable>*</replaceable>-pc</filename> configuration
+   files. Removing these symbolic links effectively disables pam-config,
+   because pam-config only operates on the
+   <filename>common-<replaceable>*</replaceable>-pc</filename> files and
+   these files are not put into effect without the symbolic links.
+  </para>
+ </sect1>
+ <sect1 id="sec.pam.info">
+  <title>For More Information</title>
+
+  <para>
+   In the <filename>/usr/share/doc/packages/pam</filename> directory after
+   installing the <systemitem>pam-doc</systemitem> package, find the
+   following additional documentation:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>READMEs</term>
+    <listitem>
+     <para>
+      In the top level of this directory, there is the
+      <filename>modules</filename> subdirectory holding README files about
+      the available PAM modules.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>The Linux-PAM System Administrators' Guide</term>
+    <listitem>
+     <para>
+      This document comprises everything that the system administrator
+      should know about PAM. It discusses a range of topics, from the syntax
+      of configuration files to the security aspects of PAM.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>The Linux-PAM Module Writers' Manual</term>
+    <listitem>
+     <para>
+      This document summarizes the topic from the developer's point of view,
+      with information about how to write standard-compliant PAM modules.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>The Linux-PAM Application Developers' Guide</term>
+    <listitem>
+     <para>
+      This document comprises everything needed by an application developer
+      who wants to use the PAM libraries.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>The PAM Manual Pages</term>
+    <listitem>
+     <para>
+      PAM in general as well as the individual modules come with manual
+      pages that provide a good overview of the functionality of all the
+      components.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <indexterm
+   class="endofrange" startref="idx.PAM"/><indexterm class="endofrange"
+   startref="idx.Authentifizierung_PAM"/>
+ </sect1>
+</chapter>

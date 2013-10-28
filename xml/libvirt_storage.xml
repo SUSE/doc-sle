@@ -1,0 +1,1083 @@
+<?xml version="1.0"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.libvirt.storage">
+ <title>Managing Storage</title>
+ <para>
+  When managing a &vmguest; on the &vmhost; itself, it is possible to access
+  the complete file system of the &vmhost; in order to attach or create
+  virtual hard disks or to attach existing images to the &vmguest;. However,
+  this is not possible when managing &vmguest;s from a remote host. For this
+  reason, &libvirt; supports so called <quote>Storage Pools</quote> which
+  can be accessed from remote machines.
+ </para>
+ <tip>
+  <title>CD/DVD ISO images</title>
+  <para>
+   In order to be able to access CD/DVD iso images on the &vmhost; from
+   remote, they also need to be placed in a storage pool.
+  </para>
+ </tip>
+ <para>
+  &libvirt; knows two different types of storage: volumes and pools.
+ </para>
+ <remark condition="clarity">
+   2011-11-14 - fs:
+  Open question: Ownership of directories to become storage pools - qemu.qemu
+  works, is this default?
+  
+  </remark>
+ <variablelist>
+  <varlistentry>
+   <term>Storage Volume</term>
+   <listitem>
+    <para>
+     A storage volume is a storage device that can be assigned to a
+     guest&mdash;a virtual disk or a CD/DVD/floppy image. Physically (on the
+     &vmhost;) it can be a block device (a partition, a logical volume,
+     etc.) or a file.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Storage Pool</term>
+   <listitem>
+    <para>
+     A storage pool basically is a storage resource on the &vmhost; that can
+     be used for storing volumes, similar to network storage for a desktop
+     machine. Physically it can be one of the following types:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>File System Directory (<guimenu>dir</guimenu>)</term>
+      <listitem>
+       <para>
+        A directory for hosting image files. The files can be either one of
+        the supported disk formats (raw, qcow2, or qed), or ISO images.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Physical Disk Device (<guimenu>disk</guimenu>)</term>
+      <listitem>
+       <para>
+        Use a complete physical disk as storage. A partition is created for
+        each volume that is added to the pool.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Pre-Formatted Block Device (<guimenu>fs</guimenu>)</term>
+      <listitem>
+       <para>
+        Specify a partition to be used in the same way as a file system
+        directory pool (a directory for hosting image files). The only
+        difference to using a file system directory is the fact that
+        &libvirt; takes care of mounting the device.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>iSCSI Target (iscsi)</term>
+      <listitem>
+       <para>
+        Set up a pool on an iSCSI target. You need to have been logged into
+        the volume once before, in order to use it with &libvirt; (use the
+        &yast; <guimenu>iSCSI Initiator</guimenu> to detect and log in to a
+        volume, see <xref linkend="stor_admin"/> for details). Volume
+        creation on iSCSI pools is not supported, instead each existing
+        Logical Unit Number (LUN) represents a volume. Each volume/LUN also
+        needs a valid (empty) partition table or disk label before you can
+        use it. If missing, use <command>fdisk</command> to add it:
+       </para>
+       <screen>~ # fdisk -cu /dev/disk/by-path/ip-&wsIip;:3260-iscsi-iqn.2010-10.com.example:[...]-lun-2
+Device contains neither a valid DOS partition table, nor Sun, SGI
+or OSF disklabel
+Building a new DOS disklabel with disk identifier 0xc15cdc4e.
+Changes will remain in memory only, until you decide to write them.
+After that, of course, the previous content won't be recoverable.
+
+Warning: invalid flag 0x0000 of partition table 4 will be corrected by w(rite)
+
+Command (m for help): w
+The partition table has been altered!
+
+Calling ioctl() to re-read partition table.
+Syncing disks.
+	</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>LVM Volume Group (logical)</term>
+      <listitem>
+       <para>
+        Use a LVM volume group as a pool. You may either use a pre-defined
+        volume group, or create a group by specifying the devices to use.
+        Storage volumes are created as partitions on the volume.
+       </para>
+       <warning>
+        <title>Deleting the LVM Based Pool</title>
+        <para>
+         When the LVM based pool is deleted in the Storage Manager, the
+         volume group is deleted as well. This results in a non-recoverable
+         loss of all data stored on the pool!
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Multipath Devices (<guimenu>mpath</guimenu>)</term>
+      <listitem>
+       <para>
+        At the moment, multipathing support is limited to assigning existing
+        devices to the guests. Volume creation or configuring multipathing
+        from within &libvirt; is not supported.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Network Exported Directory (<guimenu>netfs</guimenu>)</term>
+      <listitem>
+       <para>
+        Specify a network directory to be used in the same way as a file
+        system directory pool (a directory for hosting image files). The
+        only difference to using a file system directory is the fact that
+        &libvirt; takes care of mounting the directory. Supported protocols
+        are NFS and glusterfs.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>SCSI Host Adapter (<guimenu>scsi</guimenu>)</term>
+      <listitem>
+       <para>
+        Use an SCSI host adapter in almost the same way a an iSCSI target.
+        It is recommended to use a device name from
+        <filename>/dev/disk/by-*</filename> rather than the simple
+        <filename>/dev/sd<replaceable>X</replaceable></filename>, since the
+        latter may change (for example when adding or removing hard disks).
+        Volume creation on iSCSI pools is not supported, instead each
+        existing LUN (Logical Unit Number) represents a volume.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </listitem>
+  </varlistentry>
+ </variablelist>
+ <warning>
+  <title>Security Considerations</title>
+  <para>
+   In order to avoid data loss or data corruption, do not attempt to use
+   resources such as LVM volume groups, iSCSI targets, etc. that are used to
+   build storage pools on the &vmhost;, as well. There is no need to connect
+   to these resources from the &vmhost; or to mount them on the
+   &vmhost;&mdash;&libvirt; takes care of this.
+  </para>
+  <para>
+   Do not mount partitions on the &vmhost; by label. Under certain
+   circumstances it is possible that a partition is labeled from within a
+   &vmguest; with a name already existing on the &vmhost;.
+  </para>
+ </warning>
+ <sect1 id="sec.libvirt.storage.vmm">
+  <title>Managing Storage with &vmm;</title>
+
+  <para>
+   The &vmm; provides a graphical interface&mdash;the Storage Manager&mdash;
+   to manage storage volumes and pools. To access it, either right-click
+   a connection and choose <guimenu>Details</guimenu>, or highlight a
+   connection and choose <menuchoice> <guimenu>Edit</guimenu>
+   <guimenu>Connection Details</guimenu> </menuchoice>. Select the
+   <guimenu>Storage</guimenu> tab.
+  </para>
+
+  <informalfigure>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="virt_virt-manager_storage.png" width="60%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="virt_virt-manager_storage.png" width="60%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </informalfigure>
+
+  <sect2 id="sec.libvirt.storage.vmm.addpool">
+   <title>Adding a Storage Pool</title>
+   <para>
+    To add a storage pool, proceed as follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Click the plus symbol in the bottom left corner to open the
+      <guimenu>Add a New Storage Pool Window</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Provide a <guimenu>Name</guimenu> for the pool (consisting of
+      alphanumeric characters plus _-.) and select a
+      <guimenu>Type</guimenu>. Proceed with <guimenu>Forward</guimenu>.
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="virt_virt-manager_storage_add.png" width="60%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="virt_virt-manager_storage_add.png" width="60%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      Specify the needed details in the following window. The data that
+      needs to be entered depends on the type of pool you are creating.
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="virt_virt-manager_storage_add_details.png" width="60%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="virt_virt-manager_storage_add_details.png" width="60%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+     <variablelist>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>dir:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>Target Path</guimenu>: Specify an existing directory.
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>disk:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <remark condition="clarity">
+
+           This feature does not work anyway, see
+           https://bugzilla.novell.com/show_bug.cgi?id=730435
+          </remark>
+          <para>
+           <guimenu>Target Path</guimenu>: The directory which hosts the
+           devices. The default value <filename>/dev</filename> should fit
+           in most cases.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Format</guimenu>: Format of the device's partition
+           table. Using <guimenu>auto</guimenu> should work in most cases.
+           If not, get the needed format by running the command
+           <command>parted <option>-l</option></command> on the &vmhost;.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Source Path:</guimenu> Path to the device. It is
+           recommended to use a device name from
+           <filename>/dev/disk/by-*</filename> rather than the simple
+           <filename>/dev/sd<replaceable>X</replaceable></filename>, since
+           the latter may change (for example when adding or removing hard
+           disks). You need to specify the path that resembles the whole
+           disk, not a partition on the disk (if existing).
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Build Pool:</guimenu> Activating this option formats the
+           device. Use with care&mdash; all data on the device will be lost!
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>fs:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>Target Path:</guimenu> Mount point on the &vmhost; file
+           system.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Format: </guimenu> File system format of the device. the
+           default value <literal>auto</literal> should work.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Source Path:</guimenu> Path to the device file. It is
+           recommended to use a device name from
+           <filename>/dev/disk/by-*</filename> rather than the simple
+           <filename>/dev/sd<replaceable>X</replaceable></filename>, since
+           the latter may change (for example when adding or removing hard
+           disks).
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>iscsi:</guimenu>
+       </term>
+       <listitem>
+        <para>
+         Get the necessary data by running the following command on the
+         &vmhost;:
+        </para>
+        <screen>iscsiadm --mode node</screen>
+        <para>
+         It will return a list of iSCSI volumes with the following format.
+         The elements highlighted with a bold font are the ones needed:
+        </para>
+        <screen><emphasis role="bold">IP_ADDRESS</emphasis>:PORT,TPGT <emphasis role="bold">TARGET_NAME_(IQN)</emphasis></screen>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>Target Path:</guimenu> The directory containing the
+           device file. Use <literal>/dev/disk/by-path</literal> (default)
+           or <literal>/dev/disk/by-id</literal>.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Host Name:</guimenu> Host name or IP address of the
+           iSCSI server.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Source Path:</guimenu> The iSCSI target name (IQN).
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>logical:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>Target Path:</guimenu> In case you use an existing
+           volume group, specify the existing device path. In case of
+           building a new LVM volume group, specify a device name in the
+           <filename>/dev</filename> directory that does not already exist.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Source Path:</guimenu> Leave empty when using an
+           existing volume group. When creating a new one, specify its
+           devices here.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Build Pool:</guimenu> Only activate when creating a new
+           volume group.
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>mpath:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>Target Path:</guimenu> Support of multipathing is
+           currently limited to making all multipath devices available.
+           Therefore you may enter an arbitrary string here (needed,
+           otherwise the XML parser will fail), it will be ignored anyway.
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>netfs:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>target Path:</guimenu> Mount point on the &vmhost; file
+           system.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Format:</guimenu> Network file system protocol
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Host Name:</guimenu> IP address or hostname of the
+           server exporting the network file system.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Source Path:</guimenu> Directory on the server that is
+           being exported.
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">Type</emphasis><guimenu>scsi:</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist>
+         <listitem>
+          <para>
+           <guimenu>Target Path:</guimenu> The directory containing the
+           device file. Use <literal>/dev/disk/by-path</literal> (default)
+           or <literal>/dev/disk/by-id</literal>.
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>Source Path:</guimenu> Name of the SCSI adapter.
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <note>
+      <title>File Browsing</title>
+      <para>
+       Using the file browser by clicking on <guimenu>Browse</guimenu> is
+       not possible when operating from remote.
+      </para>
+     </note>
+    </step>
+    <step>
+     <para>
+      Click <guimenu>Finish</guimenu> to add the storage pool.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 id="sec.libvirt.storage.vmm.manage">
+   <title>Managing Storage Pools</title>
+   <para>
+    &vmm;'s Storage Manager lets you create or delete volumes in a pool. You
+    may also temporarily deactivate or permanently delete existing storage
+    pools. Changing the basic configuration of a pool is currently not
+    supported by &suse;.
+   </para>
+   <sect3 id="sec.libvirt.storage.vmm.manage.pool">
+    <title>Starting, Stopping and Deleting Pools</title>
+    <para>
+     The purpose of storage pools is to provide block devices located on the
+     &vmhost;, that can be added to a &vmguest; when managing it from
+     remote. In order to make a pool temporarily inaccessible from remote,
+     you may <guimenu>Stop</guimenu> it by clicking on the stop symbol in
+     the bottom left corner of the Storage Manager. Stopped pools are marked
+     with <guimenu>State: Inactive</guimenu> and are grayed out in the list
+     pane. By default, a newly created pool will be automatically started
+     <guimenu>On Boot</guimenu> of the &vmhost;.
+    </para>
+    <para>
+     To <guimenu>Start</guimenu> an inactive pool and make it available from
+     remote again click on the play symbol in the bottom left corner of the
+     Storage Manager.
+    </para>
+    <note>
+     <title>A Pool's State Does not Affect Attached Volumes</title>
+     <para>
+      Volumes from a pool attached to &vmguest;s are always available,
+      regardless of the pool's state (<guimenu>Active</guimenu> (stopped) or
+      <guimenu>Inactive</guimenu> (started)). The state of the pool solely
+      affects the ability to attach volumes to a &vmguest; via remote
+      management.
+     </para>
+    </note>
+    <para>
+     To permanently make a pool inaccessible, you can
+     <guimenu>Delete</guimenu> it by clicking on the shredder symbol in the
+     bottom left corner of the Storage Manager. You may only delete inactive
+     pools. Deleting a pool does not physically erase its contents on
+     &vmhost;&mdash;it only deletes the pool configuration. However, you
+     need to be extra careful when deleting pools, especially when deleting
+     LVM volume group-based tools:
+    </para>
+    <warning>
+     <title>Deleting Storage Pools</title>
+     <para>
+      Deleting storage pools based on <emphasis>local</emphasis> file system
+      directories, local partitions or disks has no effect on the
+      availability of volumes from these pools currently attached to
+      &vmguest;s.
+     </para>
+     <para>
+      Volumes located in pools of type iSCSI, SCSI, LVM group or Network
+      Exported Directory will become inaccessible from the &vmguest; in case
+      the pool will be deleted. Although the volumes themselves will not be
+      deleted, the &vmhost; will no longer have access to the resources.
+     </para>
+     <para>
+      Volumes on iSCSI/SCSI targets or Network Exported Directory will be
+      accessible again when creating an adequate new pool or when
+      mounting/accessing these resources directly from the host system.
+     </para>
+     <para>
+      When deleting an LVM group-based storage pool, the LVM group
+      definition will be erased and the LVM group will no longer exist on
+      the host system. The configuration is not recoverable and all volumes
+      from this pool are lost.
+     </para>
+    </warning>
+   </sect3>
+   <sect3 id="sec.libvirt.storage.vmm.manage.volume_add">
+    <title>Adding Volumes to a Storage Pool</title>
+    <para>
+     &vmm; lets you create volumes in all storage pools, except in pools of
+     types Multipath, iSCSI, or SCSI. A volume in these pools is equivalent
+     to a LUN and cannot be changed from within &libvirt;.
+    </para>
+    <procedure>
+     <step>
+      <para>
+       A new volume can either be created using the Storage Manager or while
+       adding a new storage device to a &vmguest;. In both cases, select a
+       <guimenu>Storage Pool</guimenu> and then click <guimenu>New
+       Volume</guimenu>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Specify a <guimenu>Name</guimenu> for the image and choose an image
+       format (note that &suse; currently only supports
+       <literal>raw</literal>, <literal>qcow2</literal>, or
+       <literal>qed</literal> images). The latter option is not available on
+       LVM group-based pools.
+      </para>
+      <para>
+       Specify a <guimenu>Max Capacity</guimenu> and the amount of space
+       that should initially be allocated. If both values differ, a
+       <literal>sparse</literal> image file, growing on demand, will be
+       created.
+      </para>
+     </step>
+     <step>
+      <para>
+       Start the volume creation by clicking <guimenu>Finish</guimenu>.
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 id="sec.libvirt.storage.vmm.manage.volume_delete">
+    <title>Deleting Volumes From a Storage Pool</title>
+    <para>
+     Deleting a volume can only be done from the Storage Manager, by
+     selecting a volume and clicking <guimenu>Delete Volume</guimenu>.
+     Confirm with <guimenu>Yes</guimenu>. Use this function with extreme
+     care!
+    </para>
+    <warning>
+     <title>No Checks Upon Volume Deletion</title>
+     <para>
+      A volume will be deleted in any case, regardless whether it is
+      currently used in an active or inactive &vmguest;. There is no way to
+      recover a deleted volume.
+     </para>
+     <para>
+      Whether a volume is used by a &vmguest; is indicated in the
+      <guimenu>Used By</guimenu> column in the Storage Manager.
+     </para>
+    </warning>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.libvirt.storage.virsh">
+  <title>Managing Storage with <command>virsh</command></title>
+
+  <para>
+   Managing storage from the command line is also possible by using
+   <command>virsh</command>. However, creating storage pools is currently
+   not supported by &suse;. Therefore this section is restricted to document
+   functions like starting, stopping and deleting pools and volume
+   management.
+  </para>
+
+  <para>
+   A list of all <command>virsh</command> subcommands for managing pools and
+   volumes is available by running <command>virsh help pool</command> and
+   <command>virsh help volume</command>, respectively.
+  </para>
+
+  <sect2 id="sec.libvirt.storage.virsh.list_pools">
+   <title>Listing Pools and Volumes</title>
+   <para>
+    List all pools currently active by executing the following command. To
+    also list inactive pools, add the option <option>--all</option>:
+   </para>
+   <screen>virsh pool-list --details</screen>
+   <para>
+    Details about a specific pool can be obtained with the
+    <literal>pool-info</literal> subcommand:
+   </para>
+   <screen>virsh pool-info <replaceable>POOL</replaceable></screen>
+   <para>
+    Volumes can only be listed per pool by default. To list all volumes from
+    a pool, enter the following command.
+   </para>
+   <screen>virsh vol-list --details <replaceable>POOL</replaceable></screen>
+   <para>
+    At the moment <command>virsh</command> offers no tools to show whether a
+    volume is used by a guest or not. The following procedure describes a
+    way to list volumes from all pools that are currently used by a
+    &vmguest;.
+   </para>
+   <procedure id="pro.libvirt.storage.virsh.list_vols">
+    <title>Listing all Storage Volumes Currently Used on a &vmhost;</title>
+    <step>
+     <para>
+      Create an XSLT style sheet by saving the following content to a file,
+      for example, ~/libvirt/guest_storage_list.xsl:
+     </para>
+<?dbfo-need height="5em"?>
+     <screen>&lt;?xml version="1.0" encoding="UTF-8"?>
+&lt;xsl:stylesheet version="1.0"
+  xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  &lt;xsl:output method="text"/>
+  &lt;xsl:template match="text()"/>
+  &lt;xsl:strip-space elements="*"/>
+  &lt;xsl:template match="disk">
+    &lt;xsl:text>&#32;&#32;&lt;/xsl:text>
+    &lt;xsl:value-of select="(source/@file|source/@dev|source/@dir)[1]"/>
+    &lt;xsl:text>&amp;#10;&lt;/xsl:text>
+  &lt;/xsl:template>
+&lt;/xsl:stylesheet></screen>
+    </step>
+    <step>
+     <para>
+      Run the following commands in a shell. It is assumed that the guest's
+      XML definitions are all stored in the default location
+      (<filename>/etc/libvirt/qemu</filename>). <command>xsltproc</command>
+      is provided by the package
+      <systemitem
+	class="resource">libxslt</systemitem>.
+     </para>
+     <screen>SSHEET="$HOME/libvirt/guest_storage_list.xsl"
+cd /etc/libvirt/qemu
+for FILE in *.xml; do
+  basename $FILE .xml 
+  xsltproc $SSHEET $FILE
+done</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 id="sec.libvirt.storage.virsh.start_pools">
+   <title>Starting, Stopping and Deleting Pools</title>
+   <para>
+    Use the <command>virsh</command> pool subcommands to start, stop or
+    delete a pool. Replace <replaceable>POOL</replaceable> with the pool's
+    name or its UUID in the following examples:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Stopping a Pool</term>
+     <listitem>
+      <screen>virsh pool-destroy <replaceable>POOL</replaceable></screen>
+      <note>
+       <title>A Pool's State Does not Affect Attached Volumes</title>
+       <para>
+        Volumes from a pool attached to &vmguest;s are always available,
+        regardless of the pool's state (<guimenu>Active</guimenu> (stopped)
+        or <guimenu>Inactive</guimenu> (started)). The state of the pool
+        solely affects the ability to attach volumes to a &vmguest; via
+        remote management.
+       </para>
+      </note>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Deleting a Pool</term>
+     <listitem>
+      <screen>virsh pool-delete <replaceable>POOL</replaceable></screen>
+      <warning>
+       <title>Deleting Storage Pools</title>
+       <para>
+        Deleting storage pools based on <emphasis>local</emphasis> file
+        system directories, local partitions or disks has no effect on the
+        availability of volumes from these pools currently attached to
+        &vmguest;s.
+       </para>
+       <para>
+        Volumes located in pools of type iSCSI, SCSI, LVM group or Network
+        Exported Directory will become inaccessible from the &vmguest; in
+        case the pool will be deleted. Although the volumes themselves will
+        not be deleted, the &vmhost; will no longer have access to the
+        resources.
+       </para>
+       <para>
+        Volumes on iSCSI/SCSI targets or Network Exported Directory will be
+        accessible again when creating an adequate new pool or when
+        mounting/accessing these resources directly from the host system.
+       </para>
+       <para>
+        When deleting an LVM group-based storage pool, the LVM group
+        definition will be erased and the LVM group will no longer exist on
+        the host system. The configuration is not recoverable and all
+        volumes from this pool are lost.
+       </para>
+      </warning>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Starting a Pool</term>
+     <listitem>
+      <screen>virsh pool-start <replaceable>POOL</replaceable></screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Enable Autostarting a Pool</term>
+     <listitem>
+      <screen>virsh pool-autostart <replaceable>POOL</replaceable></screen>
+      <para>
+       Only pools that are marked to autostart start will automatically be
+       started in case the &vmhost; reboots.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Disable Autostarting a Pool</term>
+     <listitem>
+      <screen>virsh pool-autostart <replaceable>POOL</replaceable> --disable</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.libvirt.storage.virsh.add_volumes">
+   <title>Adding Volumes to a Storage Pool</title>
+   <para>
+    <command>virsh</command> offers two ways to create storage pools: either
+    from an XML definition with <literal>vol-create</literal> and
+    <literal>vol-create-from</literal> or via command line arguments with
+    <literal>vol-create-as</literal>. The first two methods are currently
+    not supported by &suse;, therefore this section focuses on the
+    subcommand <literal>vol-create-as</literal>.
+   </para>
+   <para>
+    To add a volume to an existing pool, enter the following command:
+   </para>
+   <screen>virsh vol-create-as <replaceable>POOL</replaceable><co id="co.vol-create-as.pool"/><replaceable>NAME</replaceable><co id="co.vol-create-as.name"/> 12G --format<co id="co.vol-create-as.capacity"/><replaceable>raw|qcow2|qed</replaceable><co id="co.vol-create-as.format"/> --allocation 4G<co id="co.vol-create-as.alloc"/></screen>
+   <calloutlist>
+    <callout arearefs="co.vol-create-as.pool">
+     <para>
+      Name of the pool to which the volume should be added
+     </para>
+    </callout>
+    <callout arearefs="co.vol-create-as.name">
+     <para>
+      Name of the volume
+     </para>
+    </callout>
+    <callout arearefs="co.vol-create-as.capacity">
+     <para>
+      Size of the image, in this example 12 gigabyte. Use the suffixes
+      k,M,G,T for kilobyte, megabyte, gigabyte, and terabyte, respectively.
+     </para>
+    </callout>
+    <callout arearefs="co.vol-create-as.format">
+     <para>
+      Format of the volume. &suse; currently supports
+      <literal>raw</literal>, <literal>qcow2</literal>, and
+      <literal>qed</literal>.
+     </para>
+    </callout>
+    <callout arearefs="co.vol-create-as.alloc">
+     <para>
+      Optional parameter. By default <command>virsh </command>creates a
+      sparse image file that grows on demand. Specify the amount of space
+      that should be allocated with this parameter (4 gigabyte in this
+      example). Use the suffixes k,M,G,T for kilobyte, megabyte, gigabyte,
+      and terabyte, respectively.
+     </para>
+     <para>
+      When not specifying this parameter, a sparse image file with no
+      allocation will be generated. If you want to create a non-sparse
+      volume, specify the whole image size with this parameter (would be
+      <literal>12G</literal> in this example).
+     </para>
+    </callout>
+   </calloutlist>
+   <sect3 id="sec.libvirt.storage.virsh.add_volumes.clone">
+    <title>Cloning Existing Volumes</title>
+    <para>
+     Another way to add volumes to a pool is to clone an existing volume.
+     The new instance is always created in the same pool as the original.
+    </para>
+    <screen>vol-clone <replaceable>NAME_EXISTING_VOLUME</replaceable><co id="co.vol-clone.existing"/><replaceable>NAME_NEW_VOLUME</replaceable><co id="co.vol-clone.new"/> --pool <replaceable>POOL</replaceable><co id="co.vol-clone.pool"/></screen>
+    <calloutlist>
+     <callout arearefs="co.vol-clone.existing">
+      <para>
+       Name of the existing volume that should be cloned
+      </para>
+     </callout>
+     <callout arearefs="co.vol-clone.new">
+      <para>
+       Name of the new volume
+      </para>
+     </callout>
+     <callout arearefs="co.vol-clone.pool">
+      <para>
+       Optional parameter. &libvirt; tries to locate the existing volume
+       automatically. If that fails, specify this parameter.
+      </para>
+     </callout>
+    </calloutlist>
+   </sect3>
+  </sect2>
+
+  <sect2 id="sec.libvirt.storage.virsh.del_volumes">
+   <title>Deleting Volumes from a Storage Pool</title>
+   <para>
+    To permanently delete a volume from a pool, use the subcommand
+    <literal>vol-delete</literal>:
+   </para>
+   <screen>virsh vol-delete <replaceable>NAME</replaceable> --pool <replaceable>POOL</replaceable></screen>
+   <para>
+    <option>--pool</option> is optional. &libvirt; tries to locate the
+    volume automatically. If that fails, specify this parameter.
+   </para>
+   <warning>
+    <title>No Checks Upon Volume Deletion</title>
+    <para>
+     A volume will be deleted in any case, regardless whether it is
+     currently used in an active or inactive &vmguest;. There is no way to
+     recover a deleted volume.
+    </para>
+    <para>
+     Whether a volume is used by a &vmguest; can only be detected by using
+     by the method described in
+     <xref
+      linkend="pro.libvirt.storage.virsh.list_vols"/>.
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ 
+ <sect1 id="sec.libvirt.storage.locking">
+  <title>Locking Disk Files and Block Devices with <systemitem class="daemon">virtlockd</systemitem></title>
+  <para>
+   Locking block devices and disk files prevents concurrent writes to these
+   resources from different VM Guests. It provides protection against starting
+   the same &vmguest; twice, or adding the same disk to two different virtual
+   machines. This will reduce the risk of a virtual machine's disk image
+   becoming corrupted as a result of a wrong configuration.
+  </para>
+  <para>
+   The locking is controlled by a daemon called <systemitem
+   class="daemon">virtlockd</systemitem>. Since it operates
+    independently from the
+   &libvirtd; daemon, locks will endure a crash or a restart of
+   &libvirtd;. Locks will even persist in the case of an update of the <systemitem
+   class="daemon">virtlockd</systemitem> itself, since it has the ability to
+   re-execute itself. This ensures that &vmguest;s do <emphasis>not</emphasis>
+   have to be restarted upon a <systemitem
+   class="daemon">virtlockd</systemitem> update.
+  </para>
+  
+  <sect2 id="sec.libvirt.storage.locking.enable">
+   <title>Enable Locking</title>
+   <para>
+    Locking virtual disks is not enabled by default on &productname;. To
+    enable and automatically start it upon rebooting, perform the following
+    steps: 
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Edit <filename>/etc/libvirt/qemu.conf</filename> and set
+     </para>
+     <screen>lock_manager = "lockd"</screen>
+    </step>
+    <step>
+     <para>
+      Start the <systemitem class="daemon">virtlockd</systemitem> daemon with
+      the following command:
+     </para>
+     <screen>rcvirtlockd start</screen>
+    </step>
+    <step>
+     <para>
+      Restart the &libvirtd; daemon with:
+     </para>
+     <screen>rclibvirtd restart</screen>
+    </step>
+    <step>
+     <para>
+      Make sure <systemitem class="daemon">virtlockd</systemitem> is
+      automatically started when booting the system:
+     </para>
+     <screen>insserv virtlockd</screen>
+    </step>
+   </procedure>
+  </sect2>
+  
+  <sect2 id="sec.libvirt.storage.locking.configure">
+   <title>Configure Locking</title>
+   <para>
+    By default <systemitem class="daemon">virtlockd</systemitem> is configured
+    to automatically lock all disks configured for your &vmguest;s. The
+    default setting uses a "direct" lockspace, where the locks are acquired
+    against the actual file paths associated with the VM Guest &lt;disk>
+    devices.  For example, <literal>flock(2)</literal> will be called directly
+    on <filename>/var/lib/libvirt/images/my-server/disk0.raw</filename> when the
+    &vmguest; contains the following &lt;disk> device:
+   </para>
+   <screen>&lt;disk type='file' device='disk'>
+ &lt;driver name='qemu' type='raw'/>
+ &lt;source file='/var/lib/libvirt/images/my-server/disk0.raw'/>
+ &lt;target dev='vda' bus='virtio'/>
+&lt;/disk></screen>
+   <para>
+    The <systemitem class="daemon">virtlockd</systemitem> configuration can be
+    changed by editing the file
+    <filename>/etc/libvirt/qemu-lockd.conf</filename>. It also contains
+    detailed comments with further information. Make sure to activate
+    configuration changes by reloading <systemitem
+    class="daemon">virtlockd</systemitem>:
+   </para>
+   <screen>rcvirtlockd reload</screen>
+   
+   <note>
+    <title>Locking Currently Only Available for All Disks</title>
+    <para>
+     As of &sle; 11 SP3 locking can only be activated globally, so that all
+     virtual disks are locked. Support for locking selected disks is planned
+     for future releases.
+    </para>
+   </note>
+   
+
+<!--
+   
+   <sect3 id="sec.libvirt.storage.locking.configure.noauto">
+    <title>Manually Managing Locks</title>
+    <para>
+     As stated above, all virtual disks are locked by default. In order to
+     restrict locking to selected disks, you need to turn off auto locking by
+     setting
+    </para>
+    <screen>auto_disk_leases = 0</screen>
+    <para>
+     If auto locking is turned off you need to add &lt;lease> statements to
+     the &lt;devices> section of the &vmguest;s XML definitions by editing
+     them with the <command>virsh edit</command> command. A sample entry will
+     look like the following example:
+    </para>
+    see https://www.redhat.com/archives/libvir-list/2013-April/msg01714.html
+    <screen>TBD</screen>
+    <para>
+    
+     Device leases
+When using a lock manager, it may be desirable to record device leases against a VM. The lock manager will ensure the VM won't start unless the leases can be acquired.
+
+  ...
+  <devices>
+    ...
+    <lease>
+      <lockspace>somearea</lockspace>
+      <key>somekey</key>
+      <target path='/some/lease/path' offset='1024'/>
+    </lease>
+    ...
+  </devices>
+  ...
+lockspace
+This is an arbitrary string, identifying the lockspace within which the key is held. Lock managers may impose extra restrictions on the format, or length of the lockspace name.
+key
+This is an arbitrary string, uniquely identifying the lease to be acquired. Lock managers may impose extra restrictions on the format, or length of the key.
+target
+This is the fully qualified path of the file associated with the
+lockspace. The offset specifies where the lease is stored within the file. If
+the lock manager does not require a offset, just pass 0.
+    </para>
+    <important>
+     <title>Starting &vmguest;s without Locking</title>
+     <para>
+      If auto locking is disabled, <systemitem
+      class="daemon">virtlockd</systemitem> automatically prevents all
+      &vmguest;s that have no proper <quote>lease-configuration</quote> from
+      being started. This ensures that only &vmguest;s with disks that are
+      locked can be started.
+     </para>
+     <para>
+      Disable this behavior by setting 
+     </para>
+     <screen>require_lease_for_disks = 0</screen>
+    </important>
+   </sect3>
+-->
+
+   <sect3 id="sec.libvirt.storage.locking.configure.shared_fs">
+    <title>Enabling an Indirect Lockspace</title>
+    <para>
+     <systemitem class="daemon">virtlockd</systemitem>'s default configuration
+     uses a <quote>direct</quote> lockspace, where the locks are acquired
+     against the actual file paths associated with the &lt;disk> devices.  If
+     the disk file paths are not accessible to all hosts, <systemitem
+     class="daemon">virtlockd</systemitem> can be configured to allow an
+     <quote>indirect</quote> lockspace, where a hash of the disk file path is
+     used to create a file in the indirect lockspace directory. The locks are
+     then held on these hash files instead of the actual disk file paths.
+     Indirect lockspace is also useful if the file system containing the disk
+     files does not support <literal>fcntl()</literal> locks.  An indirect
+     lockspace is specified with the file_lockspace_dir setting:
+    </para> 
+    <screen>file_lockspace_dir = "<replaceable>/MY_LOCKSPACE_DIRECTORY</replaceable>"</screen>
+   </sect3>
+   
+   <sect3 id="sec.libvirt.storage.locking.configure.lvm_iscsi">
+    <title>Enable Locking on LVM or iSCSI Volumes</title>
+    <para>
+     When wanting to lock virtual disks placed on LVM or iSCSI volumes shared
+     by several hosts, locking needs to be done by UUID rather than by path
+     (which is used by default). Furthermore, the lockspace directory needs to
+     be placed on a shared file system accessible by all hosts sharing the
+     volume. Set the following options for LVM and/or iSCSI:
+    </para>
+    <screen>lvm_lockspace_dir = "<replaceable>/MY_LOCKSPACE_DIRECTORY</replaceable>"
+iscsi_lockspace_dir = "<replaceable>/MY_LOCKSPACE_DIRECTORY</replaceable>"</screen>
+   </sect3>
+   
+  </sect2>
+ </sect1>
+ </chapter>

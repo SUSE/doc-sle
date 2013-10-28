@@ -1,0 +1,2746 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<!-- fs 2008-12-30:
+     Changelog:
+     ==========
+     http://people.redhat.com/sgrubb/audit/ChangeLog
+     A bit of documentation:
+     =======================
+     http://people.redhat.com/sgrubb/audit/
+     Usecases:
+     =========
+     http://www.cyberciti.biz/tips/linux-audit-files-to-see-who-made-changes-to-a-file.html (may only work on RHEL4)
+     http://www.linux.com/feature/114422
+     http://expo.pistonbroke.com/content/sessions/S11/S11Baudit_lwe_final_v4.pdf
+-->
+<!--rwalter: TODO post-SP1:
+    audit or Audit?  work out a capitalization scheme and stick to it (like 
+    maybe Audit for the app in general and audit for the command
+-->
+<chapter id="cha.audit.comp">
+ <title>Understanding Linux Audit</title>
+ <abstract>
+  <para>
+   The Linux audit framework as shipped with this version of &productname;
+   provides a CAPP-compliant (Controlled Access Protection Profiles)
+   auditing system that reliably collects information about any
+   security-relevant event. The audit records can be examined to determine
+   whether any violation of the security policies has been committed, and by
+   whom.
+  </para>
+
+  <para>
+   Providing an audit framework is an important requirement for a
+   CC-CAPP/EAL (Common Criteria-Controlled Access Protection
+   Profiles/Evaluation Assurance Level) certification. Common Criteria (CC)
+   for Information Technology Security Information is an international
+   standard for independent security evaluations. Common Criteria helps
+   customers judge the security level of any IT product they intend to
+   deploy in mission-critical setups.
+  </para>
+
+  <para>
+   Common Criteria security evaluations have two sets of evaluation
+   requirements, functional and assurance requirements. Functional
+   requirements describe the security attributes of the product under
+   evaluation and are summarized under the Controlled Access Protection
+   Profiles (CAPP). Assurance requirements are summarized under the
+   Evaluation Assurance Level (EAL). EAL describes any activities that must
+   take place for the evaluators to be confident that security attributes
+   are present, effective, and implemented. Examples for activities of this
+   kind include documenting the developers' search for security
+   vulnerabilities, the patch process, and testing.
+  </para>
+
+  <para>
+   This guide provides a basic understanding of how audit works and how it
+   can be set up. For more information about Common Criteria itself, refer
+   to <ulink
+    url="http://www.commoncriteriaportal.org/">the Common
+   Criteria Web site</ulink>.
+  </para>
+ </abstract>
+ <para>
+  Linux audit helps make your system more secure by providing you with a
+  means to analyze what is happening on your system in great detail. It does
+  not, however, provide additional security itself&mdash;it does not protect
+  your system from code malfunctions or any kind of exploits. Instead, Audit
+  is useful for tracking these issues and helps you take additional security
+  measures, like &aa;, to prevent them.
+ </para>
+ <para>
+  Audit consists of several components, each contributing crucial
+  functionality to the overall framework. The audit kernel module intercepts
+  the system calls and records the relevant events. The auditd daemon writes
+  the audit reports to disk. Various command line utilities take care of
+  displaying, querying, and archiving the audit trail.
+ </para>
+ <para>
+  Audit enables you to do the following:
+ </para>
+ <variablelist>
+  <varlistentry>
+   <term>Associate Users with Processes</term>
+   <listitem>
+    <para>
+     Audit maps processes to the user ID that started them. This makes it
+     possible for the administrator or security officer to exactly trace
+     which user owns which process and is potentially doing malicious
+     operations on the system.
+    </para>
+    <important>
+     <title>Renaming User IDs</title>
+     <para>
+      Audit does not handle the renaming of UIDs. Therefore avoid renaming
+      UIDs (for example, changing <literal>tux</literal> from
+      <literal>uid=1001</literal> to <literal>uid=2000</literal>) and make
+      obsolete UIDs rather than renaming them. Otherwise you would need to
+      change auditctl data (audit rules) and would have problems retrieving
+      old data correctly.
+     </para>
+    </important>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Review the Audit Trail</term>
+   <listitem>
+    <para>
+     Linux audit provides tools that write the audit reports to disk and
+     translate them into human readable format.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Review Particular Audit Events</term>
+   <listitem>
+    <para>
+     Audit provides a utility that allows you to filter the audit reports
+     for certain events of interest. You can filter for:
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       User
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Group
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Audit ID
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Remote Hostname
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Remote Host Address
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       System Call
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       System Call Arguments
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       File
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       File Operations
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Success or Failure
+      </para>
+     </listitem>
+    </itemizedlist>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Apply a Selective Audit</term>
+   <listitem>
+    <para>
+     Audit provides the means to filter the audit reports for events of
+     interest and also to tune audit to record only selected events. You can
+     create your own set of rules and have the audit daemon record only
+     those of interest to you.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Guarantee the Availability of the Report Data</term>
+   <listitem>
+    <para>
+     Audit reports are owned by &rootuser; and therefore only removable by
+     &rootuser;. Unauthorized users cannot remove the audit logs.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>Prevent Audit Data Loss</term>
+   <listitem>
+    <para>
+     If the kernel runs out of memory, the audit daemon's backlog is
+     exceeded, or its rate limit is exceeded, audit can trigger a shutdown
+     of the system to keep events from escaping audit's control. This
+     shutdown would be an immediate halt of the system triggered by the
+     audit kernel component without any syncing of the latest logs to disk.
+     The default configuration is to log a warning to syslog rather than to
+     halt the system.
+    </para>
+    <para>
+     If the system runs out of disk space when logging, the audit system can
+     be configured to perform clean shutdown (<command>init 0</command>).
+     The default configuration tells the audit daemon to stop logging when
+     it runs out of disk space.
+    </para>
+   </listitem>
+  </varlistentry>
+ </variablelist>
+<?dbfo-need height="15em"?>
+ <sect1 id="sec.audit.bigpicture">
+  <title>Introducing the Components of Linux Audit</title>
+
+  <para>
+   The following figure illustrates how the various components of audit
+   interact with each other:
+  </para>
+
+  <figure id="fig.audit.components">
+   <title>Introducing the Components of Linux Audit</title>
+   <mediaobject>
+    <imageobject role="html">
+     <imagedata fileref="audit_components.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="fo">
+     <imagedata fileref="audit_components.svg" width="75%" format="SVG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   Straight arrows represent the data flow between components while dashed
+   arrows represent lines of control between components.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>auditd</term>
+    <listitem>
+     <para>
+      The audit daemon is responsible for writing the audit messages that
+      were generated through the audit kernel interface and triggered by
+      application and system activity to disk. The way the audit daemon is
+      started is controlled by its configuration file,
+      <filename>/etc/sysconfig/auditd</filename>. The audit system functions
+      (once started) are controlled by
+      <filename>/etc/audit/auditd.conf</filename>. For more information
+      about auditd and its configuration, refer to
+      <xref linkend="sec.audit.auditd"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>auditctl</term>
+    <listitem>
+     <para>
+      The auditctl utility controls the audit system. It controls the log
+      generation parameters and kernel settings of the audit interface as
+      well as the rule sets that determine which events are tracked. For
+      more information about auditctl, refer to
+      <xref
+       linkend="sec.audit.auditctl"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>audit rules</term>
+    <listitem>
+     <para>
+      The file <filename>/etc/audit/audit.rules</filename> contains a
+      sequence of auditctl commands that are loaded at system boot time
+      immediately after the audit daemon is started. For more information
+      about audit rules, refer to <xref linkend="sec.audit.rules"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>aureport</term>
+    <listitem>
+     <para>
+      The aureport utility allows you to create custom reports from the
+      audit event log. This report generation can easily be scripted, and
+      the output can be used by various other applications, for example, to
+      plot these results. For more information about aureport, refer to
+      <xref linkend="sec.audit.aureport"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ausearch</term>
+    <listitem>
+     <para>
+      The ausearch utility can search the audit log file for certain events
+      using various keys or other characteristics of the logged format. For
+      more information about ausearch, refer to
+      <xref linkend="sec.audit.ausearch"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>audispd</term>
+    <listitem>
+     <para>
+      The audit dispatcher daemon (audispd) can be used to relay event
+      notifications to other applications instead of (or in addition to)
+      writing them to disk in the audit log. For more information about
+      audispd, refer to <xref linkend="sec.audit.audisp"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>autrace</term>
+    <listitem>
+     <para>
+      The autrace utility traces individual processes in a fashion similar
+      to strace. The output of <command>autrace</command> is logged to the
+      audit log. For more information about autrace, refer to
+      <xref linkend="sec.audit.autrace"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+<!-- fs 2009-10-19:
+     For future versions
+   <varlistentry>
+    <term>aulast</term>
+    <listitem>
+     <para>FIXME</para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>aulastlog</term>
+    <listitem>
+     <para>FIXME</para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ausyscall</term>
+    <listitem>
+     <para>FIXME</para>
+    </listitem>
+   </varlistentry>
+-->
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.audit.auditd">
+  <title>Configuring the Audit Daemon</title>
+
+  <para>
+   Before you can actually start generating audit logs and processing them,
+   configure the audit daemon itself. Configure how it is started in the
+   <filename>/etc/sysconfig/auditd</filename> configuration file and
+   configure how the audit system functions once the daemon has been started
+   in <filename>/etc/audit/auditd.conf</filename>.
+  </para>
+
+  <para>
+   The most important configuration parameters in
+   <filename>/etc/sysconfig/auditd</filename> are:
+  </para>
+
+<screen>AUDITD_LANG="en_US"
+AUDITD_DISABLE_CONTEXTS="no"</screen>
+
+  <variablelist>
+   <varlistentry>
+    <term><envar>AUDITD_LANG</envar>
+    </term>
+    <listitem>
+     <para>
+      The locale information used by audit. The default setting is
+      <literal>en_US</literal>. Setting it to <literal>none</literal> would
+      remove all locale information from audit's environment.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><envar>AUDITD_DISABLE_CONTEXTS</envar>
+    </term>
+    <listitem>
+     <para>
+      Disable system call auditing by default. Set to <literal>no</literal>
+      for full audit functionality including file and directory watches and
+      system call auditing.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   The <filename>/etc/audit/auditd.conf</filename> configuration file
+   determines how the audit system functions once the daemon has been
+   started. For most use cases, the default settings shipped with
+   &productname; should suffice. For CAPP environments, most of these
+   parameters need tweaking. The following list briefly introduces the
+   parameters available:
+  </para>
+
+<screen>log_file = /var/log/audit/audit.log
+log_format = RAW
+log_group = root
+priority_boost = 4
+flush = INCREMENTAL
+freq = 20
+num_logs = 4
+disp_qos = lossy
+dispatcher = /usr/sbin/audispd
+name_format = NONE
+#name = mydomain
+max_log_file = 5
+max_log_file_action = ROTATE
+space_left = 75
+space_left_action = SYSLOG
+action_mail_acct = root
+admin_space_left = 50
+admin_space_left_action = SUSPEND
+disk_full_action = SUSPEND
+disk_error_action = SUSPEND
+
+#tcp_listen_port =
+tcp_listen_queue = 5
+#tcp_client_ports = 1024-65535
+tcp_client_max_idle = 0</screen>
+
+  <para>
+   Depending on whether you want your environment to satisfy the
+   requirements of CAPP, you need to be extra restrictive when configuring
+   the audit daemon. Where you need to use particular settings to meet the
+   CAPP requirements, a <quote>CAPP Environment</quote> note tells you how
+   to adjust the configuration.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>log_file</literal>, <literal>log_format</literal> and
+      <literal>log_group</literal>
+    </term>
+    <listitem>
+     <para>
+      <literal>log_file</literal> specifies the location where the audit
+      logs should be stored. <literal>log_format</literal> determines how
+      the audit information is written to disk and
+      <literal>log_group</literal> defines the group that owns the log
+      files. Possible values for <literal>log_format</literal> are
+      <literal>raw</literal> (messages are stored just as the kernel sends
+      them) or <literal>nolog</literal> (messages are discarded and not
+      written to disk). The data sent to the audit dispatcher is not
+      affected if you use the <literal>nolog</literal> mode. The default
+      setting is <literal>raw</literal> and you should keep it if you want
+      to be able to create reports and queries against the audit logs using
+      the aureport and ausearch tools. The value for
+      <literal>log_group</literal> can either be specified literally or by
+      the groups ID.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       In a CAPP environment, have the audit log reside on its own
+       partition. By doing so, you can be sure that the space detection of
+       the audit daemon is accurate and that you do not have other processes
+       consuming this space.
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>priority_boost</literal>
+    </term>
+    <listitem>
+     <para>
+      Determine how much of a priority boost the audit daemon should get.
+      Possible values are <literal>0</literal> to <literal>4</literal>, with
+      <literal>4</literal> assigning the highest priority. The values given
+      here translate to negative nice values, as in <literal>3</literal> to
+      <literal>-4</literal> to increase the priority.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>flush</literal> and <literal>freq</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies whether, how, and how often the audit logs should be written
+      to disk. Valid values for <literal>flush</literal> are
+      <literal>none</literal>, <literal>incremental</literal>,
+      <literal>data</literal>, and <literal>sync</literal>.
+      <literal>none</literal> tells the audit daemon not to make any special
+      effort to write the audit data to disk. <literal>incremental</literal>
+      tells the audit daemon to explicitly flush the data to disk. A
+      frequency must be specified if <literal>incremental</literal> is used.
+      A <literal>freq</literal> value of <literal>20</literal> tells the
+      audit daemon to request that the kernel flush the data to disk after
+      every 20 records. The <literal>data</literal> option keeps the data
+      portion of the disk file in sync at all times while the
+      <literal>sync</literal> option takes care of both metadata and data.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       In a CAPP environment, make sure that the audit trail is always fully
+       up to date and complete. Therefore, use <literal>sync</literal> or
+       <literal>data</literal> with the <literal>flush</literal> parameter.
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>num_logs</literal>
+    </term>
+    <listitem>
+     <para>
+      Specify the number of log files to keep if you have given
+      <literal>rotate</literal> as the
+      <literal>max_log_file_action</literal>. Possible values range from
+      <literal>0</literal> to <literal>99</literal>. A value less than
+      <literal>2</literal> means that the log files are not rotated at all.
+      As you increase the number of files to rotate, you increase the amount
+      of work required of the audit daemon. While doing this rotation,
+      auditd cannot always service new data that is arriving from the kernel
+      as quickly, which can result in a backlog condition (triggering auditd
+      to react according to the failure flag, described in
+      <xref
+       linkend="sec.audit.auditctl"/>). In this situation,
+      increasing the backlog limit is recommended. Do so by changing the
+      value of the <literal>-b</literal> parameter in the
+      <filename>/etc/audit/audit.rules</filename> file.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>disp_qos</literal> and <literal>dispatcher</literal>
+    </term>
+    <listitem>
+     <para>
+      The dispatcher is started by the audit daemon during its start. The
+      audit daemon relays the audit messages to the application specified in
+      <literal>dispatcher</literal>. This application must be a highly
+      trusted one, because it needs to run as &rootuser;.
+      <literal>disp_qos</literal> determines whether you allow for
+      <literal>lossy</literal> or <literal>lossless</literal> communication
+      between the audit daemon and the dispatcher. If you choose
+      <literal>lossy</literal>, the audit daemon might discard some audit
+      messages when the message queue is full. These events still get
+      written to disk if <literal>log_format</literal> is set to
+      <literal>raw</literal>, but they might not get through to the
+      dispatcher. If you choose <literal>lossless</literal> the audit
+      logging to disk is blocked until there is an empty spot in the message
+      queue. The default value is <literal>lossy</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>name_format</literal> and <literal>name</literal>
+    </term>
+    <listitem>
+     <para>
+      <literal>name_format</literal> controls how computer names are
+      resolved. Possible values are <literal>none</literal> (no name will be
+      used), <literal>hostname</literal> (value returned by gethostname),
+      <literal>fqd</literal> (full qualified hostname as received per DNS
+      lookup), <literal>numeric</literal> (IP address) and
+      <literal>user</literal>. <literal>user</literal> is a custom string
+      that has to be defined with the <literal>name</literal> parameter.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>max_log_file</literal> and <literal>max_log_file_action</literal>
+    </term>
+    <listitem>
+     <para>
+      <literal>max_log_file</literal> takes a numerical value that specifies
+      the maximum file size in megabytes that the log file can reach before
+      a configurable action is triggered. The action to be taken is
+      specified in <literal>max_log_file_action</literal>. Possible values
+      for <literal>max_log_file_action</literal> are
+      <literal>ignore</literal>, <literal>syslog</literal>,
+      <literal>suspend</literal>, <literal>rotate</literal>, and
+      <literal>keep_logs</literal>. <literal>ignore</literal> tells the
+      audit daemon to do nothing once the size limit is reached,
+      <literal>syslog</literal> tells it to issue a warning and send it to
+      syslog, and <literal>suspend</literal> causes the audit daemon to stop
+      writing logs to disk, leaving the daemon itself still alive.
+      <literal>rotate</literal> triggers log rotation using the
+      <literal>num_logs</literal> setting. <literal>keep_logs</literal> also
+      triggers log rotation, but does not use the <literal>num_log</literal>
+      setting, so always keeps all logs.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       To keep a complete audit trail in CAPP environments, the
+       <literal>keep_logs</literal> option should be used. If using a
+       separate partition to hold your audit logs, adjust
+       <literal>max_log_file</literal> and <literal>num_logs</literal> to
+       use the entire space available on that partition. Note that the more
+       files that have to be rotated, the longer it takes to get back to
+       receiving audit events.
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>space_left</literal> and <literal>space_left_action</literal>
+    </term>
+    <listitem>
+     <para>
+      <literal>space_left</literal> takes a numerical value in megabytes of
+      remaining disk space that triggers a configurable action by the audit
+      daemon. The action is specified in
+      <literal>space_left_action</literal>. Possible values for this
+      parameter are <literal>ignore</literal>, <literal>syslog</literal>,
+      <literal>email</literal>, <literal>exec</literal>,
+      <literal>suspend</literal>, <literal>single</literal>, and
+      <literal>halt</literal>. <literal>ignore</literal> tells the audit
+      daemon to ignore the warning and do nothing, <literal>syslog</literal>
+      has it issue a warning to syslog, and <literal>email</literal> sends
+      an e-mail to the account specified under
+      <literal>action_mail_acct</literal>. <literal>exec</literal> plus a
+      path to a script executes the given script. Note that it is not
+      possible to pass parameters to the script. <literal>suspend</literal>
+      tells the audit daemon to stop writing to disk but remain alive while
+      <literal>single</literal> triggers the system to be brought down to
+      single user mode. <literal>halt</literal> triggers a full shutdown of
+      the system.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       Make sure that <literal>space_left</literal> is set to a value that
+       gives the administrator enough time to react to the alert and allows
+       him to free enough disk space for the audit daemon to continue to
+       work. Freeing disk space would involve calling <command>aureport
+       -t</command> and archiving the oldest logs on a separate archiving
+       partition or resource. The actual value for
+       <literal>space_left</literal> depends on the size of your deployment.
+       Set <literal>space_left_action</literal> to <literal>email</literal>.
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>action_mail_acct</literal>
+    </term>
+    <listitem>
+     <para>
+      Specify an e-mail address or alias to which any alert messages should
+      be sent. The default setting is <literal>root</literal>, but you can
+      enter any local or remote account as long as e-mail and the network
+      are properly configured on your system and
+      <filename>/usr/lib/sendmail</filename> exists.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>admin_space_left</literal> and <literal>admin_space_left_action</literal>
+    </term>
+    <listitem>
+     <para>
+      <literal>admin_space_left</literal> takes a numerical value in
+      megabytes of remaining disk space. The system is already running low
+      on disk space when this limit is reached and the administrator has one
+      last chance to react to this alert and free disk space for the audit
+      logs. The value of <literal>admin_space_left</literal> should be lower
+      than the value for <literal>space_left</literal>. The values for
+      <literal>admin_space_left_action</literal> are the same as for
+      <literal>space_left_action</literal>.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       Set <literal>admin_space_left</literal> to a value that would just
+       allow the administrator's actions to be recorded. The action should
+       be set to <literal>single</literal>.
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>disk_full_action</literal>
+    </term>
+    <listitem>
+     <para>
+      Specify which action to take when the system runs out of disk space
+      for the audit logs. The possible values are the same as for
+      <literal>space_left_action</literal>.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       As the <literal>disk_full_action</literal> is triggered when there is
+       absolutely no more room for any audit logs, you should bring the
+       system down to single-user mode (<literal>single</literal>) or shut
+       it down completely (<literal>halt</literal>).
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>disk_error_action</literal>
+    </term>
+    <listitem>
+     <para>
+      Specify which action to take when the audit daemon encounters any kind
+      of disk error while writing the logs to disk or rotating the logs. The
+      possible value are the same as for
+      <literal>space_left_action</literal>.
+     </para>
+     <note>
+      <title>CAPP Environment</title>
+      <para>
+       Use <literal>syslog</literal>, <literal>single</literal>, or
+       <literal>halt</literal> depending on your site's policies regarding
+       the handling of any kind of hardware failure.
+      </para>
+     </note>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>tcp_listen_port</literal>, <literal>tcp_listen_queue</literal>,
+      <literal>tcp_client_ports</literal> and <literal>tcp_client_max_idle</literal>
+    </term>
+    <listitem>
+     <para>
+      The audit daemon can receive audit events from other audit daemons.
+      The tcp parameters let you control incoming connections. Specify a
+      port between 1 and 65535 with <literal>tcp_listen_port</literal> on
+      which the auditd will listen. <literal>tcp_listen_queue</literal> lets
+      you configure a maximum value for pending connections. Make sure not
+      to set a value too small, since the number of pending connections may
+      be high under certain circumstances, such as after a power outage.
+      <literal>tcp_client_ports</literal> defines which client ports are
+      allowed. Either specify a single port or a port range with numbers
+      separated by a dash (e.g. 1-1023 for all privileged ports). Specifying
+      a single allowed client port may make it difficult for the client to
+      restart their audit subsystem, as it will be unable to re-create a
+      connection with the same host addresses and ports until the connection
+      closure TIME_WAIT state times out. If a client does not respond
+      anymore, auditd complains. Specify the number of seconds after which
+      this will happen with <literal>tcp_client_max_idle</literal>. Keep in
+      mind that this setting is valid for all clients and therefore should
+      be higher than any individual client heartbeat setting, preferably by
+      a factor of two.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Once the daemon configuration in
+   <filename>/etc/sysconfig/auditd</filename> and
+   <filename>/etc/audit/auditd.conf</filename> is complete, the next step is
+   to focus on controlling the amount of auditing the daemon does, and to
+   assign sufficient resources and limits to the daemon so it can operate
+   smoothly.
+  </para>
+ </sect1>
+ <sect1 id="sec.audit.auditctl">
+  <title>Controlling the Audit System Using auditctl</title>
+
+  <para>
+   auditctl is responsible for controlling the status and some basic system
+   parameters of the audit daemon. It controls the amount of auditing
+   performed on the system. Using audit rules, auditctl controls which
+   components of your system are subjected to the audit and to what extent
+   they are audited. Audit rules can be passed to the audit daemon on the
+   <command>auditctl</command> command line as well as by composing a rule
+   set and instructing the audit daemon to process this file. By default,
+   the <command>rcauditd</command> script is configured to check for audit
+   rules under <filename>/etc/audit/audit.rules</filename>. For more details
+   on audit rules, refer to <xref linkend="sec.audit.rules"/>.
+  </para>
+
+<?dbfo-need height="10em"?>
+
+  <para>
+   The main auditctl commands to control basic audit system parameters are:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <command>auditctl <option>-e</option></command> to enable or disable
+     audit
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>auditctl <option>-f</option></command> to control the failure
+     flag
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>auditctl <option>-r</option></command> to control the rate
+     limit for audit messages
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>auditctl <option>-b</option></command> to control the backlog
+     limit
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>auditctl <option>-s</option></command> to query the current
+     status of the audit daemon
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   The <option>-e</option>, <option>-f</option>, <option>-r</option>, and
+   <option>-b</option> options can also be specified in the
+   <filename>audit.rules</filename> file to avoid having to enter them each
+   time the audit daemon is started.
+  </para>
+
+  <para>
+   Any time you query the status of the audit daemon with <command>auditctl
+   <option>-s</option></command> or change the status flag with
+   <command>auditctl
+   <option>-e<replaceable>flag</replaceable></option></command>, a status
+   message (including information on each of the above-mentioned parameters)
+   is output. The following example highlights the typical audit status
+   message.
+  </para>
+
+  <example id="ex.auditctl.status">
+   <title>Example output of <command>auditctl <option>-s</option></command></title>
+<screen>AUDIT_STATUS: enabled=1 flag=2 pid=3105 rate_limit=0 backlog_limit=8192 lost=0 backlog=0</screen>
+  </example>
+
+  <table id="tab.audit.auditctl">
+   <title>Audit Status Flags</title>
+   <tgroup cols="3">
+    <thead>
+     <row>
+      <entry>
+       <para>
+        Flag
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Meaning [Possible Values]
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Command
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        <literal>enabled</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Set the enable flag. [0..2] 0=disable, 1=enable, 2=enable and lock
+        down the configuration
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <command>auditctl <option>-e [0|1]</option></command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>flag</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Set the failure flag. [0..2] 0=silent, 1=printk, 2=panic (immediate
+        halt without syncing pending data to disk)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <command>auditctl <option>-f [0|1|2]</option></command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>pid</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Process ID under which auditd is running.
+       </para>
+      </entry>
+      <entry>
+       <para>
+        &mdash;
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>rate_limit</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Set a limit in messages per second. If the rate is not zero and is
+        exceeded, the action specified in the failure flag is triggered.
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <command>auditctl <option>-r
+        <replaceable>rate</replaceable></option></command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>backlog_limit</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Specify the maximum number of outstanding audit buffers allowed. If
+        all buffers are full, the action specified in the failure flag is
+        triggered.
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <command>auditctl <option>-b
+        <replaceable>backlog</replaceable></option></command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>lost</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Count the current number of lost audit messages.
+       </para>
+      </entry>
+      <entry>
+       <para>
+        &mdash;
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>backlog</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Count the current number of outstanding audit buffers.
+       </para>
+      </entry>
+      <entry>
+       <para>
+        &mdash;
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+ </sect1>
+ <sect1 id="sec.audit.rules">
+  <title>Passing Parameters to the Audit System</title>
+
+  <para>
+   Commands to control the audit system can be invoked individually from the
+   shell using auditctl or batch read from a file using <command>auditctl
+   -<option>R</option></command>. This latter method is used by the init
+   scripts to load rules from the file
+   <filename>/etc/audit/audit.rules</filename> after the audit daemon has
+   been started. The rules are executed in order from top to bottom. Each of
+   these rules would expand to a separate auditctl command. The syntax used
+   in the rules file is the same as that used for the auditctl command.
+  </para>
+
+  <para>
+   Changes made to the running audit system by executing auditctl on the
+   command line are not persistent across system restarts. For changes to
+   persist, add them to the <filename>/etc/audit/audit.rules</filename> file
+   and, if they are not currently loaded into audit, restart the audit
+   system to load the modified rule set by using the <command>rcauditd
+   restart</command> command.
+  </para>
+
+  <example id="ex.audit.rules.sysparam">
+   <title>Example Audit Rules&mdash;Audit System Parameters</title>
+<screen>-b 1000<co id="co.aurules.b"/>
+-f 1<co id="co.aurules.f"/>
+-r 10<co id="co.aurules.r"/>
+-e 1<co id="co.aurules.e"/></screen>
+  </example>
+
+  <calloutlist>
+   <callout arearefs="co.aurules.b">
+    <para>
+     Specify the maximum number of outstanding audit buffers. Depending on
+     the level of logging activity, you might need to adjust the number of
+     buffers to avoid causing too heavy an audit load on your system.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.f">
+    <para>
+     Specify the failure flag to use. See
+     <xref linkend="tab.audit.auditctl"/> for possible values.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.r">
+    <para>
+     Specify the maximum number of messages per second that may be issued by
+     the kernel. See <xref linkend="tab.audit.auditctl"/> for details.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.e">
+    <para>
+     Enable or disable the audit subsystem.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   Using audit, you can track any kind of file system access to important
+   files, configurations or resources. You can add watches on these and
+   assign keys to each kind of watch for better identification in the logs.
+  </para>
+
+  <example id="ex.audit.rules.fs">
+   <title>Example Audit Rules&mdash;File System Auditing</title>
+<screen>-w /etc/shadow<co id="co.aurules.fs"/>
+-w /etc -p rx<co id="co.aurules.fsmode"/>
+-w /etc/passwd -k fk_passwd -p rwxa<co id="co.aurules.fskey"/></screen>
+   <calloutlist>
+    <callout arearefs="co.aurules.fs">
+     <para>
+      The <literal>-w</literal> option tells audit to add a watch to the
+      file specified, in this case <filename>/etc/shadow</filename>. All
+      system calls requesting access permissions to this file are analyzed.
+     </para>
+    </callout>
+    <callout arearefs="co.aurules.fsmode">
+     <para>
+      This rule adds a watch to the <filename>/etc</filename> directory and
+      applies permission filtering for read and execute access to this
+      directory (<literal>-p wx</literal>). Any system call requesting any
+      of these two permissions is analyzed. Only the creation of new files
+      and the deletion of existing ones are logged as directory-related
+      events. To get more specific events for files located under this
+      particular directory, you should add a separate rule for each file. A
+      file must exist before you add a rule containing a watch on it.
+      Auditing files as they are created is not supported.
+     </para>
+    </callout>
+    <callout arearefs="co.aurules.fskey">
+     <para>
+      This rule adds a file watch to <filename>/etc/passwd</filename>.
+      Permission filtering is applied for read, write, execute, and
+      attribute change permissions. The <literal>-k</literal> option allows
+      you to specify a key to use to filter the audit logs for this
+      particular event later (e.g. with <command>ausearch</command>). You
+      may use the same key on different rules in order to be able to group
+      rules when searching for them. It is also possible to apply multiple
+      keys to a rule.
+     </para>
+    </callout>
+   </calloutlist>
+  </example>
+
+  <para>
+   System call auditing lets you track your system's behavior on a level
+   even below the application level. When designing these rules, consider
+   that auditing a great many system calls may increase your system load and
+   cause you to run out of disk space. Consider carefully which events need
+   tracking and how they can be filtered to be even more specific.
+  </para>
+
+  <example id="ex.audit.rules.syscall">
+   <title>Example Audit Rules&mdash;System Call Auditing</title>
+<screen>-a entry,always -S mkdir<co id="co.aurules.scalladd"/>
+-a entry,always -S access -F a1=4<co id="co.aurules.scallfilter"/>
+-a exit,always -S ipc -F a0=2<co id="co.aurules.scallipc"/>
+-a exit,always -S open -F success!=0<co id="co.aurules.scalls"/>
+-a task,always -F auid=0<co id="co.aurules.scalltask"/>
+-a task,always -F uid=0 -F auid=501 -F gid=wheel<co id="co.aurules.scallsu"/></screen>
+  </example>
+
+  <calloutlist>
+   <callout arearefs="co.aurules.scalladd">
+    <para>
+     This rule activates auditing for the mkdir system call. The
+     <literal>-a</literal> option adds system call rules. This rule triggers
+     an event whenever the mkdir system call is entered
+     (<literal>entry</literal>, <literal>always</literal>). The
+     <literal>-S</literal> option adds the system call to which this rule
+     should be applied.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.scallfilter">
+    <para>
+     This rule adds auditing to the access system call, but only if the
+     second argument of the system call (<literal>mode</literal>) is
+     <literal>4</literal> (<literal>R_OK</literal>).
+     <literal>entry,always</literal> tells audit to add an audit context to
+     this system call when entering it and to write out a report as soon as
+     the call exits.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.scallipc">
+    <para>
+     This rule adds an audit context to the IPC multiplexed system call. The
+     specific <literal>ipc</literal> system call is passed as the first
+     syscall argument and can be selected using <option>-F
+     a0=<replaceable>ipc_call_number</replaceable></option>.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.scalls">
+    <para>
+     This rule audits failed attempts to call open.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.scalltask">
+    <para>
+     This rule is an example of a task rule (keyword:
+     <literal>task</literal>). It is different from the other rules above in
+     that it applies to processes that are forked or cloned. To filter these
+     kind of events, you can only use fields that are known at fork time,
+     such as UID, GID, and AUID. This example rule filters for all tasks
+     carrying an audit ID of <literal>0</literal>.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.scallsu">
+    <para>
+     This last rule makes heavy use of filters. All filter options are
+     combined with a logical AND operator, meaning that this rule applies to
+     all tasks that carry the audit ID of <literal>501</literal>, have
+     changed to run as &rootuser;, and have <literal>wheel</literal> as the
+     group. A process is given an audit ID on user login. This ID is then
+     handed down to any child process started by the initial process of the
+     user. Even if the user changes his identity, the audit ID stays the
+     same and allows tracing actions to the original user.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <tip>
+   <title>Filtering System Call Arguments</title>
+   <para>
+    For more details on filtering system call arguments, refer to
+    <xref
+     linkend="sec.audit.scenipc"/>.
+   </para>
+  </tip>
+
+  <para>
+   You can not only add rules to the audit system, but also remove them.
+   Delete rules are used to purge the rule queue of rules that might
+   potentially clash with those you want to add. There are different methods
+   for deleting the entire rule set at once or for deleting system call
+   rules or file and directory watches:
+  </para>
+
+  <example id="ex.audit.ruledel">
+   <title>Deleting Audit Rules and Events</title>
+<screen>-D<co id="co.aurules.d"/>
+-d entry,always -S mkdir<co id="co.aurules.scalldel"/>
+-W /etc<co id="co.aurules.fsdel"/></screen>
+  </example>
+
+  <calloutlist>
+   <callout arearefs="co.aurules.d">
+    <para>
+     Clear the queue of audit rules and delete any preexisting rules. This
+     rule is used as the first rule in
+     <filename>/etc/audit/audit.rules</filename> files to make sure that the
+     rules that are about to be added do not clash with any preexisting
+     ones. The <command>auditctl <option>-D</option></command> command is
+     also used before doing an autrace to avoid having the trace rules clash
+     with any rules present in the <filename>audit.rules</filename> file.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.scalldel">
+    <para>
+     This rule deletes a system call rule. The <literal>-d</literal> option
+     must precede any system call rule that needs to be deleted from the
+     rule queue, and must match exactly.
+    </para>
+   </callout>
+   <callout arearefs="co.aurules.fsdel">
+    <para>
+     This rule tells audit to discard the rule with the directory watch on
+     <filename>/etc</filename> from the rules queue. This rule deletes any
+     rule containing a directory watch on <filename>/etc</filename>,
+     regardless of any permission filtering or key options.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   To get an overview of which rules are currently in use in your audit
+   setup, run <command>auditctl <option>-l</option></command>. This command
+   displays all rules with one rule per line.
+  </para>
+
+  <example>
+   <title>Listing Rules with <command>auditctl <option>-l</option></command></title>
+<screen>LIST_RULES: exit,always watch=/etc perm=rx
+LIST_RULES: exit,always watch=/etc/passwd perm=rwxa key=fk_passwd
+LIST_RULES: exit,always watch=/etc/shadow perm=rwxa
+LIST_RULES: entry,always syscall=mkdir
+LIST_RULES: entry,always a1=4 (0x4) syscall=access
+LIST_RULES: exit,always a0=2 (0x2) syscall=ipc
+LIST_RULES: exit,always success!=0 syscall=open</screen>
+  </example>
+
+  <note>
+   <title>Creating Filter Rules</title>
+   <para>
+    You can build very sophisticated audit rules by using the various filter
+    options. Refer to the <command>auditctl(8)</command> man page for more
+    information about the options available for building audit filter rules,
+    and audit rules in general.
+   </para>
+  </note>
+ </sect1>
+ <sect1 id="sec.audit.aureport">
+  <title>Understanding the Audit Logs and Generating Reports</title>
+
+  <para>
+   To understand what the aureport utility does, it is vital to know how the
+   logs generated by the audit daemon are structured, and what exactly is
+   recorded for an event. Only then can you decide which report types are
+   most appropriate for your needs.
+  </para>
+
+  <sect2 id="sec.audit.aureport.ustand">
+   <title>Understanding the Audit Logs</title>
+   <para>
+    The following examples highlight two typical events that are logged by
+    audit and how their trails in the audit log are read. The audit log or
+    logs (if log rotation is enabled) are stored in the
+    <filename>/var/log/audit</filename> directory. The first example is a
+    simple <command>less</command> command. The second example covers a
+    great deal of PAM activity in the logs when a user tries to remotely log
+    in to a machine running audit.
+   </para>
+   <example id="ex.audit.aureport.logtrail">
+    <title>A Simple Audit Event&mdash;Viewing the Audit Log</title>
+<screen>type=SYSCALL msg=audit(1234874638.599:5207): arch=c000003e syscall=2 success=yes exit=4 a0=62fb60 a1=0 a2=31 a3=0 items=1 ppid=25400 pid
+=25616 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts1 ses=1164 comm="less" exe="/usr/bin/less" key="doc_log"
+type=CWD msg=audit(1234874638.599:5207):  cwd="/root"
+type=PATH msg=audit(1234874638.599:5207): item=0 name="/var/log/audit/audit.log" inode=1219041 dev=08:06 mode=0100644 ouid=0 ogid=0 rdev=00:00</screen>
+   </example>
+   <para>
+    The above event, a simple <command>less
+    /var/log/audit/audit.log</command>, wrote three messages to the log. All
+    of them are closely linked together and you would not be able to make
+    sense of one of them without the others. The first message reveals the
+    following information:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>type</literal>
+     </term>
+     <listitem>
+      <para>
+       The type of event recorded. In this case, it assigns the
+       <literal>SYSCALL</literal> type to an event triggered by a system
+       call (less or rather the underlying open). The <literal>CWD</literal>
+       event was recorded to record the current working directory at the
+       time of the syscall. A <literal>PATH</literal> event is generated for
+       each path passed to the system call. The open system call takes only
+       one path argument, so only generates one <literal>PATH</literal>
+       event. It is important to understand that the <literal>PATH</literal>
+       event reports the pathname string argument without any further
+       interpretation, so a relative path requires manual combination with
+       the path reported by the <literal>CWD</literal> event to determine
+       the object accessed.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>msg</literal>
+     </term>
+     <listitem>
+<!-- hint: UNIX time: 1175176190.105 = Thu Mar 29 15:49:50 2007 -->
+<!-- perl -le 'print scalar localtime ...' -->
+      <para>
+       A message ID enclosed in brackets. The ID splits into two parts. All
+       characters before the <literal>:</literal> represent a UNIX epoch
+       time stamp. The number after the colon represents the actual event
+       ID. All events that are logged from one application's system call
+       have the same event ID. If the application makes a second system
+       call, it gets another event ID.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>arch</literal>
+     </term>
+     <listitem>
+      <para>
+       References the CPU architecture of the system call. Decode this
+       information using the <option>-i</option> option on any of your
+       <command>ausearch</command> commands when searching the logs.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>syscall</literal>
+     </term>
+     <listitem>
+      <para>
+       The type of system call as it would have been printed by an strace on
+       this particular system call. This data is taken from the list of
+       system calls under <filename>/usr/include/asm/unistd.h</filename> and
+       may vary depending on the architecture. In this case,
+       <literal>syscall=2</literal> refers to the open system call (see
+       <command>man open(2)</command>) invoked by the less application.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>success</literal>
+     </term>
+     <listitem>
+      <para>
+       Whether the system call succeeded or failed.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>exit</literal>
+     </term>
+     <listitem>
+      <para>
+       The exit value returned by the system call. For the
+       <command>open</command> system call used in this example, this is the
+       file descriptor number. This varies by system call.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>a0</literal> to <literal>a3</literal>
+     </term>
+     <listitem>
+      <para>
+       The first four arguments to the system call in numeric form. The
+       values of these are totally system call dependent. In this example
+       (an <command>open</command> system call), the following are used:
+      </para>
+<screen>a0=62fb60 a1=0 a2=31 a3=0</screen>
+      <para>
+       <literal>a0</literal> is the start address of the passed pathname.
+       <literal>a1</literal> is the flags. <literal>8000</literal> in hex
+       notation translates to <literal>100000</literal> in octal notation,
+       which in turn translates to <literal>O_LARGEFILE</literal>.
+       <literal>a2</literal> is the mode, which, because
+       <literal>O_CREAT</literal> was not specified, is unused.
+       <literal>a3</literal> is not passed by the <command>open</command>
+       system call. Check the manual page of the relevant system call to
+       find out which arguments are used with it.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>items</literal>
+     </term>
+     <listitem>
+      <para>
+       The number of strings passed to the application.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ppid</literal>
+     </term>
+     <listitem>
+      <para>
+       The process ID of the parent of the process analyzed.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>pid</literal>
+     </term>
+     <listitem>
+      <para>
+       The process ID of the process analyzed.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>auid</literal>
+     </term>
+     <listitem>
+      <para>
+       The audit ID. A process is given an audit ID on user login. This ID
+       is then handed down to any child process started by the initial
+       process of the user. Even if the user changes his identity (for
+       example, becomes &rootuser;), the audit ID stays the same. Thus you
+       can always trace actions to the original user who logged in.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>uid</literal>
+     </term>
+     <listitem>
+      <para>
+       The user ID of the user who started the process. In this case,
+       <literal>0</literal> for &rootuser;.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>gid</literal>
+     </term>
+     <listitem>
+      <para>
+       The group ID of the user who started the process. In this case,
+       <literal>0</literal> for &rootuser;.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>euid</literal>, <literal>suid</literal>, <literal>fsuid</literal>
+     </term>
+     <listitem>
+      <para>
+       Effective user ID, set user ID, and file system user ID of the user
+       that started the process.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>egid</literal>, <literal>sgid</literal>, <literal>fsgid</literal>
+     </term>
+     <listitem>
+      <para>
+       Effective group ID, set group ID, and file system group ID of the
+       user that started the process.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>tty</literal>
+     </term>
+     <listitem>
+      <para>
+       The terminal from which the application is started. In this case, a
+       pseudoterminal used in an SSH session.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ses</literal>
+     </term>
+     <listitem>
+      <para>
+       The login session ID. This process attribute is set when a user logs
+       in and can tie any process to a particular user login.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>comm</literal>
+     </term>
+     <listitem>
+      <para>
+       The application name under which it appears in the task list.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>exe</literal>
+     </term>
+     <listitem>
+      <para>
+       The resolved pathname to the binary program.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>subj</literal>
+     </term>
+     <listitem>
+      <para>
+       auditd records whether the process is subject to any security
+       context, such as &aa;. <literal>unconstrained</literal>, as in this
+       case, means that the process is not confined with &aa;. If the
+       process had been confined, the binary pathname plus the &aa; profile
+       mode would have been logged.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>key</literal>
+     </term>
+     <listitem>
+      <para>
+       If you are auditing a large number of directories or files, assign
+       key strings each of these watches. You can use these keys with
+       <command>ausearch</command> to search the logs for events of this
+       type only.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    The second message triggered by the example <command>less</command> call
+    does not reveal anything apart from just the current working directory
+    when the <command>less</command> command was executed.
+   </para>
+   <para>
+    The third message reveals the following (the <literal>type</literal> and
+    <literal>message</literal> flags have already been introduced):
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>item</literal>
+     </term>
+     <listitem>
+      <para>
+       In this example, <literal>item</literal> references the
+       <literal>a0</literal> argument&mdash;a path&mdash;that is associated
+       with the original <literal>SYSCALL</literal> message. Had the
+       original call had more than one path argument (such as a
+       <command>cp</command> or <command>mv</command> command), an
+       additional <literal>PATH</literal> event would have been logged for
+       the second path argument.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>name</literal>
+     </term>
+     <listitem>
+      <para>
+       Refers to the pathname passed as an argument to the
+       <command>less</command> (or <command>open</command>) call.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>inode</literal>
+     </term>
+     <listitem>
+      <para>
+       Refers to the inode number corresponding to <literal>name</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>dev</literal>
+     </term>
+     <listitem>
+      <para>
+       Specifies the device on which the file is stored. In this case,
+       <literal>03:01</literal>, which stands for
+       <literal>/dev/sda1</literal> or <quote>first partition on the first
+       IDE device.</quote>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>mode</literal>
+     </term>
+     <listitem>
+      <para>
+       Numerical representation of the file's access permissions. In this
+       case, &rootuser; has read and write permissions and his group
+       (&rootuser;) has read access while the entire rest of the world
+       cannot access the file at all.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ouid</literal> and <literal>ogid</literal>
+     </term>
+     <listitem>
+      <para>
+       Refer to the UID and GID of the inode itself.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>rdev</literal>
+     </term>
+     <listitem>
+      <para>
+       Not applicable for this example. The <literal>rdev</literal> entry
+       only applies to block or character devices, not to files.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    <xref linkend="ex.audit.aureport.sshd"/> highlights the audit events
+    triggered by an incoming SSH connection. Most of the messages are
+    related to the PAM stack and reflect the different stages of the SSH PAM
+    process. Several of the audit messages carry nested PAM messages in them
+    that signify that a particular stage of the PAM process has been
+    reached. Although the PAM messages are logged by audit, audit assigns
+    its own message type to each event:
+   </para>
+   <example id="ex.audit.aureport.sshd">
+    <title>An Advanced Audit Event&mdash;Login via SSH</title>
+<screen>type=USER_AUTH msg=audit(1234877011.791:7731): user pid=26127 uid=0 <co id="co.audit.sshd.auth"/>
+auid=4294967295 ses=4294967295 msg='op=PAM:authentication acct="root" exe="/usr/sbin/sshd"
+(hostname=&wsIname;, addr=&wsIip;, terminal=ssh res=success)'
+type=USER_ACCT msg=audit(1234877011.795:7732): user pid=26127 uid=0 <co id="co.audit.sshd.acct"/>
+auid=4294967295 ses=4294967295 msg='op=PAM:accounting acct="root" exe="/usr/sbin/sshd" 
+(hostname=&wsIname;, addr=&wsIip;, terminal=ssh res=success)'
+type=CRED_ACQ msg=audit(1234877011.799:7733): user pid=26125 uid=0 <co id="co.audit.sshd.acq"/>
+auid=4294967295 ses=4294967295 msg='op=PAM:setcred acct="root" exe="/usr/sbin/sshd"
+(hostname=&wsIname;, addr=&wsIip;, terminal=/dev/pts/0 res=success)'
+type=LOGIN msg=audit(1234877011.799:7734): login pid=26125 uid=0
+old auid=4294967295 new auid=0 old ses=4294967295 new ses=1172
+type=USER_START msg=audit(1234877011.799:7735): user pid=26125 uid=0 <co id="co.audit.sshd.start"/>
+auid=0 ses=1172 msg='op=PAM:session_open acct="root" exe="/usr/sbin/sshd" 
+(hostname=&wsIname;, addr=&wsIip;, terminal=/dev/pts/0 res=success)'
+type=USER_LOGIN msg=audit(1234877011.823:7736): user pid=26128 uid=0 <co id="co.audit.sshd.login"/>
+auid=0 ses=1172 msg='uid=0: exe="/usr/sbin/sshd"
+(hostname=&wsIname;, addr=&wsIip;, terminal=/dev/pts/0 res=success)'
+type=CRED_REFR msg=audit(1234877011.828:7737): user pid=26128 uid=0 <co id="co.audit.sshd.refr"/> 
+auid=0 ses=1172 msg='op=PAM:setcred acct="root" exe="/usr/sbin/sshd" 
+(hostname=&wsIname;, addr=&wsIip;, terminal=/dev/pts/0 res=success)'</screen>
+   </example>
+   <calloutlist>
+    <callout arearefs="co.audit.sshd.auth">
+     <para>
+      PAM reports that is has successfully requested user authentication for
+      &rootuser; from a remote host (&wsIname;, &wsIip;). The terminal where
+      this is happening is <literal>ssh</literal>.
+     </para>
+    </callout>
+    <callout arearefs="co.audit.sshd.acct">
+     <para>
+      PAM reports that it has successfully determined whether the user is
+      authorized to log in at all.
+     </para>
+    </callout>
+    <callout arearefs="co.audit.sshd.acq">
+     <para>
+      PAM reports that the appropriate credentials to log in have been
+      acquired and that the terminal changed to a normal terminal
+      (<literal>/dev/pts0</literal>).
+     </para>
+    </callout>
+    <callout arearefs="co.audit.sshd.login">
+     <para>
+      The user has successfully logged in. This event is the one used by
+      <command>aureport <option>-l</option></command> to report about user
+      logins.
+     </para>
+    </callout>
+    <callout arearefs="co.audit.sshd.start">
+     <para>
+      PAM reports that it has successfully opened a session for &rootuser;.
+     </para>
+    </callout>
+    <callout arearefs="co.audit.sshd.refr">
+     <para>
+      PAM reports that the credentials have been successfully reacquired.
+     </para>
+    </callout>
+   </calloutlist>
+  </sect2>
+
+  <sect2 id="sec.audit.aureport.gen">
+   <title>Generating Custom Audit Reports</title>
+   <para>
+    The raw audit reports stored in the <filename>/var/log/audit</filename>
+    directory tend to become very bulky and hard to understand. To find
+    individual events of interest, you might have to read through thousands
+    of other events before you locate the one that you want. To avoid this,
+    use the aureport utility and create custom reports.
+   </para>
+   <para>
+    The following use cases highlight just a few of the possible report
+    types that you can generate with aureport:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Read Audit Logs from Another File</term>
+     <listitem>
+      <para>
+       When the audit logs have moved to another machine or when you want to
+       analyze the logs of a number of machines on your local machine
+       without wanting to connect to each of these individually, move the
+       logs to a local file and have aureport analyze them locally:
+      </para>
+<screen><command>aureport -if myfile</command>
+
+Summary Report
+======================
+Range of time in logs: 03/02/09 14:13:38.225 - 17/02/09 14:52:27.971
+Selected time for report: 03/02/09 14:13:38 - 17/02/09 14:52:27.971
+Number of changes in configuration: 13
+Number of changes to accounts, groups, or roles: 0
+Number of logins: 6
+Number of failed logins: 13
+Number of authentications: 7
+Number of failed authentications: 573
+Number of users: 1
+Number of terminals: 9
+Number of host names: 4
+Number of executables: 17
+Number of files: 279
+Number of AVC's: 0
+Number of MAC events: 0
+Number of failed syscalls: 994
+Number of anomaly events: 0
+Number of responses to anomaly events: 0
+Number of crypto events: 0
+Number of keys: 2
+Number of process IDs: 1211
+Number of events: 5320</screen>
+      <para>
+       The above command, <command>aureport</command> without any arguments,
+       provides just the standard general summary report generated from the
+       logs contained in <filename>myfile</filename>. To create more
+       detailed reports, combine the <option>-if</option> option with any of
+       the options below. For example, generate a login report that is
+       limited to a certain time frame:
+      </para>
+<screen><command>aureport -l -ts 14:00 -te 15:00 -if myfile</command>
+
+Login Report
+============================================
+# date time auid host term exe success event
+============================================
+1. 17/02/09 14:21:09 root: &wsIip; sshd /usr/sbin/sshd no 7718
+2. 17/02/09 14:21:15 0 &wsI; /dev/pts/3 /usr/sbin/sshd yes 7724</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Convert Numeric Entities to Text</term>
+     <listitem>
+      <para>
+       Some information, such as user IDs, are printed in numeric form. To
+       convert these into a human-readable text format, add the
+       <option>-i</option> option to your <command>aureport</command>
+       command.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Rough Summary Report</term>
+     <listitem>
+      <para>
+       If you are just interested in the current audit statistics (events,
+       logins, processes, etc.), run <command>aureport</command> without any
+       other option.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Summary Report of Failed Events</term>
+     <listitem>
+      <para>
+       If you want to break down the overall statistics of plain
+       <command>aureport</command> to the statistics of failed events, use
+       <command>aureport <option>--failed</option></command>:
+      </para>
+<screen><command>aureport --failed</command>
+
+Failed Summary Report
+======================
+Range of time in logs: 03/02/09 14:13:38.225 - 17/02/09 14:57:35.183
+Selected time for report: 03/02/09 14:13:38 - 17/02/09 14:57:35.183
+Number of changes in configuration: 0
+Number of changes to accounts, groups, or roles: 0
+Number of logins: 0
+Number of failed logins: 13
+Number of authentications: 0
+Number of failed authentications: 574
+Number of users: 1
+Number of terminals: 5
+Number of host names: 4
+Number of executables: 11
+Number of files: 77
+Number of AVC's: 0
+Number of MAC events: 0
+Number of failed syscalls: 994
+Number of anomaly events: 0
+Number of responses to anomaly events: 0
+Number of crypto events: 0
+Number of keys: 2
+Number of process IDs: 708
+Number of events: 1583</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Summary Report of Successful Events</term>
+     <listitem>
+      <para>
+       If you want to break down the overall statistics of a plain
+       <command>aureport</command> to the statistics of successful events,
+       use <command>aureport <option>--success</option></command>:
+      </para>
+<screen><command>aureport --success</command>
+
+Success Summary Report
+======================
+Range of time in logs: 03/02/09 14:13:38.225 - 17/02/09 15:00:01.535
+Selected time for report: 03/02/09 14:13:38 - 17/02/09 15:00:01.535
+Number of changes in configuration: 13
+Number of changes to accounts, groups, or roles: 0
+Number of logins: 6
+Number of failed logins: 0
+Number of authentications: 7
+Number of failed authentications: 0
+Number of users: 1
+Number of terminals: 7
+Number of host names: 3
+Number of executables: 16
+Number of files: 215
+Number of AVC's: 0
+Number of MAC events: 0
+Number of failed syscalls: 0
+Number of anomaly events: 0
+Number of responses to anomaly events: 0
+Number of crypto events: 0
+Number of keys: 2
+Number of process IDs: 558
+Number of events: 3739</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create Summary Reports</term>
+     <listitem>
+      <para>
+       In addition to the dedicated summary reports (main summary and failed
+       and success summary), use the <option>--summary</option> option with
+       most of the other options to create summary reports for a particular
+       area of interest only. Not all reports support this option, however.
+       This example creates a summary report for user login events:
+      </para>
+<?dbfo-need height="15em"?>
+<screen><command>aureport -u -i --summary</command>
+
+User Summary Report
+===========================
+total  auid
+===========================
+5640  root
+13  &exampleuser;
+3  &exampleuserII;</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report of Events</term>
+     <listitem>
+      <para>
+       To get an overview of the events logged by audit, use the
+       <command>aureport <option>-e</option></command> command. This command
+       generates a numbered list of all events including date, time, event
+       number, event type, and audit ID.
+      </para>
+<screen>aureport -e -ts 14:00 -te 14:21
+
+Event Report
+===================================
+# date time event type auid success
+===================================
+1. 17/02/09 14:20:27 7462 DAEMON_START 0 yes
+2. 17/02/09 14:20:27 7715 CONFIG_CHANGE 0 yes
+3. 17/02/09 14:20:57 7716 USER_END 0 yes
+4. 17/02/09 14:20:57 7717 CRED_DISP 0 yes
+5. 17/02/09 14:21:09 7718 USER_LOGIN -1 no
+6. 17/02/09 14:21:15 7719 USER_AUTH -1 yes
+7. 17/02/09 14:21:15 7720 USER_ACCT -1 yes
+8. 17/02/09 14:21:15 7721 CRED_ACQ -1 yes
+9. 17/02/09 14:21:15 7722 LOGIN 0 yes
+10. 17/02/09 14:21:15 7723 USER_START 0 yes
+11. 17/02/09 14:21:15 7724 USER_LOGIN 0 yes
+12. 17/02/09 14:21:15 7725 CRED_REFR 0 yes</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report from All Process Events</term>
+     <listitem>
+      <para>
+       To analyze the log from a process's point of view, use the
+       <command>aureport <option>-p</option></command> command. This command
+       generates a numbered list of all process events including date, time,
+       process ID, name of the executable, system call, audit ID, and event
+       number.
+      </para>
+<screen><command>aureport -p</command>
+
+Process ID Report
+======================================
+# date time pid exe syscall auid event
+======================================
+1. 13/02/09 15:30:01 32742 /usr/sbin/cron 0 0 35
+2. 13/02/09 15:30:01 32742 /usr/sbin/cron 0 0 36
+3. 13/02/09 15:38:34 32734 /usr/lib/gdm/gdm-session-worker 0 -1 37</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report from All System Call Events</term>
+     <listitem>
+      <para>
+       To analyze the audit log from a system call's point of view, use the
+       <command>aureport <option>-s</option></command> command. This command
+       generates a numbered list of all system call events including date,
+       time, number of the system call, process ID, name of the command that
+       used this call, audit ID, and event number.
+      </para>
+<screen><command>aureport -s</command>
+
+Syscall Report
+=======================================
+# date time syscall pid comm auid event
+=======================================
+1. 16/02/09 17:45:01 2 20343 cron -1 2279
+2. 16/02/09 17:45:02 83 20350 mktemp 0 2284
+3. 16/02/09 17:45:02 83 20351 mkdir 0 2285</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report from All Executable Events</term>
+     <listitem>
+      <para>
+       To analyze the audit log from an executable's point of view, use the
+       <command>aureport <option>-x</option></command> command. This command
+       generates a numbered list of all executable events including date,
+       time, name of the executable, the terminal it is run in, the host
+       executing it, the audit ID, and event number.
+      </para>
+<screen><command>aureport -x</command>
+
+Executable Report
+====================================
+# date time exe term host auid event
+====================================
+1. 13/02/09 15:08:26 /usr/sbin/sshd sshd &wsIip; -1 12
+2. 13/02/09 15:08:28 /usr/lib/gdm/gdm-session-worker :0 ? -1 13
+3. 13/02/09 15:08:28 /usr/sbin/sshd ssh &wsIip; -1 14</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report about Files</term>
+     <listitem>
+      <para>
+       To generate a report from the audit log that focuses on file access,
+       use the <command>aureport <option>-f</option></command> command. This
+       command generates a numbered list of all file-related events
+       including date, time, name of the accessed file, number of the system
+       call accessing it, success or failure of the command, the executable
+       accessing the file, audit ID, and event number.
+      </para>
+<screen><command>aureport -f</command>
+
+File Report
+===============================================
+# date time file syscall success exe auid event
+===============================================
+1. 16/02/09 17:45:01 /etc/shadow 2 yes /usr/sbin/cron -1 2279
+2. 16/02/09 17:45:02 /tmp/ 83 yes /bin/mktemp 0 2284
+3. 16/02/09 17:45:02 /var 83 no /bin/mkdir 0 2285</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report about Users</term>
+     <listitem>
+      <para>
+       To generate a report from the audit log that illustrates which users
+       are running what executables on your system, use the
+       <command>aureport <option>-u</option></command> command. This command
+       generates a numbered list of all user-related events including date,
+       time, audit ID, terminal used, host, name of the executable, and an
+       event ID.
+      </para>
+<screen><command>aureport -u</command>
+
+User ID Report
+====================================
+# date time auid term host exe event
+====================================
+1. 13/02/09 15:08:26 -1 sshd &wsIip; /usr/sbin/sshd 12
+2. 13/02/09 15:08:28 -1 :0 ? /usr/lib/gdm/gdm-session-worker 13
+3. 14/02/09 08:25:39 -1 ssh &wsIIip; /usr/sbin/sshd 14</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Create a Report about Logins</term>
+     <listitem>
+      <para>
+       To create a report that focuses on login attempts to your machine,
+       run the <command>aureport <option>-l</option></command> command. This
+       command generates a numbered list of all login-related events
+       including date, time, audit ID, host and terminal used, name of the
+       executable, success or failure of the attempt, and an event ID.
+      </para>
+<screen><command>aureport -l -i</command>
+
+Login Report
+============================================
+# date time auid host term exe success event
+============================================
+1. 13/02/09 15:08:31 tux: &wsIip; sshd /usr/sbin/sshd no 19
+2. 16/02/09 12:39:05 root: &wsIIip; sshd /usr/sbin/sshd no 2108
+3. 17/02/09 15:29:07 geeko: ? tty3 /bin/login yes 7809</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Limit a Report to a Certain Time Frame</term>
+     <listitem>
+      <para>
+       To analyze the logs for a particular time frame, such as only the
+       working hours of Feb 16, 2009, first find out whether this data is
+       contained in the the current <filename>audit.log</filename> or
+       whether the logs have been rotated in by running <command>aureport
+       <option>-t</option></command>:
+      </para>
+<screen><command>aureport -t</command>
+
+Log Time Range Report
+=====================
+/var/log/audit/audit.log: 03/02/09 14:13:38.225 - 17/02/09 15:30:01.636</screen>
+      <para>
+       The current <filename>audit.log</filename> contains all the desired
+       data. Otherwise, use the <option>-if</option> option to point the
+       aureport commands to the log file that contains the needed data.
+      </para>
+      <para>
+       Then, specify the start date and time and the end date and time of
+       the desired time frame and combine it with the report option needed.
+       This example focuses on login attempts:
+      </para>
+<screen><command>aureport -ts 02/16/09 8:00 -te 02/16/09 18:00 -l</command>
+
+Login Report
+============================================
+# date time auid host term exe success event
+============================================
+1. 16/02/09 12:39:05 root: &wsIip; sshd /usr/sbin/sshd no 2108
+2. 16/02/09 12:39:12 0 &wsIip; /dev/pts/1 /usr/sbin/sshd yes 2114
+3. 16/02/09 13:09:28 root: &wsIip; sshd /usr/sbin/sshd no 2131
+4. 16/02/09 13:09:32 root: &wsIip; sshd /usr/sbin/sshd no 2133
+5. 16/02/09 13:09:37 0 &wsIip; /dev/pts/2 /usr/sbin/sshd yes 2139</screen>
+      <para>
+       The start date and time are specified with the <option>-ts</option>
+       option. Any event that has a time stamp equal to or after your given
+       start time appears in the report. If you omit the date,
+       <command>aureport</command> assumes that you meant
+       <emphasis>today</emphasis>. If you omit the time, it assumes that the
+       start time should be midnight of the date specified. Use the 24 clock
+       notation rather than the 12 hour one and adjust the date format to
+       your locale (specified in <filename>/etc/sysconfig/audit</filename>
+       under <envar>AUDITD_LANG</envar>, default is
+       <literal>en_US</literal>).
+      </para>
+      <para>
+       Specify the end date and time with the <option>-te</option> option.
+       Any event that has a time stamp equal to or before your given event
+       time appears in the report. If you omit the date,
+       <command>aureport</command> assumes that you meant today. If you omit
+       the time, it assumes that the end time should be now. Use a similar
+       format for the date and time as for <option>-ts</option>.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    All reports except the summary ones are printed in column format and
+    sent to STDOUT, which means that this data can be piped to other
+    commands very easily. The visualization scripts introduced in
+    <xref linkend="sec.audit.auviz"/> are just one example of how to further
+    process the data generated by audit.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.audit.ausearch">
+  <title>Querying the Audit Daemon Logs with ausearch</title>
+
+  <para>
+   The aureport tool helps you to create overall summaries of what is
+   happening on the system, but if you are interested in the details of a
+   particular event, ausearch is the tool to use. ausearch allows you to
+   search the audit logs using special keys and search phrases that relate
+   to most of the flags that appear in event messages in
+   <filename>/var/log/audit/audit.log</filename>. Not all record types
+   contain the same search phrases. There are no <literal>hostname</literal>
+   or <literal>uid</literal> entries in a <literal>PATH</literal> record,
+   for example. When searching, make sure that you choose appropriate search
+   criteria to catch all records you need. On the other hand, you could be
+   searching for a specific type of record and still get various other
+   related records along with it. This is caused by different parts of the
+   kernel contributing additional records for events that are related to the
+   one to find. For example, you would always get a <literal>PATH</literal>
+   record along with the <literal>SYSCALL</literal> record for an
+   <command>open</command> system call.
+  </para>
+
+  <tip>
+   <title>Using Multiple Search Options</title>
+   <para>
+    Any of the command line options can be combined with logical AND
+    operators to narrow down your search.
+   </para>
+  </tip>
+
+  <variablelist>
+   <varlistentry>
+    <term>Read Audit Logs from Another File</term>
+    <listitem>
+     <para>
+      When the audit logs have moved to another machine or when you want to
+      analyze the logs of a number of machines on your local machine without
+      wanting to connect to each of these individually, move the logs to a
+      local file and have ausearch search them locally:
+     </para>
+<screen><command>ausearch -<replaceable>option</replaceable> -if <replaceable>myfile</replaceable></command></screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Convert Numeric Results into Text</term>
+    <listitem>
+     <para>
+      Some information, such as user IDs are printed in numeric form. To
+      convert these into human readable text format, add the
+      <option>-i</option> option to your <command>ausearch</command>
+      command.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Audit Event ID</term>
+    <listitem>
+     <para>
+      If you have previously run an audit report or done an autrace, you
+      might want to analyze the trail of a particular event in the log. Most
+      of the report types described in
+      <xref
+       linkend="sec.audit.aureport"/> include audit event IDs in
+      their output. An audit event ID is the second part of an audit message
+      ID, which consists of a UNIX epoch time stamp and the audit event ID
+      separated by a colon. All events that are logged from one
+      application's system call have the same event ID. Use this event ID
+      with ausearch to retrieve this event's trail from the log.
+     </para>
+     <para>
+      The autrace tool asks you to review the complete trail of the command
+      traced in the logs using ausearch. autrace provides you with the
+      complete ausearch command including the audit event ID.
+     </para>
+     <para>
+      In both cases, use a command similar to the following:
+     </para>
+<screen><command>ausearch -a 5207</command>
+----
+time->Tue Feb 17 13:43:58 2009
+type=PATH msg=audit(1234874638.599:5207): item=0 name="/var/log/audit/audit.log" inode=1219041 dev=08:06 mode=0100644 ouid=0 ogid=0 rdev=00:00
+type=CWD msg=audit(1234874638.599:5207):  cwd="/root"
+type=SYSCALL msg=audit(1234874638.599:5207): arch=c000003e syscall=2 success=yes exit=4 a0=62fb60 a1=0 a2=31 a3=0 items=1 ppid=25400 pid=25616 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts1 ses=1164 comm="less" exe="/usr/bin/less" key="doc_log"</screen>
+     <para>
+      The <command>ausearch <option>-a</option></command> command grabs all
+      records in the logs that are related to the audit event ID provided
+      and displays them. This option cannot be combined with any other
+      option.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Message Type</term>
+    <listitem>
+     <para>
+      To search for audit records of a particular message type, use the
+      <command>ausearch <option>-m
+      <replaceable>message_type</replaceable></option></command> command.
+      Examples of valid message types include <literal>PATH</literal>,
+      <literal>SYSCALL</literal>, and <literal>USER_LOGIN</literal>. Running
+      <command>ausearch <option>-m</option></command> without a message type
+      displays a list of all message types.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Login ID</term>
+    <listitem>
+     <para>
+      To view records associated with a particular login user ID, use the
+      <command>ausearch <option>-ul</option></command> command. It displays
+      any records related to the user login ID specified provided that user
+      had been able to log in successfully.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by User ID</term>
+    <listitem>
+     <para>
+      View records related to any of the user IDs (both user ID and
+      effective user ID) with <command>ausearch
+      <option>-ua</option></command>. View reports related to a particular
+      user ID with <command>ausearch <option>-ui
+      <replaceable>uid</replaceable></option></command>. Search for records
+      related to a particular effective user ID, use the <command>ausearch
+      <option>-ue <replaceable>euid</replaceable></option></command>.
+      Searching for a user ID means the user ID of the user creating a
+      process. Searching for an effective user ID means the user ID and
+      privileges that are required to run this process.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Group ID</term>
+    <listitem>
+     <para>
+      View records related to any of the group IDs (both group ID and
+      effective group ID) with the <command>ausearch
+      <option>-ga</option></command> command. View reports related to a
+      particular user ID with <command>ausearch <option>-gi
+      <replaceable>gid</replaceable></option></command>. Search for records
+      related to a particular effective group ID, use <command>ausearch
+      <option>-ge <replaceable>egid</replaceable></option></command>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Command Line Name</term>
+    <listitem>
+     <para>
+      View records related to a certain command, using the <command>ausearch
+      <option>-c <replaceable>comm_name</replaceable></option></command>
+      command, for example, <command>ausearch <option>-c
+      less</option></command> for all records related to the
+      <command>less</command> command.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Executable Name</term>
+    <listitem>
+     <para>
+      View records related to a certain executable with the
+      <command>ausearch <option>-x
+      <replaceable>exe</replaceable></option></command> command, for example
+      <command>ausearch <option>-x /usr/bin/less</option></command> for all
+      records related to the <command>/usr/bin/less</command> executable.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by System Call Name</term>
+    <listitem>
+     <para>
+      View records related to a certain system call with the
+      <command>ausearch <option>-sc
+      <replaceable>syscall</replaceable></option></command> command, for
+      example, <command>ausearch -sc open</command> for all records related
+      to the <command>open</command> system call.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Process ID</term>
+    <listitem>
+     <para>
+      View records related to a certain process ID with the
+      <command>ausearch <option>-p
+      <replaceable>pid</replaceable></option></command> command, for example
+      <command>ausearch <option>-p 13368</option></command> for all records
+      related to this process ID.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Event or System Call Success Value</term>
+    <listitem>
+     <para>
+      View records containing a certain system call success value with
+      <command>ausearch <option>-sv
+      <replaceable>success_value</replaceable></option></command>, for
+      example, <command>ausearch <option>-sv yes</option></command> for all
+      successful system calls.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Filename</term>
+    <listitem>
+     <para>
+      View records containing a certain filename with <command>ausearch
+      <option>-f <replaceable>filename</replaceable></option></command>, for
+      example, <command>ausearch <option>-f /foo/bar</option></command> for
+      all records related to the <filename>/foo/bar</filename> file. Using
+      the filename alone would work as well, but using relative paths would
+      not.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Terminal</term>
+    <listitem>
+     <para>
+      View records of events related to a certain terminal only with
+      <command>ausearch <option>-tm
+      <replaceable>term</replaceable></option></command>, for example,
+      <command>ausearch <option>-tm ssh</option></command> to view all
+      records related to events on the SSH terminal and <command>ausearch
+      <option>-tm tty</option> to view all events related to the
+      console.</command>
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Hostname</term>
+    <listitem>
+     <para>
+      View records related to a certain remote hostname with
+      <command>ausearch <option>-hn
+      <replaceable>hostname</replaceable></option></command>, for example,
+      <command>ausearch <option>-hn &wsIname;</option></command>. You can
+      use a hostname, fully qualified domain name, or numeric network
+      address.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Key Field</term>
+    <listitem>
+     <para>
+      View records that contain a certain key assigned in the audit rule set
+      to identify events of a particular type. Use the <command>ausearch
+      <option>-k <replaceable>key_field</replaceable></option></command>,
+      for example, <command>ausearch <option>-k CFG_etc</option></command>
+      to display any records containing the <literal>CFG_etc</literal> key.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Search by Word</term>
+    <listitem>
+     <para>
+      View records that contain a certain string assigned in the audit rule
+      set to identify events of a particular type. The whole string will be
+      matched on filename, hostname, and terminal. Use the <command>ausearch
+      <option>-w <replaceable>word</replaceable></option></command>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Limit a Search to a Certain Time Frame</term>
+    <listitem>
+     <para>
+      Use <option>-ts</option> and <option>-te</option> to limit the scope
+      of your searches to a certain time frame. The <option>-ts</option>
+      option is used to specify the start date and time and the
+      <option>-te</option> option is used to specify the end date and time.
+      These options can be combined with any of the above, except the
+      <option>-a</option> option. The use of these options is similar to use
+      with aureport.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.audit.autrace">
+  <title>Analyzing Processes with autrace</title>
+
+  <para>
+   In addition to monitoring your system using the rules you set up, you can
+   also perform dedicated audits of individual processes using the
+   <command>autrace</command> command. autrace works similarly to the
+   <command>strace</command> command, but gathers slightly different
+   information. The output of autrace is written to
+   <filename>/var/log/audit/audit.log</filename> and does not look any
+   different from the standard audit log entries.
+  </para>
+
+  <para>
+   When performing an autrace on a process, make sure that any audit rules
+   are purged from the queue to avoid these rules clashing with the ones
+   autrace adds itself. Delete the audit rules with the <command>auditctl
+   <option>-D</option></command> command. This stops all normal auditing.
+  </para>
+
+<?dbfo-need height="20em"?>
+
+<screen><command>auditctl -D</command>
+
+No rules
+
+<command>autrace /usr/bin/less /etc/sysconfig/auditd</command>
+
+Waiting to execute: /usr/bin/less
+Cleaning up...
+No rules
+Trace complete. You can locate the records with 'ausearch -i -p 7642'</screen>
+
+  <para>
+   Always use the full path to the executable to track with autrace. After
+   the trace is complete, autrace provides the event ID of the trace, so you
+   can analyze the entire data trail with ausearch. To restore the audit
+   system to use the audit rule set again, just restart the audit daemon
+   with <command>rcauditd restart</command>.
+  </para>
+ </sect1>
+ <sect1 id="sec.audit.auviz">
+  <title>Visualizing Audit Data</title>
+
+  <para>
+   Neither the data trail in <filename>/var/log/audit/audit.log</filename>
+   nor the different report types generated by aureport, described in
+   <xref linkend="sec.audit.aureport.gen"/>, provide an intuitive reading
+   experience to the user. The aureport output is formatted in columns and
+   thus easily available to any sed, perl, or awk scripts that users might
+   connect to the audit framework to visualize the audit data.
+  </para>
+
+  <para>
+   The visualization scripts (see <xref linkend="sec.audit.viz"/> are one
+   example of how to use standard Linux tools available with &productname;
+   or any other Linux distribution to create easy-to-read audit output. The
+   following examples help you understand how the plain audit reports can be
+   transformed into human readable graphics.
+  </para>
+
+  <para>
+   The first example illustrates the relationship of programs and system
+   calls. To get to this kind of data, you need to determine the appropriate
+   <command>aureport</command> command that delivers the source data from
+   which to generate the final graphic:
+  </para>
+
+<screen><command>aureport -s -i</command>
+
+Syscall Report
+=======================================
+# date time syscall pid comm auid event
+=======================================
+1. 16/02/09 17:45:01 open 20343 cron unset 2279
+2. 16/02/09 17:45:02 mkdir 20350 mktemp root 2284
+3. 16/02/09 17:45:02 mkdir 20351 mkdir root 2285
+...</screen>
+
+  <para>
+   The first thing that the visualization script needs to do on this report
+   is to extract only those columns that are of interest, in this example,
+   the <literal>syscall</literal> and the <literal>comm</literal> columns.
+   The output is sorted and duplicates removed then the final output is
+   piped into the visualization program itself:
+  </para>
+
+<screen>LC_ALL=C aureport -s -i | awk '/^[0-9]/ { print $6" "$4 }' | sort | uniq | mkgraph</screen>
+
+  <note>
+   <title>Adjusting the Locale</title>
+   <para>
+    Depending on your choice of locale in
+    <filename>/etc/sysconfig/auditd</filename>, your aureport output might
+    contain an additional data column for AM/PM on time stamps. To avoid
+    having this confuse your scripts, precede your script calls with
+    <literal>LC_ALL=C</literal> to reset the locale and use the 24 hour time
+    format.
+   </para>
+  </note>
+
+  <figure id="fig.audit.mkgraph">
+   <title>Flow Graph&mdash;Program versus System Call Relationship</title>
+   <mediaobject>
+    <imageobject role="html">
+     <imagedata fileref="audit_mkgraph.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="fo">
+     <imagedata fileref="audit_mkgraph.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   The second example illustrates the different types of events and how many
+   of each type have been logged. The appropriate
+   <command>aureport</command> command to extract this kind of information
+   is <command>aureport -e</command>:
+  </para>
+
+<screen>aureport -e -i --summary
+
+Event Summary Report
+======================
+total  type
+======================
+2434  SYSCALL
+816  USER_START
+816  USER_ACCT
+814  CRED_ACQ
+810  LOGIN
+806  CRED_DISP
+779  USER_END
+99  CONFIG_CHANGE
+52  USER_LOGIN</screen>
+
+  <para>
+   Because this type of report already contains a two column output, it is
+   just fed into the the visualization script and transformed into a bar
+   chart.
+  </para>
+
+<screen>aureport -e -i --summary  | mkbar events</screen>
+
+  <figure id="fig.audit.mkbar">
+   <title>Bar Chart&mdash;Common Event Types</title>
+   <mediaobject>
+    <imageobject role="html">
+     <imagedata fileref="audit_mkbar.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="fo">
+     <imagedata fileref="audit_mkbar.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   For background information about the visualization of audit data, refer
+   to the Web site of the audit project at
+   <ulink url="http://people.redhat.com/sgrubb/audit/visualize/index.html"/>.
+  </para>
+ </sect1>
+ <sect1 id="sec.audit.audisp">
+  <title>Relaying Audit Event Notifications</title>
+
+  <para>
+   The auditing system also allows external applications to access and make
+   use of the auditd daemon in real time. This feature is provided by so
+   called <emphasis>audit dispatcher</emphasis> which allows, for example,
+   intrusion detection systems to use the auditd daemon to receive enhanced
+   detection information.
+  </para>
+
+  <para>
+   audispd is a daemon which controls the audit dispatcher. It is normally
+   started by the auditd daemon. The audispd daemon takes audit events and
+   distributes them to the programs which want to analyze them in real time.
+   Configuration of the auditd daemon is stored in
+   <filename>/etc/audisp/audispd.conf</filename>. The file has the following
+   options:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>q_depth</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the size of the event dispatcher internal queue. If syslog
+      complains about audit events getting dropped, increase this value.
+      Default is 80.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>overflow_action</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the way the audit daemon will react to the internal queue
+      overflow. Possible values are <option>ignore</option> (nothing
+      happens), <option>syslog</option> (issues a warning to syslog),
+      <option>suspend</option> (audispd will stop processing events),
+      <option>single</option> (the computer system will be put in single
+      user mode), or <option>halt</option> (shuts the system down).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>priority_boost</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the priority for the audit event dispatcher (in addition to
+      the audit daemon priority itself). Default is 4 which means no change
+      in priority.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>name_format</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the way the computer node name is inserted into the audit
+      event. Possible values are <option>none</option> (no computer name is
+      inserted), <option>hostname</option> (name returned by the gethostname
+      system call), <option>fqd</option> (fully qualified domain name of the
+      machine), <option>numeric</option> (IP address of the machine), or
+      <option>user</option> (user defined string from the
+      <option>name</option> option). Default is <option>none</option>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>name</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies a user defined string which identifies the machine. The
+      <option>name_format</option> option must be set to
+      <option>user</option>, otherwise this option is ignored.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <example>
+   <title>Example /etc/audisp/audispd.conf</title>
+<screen>
+  q_depth = 80
+  overflow_action = SYSLOG
+  priority_boost = 4
+  name_format = HOSTNAME
+  #name = mydomain</screen>
+  </example>
+
+  <para>
+   The plug-in programs install their configuration files in a special
+   directory dedicated to audispd plug-ins. It is
+   <filename>/etc/audisp/plugins.d</filename> by default. The plug-in
+   configuration files have the following options:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>active</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies if the program will make use of audispd. Possible values are
+      <option>yes</option> or <option>no</option>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>direction</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the way the plug-in was designed to communicate with audit.
+      It informs the event dispatcher in which directions the events flow.
+      Possible values are <option>in</option> or <option>out</option>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>path</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the absolute path to the plug-in executable. In case of
+      internal plug-ins, this option specifies the plug-in name.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>type</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the way the plug-in is to be run. Possible values are
+      <option>builtin</option> or <option>always</option>. Use
+      <option>builtin</option> for internal plug-ins
+      (<literal>af_unix</literal> and <literal>syslog</literal>) and
+      <option>always</option> for most (if not all) other plug-ins. Default
+      is <option>always</option>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>args</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the argument that is passed to the plug-in program. Normally,
+      plug-in programs read their arguments from their configuration file and
+      do not need to receive any arguments. There is a limit of 2 arguments.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>format</literal>
+    </term>
+    <listitem>
+     <para>
+      Specifies the format of data that the audit dispatcher passes to the
+      plug-in program. Valid options are <option>binary</option> or
+      <option>string</option>. <option>binary</option> passes the data
+      exactly as the event dispatcher receives them from the audit daemon.
+      <option>string</option> instructs the dispatcher to change the event
+      into a string that is parsable by the audit parsing library. Default
+      is <option>string</option>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <example>
+   <title>Example /etc/audisp/plugins.d/syslog.conf</title>
+<screen>
+  active = no
+  direction = out
+  path = builtin_syslog
+  type = builtin 
+  args = LOG_INFO
+  format = string</screen>
+  </example>
+ </sect1>
+</chapter>

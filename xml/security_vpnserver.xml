@@ -1,0 +1,1304 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+  
+]>
+<!-- 
+ * openVPN Howto
+   http://openvpn.net/index.php/documentation/howto.html
+   
+ * OpenVPN (German) about Configuring
+   http://wiki.h1276721.stratoserver.net/index.php/Openvpn
+   
+ * OpenVPN Tutorial (German)
+   http://www.pronix.de/pronix-935.html
+   
+ * OpenVPN-Wiki (German)
+   http://wiki.openvpn.eu/index.php/Hauptseite
+
+ Contact:
+ - Marius Tomaschewski <mt@suse.de>
+
+-->
+<chapter id="cha.security.vpnserver">
+ <title>Configuring VPN Server</title><indexterm>
+ <primary>VPN</primary></indexterm><indexterm>
+ <primary>OpenVPN</primary></indexterm>
+ <abstract>
+  <para>
+   Nowadays, the Internet connection is cheap and available almost
+   everywhere. It is important that the connection is as secure as possible.
+   Virtual Private Network (<ulink url="http://www.openvpn.net ">VPN</ulink>)
+   is a secure network within a second, insecure network such as the Internet
+   or WLAN. It can be implemented in different ways and serves several
+   purposes. In this chapter, we focus on VPNs to link branch offices via
+   secure wide area networks (WANs).
+  </para>
+ </abstract>
+<!-- 
+    Source (2003):
+    http://openvpn.net/papers/BLUG-talk/index.html
+   
+   What is VPN?
+   - VPN = Virtual Private Network
+   - VPNs allow networks at different locations to be securely
+     connected, using a public network as the transport layer.
+   - VPNs use cryptography to provide protections
+     against eavesdropping and active attacks
+   - VPNs are most commonly used today for telecommuting and
+     linking branch offices via secure WANs.
+   
+   VPN and Networking:
+   - The two major techniques for VPN networking
+     are routing and bridging
+   
+   OpenVPN and Keyring
+   - Static: pre-shared keys are provided for ease of configuration
+   - Full RSA PKI: through the OpenSSL library. Is provided for full
+     certificate and private key operation.
+  
+  -->
+<!-- 
+  Replace ++ with double minus.
+  
+  ## See thread on openSUSE mailinglist about VPN, 
+  ## subject "openVPN", date 2008-12-18
+    
+  Generate static key:
+  
+  $ openvpn ++genkey ++secret static.key
+  
+  OpenVPN normally uses UDP port 1194, but that can be changed and even use TCP.
+  
+  #######
+  It can be started by (root) command or in Yast System Services.  I use
+  the command method.  On my firewall, I use the following commands in
+  /etc/init.d/boot.local:
+  
+#start vpn tunnel
+modprobe tun
+/usr/local/bin/vpn_up &
+
+That script points to /usr/local/bin/vpn_up:
+#! /bin/bash
+cd /etc/openvpn
+/usr/sbin/openvpn ++config static-office.conf
+  
+  -->
+ <sect1 id="sec.security.vpn.overview">
+  <title>Conceptual Overview</title>
+
+  <para>
+   This section defines some term regarding to VPN and introduces a brief
+   overview of some scenarios.
+  </para>
+
+  <sect2 id="sec.security.vpn.terminology">
+   <title>Terminology</title>
+   <variablelist>
+    <varlistentry>
+     <term>Endpoint</term>
+     <listitem>
+      <para>
+       The two <quote>ends</quote> of a tunnel, the source or destination
+       client
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Tap Device</term>
+     <listitem>
+      <para>
+       A tap device simulates an Ethernet device (layer 2 packets in the OSI
+       model such as IP packets). A tap device is used for creating a
+       network bridge. It works with Ethernet frames.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Tun Device</term>
+     <listitem>
+      <para>
+       A tun device simulates a point-to-point network (layer 3 packets in
+       the OSI model such as Ethernet frames). A tun device is used with
+       routing and works with IP frames.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Tunnel</term>
+     <listitem>
+      <para>
+       Linking two locations through a primarily public network. From a more
+       technical viewpoint, it is a connection between the client's device
+       and the server's device. Usually a tunnel is encrypted, but it does
+       need to be by definition.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.security.vpn.scenarios">
+   <title>VPN Scenarios</title>
+   <para>
+    Whenever you setup a VPN connection your IP packets are transferred over
+    your secured <emphasis>tunnel</emphasis>. A tunnel can use a so-called
+    <emphasis>tun</emphasis> or <emphasis>tap</emphasis> device. They are
+    virtual network kernel drivers which implement the transmission of
+    ethernet frames or ip frames/packets.
+   </para>
+   <para>
+    Any userspace program OpenVPN can attach itself to a tun or tap device
+    to receive packets sent by your OS. The program is also able to write
+    packets to the device.
+   </para>
+   <para>
+    There are many solutions to set up and build a VPN connection. This
+    section focuses on the OpenVPN package. Compared to other VPN software,
+    OpenVPN can be operated in two modes:
+   </para>
+<!-- 
+    More information:
+    * http://openvpn.net/index.php/documentation/howto.html#vpntype
+    * http://openvpn.net/index.php/documentation/faq.html#bridge1
+    * http://www.shorewall.net/OPENVPN.html
+    -->
+   <variablelist>
+    <varlistentry>
+     <term>Routed VPN</term>
+     <listitem>
+      <para>
+       Routing is an easy solution to set up. It is more efficient and
+       scales better than bridged VPN. Furthermore, it allows the user to
+       tune MTU (Maximum Transfer Unit) to raise efficiency. However, in a
+       heterogeneous environment NetBIOS broadcasts do not work if you do
+       not have a Samba server on the gateway. If you need IPv6, each tun
+       drivers on both ends must support this protocol explicitly. This
+       scenario is depicted in <xref linkend="fig.vpn.scenario-routed-1"/>.
+      </para>
+      <figure id="fig.vpn.scenario-routed-1">
+       <title>Routed VPN</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_routed1.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_routed1.svg" width="80%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Bridged VPN</term>
+     <listitem>
+      <para>
+       Bridging is a more complex solution. It is recommended when you need
+       to browse Windows file shares across the VPN without setting up a
+       Samba or WINS server. Bridged VPN is also needed if you want to use
+       non-IP protocols (such as IPX) or applications relying on network
+       broadcasts. However, it is less efficient than routed VPN. Another
+       disadvantage is that it does not scale well. This scenarios is
+       depicted in the following figures.
+      </para>
+<!--<example>
+            <title>Scenario 2</title>      
+          <screen>     [ machine2 (client) ]&#x2d;&#x2d;eth0&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;>[switch/router]->..
+              |                                           .
+            [tap0] (192.168.100.2/24)                     .
+              |                                           .
+              | [VPN bridge]                       {e.g. INTERNET}
+              |                                           .
+            [tap0] (192.168.100.1/24)                     .
+              |                                           .
+     [ machine1 (server) ]&#x2d;&#x2d;eth0&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;>[switch/router]->..</screen>
+          </example>-->
+      <figure id="fig.vpn.scenario-briged-1">
+       <title>Bridged VPN - Scenario 1</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_bridged1.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_bridged1.svg" width="80%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+<!--<example>
+            <title>Scenario 2</title>         
+          <screen>     [ machine2 (client) ]&#x2d;&#x2d;eth0&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;>[switch/router]->..
+          |     |                                           .
+       [eth1] [tap0] (192.168.100.2/24)                     .
+          |     |                                           .
+          |     \.-.-.-.-.                                .
+       { LAN 2}           \                               .
+                           | [VPN bridge]            {e.g. INTERNET}
+        { LAN 1 }          |                              .
+           |               |                              .
+          eth1  tap0-.-.-./                               .
+             \  /                                         .
+            [br0] (192.168.100.1/24)                      .
+              |                                           .
+     [ machine1 (server) ]&#x2d;&#x2d;eth0&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;>[switch/router]->..</screen>
+          
+          </example>-->
+      <figure id="fig.vpn.scenario-briged-2">
+       <title>Bridged VPN - Scenario 2</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_bridged2.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_bridged2.svg" width="80%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+<!--<example>
+            <title>Scenario 3</title>
+          <screen>     [ machine2 (client) ]&#x2d;&#x2d;eth0&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;>[switch/router]->..
+              |                                           .
+            [br0] (192.168.100.2/24)                      .
+            /   \                                         .
+          eth1  tap0-.-.-.                                .
+           |              \                               .
+        { LAN (part2) }    |                              .
+                           | [VPN bridge]            {e.g. INTERNET}
+        { LAN (part1) }    |                              .
+           |               |                              .
+          eth1  tap0-.-.-./                               .
+             \  /                                         .
+            [br0] (192.168.100.1/24)                      .
+              |                                           .
+     [ machine1 (server) ]&#x2d;&#x2d;eth0&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;&#x2d;>[switch/router]->..</screen>
+          </example>-->
+      <figure id="fig.vpn.scenario-briged-3">
+       <title>Bridged VPN - Scenario 3</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_bridged3.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_bridged3.svg" width="80%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    The major difference between bridging and routing is that a routed VPN
+    cannot IP-broadcast while a bridged VPN can.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.vpn.simplest">
+  <title>Creating the Simplest VPN Example</title>
+
+  <para>
+   The following example creates a point-to-point VPN tunnel. It
+   demonstrates how to create a VPN tunnel between one client and a server.
+   It is assumed that your VPN server will use private IP addresses like
+   <systemitem class="ipaddress">&vpnip;</systemitem> and your client the IP
+   address <systemitem class="ipaddress">&vpnclient1;</systemitem>. You can
+   modify these private IP addresses to your needs but make sure you select
+   addresses which do not conflict with other IP addresses.
+  </para>
+
+  <warning>
+   <title>Use It Only For Testing</title>
+   <para>
+    This scenario is only useful for testing and is considered as an example
+    to get familiar with VPN. <emphasis>Do not use</emphasis> this as a real
+    world scenario to connect as it can compromise your security and the
+    safety of your IT infrastructure!
+   </para>
+  </warning>
+
+  <sect2 id="sec.security.vpn.simplest.vpnserv">
+   <title>Configuring the VPN Server</title>
+   <para>
+    To configure a VPN server, proceed as follows:
+   </para>
+   <procedure id="pro.security.vpn.simplest.vpnserv">
+    <title>VPN Server Configuration</title>
+    <step>
+     <para>
+      Install the package <systemitem class="resource">openvpn</systemitem>
+      on the machine that will later become your VPN server.
+     </para>
+    </step>
+    <step>
+     <para>
+      Open a shell, become &rootuser; and create the VPN secret key:
+     </para>
+<screen>openvpn --genkey --secret /etc/openvpn/secret.key</screen>
+    </step>
+    <step>
+     <para>
+      Copy the secret key to your client:
+     </para>
+<screen>scp /etc/openvpn/secret.key root@&vpnclient1;:/etc/openvpn/</screen>
+<?dbfo-need height="10em"?>
+    </step>
+    <step>
+     <para>
+      Create the file <filename>/etc/openvpn/server.conf</filename> with the
+      following content:
+     </para>
+<screen>dev tun
+ifconfig &vpnip; &vpnclient1;
+secret secret.key</screen>
+    </step>
+    <step id="st.security.vpn.simplest.vpnserv.yast">
+     <para>
+      If you use a firewall, start &yast; and open UDP port 1194
+      (<menuchoice><guimenu>Security and
+      Users</guimenu><guimenu>Firewall</guimenu><guimenu>Allowed
+      Services</guimenu></menuchoice>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Start the OpenVPN service as &rootuser;:
+     </para>
+<screen>rcopenvpn start</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 id="sec.security.vpn.simplest.vpnclient">
+   <title>Configuring the VPN Client</title>
+   <para>
+    To configure the VPN client, do the following:
+   </para>
+   <procedure>
+    <title>VPN Client Configuration</title>
+    <step>
+     <para>
+      Install the package <systemitem class="resource">openvpn</systemitem>
+      on your client VPN machine.
+     </para>
+    </step>
+    <step>
+     <para>
+      Create <filename>/etc/openvpn/client.conf</filename> with the
+      following content:
+     </para>
+<screen>remote <replaceable>IP_OF_SERVER</replaceable>
+dev tun
+ifconfig &vpnclient1; &vpnip;
+secret secret.key</screen>
+     <para>
+      Replace the placeholder <replaceable>IP_OF_SERVER</replaceable> in the
+      first line with either the domain name, or the public IP address of
+      your server.
+     </para>
+    </step>
+    <step>
+     <para>
+      If you use a firewall, start &yast; and open UDP port 1194 as
+      described in <xref linkend="st.security.vpn.simplest.vpnserv.yast"/>
+      of <xref linkend="pro.security.vpn.simplest.vpnserv"/>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Start the OpenVPN service as &rootuser;:
+     </para>
+<screen>rcopenvpn start</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 id="sec.security.vpn.simplest.use">
+   <title>Testing the VPN Example</title>
+   <para>
+    After the OpenVPN is successfully started, test if the tun device is
+    available with the following command:
+   </para>
+<screen>ifconfig tun0</screen>
+   <para>
+    To verify the VPN connection, use <command>ping</command> on both client
+    and server to see if you can reach each other. Ping server from client:
+   </para>
+<screen>ping -I tun0 &vpnip;</screen>
+   <para>
+    Ping client from server:
+   </para>
+<screen>ping -I tun0 &vpnclient1;</screen>
+  </sect2>
+ </sect1>
+<!-- ====================================================================== -->
+ <sect1 id="sec.security.vpn.ca">
+  <title>Setting Up Your VPN Server Using Certificate Authority</title>
+
+  <para>
+   The example shown in
+   <xref linkend="sec.security.vpn.simplest" xrefstyle="select:label number"/>
+   is useful for testing, but not for daily work. This section explains how
+   to build a VPN server that allows more than one connection at the same
+   time. This is done with a public key infrastructure (PKI). A PKI consists
+   of a pair of public and private keys for the server and each client and a
+   master certificate authority (CA), which is used to sign every server and
+   client certificate.
+  </para>
+
+  <para>
+   The general overview of this process involves the following steps
+   explained in these sections:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     <xref linkend="sec.security.vpn.certs"/>
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec.security.vpn.config-server"/>
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec.security.vpn.config-clients"/>
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 id="sec.security.vpn.certs">
+   <title>Creating Certificates</title>
+   <para> Before a VPN connection gets established, the client must
+        authenticate the server certificate. Conversely, the server must
+        also authenticate the client certificate. This is called
+          <emphasis>mutual authentication</emphasis>. To create such
+        certificates, use the &yast; CA module in <xref
+          linkend="cha.security.yast_ca"/> for more details.</para>
+    
+    <para>To create a VPN root, server, and client CA, proceed as
+        follows: </para>
+    
+    <procedure id="pro.security.vpn.serverca">
+      <title>Creating a VPN Server Certificate</title>
+      <step id="st.security.vpn.serverca.vpnrootca">
+        <para>Prepare a common VPN Certificate Authority (CA):</para>
+          <substeps>
+            <step>
+              <para>Start the &yast; CA module.</para>
+            </step>
+            <step>
+              <para>Click <guimenu>Create Root CA</guimenu>.</para>
+            </step>
+            <step>
+              <para>Enter your <guimenu>CA Name</guimenu> and
+                  <guimenu>Common Name</guimenu>, for example
+                  <literal>VPN-Server-CA</literal>.</para>
+            </step>
+            <step>
+              <para>Fill out the other fields like e-mail addresses,
+                organization, etc. and proceed with
+                  <guimenu>Next</guimenu>.</para>
+            </step>
+     <step>
+              <para>Enter your password twice and proceed with
+                  <guimenu>Next</guimenu>.</para>
+              
+     </step>
+     <step>
+              <para> Review the summary. &yast; displays the current
+                settings for confirmation. Click <guimenu>Create</guimenu>. 
+                The root CA is created then appears in the overview. </para>
+            </step>
+          </substeps>
+     </step>
+      
+      <step id="st.security.vpn.serverca.vpnserverca">
+        <para>Create a VPN server certificate:</para>
+          <substeps>
+            <step>
+              <para> Select your created root CA from <xref 
+                linkend="st.security.vpn.serverca.vpnrootca"/>
+                and click <guimenu>Enter CA</guimenu>.</para>
+     </step>
+            <step>
+              <para>Click the <guimenu>Certificate</guimenu> tab and
+                click <menuchoice>
+                  <guimenu>Add</guimenu>
+                  <guimenu>Add Server Certificate</guimenu>
+                </menuchoice>.</para>
+     </step>
+     <step>
+              <para>Enter the <guimenu>Common Name</guimenu>, something
+                like <systemitem class="fqdomainname"
+                  >openvpn.example.com</systemitem> and proceed with
+                  <guimenu>Next</guimenu>.</para>
+     </step>
+     <step>
+              <para>Enter your password twice and proceed with
+                <guimenu>Next</guimenu>.</para>
+     </step>
+     <step>
+              <para>Review the summary. &yast; displays the current
+                settings for confirmation. Click <guimenu>Create</guimenu>. 
+                The VPN server certificate is created and appears in the
+                <guimenu>Certificate</guimenu> tab.</para>
+            </step>
+          </substeps>
+     </step>
+      
+      <step id="st.security.vpn.serverca.vpnclientca">
+        <para>Create VPN client certificates:</para>
+        <substeps>
+          <step>
+            <para>Make sure you are on the <guimenu>Certificate</guimenu> tab and
+                click <menuchoice>
+                  <guimenu>Add</guimenu>
+                  <guimenu>Add Client Certificate</guimenu>
+                </menuchoice>.</para>
+     </step>
+     <step>
+            <para>Enter the <guimenu>Common Name</guimenu>, something
+                like <systemitem class="fqdomainname"
+                  >client1.example.com</systemitem>.</para>
+     </step>
+     <step>
+            <para>Enter the e-mail addresses for your client, something
+              like <systemitem
+                class="resource">user1@client1.example.com</systemitem>,
+            and click <guimenu>Add</guimenu>. Proceed with
+              <guimenu>Next</guimenu>.</para>
+     </step>
+     <step>
+              <para>Enter your password twice and proceed with
+                <guimenu>Next</guimenu>.</para>
+     </step>
+     <step>
+              <para>Review the summary. &yast; displays the current
+                settings for confirmation. Click <guimenu>Create</guimenu>. 
+                The VPN client certificate is created and appears in the
+                <guimenu>Certificate</guimenu> tab.</para>
+     </step>
+     <step>
+            <para>Repeat <xref
+              linkend="st.security.vpn.serverca.vpnclientca"/> if you
+              need more clients.</para>
+          </step>
+        </substeps>
+     </step>
+    </procedure>
+    
+    <para>After you have successfully finished <xref
+      linkend="pro.security.vpn.serverca"/> you have a VPN root CA, a
+      VPN server CA, and one or more VPN client CAs. To finish the task,
+    proceed with the following procedure:</para>
+    
+    <procedure>
+     <step>
+        <para>Activate the <guimenu>Certificate</guimenu> tab if you
+          haven't done so yet.</para>
+      </step>
+      <step>
+        <para>Export the VPN server certificate in two formats: PEM and
+          unencrypted key in PEM.</para>
+          <substeps>
+            <step id="st.security.vpn.selectserverca">
+              <para>Select your VPN server CA (<systemitem
+                  class="fqdomainname">openvpn.example.com</systemitem>
+                in our example) and choose <menuchoice>
+                  <guimenu>Export</guimenu>
+                  <guimenu>Export to File</guimenu>
+                </menuchoice>.</para>
+            </step>
+            <step id="st.security.vpn.selectsaveca">
+              <para>Mark <guimenu>Only the Certificate in PEM
+                  Format</guimenu>, enter your VPN server certificate password
+                and save the file to
+                  <filename>/etc/openvpn/server_crt.pem</filename>.</para>
+            </step>
+            <step>
+              <para>Repeat <xref
+                  linkend="st.security.vpn.selectserverca"/> and <xref
+                  linkend="st.security.vpn.selectsaveca"/>, but choose
+                from the save dialog window the option <guimenu>Only the
+                  Certificate in PEM Format to File</guimenu>.</para>
+            </step>
+          </substeps>
+      </step>
+      <step>
+        <para>Export the VPN client certificates and choose an export
+            format, PEM or PKCS12 (preferred). For each client:</para>
+         <substeps>
+            <step id="st.security.vpn.selectclient.ca">
+              <para>Select your VPN client certificate (<systemitem
+                  class="fqdomainname">client1.example.com</systemitem>
+                in our example) and choose <menuchoice>
+                  <guimenu>Export</guimenu>
+                  <guimenu>Export to File</guimenu>
+                </menuchoice>.</para>
+            </step>
+            <step>
+              <para>Mark <guimenu>Like PKCS12 and Include the CA
+                Chain</guimenu>, enter your VPN client certificate key 
+                password and provide a PKCS12 password, and save the
+                file to <filename>/etc/openvpn/ssl/client1.pk12</filename>.</para>
+             
+           </step>
+          </substeps>
+     </step>
+     <step>
+          <para>Copy the files to your client (in our example,
+              <systemitem class="fqdomainname"
+              >client1.example.com</systemitem>).</para>
+     </step>
+     <step>
+        <para>Export the VPN CA (in our example
+          <systemitem>VPN-Server-CA</systemitem>):</para>
+          <substeps>
+            <step>
+              <para>Switch to the <guimenu>Description</guimenu> tab and
+                select <guimenu>Export to File</guimenu>.</para>
+     </step>
+     <step>
+              <para>Select <menuchoice>
+                  <guimenu>Advanced</guimenu>
+                  <guimenu>Export to File</guimenu>
+                </menuchoice>.</para>
+     </step>
+     <step>
+              <para>Mark <guimenu>Only the Certificate in PEM
+                  Format</guimenu> and save the file to
+                  <filename>/etc/openvpn/vpn_ca.pem</filename>.</para>
+            </step>
+          </substeps>
+     </step>
+    </procedure>
+    
+    <para>If desired, the client PKCS12 file can be converted into 
+      the PEM format using this command:</para>
+    <screen>openssl pkcs12 -in client1.p12 -out client1.pem</screen>
+    <para>Enter your client password to create the
+      <filename>client1.pem</filename> file.
+      The PEM file contains the client certificate, client key, and 
+      the CA certificate. You can split this combined file using a text
+      editor and create three separate files. The filenames can
+      be used for the <option>ca</option>, <option>cert</option>, and 
+      <option>key</option> options in the OpenVPN configuration file 
+      (see <xref linkend="ex.vpn.serv-config"/>).</para>
+    
+  </sect2>
+
+  <sect2 id="sec.security.vpn.config-server">
+   <title>Configuring the Server</title>
+   <para>
+    The configuration file is mostly a summary of
+    <filename>/usr/share/doc/packages/openvpn/sample-config-files/server.conf</filename>
+    without the comments and with some small changes concerning some paths.
+   </para>
+   <example id="ex.vpn.serv-config">
+    <title>VPN Server Configuration File</title>
+<screen># /etc/openvpn/server.conf
+port 1194 <co id="co.vpn.servconfig.port"/>
+proto udp <co id="co.vpn.servconfig.proto"/>
+dev tun0 <co id="co.vpn.servconfig.dev"/>
+
+# Security <co id="co.vpn.servconfig.security"/>
+pkcs12 ssl/client1.p12
+# Enable one of these options: <co id="co.vpn.servconfig.verify"/>
+# tls-verify openvpn.example.com
+# ns-cert-type server
+dh   ssl/dh1024.pem
+
+server &vpnip; 255.255.255.0 <co id="co.vpn.servconfig.server"/>
+ifconfig-pool-persist /var/run/openvpn/ipp.txt <co id="co.vpn.servconfig.pool"/>
+
+# Privileges <co id="co.vpn.serverconf.privilege"/>
+user nobody
+group nobody
+
+# Other configuration <co id="co.vpn.servconfig.misc"/>
+keepalive 10 120
+comp-lzo
+persist-key
+persist-tun
+status      /var/log/openvpn-status.log
+log-append  /var/log/openvpn.log
+verb 4</screen>
+   </example>
+   <calloutlist>
+    <callout arearefs="co.vpn.servconfig.port">
+     <para>
+      The TCP/UDP port to which OpenVPN listens. You have to open up the
+      port in the Firewall, see <xref linkend="cha.security.firewall"/>. The
+      standard port for VPN is 1194, so in most cases you can leave that as
+      it is.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.proto">
+     <para>
+      The protocol, either UDP or TCP.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.dev">
+     <para>
+      The tun or tap device, see <xref linkend="sec.security.vpn.terminology"/> for
+      the differences.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.security">
+     <para>
+      The following lines contain the relative or absolute path to the root
+      server CA certificate (<literal>ca</literal>), the root CA key
+      (<literal>cert</literal>), the private server key
+      (<literal>key</literal>) and the Diffie-Hellman parameters
+      (<literal>dh</literal>). These were generated in
+      <xref linkend="sec.security.vpn.certs"/>.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.verify">
+      <para>Verifies the X509 name of a pending TLS connection
+        (option <option>tls-verify</option>) or uses a peer certificate
+        designated as an explicit <option>nsCertType</option>; enable
+        one of the two options.</para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.server">
+     <para>
+      Supplies a VPN subnet. The server can be reached by
+      <systemitem class="ipaddress">&vpnip;</systemitem>.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.pool">
+     <para>
+      Records a mapping of clients and its virtual IP address in the given
+      file. Useful when the server goes down and (after the restart) the
+      clients get their previously assigned IP address.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.serverconf.privilege">
+     <para>
+      For security reasons it is a good idea to run the OpenVPN daemon with
+      reduced privileges. For this reason the group and user
+      <systemitem>nobody</systemitem> is used.
+     </para>
+    </callout>
+    <callout arearefs="co.vpn.servconfig.misc">
+     <para>
+      Several other configurations, see comment in the original
+      configuration from
+      <filename>/usr/share/doc/packages/openvpn/sample-config-files</filename>.
+     </para>
+    </callout>
+   </calloutlist>
+   <para>
+    After this configuration, you can see log messages from your OpenVPN
+    server under <filename>/var/log/openvpn.log</filename>. When you have
+    started it for the first time, it should finish it with:
+   </para>
+<screen>... Initialization Sequence Completed</screen>
+   <para>
+    If you do not see this message, check the log carefully. Usually OpenVPN
+    gives you some hints what is wrong in your configuration file.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.vpn.config-clients">
+   <title>Configuring the Clients</title>
+   <para>
+    The configuration file is mostly a summary from
+    <filename>/usr/share/doc/packages/openvpn/sample-config-files/client.conf</filename>
+    without the comments and with some small changes concerning some paths.
+   </para>
+   <example>
+    <title>VPN Client Configuration File</title>
+<screen># /etc/openvpn/client.conf
+client <co id="co.vpn.clientconf.client"/>
+dev tun <co id="co.vpn.clientconf.dev"/>
+proto udp <co id="co.vpn.clientconf.proto"/>
+remote <replaceable>IP_OR_HOSTNAME</replaceable> 1194 <co id="co.vpn.clientconf.remote"/>
+resolv-retry infinite
+nobind
+
+# Privileges <co id="co.vpn.clientconf.privileges"/>
+user nobody
+group nobody
+
+# Try to preserve some state across restarts.
+persist-key
+persist-tun
+
+# Security <co id="co.vpn.clientconf.security"/>
+ca   ssl/ca.crt
+cert ssl/client.crt
+key  ssl/client.key
+
+comp-lzo <co id="co.vpn.clientconf.compr"/></screen>
+    <calloutlist>
+     <callout arearefs="co.vpn.clientconf.client">
+      <para>
+       We must specify that this machine is a client.
+      </para>
+     </callout>
+     <callout arearefs="co.vpn.clientconf.dev">
+      <para>
+       The network device. Both clients and server must use the same device.
+      </para>
+     </callout>
+     <callout arearefs="co.vpn.clientconf.proto">
+      <para>
+       The protocol. Use the same settings as on the server.
+      </para>
+     </callout>
+     <callout arearefs="co.vpn.clientconf.remote">
+      <para>
+       Replace the placeholder <replaceable>IP_OR_HOSTNAME</replaceable>
+       with the respective hostname or IP address of your VPN server. After
+       the hostname the port of the server is given. You can have multiple
+       lines of <literal>remote</literal> entries pointing to different VPN
+       servers. This is useful for load balancing between different VPN
+       servers.
+      </para>
+     </callout>
+     <callout arearefs="co.vpn.clientconf.privileges">
+      <para>
+       For security reasons it is a good idea to run the OpenVPN daemon with
+       reduced privileges. For this reason the group and user
+       <systemitem>nobody</systemitem> is used.
+      </para>
+     </callout>
+     <callout arearefs="co.vpn.clientconf.security">
+      <para>
+       Contains the client files. For security reasons, it is better to have
+       a separate file pair for each client.
+      </para>
+     </callout>
+     <callout arearefs="co.vpn.clientconf.compr">
+      <para>
+       Turns compression on. Use it only when the server has this parameter
+       switched on as well.
+      </para>
+     </callout>
+    </calloutlist>
+   </example>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.vpn.nameserver">
+  <title>Changing Nameservers in VPN</title>
+
+  <para>
+   If you need to change nameservers before or during your VPN session, use
+   <command>netconfig</command>.
+  </para>
+
+  <important os="sles;sled">
+   <title>Differences between &sled; and &sle; Server</title>
+   <para>
+    The following procedure is for &sle; Servers only without &nm; (with
+    <command>ifup</command>). &sled; installations use &nm; and must install
+    the <systemitem>NetworkManager-openvpn</systemitem> plug-in.
+   </para>
+  </important>
+
+  <para>
+   Use the following procedure to change a nameserver:
+  </para>
+
+  <procedure id="pro.security.vpn.nameserver">
+   <title>Changing Nameservers</title>
+   <step>
+      <para>Copy the scripts and make them executable:</para>
+      <screen>cp<!--
+       --> /usr/share/doc/packages/openvpn/sample-scripts/client-netconfig.* \
+  /etc/openvpn/
+chmod +x /etc/openvpn/client-netconfig.*</screen>
+    </step>
+    <step>
+      <para>Add the following lines to
+        <filename>/etc/openvpn/client.conf</filename>:</para>
+      <screen>pull dhcp-options
+up   /etc/openvpn/client-netconfig.up
+down /etc/openvpn/client-netconfig.down</screen>
+    </step>
+   <!--<step>
+    <para>
+     Open a shell and log in as &rootuser;.
+    </para>
+   </step>
+   <step>
+    <para>
+     Create the file <filename>/etc/openvpn/client.up</filename> with the
+     following contents:
+    </para>
+<screen>/sbin/netconfig modify -i "${1}" -s openvpn &lt;&lt;EOT
+DNSSEARCH='${domain}'
+DNSSERVERS='${dns[*]}'
+EOT</screen>
+   </step>
+   <step>
+    <para>
+     Start your VPN connection with <command>rcopenvpn
+     <option>start</option></command>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Create the file <filename>/etc/openvpn/client.down</filename> with the
+     following contents:
+    </para>
+<screen>/sbin/netconfig remove -i "${1}" -s openvpn</screen>
+   </step>
+   <step>
+    <para>
+     Run <command>netconfig</command> and replace the line
+     <envar>DNSSERVERS</envar> with your respective entry:
+    </para>
+<screen>netconfig modify -i tun0 -s openvpn &lt;&lt;EOT
+DNSSEARCH='mt-home.net'
+DNSSERVERS='&dnsip;' 
+EOT</screen>
+    <para>
+     To check, if the entry has been successfully inserted into
+     <filename>/etc/resolv.conf</filename>, execute:
+    </para>
+<screen>grep -v ^# /etc/resolv.conf 
+search mt-home.net mat-home.net
+nameserver ...
+nameserver ...
+nameserver &dnsip;</screen>
+   </step>
+   <step>
+    <para>
+     To remove the DNS entry, execute:
+    </para>
+<screen>netconfig remove -i tun0 -s openvpn</screen>
+   </step>-->
+  </procedure>
+
+  <para>
+   If you need to specify a ranking list of fallback services, use the
+   <envar>NETCONFIG_DNS_RANKING</envar> variable in
+   <filename>/etc/sysconfig/network/config</filename>. The default value is
+   <literal>auto</literal> which resolves to:
+  </para>
+
+<screen>+strongswan +openswan +racoon +openvpn -avahi</screen>
+
+  <para>
+   Preferred service names have the <literal>+</literal> prefix, fallback
+   services the <literal>-</literal> prefix.
+  </para>
+ </sect1>
+ <sect1 id="sec.security.vpn.tools-client">
+  <title>KDE- and GNOME Applets For Clients</title>
+
+  <para>
+   The following sections describe the setup of OpenVPN connections with the
+   GNOME and KDE desktop tools.
+  </para>
+
+  <sect2 id="sec.security.vpn.config.kde">
+   <title>KDE</title>
+   <para>
+    To setup an OpenVPN connection in KDE4 that can be easily turned on or
+    off, proceed as follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Make sure you have installed the
+      <systemitem class="resource">NetworkManager-openvpn-kde4</systemitem>
+      package with all dependencies resolved.
+     </para>
+    </step>
+    <step>
+     <para>
+      Right-click on a widget of your panel and select <menuchoice>
+      <guimenu>Panel Options</guimenu> <guimenu>Add Widgets...</guimenu>
+      </menuchoice>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Select <guimenu>Networks</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Right-click on the icon and choose <guimenu>Manage
+      Connections</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Add a new VPN connection with <menuchoice> <guimenu>Add</guimenu>
+      <guimenu>OpenVPN</guimenu> </menuchoice>. A new window opens.
+     </para>
+    </step>
+    <step>
+     <para>
+      Choose the <guimenu>Connection Type</guimenu> between <guimenu>X.509
+      Certificates</guimenu> or <guimenu>X.509 With Password</guimenu>
+      depending on what you have setup with your OpenVPN server.
+<?dbfo-need height="25em"?>
+     </para>
+    </step>
+    <step>
+     <para>
+      Insert the necessary files into the respective text fields. From our
+      example configuration these are:
+     </para>
+     <informaltable>
+      <tgroup cols="2">
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <guimenu>CA file</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           <filename>/etc/openvpn/ssl/ca.crt</filename>
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>Certificate</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           <filename>/etc/openvpn/ssl/client1.crt</filename>
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>Key</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           <filename>/etc/openvpn/ssl/client1.key</filename>
+          </para>
+         </entry>
+        </row>
+<!-- Optional fields, depends on what you have selected in Connection Type -->
+        <row>
+         <entry>
+          <para>
+           <guimenu>Username</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           The user
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>Password</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           The password for the user
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+    </step>
+    <step>
+     <para>
+      If you have not used the KDE Wallet System, you are asked if you want
+      to configure it. Follow the steps in the wizard. After you have
+      finished this step, you are reverted back to the <guimenu>Network
+      Settings</guimenu> dialog.
+     </para>
+    </step>
+    <step>
+     <para>
+      Finish with <guimenu>Ok</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enable the connection with your Network manager applet.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 id="sec.security.vpn.config.gnome">
+   <title>GNOME</title>
+   <remark>Same as for KDE</remark>
+   <para>
+    To setup a OpenVPN connection in GNOME that can be easily turned on or
+    off, proceed as follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Make sure you have installed the package
+      <systemitem class="resource">NetworkManager-openvpn-gnome</systemitem>
+      and have resolved all dependencies.
+     </para>
+    </step>
+    <step>
+     <para>
+      Start the Network Connection Editor with <keycombo>
+      <keycap function="alt"/> <keycap>F2</keycap> </keycombo> and insert
+      <command>nm-connection-editor</command> into the text field. A new
+      window appears.
+     </para>
+    </step>
+    <step>
+     <para>
+      Select the <guimenu>VPN</guimenu> tab and click
+      <guimenu>Add</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Choose the VPN connection type, in this case
+      <guimenu>OpenVPN</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Choose the <guimenu>Authentication</guimenu> type. Select between
+      <guimenu>Certificates (TLS)</guimenu> or <guimenu>Password with
+      Certificates (TLS)</guimenu> depending on the setup of your OpenVPN
+      server.
+     </para>
+    </step>
+    <step>
+     <para>
+      Insert the necessary files into the respective text fields. According
+      to the example configuration, these are:
+     </para>
+     <informaltable>
+      <tgroup cols="2">
+       <tbody>
+<!-- Optional fields, depends on what you have selected in Connection Type -->
+        <row>
+         <entry>
+          <para>
+           <guimenu>Username</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           The user (only available when you have selected <guimenu>Password
+           with Certificates (TLS)</guimenu>)
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>Password</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           The password for the user (only available when you have selected
+           <guimenu>Password with Certificates (TLS)</guimenu>)
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>User Certificate</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           <filename>/etc/openvpn/ssl/client1.crt</filename>
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>CA Certificate</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           <filename>/etc/openvpn/ssl/ca.crt</filename>
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <guimenu>Private Key</guimenu>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           <filename>/etc/openvpn/ssl/client1.key</filename>
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+    </step>
+    <step>
+     <para>
+      Finish with <guimenu>Apply</guimenu> and <guimenu>Close</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enable the connection with your Network Manager applet.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.vpn.moreinfo">
+  <title>For More Information</title>
+
+  <para>
+   For more information about VPN, visit:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <ulink url="http://www.openvpn.net"/>: Homepage of VPN
+    </para>
+   </listitem>
+   <listitem>
+     <para><command>man</command> <option>openvpn</option></para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>/usr/share/doc/packages/openvpn/sample-config-files/</filename>:
+     Examples of configuration files for different scenarios
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>/usr/src/linux/Documentation/networking/tuntap.txt</filename>,
+     install the
+     <systemitem
+        class="resource">kernel-source</systemitem> package
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

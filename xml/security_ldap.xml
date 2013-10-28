@@ -1,0 +1,2515 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.security.ldap">
+ <title>LDAP&mdash;A Directory Service</title>
+ <remark condition="generic">
+  2007-05-29 - jjaeger: shorten intro??? </remark>
+ <remark condition="generic">
+  2010-08-27 - ke: started with shortening intro.</remark><indexterm id="idx.LDAP" class="startofrange">
+ <primary>LDAP</primary></indexterm><indexterm>
+ <primary>Lightweight Directory Access Protocol</primary>
+ <see>LDAP</see></indexterm><indexterm>
+ <primary>protocols</primary>
+ <secondary>LDAP</secondary></indexterm><indexterm>
+ <primary>OpenLDAP</primary>
+ <see>LDAP</see></indexterm>
+ <abstract>
+  <para>
+   The Lightweight Directory Access Protocol (LDAP) is a set of protocols
+   designed to access and maintain information directories. LDAP can be used
+   for user and group management, system configuration management, address
+   management, and more. This chapter provides a basic understanding of how
+   OpenLDAP works and how to manage LDAP data with &yast;.
+  </para>
+ </abstract>
+ <para>
+  In a network environment it is crucial to keep important information
+  structured and to serve it quickly. A directory service&mdash;like the
+  common yellow pages, keeps information available in a well-structured and
+  readily-searchable form.
+ </para>
+ <para>
+  Ideally, a central server stores the data in a directory and distributes
+  it to all clients using a well-defined protocol. The structured data allow
+  a wide range of applications to access them. A central repository reduces
+  the necessary administrative effort. The use of an open and standardized
+  protocol like LDAP ensures that as many different client applications as
+  possible can access such information.
+ </para>
+ <para>
+  A directory in this context is a type of database optimized for quick and
+  effective reading and searching:
+ </para>
+ <itemizedlist>
+  <listitem>
+   <remark condition="clarity">
+    2011-02-18 - fs: the number is limited? and why limit reads?
+   </remark>
+   <para>
+    To make multiple concurrent reading accesses possible, the number of
+    updates is usually very low. The number of read and write accesses is
+    often limited to a few users with administrative privileges. In
+    contrast, conventional databases are optimized for accepting the largest
+    possible data volume in a short time.
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    When static data is administered, updates of the existing data sets are
+    very rare. When working with dynamic data, especially when data sets
+    like bank accounts or accounting are concerned, the consistency of the
+    data is of primary importance. If an amount should be subtracted from
+    one place to be added to another, both operations must happen
+    concurrently, within one <emphasis>transaction</emphasis>, to ensure
+    balance over the data stock. Traditional relational databases usually
+    have a very strong focus on data consistency, such as the referential
+    integrity support of transactions. Conversely, short-term
+    inconsistencies are usually acceptable in LDAP directories. LDAP
+    directories often do not have such strong consistency requirements as
+    relational databases.
+   </para>
+  </listitem>
+ </itemizedlist>
+ <para>
+  The design of a directory service like LDAP is not laid out to support
+  complex update or query mechanisms. All applications are guaranteed to
+  access this service quickly and easily.
+ </para>
+ <sect1 id="sec.security.ldap.vs_nis">
+  <title>LDAP versus NIS</title>
+
+  <remark condition="generic"> 2007-05-29 - jjaeger: this still necessary? Why not discard the NIS
+   part alltogether and merge the use cases for LDAP with the intro? </remark>
+
+  <para>
+   Unix system administrators traditionally use NIS (Network Information
+   Service) for name resolution and data distribution in a network. The
+   configuration data contained in the files <filename>group</filename>,
+   <filename>hosts</filename>, <filename>mail</filename>,
+   <filename>netgroup</filename>, <filename>networks</filename>,
+   <filename>passwd</filename>, <filename>printcap</filename>,
+   <filename>protocols</filename>, <filename>rpc</filename>, and
+   <filename>services</filename> in the <filename>/etc</filename> directory
+   is distributed to clients all over the network. These files can be
+   maintained without major effort because they are simple text files. The
+   handling of larger amounts of data, however, becomes increasingly
+   difficult due to nonexistent structuring. NIS is only designed for Unix
+   platforms, and is not suitable as a centralized data administration tool
+   in heterogeneous networks.
+  </para>
+
+  <para>
+   Unlike NIS, the LDAP service is not restricted to pure Unix networks.
+   Windows servers (from 2000) support LDAP as a directory service. The
+   application tasks mentioned above are additionally supported in non-Unix
+   systems.
+  </para>
+
+  <para>
+   The LDAP principle can be applied to any data structure that needs to be
+   centrally administered. A few application examples are:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     Replacement for the NIS service
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Mail routing (postfix, sendmail)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Address books for mail clients, like Mozilla, Evolution, and Outlook
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Administration of zone descriptions for a BIND9 name server
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     User authentication with Samba in heterogeneous networks
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   This list can be extended because LDAP is extensible, unlike NIS. The
+   clearly-defined hierarchical structure of the data eases the
+   administration of large amounts of data, as it can be searched more
+   easily.
+  </para>
+ </sect1>
+ <sect1 id="sec.security.ldap.tree">
+  <title>Structure of an LDAP Directory Tree</title><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>directory tree</secondary></indexterm>
+
+  <para>
+   To get background knowledge on how a LDAP server works and how the data
+   is stored, it is vital to understand the way the data is organized on the
+   server and how this structure enables LDAP to provide fast access to the
+   data. To successfully operate an LDAP setup, you also need to be familiar
+   with some basic LDAP terminology. This section introduces the basic
+   layout of an LDAP directory tree and provides the basic terminology used
+   with respect to LDAP. Skip this introductory section if you already have
+   some LDAP background knowledge and just want to learn how to set up an
+   LDAP environment in &productname;.<phrase os="sles;osuse"> Read on at
+   <xref linkend="sec.security.ldap.yast"/> or
+   <xref linkend="sec.security.ldap.slapd"/>.</phrase>
+  </para>
+
+  <para>
+   An LDAP directory has a tree structure. All entries (called objects) of
+   the directory have a defined position within this hierarchy. This
+   hierarchy is called the <emphasis>directory information tree</emphasis>
+   (DIT). The complete path to the desired entry, which unambiguously
+   identifies it, is called the <emphasis>distinguished name</emphasis> or
+   DN. A single node along the path to this entry is called
+   <emphasis>relative distinguished name</emphasis> or RDN.
+  </para>
+
+<!-- rhafer says:
+
+Dieser ganze Absatz ist eigentlich nicht ganz korrekt. Bei LDAP kann im Prinzip
+jedes Objekt sowohl leaf als auch container sein. Zumindest solange keine
+DIT-Structure-Rules bzw.  DIT-Content-Rules definiert sind. Diese Regeln im
+Handbuch zu erklären würde wohl etwas zu weit gehen. Sie sind auch nicht 100%
+standardisiert und OpenLDAP unterstützt sie noch nicht.  Von daher würde ich
+den Absatz ganz weglassen.
+
+  <para>
+   Objects can generally be assigned to one of two possible types:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>container</term>
+    <listitem>
+     <para>
+      These objects can themselves contain other objects. Such object
+      classes are <literal>root</literal> (the root element of the directory
+      tree, which does not really exist), <literal>c</literal> (country),
+      <literal>ou</literal> (organizational unit), and <literal>dc</literal>
+      (domain component). This model is comparable to the directories
+      (folders) in a file system.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>leaf</term>
+    <listitem>
+     <para>
+      These objects sit at the end of a branch and have no subordinate
+      objects. Examples are <literal>person</literal>,
+      <literal>InetOrgPerson</literal>, or <literal>groupofNames</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   The top of the directory hierarchy has a root element
+   <literal>root</literal>. This can contain <literal>c</literal> (country),
+   <literal>dc</literal> (domain component), or <literal>o</literal>
+   (organization) as subordinate elements.
+  </para>
+  -->
+
+  <para>
+   The relations within an LDAP directory tree become more evident in the
+   following example, shown in <xref linkend="fig.ldap.tree"/>.
+  </para>
+
+  <figure id="fig.ldap.tree">
+   <title>Structure of an LDAP Directory</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="ldap_tree.svg" width="85%"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="ldap_tree.png" width="85%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   The complete diagram is a fictional directory information tree. The
+   entries on three levels are depicted. Each entry corresponds to one box
+   in the image. The complete, valid <emphasis>distinguished name</emphasis>
+   for the fictional employee <systemitem class="username"
+    >Geeko
+   Linux</systemitem>, in this case, is <literal>cn=Geeko
+   Linux,ou=doc,dc=example,dc=com</literal>. It is composed by adding the
+   RDN <literal>cn=Geeko Linux</literal> to the DN of the preceding entry
+   <literal>ou=doc,dc=example,dc=com</literal>.
+  </para>
+
+<!-- ke: yes, these things are called "Schema" -->
+
+  <para>
+   The types of objects that can be stored in the DIT are globally
+   determined following a <emphasis>Schema</emphasis>. The type of an object
+   is determined by the <emphasis>object class</emphasis>. The object class
+   determines what attributes the relevant object must or can be assigned.
+   The Schema, therefore, must contain definitions of all object classes and
+   attributes used in the desired application scenario. There are a few
+   common Schemas (see RFC 2252 and 2256). The LDAP RFC defines a few
+   commonly used Schemas (see e.g., RFC4519). Additionally there are Schemas
+   available for many other use cases (e.g., Samba, NIS replacement, etc.).
+   It is, however, possible to create custom Schemas or to use multiple
+   Schemas complementing each other (if this is required by the environment
+   in which the LDAP server should operate).
+  </para>
+
+  <para>
+   <xref linkend="tab.ldap.schema"/> offers a small overview of the object
+   classes from <filename>core.schema</filename> and
+   <filename>inetorgperson.schema</filename> used in the example, including
+   required attributes (Req. Attr.) and valid attribute values.
+   <!-- intro abbrev "Req. Attr." too shorten the table header -->
+  </para>
+
+  <table id="tab.ldap.schema">
+   <title>Commonly Used Object Classes and Attributes</title>
+   <tgroup cols="4">
+    <colspec colname="c1" colwidth="30*"/>
+    <colspec colname="c2" colwidth="40*"/>
+    <colspec colname="c3" colwidth="16*"/>
+    <colspec colname="c4" colwidth="14*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        Object Class
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Meaning
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Example Entry
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Req. Attr.
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        <literal>dcObject</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <emphasis>domainComponent</emphasis> (name components of the domain)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        example
+       </para>
+      </entry>
+      <entry>
+       <para>
+        dc
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>organizationalUnit</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <emphasis>organizationalUnit</emphasis> (organizational unit)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        doc
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ou
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <literal>inetOrgPerson</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <emphasis>inetOrgPerson</emphasis> (person-related data for the
+        intranet or Internet)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Geeko Linux
+       </para>
+      </entry>
+      <entry>
+       <para>
+        sn and cn
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <para>
+   <xref linkend="aus.ldap.schema.help"/> shows an excerpt from a Schema
+   directive with explanations.
+  </para>
+
+  <example id="aus.ldap.schema.help">
+   <title>Excerpt from schema.core</title>
+<screen>attributetype (2.5.4.11 NAME ( 'ou' 'organizationalUnitName') <co id="co.ldap.schema.core.att_type"/>
+       DESC 'RFC2256: organizational unit this object belongs to' <co id="co.ldap.schema.core.desc"/>
+       SUP name ) <co id="co.ldap.schema.core.sup"/>
+
+objectclass ( 2.5.6.5 NAME 'organizationalUnit' <co id="co.ldap.schema.core.oc"/>
+       DESC 'RFC2256: an organizational unit' <co id="co.ldap.schema.core.desc.oc"/>
+       SUP top STRUCTURAL <co id="co.ldap.schema.core.sup.oc"/>
+       MUST ou <co id="co.ldap.schema.core.must.oc"/>
+MAY (userPassword $ searchGuide $ seeAlso $ businessCategory <co id="co.ldap.schema.core.may.oc"/>
+  $ x121Address $ registeredAddress $ destinationIndicator 
+  $ preferredDeliveryMethod $ telexNumber 
+  $ teletexTerminalIdentifier $ telephoneNumber 
+  $ internationaliSDNNumber $ facsimileTelephoneNumber 
+  $ street $ postOfficeBox $ postalCode $ postalAddress 
+  $ physicalDeliveryOfficeName
+  $ st $ l $ description) )
+  ...</screen>
+  </example>
+
+  <para>
+   The attribute type <literal>organizationalUnitName</literal> and the
+   corresponding object class <literal>organizationalUnit</literal> serve as
+   an example here.
+  </para>
+
+  <calloutlist>
+   <callout arearefs="co.ldap.schema.core.att_type">
+    <para>
+     The name of the attribute, its unique OID (<emphasis>object
+     identifier</emphasis>) (numerical), and the abbreviation of the
+     attribute.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.desc">
+    <para>
+     A brief description of the attribute with <literal>DESC</literal>. The
+     corresponding RFC, on which the definition is based, is also mentioned
+     here.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.sup">
+    <para>
+     <literal>SUP</literal> indicates a superordinate attribute type to
+     which this attribute belongs.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.oc">
+    <para>
+     The definition of the object class
+     <literal>organizationalUnit</literal> begins&mdash;the same as in the
+     definition of the attribute&mdash;with an OID and the name of the
+     object class.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.desc.oc">
+    <para>
+     A brief description of the object class.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.sup.oc">
+    <para>
+     The <literal>SUP top</literal> entry indicates that this object class
+     is not subordinate to another object class.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.must.oc">
+    <para>
+     With <literal>MUST</literal> list all attribute types that must be used
+     in conjunction with an object of the type
+     <literal>organizationalUnit</literal>.
+    </para>
+   </callout>
+   <callout arearefs="co.ldap.schema.core.may.oc">
+    <para>
+     With <literal>MAY</literal> list all attribute types that are permitted
+     in conjunction with this object class.
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   A very good introduction to the use of Schemas can be found in the
+   OpenLDAP documentation (<systemitem>openldap2-doc</systemitem>). When
+   installed, find it in
+   <filename>/usr/share/doc/packages/openldap2/adminguide/guide.html</filename>.
+  </para>
+ </sect1>
+ <sect1 id="sec.security.ldap.yast" os="osuse;sles">
+  <title>Configuring an LDAP Server with &yast;</title><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>configuring</secondary>
+
+  <tertiary>&yast;</tertiary></indexterm><indexterm>
+
+  <primary>&yast;</primary>
+
+  <secondary>LDAP</secondary>
+
+  <tertiary>servers</tertiary></indexterm><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>server configuration</secondary>
+
+  <tertiary>&yast;</tertiary></indexterm>
+
+  <para>
+   Use &yast; to set up an LDAP server. Typical use cases for LDAP servers
+   include the management of user account data and the configuration of
+   mail, DNS, and DHCP servers.
+  </para>
+
+  <figure id="fig.ldap.y2.wizard.general.settings">
+   <title>&yast; LDAP Server Configuration</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="yast2_ldap_wizard_general_settings.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="yast2_ldap_wizard_general_settings.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <figure id="fig.ldap.y2.wizard.db.settings">
+   <title>&yast; LDAP Server&mdash;New Database</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="yast2_ldap_wizard_db_settings.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="yast2_ldap_wizard_db_settings.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   To set up an LDAP server for user account data, make sure the
+   <systemitem>yast2-ldap-server</systemitem> and
+   <systemitem>openldap2</systemitem> packages are installed. Then proceed
+   as follows:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Start &yast; as &rootuser; and select <menuchoice> <guimenu>Network
+     Services</guimenu> <guimenu>LDAP Server</guimenu> </menuchoice> to
+     invoke the configuration wizard.
+    </para>
+   </step>
+   <step>
+    <para>
+     Configure the <guimenu>Global Settings</guimenu> of your LDAP server
+     (you can change these settings later)&mdash;see
+     <xref linkend="fig.ldap.y2.wizard.general.settings"/>:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Set LDAP to be started.
+      </para>
+     </step>
+     <step>
+      <para>
+       If the LDAP server should announce its services via SLP, check
+       <guimenu>Register at an SLP Daemon</guimenu>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Configure <guimenu>Firewall Settings</guimenu>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Click <guimenu>Next</guimenu>.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Select the server type: stand-alone server, master server in a
+     replication setup, or replication (slave) server.
+    </para>
+   </step>
+   <step>
+    <para>
+     Select security options (<guimenu>TLS Settings</guimenu>).
+    </para>
+    <para>
+     It is strongly recommended to <guimenu>Enable TLS</guimenu>. For more
+     information, see <xref linkend="step.ldap.server.config.tls"/>.
+    </para>
+    <warning>
+     <title>Password Encryption</title>
+     <para>
+      Enabling TLS ensures passwords are sent encrypted over the network.
+      When this option is not enabled, passwords are sent unencrypted.
+     </para>
+    </warning>
+    <para>
+     Also consider to use LDAP over SSL and certificates.
+    </para>
+   </step>
+   <step>
+    <para>
+     Confirm <guimenu>Basic Database Settings</guimenu> with entering an
+     <guimenu>LDAP Administrator Password</guimenu> and then clicking
+     <guimenu>Next</guimenu>&mdash;see
+     <xref
+      linkend="fig.ldap.y2.wizard.db.settings"/>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Check the <guimenu>LDAP Server Configuration Summary</guimenu> and
+     click <guimenu>Finish</guimenu> to exit the configuration wizard.
+    </para>
+   </step>
+  </procedure>
+
+  <figure id="fig.ldap.y2.server.cfg">
+   <title>&yast; LDAP Server Configuration</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="yast2_ldap_server_cfg.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="yast2_ldap_server_cfg.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   For changes or additional configuration start the LDAP server module
+   again and in the left pane expand <guimenu>Global Settings</guimenu> to
+   make subentries visible&mdash;see
+   <xref linkend="fig.ldap.y2.server.cfg"/>:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     With <guimenu>Log Level Settings</guimenu>, configure the degree of
+     logging activity (verbosity) of the LDAP server. From the predefined
+     list, select or deselect the logging options according to your needs.
+     The more options are enabled, the larger your log files grow.
+    </para>
+   </step>
+   <step>
+    <para>
+     Configure which connection types the server should offer under
+     <guimenu>Allow/Disallow Features</guimenu>. Choose from:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>LDAPv2 Bind Requests</term>
+      <listitem>
+       <para>
+        This option enables connection requests (bind requests) from clients
+        using the previous version of the protocol (LDAPv2).
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Anonymous Bind When Credentials Not Empty</term>
+      <listitem>
+       <para>
+        Normally the LDAP server denies any authentication attempts with
+        empty credentials (DN or password). Enabling this option, however,
+        makes it possible to connect with a password and no DN to establish
+        an anonymous connection.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Unauthenticated Bind When DN Not Empty</term>
+      <listitem>
+       <para>
+        Enabling this option makes it possible to connect without
+        authentication (anonymously) using a DN but no password.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Unauthenticated Update Options to Process</term>
+      <listitem>
+       <para>
+        Enabling this option allows non-authenticated (anonymous) update
+        operations. Access is restricted according to ACLs and other rules.
+<!-- (see <xref linkend="sec.ldap.slapd.global"/>)-->
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </step>
+   <step>
+    <para>
+     <guimenu>Allow/Disallow Features</guimenu> also lets you configure the
+     server flags. Choose from:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>Disable Acceptance of Anonymous Bind Requests</term>
+      <listitem>
+       <para>
+        The server will no longer accept anonymous bind requests. Note, that
+        this does not generally prohibit anonymous directory access.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Disable Simple Bind Authentication</term>
+      <listitem>
+       <para>
+        Completely disable Simple Bind authentication.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Disable Forcing Session to Anonymous Status upon StartTLS Operation Receipt</term>
+      <listitem>
+       <para>
+        The server will no longer force an authenticated connection back to
+        the anonymous state when receiving the StartTLS operation.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Disallow the StartTLS Operation if Authenticated</term>
+      <listitem>
+       <para>
+        The server will disallow the StartTLS operation on already
+        authenticated connections.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </step>
+   <step id="step.ldap.server.config.tls">
+    <para>
+     To configure secure communication between client and server, proceed
+     with <guimenu>TLS Settings</guimenu>:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Activate <guimenu>Enable TLS</guimenu> to enable TLS and SSL
+       encryption of the client/server communication.
+      </para>
+     </step>
+     <step>
+      <para>
+       Either <guimenu>Import Certificate</guimenu> by specifying the exact
+       path to its location or enable the <guimenu>Use Common Server
+       Certificate</guimenu>. If the <guimenu>Use Common Server
+       Certificate</guimenu> is not available because it has not been
+       created during installation, go for <guimenu>Launch CA Management
+       Module</guimenu> first&mdash; for more information, see
+       <xref linkend="sec.security.yast_ca.module"/>.
+      </para>
+<!--
+      <itemizedlist>
+       <listitem>
+	<para>If you opted for importing a certificate, &yast; prompts you
+	 to specify the exact path to its location.</para>
+       </listitem>
+       <listitem>
+	<para>If you opted for using the common server certificate and it has
+	 not been created during installation, it is subsequently created.
+	</para>
+       </listitem>
+      </itemizedlist>
+      -->
+     </step>
+    </substeps>
+   </step>
+  </procedure>
+
+  <para>
+<!-- bnc#431264 -->
+<!-- Accept or modify the schema files included in the server's
+     configuration by selecting <guimenu>Schema Files</guimenu> in
+     the left part of the dialog.
+     -->
+   Add Schema files to be included in the server's configuration by
+   selecting <guimenu>Schema Files</guimenu> in the left part of the dialog.
+   The default selection of schema files applies to the server providing a
+   source of &yast; user account data.
+  </para>
+
+  <para>
+   &yast; allows to add traditional Schema files (usually with a name ending
+   in <literal>.schema</literal>) or LDIF files containing Schema
+   definitions in OpenLDAP's LDIF Schema format.
+  </para>
+
+  <figure
+   id="fig.ldap.y2.server.db.cfg">
+   <title>&yast; LDAP Server Database Configuration</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="yast2_ldap_server_db_cfg.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="yast2_ldap_server_db_cfg.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   To configure the databases managed by your LDAP server, proceed as
+   follows:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Select the <guimenu>Databases</guimenu> item in the left part of the
+     dialog.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>Add Database</guimenu> to add a new database.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter the requested data:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><guimenu>Base DN</guimenu>
+      </term>
+      <listitem>
+       <para>
+        Enter the base DN of your LDAP server.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><guimenu>Administrator DN</guimenu>
+      </term>
+      <listitem>
+       <para>
+        Enter the DN of the administrator in charge of the server. If you
+        check <guimenu>Append Base DN</guimenu>, only provide the
+        <literal>cn</literal> of the administrator and the system fills in
+        the rest automatically.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>LDAP Administrator Password</term>
+      <listitem>
+       <para>
+        Enter the password for the database administrator.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Use This Database as the Default for OpenLDAP Clients</term>
+      <listitem>
+       <para>
+        For convenience, check this option if wanted.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </step>
+   <step>
+    <para>
+     In the next dialog configure replication settings.
+    </para>
+   </step>
+<!--
+     <varlistentry>
+      <term>Encryption</term>
+      <listitem>
+       <para>
+	Determine the encryption algorithm to use to secure the password of
+	Root DN.       
+ Choose <guimenu>Crypt</guimenu>,
+	<guimenu>smd5</guimenu>, <guimenu>ssha</guimenu>, or
+	<guimenu>sha</guimenu>. 
+	The dialog also includes a <guimenu>Plain</guimenu> option to
+	enable the use of plain text passwords, but enabling this is not
+	recommended for security reasons. To confirm your settings and return
+	to the previous dialog, select <guimenu>OK</guimenu>.
+       </para>
+      </listitem>
+     </varlistentry>
+-->
+   <step>
+    <para>
+     In the next dialog, enable enforcement of password policies to provide
+     extra security to your LDAP server:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Check <guimenu>Enable Password Policies</guimenu> to be able to
+       specify a password policy.
+      </para>
+     </step>
+     <step>
+      <para>
+       Activate <guimenu>Hash Clear Text Passwords</guimenu> to have clear
+       text passwords be hashed before they are written to the database
+       whenever they are added or modified.
+      </para>
+     </step>
+     <step>
+      <para>
+       <guimenu>Disclose "Account Locked" Status</guimenu> provides a
+       relevant error message for bind requests to locked accounts.
+      </para>
+      <warning>
+       <title>Locked Accounts in Security Sensitive Environments</title>
+       <para>
+        Do not use the <guimenu>Disclose "Account Locked" Status</guimenu>
+        option if your environment is sensitive to security issues, because
+        the <quote>Locked Account</quote> error message provides
+        security-sensitive information that can be exploited by a potential
+        attacker.
+       </para>
+      </warning>
+     </step>
+     <step>
+      <para>
+       Enter the DN of the default policy object. To use a DN other than the
+       one suggested by &yast;, enter your choice. Otherwise, accept the
+       default settings.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Complete the database configuration by clicking
+     <guimenu>Finish</guimenu>.
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   If you have not opted for password policies, your server is ready to run
+   at this point. If you have chosen to enable password policies, proceed
+   with the configuration of the password policy in detail. If you have
+   chosen a password policy object that does not yet exist, &yast; creates
+   one:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Enter the LDAP server password. In the navigation tree below
+     <guimenu>Databases</guimenu> expand your database object and activate
+     the <guimenu>Password Policy Configuration</guimenu> item.
+    </para>
+   </step>
+   <step>
+    <para>
+     Make sure <guimenu>Enable Password Policies</guimenu> is activated.
+     Then click <guimenu>Edit Policy</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Configure the password change policies:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Determine the number of passwords stored in the password history.
+       Saved passwords may not be reused by the user.
+      </para>
+     </step>
+     <step>
+      <para>
+       Determine if users will be able to change their passwords and if they
+       will need to change their passwords after a reset by the
+       administrator. Require the old password for password changes
+       (optional).
+      </para>
+     </step>
+     <step>
+      <para>
+       Determine whether and to what extent passwords should be subject to
+       quality checking. Set the minimum password length that must be met
+       before a password is valid. If you select <guimenu>Accept Uncheckable
+       Passwords</guimenu>, users are allowed to use encrypted passwords,
+       even though the quality checks cannot be performed. If you opt for
+       <guimenu>Only Accept Checked Passwords</guimenu> only those passwords
+       that pass the quality tests are accepted as valid.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Configure the password time-limit policies:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Determine the minimum password time-limit (the time that needs to
+       pass between two valid password changes) and the maximum password
+       time-limit.
+      </para>
+     </step>
+     <step>
+      <para>
+       Determine the time between a password expiration warning and the
+       actual password expiration.
+      </para>
+     </step>
+     <step>
+      <para>
+       Set the number of postponement uses of an expired password before the
+       password expires permanently.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Configure the lockout policies:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Enable password locking.
+      </para>
+     </step>
+     <step>
+      <para>
+       Determine the number of bind failures that trigger a password lock.
+      </para>
+     </step>
+     <step>
+      <para>
+       Determine the duration of the password lock.
+      </para>
+     </step>
+     <step>
+      <para>
+       Determine the length of time that password failures are kept in the
+       cache before they are purged.
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Apply your password policy settings with <guimenu>OK</guimenu>.
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   To edit a previously created database, select its base DN in the tree to
+   the left. In the right part of the window, &yast; displays a dialog
+   similar to the one used for the creation of a new database (with the main
+   difference that the base DN entry is grayed out and cannot be changed).
+  </para>
+
+  <para>
+   After leaving the LDAP server configuration by selecting
+   <guimenu>Finish</guimenu>, you are ready to go with a basic working
+   configuration for your LDAP server. To fine-tune this setup, make use of
+   OpenLDAP's dynamic configuration back-end.
+  </para>
+
+  <para>
+   <!-- bnc#754946 -->
+   The OpenLDAP's dynamic configuration back-end stores the configuration
+   in an LDAP database. That database consists of a set of
+   <literal>.ldif</literal> files in
+   <filename>/etc/openldap/slapd.d</filename>. There is no need to access
+   these files directly. To access the settings you can either use the
+   &yast; LDAP server module (the <systemitem>yast2-ldap-server</systemitem>
+   package) or an LDAP client such as <command>ldapmodify</command> or
+   <command>ldapsearch</command>. For more information on the dynamic
+   configuration of OpenLDAP, see the OpenLDAP Administration Guide.
+  </para>
+ </sect1>
+ <sect1
+  id="sec.security.ldap.yast.client">
+  <title>Configuring an LDAP Client with &yast;</title><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>&yast;</secondary>
+
+  <tertiary>client</tertiary></indexterm><indexterm>
+
+  <primary>&yast;</primary>
+
+  <secondary>LDAP</secondary>
+
+  <tertiary>clients</tertiary></indexterm><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>&yast;</secondary>
+
+  <tertiary>modules</tertiary></indexterm><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>&yast;</secondary>
+
+  <tertiary>templates</tertiary></indexterm>
+
+  <para>
+   &yast; includes a module to set up LDAP-based user management. If you did
+   not enable this feature during the installation, start the module by
+   selecting <menuchoice> <guimenu>Network Services</guimenu> <guimenu>LDAP
+   Client</guimenu> </menuchoice>. &yast; automatically enables any PAM and
+   NSS-related changes as required by LDAP and installs the necessary files.
+   Simply connect your client to the server and let &yast; manage users over
+   LDAP. This basic setup is described in
+   <xref linkend="sec.security.ldap.yast.client.conf.basic"
+   />.
+  </para>
+
+  <para>
+   Use the &yast; LDAP client to further configure the &yast; group and user
+   configuration modules. This includes manipulating the default settings
+   for new users and groups and the number and nature of the attributes
+   assigned to a user or group. LDAP user management allows you to assign
+   far more and different attributes to users and groups than traditional
+   user or group management solutions. This is described in
+   <xref linkend="sec.security.ldap.yast.client.conf.mod"
+   />.
+  </para>
+
+  <sect2 id="sec.security.ldap.yast.client.conf.basic">
+   <title>Configuring Basic Settings</title>
+   <para>
+    The basic LDAP client configuration dialog
+    (<xref linkend="fig.ldap.y2.clconf"/>) opens during installation if you
+    choose LDAP user management or when you select <menuchoice>
+    <guimenu>Network Services</guimenu> <guimenu>LDAP Client</guimenu>
+    </menuchoice> in the &yast; Control Center in the installed system.
+   </para>
+   <figure id="fig.ldap.y2.clconf">
+    <title>&yast;: LDAP Client Configuration</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="ldap_y2_clconf.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="ldap_y2_clconf.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <procedure>
+    <para>
+     To authenticate users of your machine against an OpenLDAP server and to
+     enable user management via OpenLDAP, proceed as follows:
+    </para>
+    <step>
+     <para>
+      Click <guimenu>Use LDAP</guimenu> to enable the use of LDAP. Select
+      <guimenu>Use LDAP but Disable Logins</guimenu> instead if you want to
+      use LDAP for authentication, but do not want other users to log in to
+      this client.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enter the IP address of the LDAP server to use.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enter the <guimenu>LDAP Base DN</guimenu> to select the search base on
+      the LDAP server. To retrieve the base DN automatically, click
+      <guimenu>Fetch DN</guimenu>. &yast; then checks for any LDAP database
+      on the server address specified above. Choose the appropriate base DN
+      from the search results given by &yast;.
+     </para>
+    </step>
+    <step>
+     <para>
+      If TLS or SSL-protected communication with the server is required,
+      select <guimenu>LDAP TLS/SSL</guimenu>. Click <guimenu>Download CA
+      Certificate</guimenu> to download a certificate in PEM format from a
+      URL.
+     </para>
+    </step>
+    <step>
+     <para>
+      Select <guimenu>Start Automounter</guimenu> to mount remote
+      directories on your client, such as a remotely managed
+      <filename>/home</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Select <guimenu>Create Home Directory on Login</guimenu> to have a
+      user's home automatically created on the first user login.
+     </para>
+    </step>
+    <step>
+     <para>
+      Click <guimenu>OK</guimenu> to apply your settings.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    To modify data on the server as administrator, click <guimenu>Advanced
+    Configuration</guimenu>. The following dialog is split into two tabs.
+    See <xref
+     linkend="fig.ldap.y2.adconf"/>.
+   </para>
+   <figure id="fig.ldap.y2.adconf">
+    <title>&yast;: Advanced Configuration</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="ldap_y2_adconf.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="ldap_y2_adconf.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <procedure>
+    <step>
+     <para>
+      In the <guimenu>Client Settings</guimenu> tab, adjust the following
+      settings according to your needs:
+     </para>
+     <substeps>
+      <step>
+       <para>
+        If the search base for users, passwords, and groups differs from the
+        global search base specified in the <guimenu>LDAP base DN</guimenu>,
+        enter these different naming contexts in <guimenu>User
+        Map</guimenu>, <guimenu>Password Map</guimenu>, and <guimenu>Group
+        Map</guimenu>.
+       </para>
+      </step>
+      <step>
+       <para>
+        Specify the password change protocol. The standard method to use
+        whenever a password is changed is <systemitem>crypt</systemitem>,
+        meaning that password hashes generated by <command>crypt</command>
+        are used. For details on this and other options, refer to the
+        <systemitem>pam_ldap</systemitem> man page.
+       </para>
+      </step>
+      <step>
+       <para>
+        Specify the LDAP group to use with <guimenu>Group Member
+        Attribute</guimenu>. The default value for this is
+        <literal>member</literal>.
+       </para>
+      </step>
+      <step>
+       <para>
+        If a secure connection requires certificate checking, specify where
+        your <guimenu>CA Certificate File</guimenu> in PEM format is
+        located. Or specify a directory with certificates.
+       </para>
+      </step>
+      <step>
+       <para>
+        If the LDAP server still uses LDAPv2, enable the use of this
+        protocol version by selecting <guimenu>LDAP Version 2</guimenu>.
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      In <guimenu>Administration Settings</guimenu>, adjust the following
+      settings:
+     </para>
+     <substeps>
+      <step>
+       <para>
+        Set the base for storing your user management data via
+        <guimenu>Configuration Base DN</guimenu>.
+       </para>
+      </step>
+      <step>
+       <para>
+        Enter the appropriate value for <guimenu>Administrator DN</guimenu>.
+        This DN must be identical with the <literal>rootdn</literal> value
+        specified in <filename>/etc/openldap/slapd.conf</filename> to enable
+        this particular user to manipulate data stored on the LDAP server.
+        Enter the full DN (such as
+        <literal>cn=Administrator,dc=example,dc=com</literal>) or activate
+        <guimenu>Append Base DN</guimenu> to have the base DN added
+        automatically when you enter <literal>cn=Administrator</literal>.
+       </para>
+      </step>
+      <step>
+       <para>
+        Check <guimenu>Create Default Configuration Objects</guimenu> to
+        create the basic configuration objects on the server to enable user
+        management via LDAP.
+       </para>
+      </step>
+      <step>
+       <para>
+        If your client machine needs to act as a file server for home
+        directories across your network, check <guimenu>Home Directories on
+        This Machine</guimenu>.
+       </para>
+      </step>
+      <step>
+       <para>
+        Use the <guimenu>Password Policy</guimenu> section to select, add,
+        delete, or modify the password policy settings to use. The
+        configuration of password policies with &yast; is part of the LDAP
+        server setup.
+       </para>
+      </step>
+      <step>
+       <para>
+        Click <guimenu>OK</guimenu> to leave the <guimenu>Advanced
+        Configuration</guimenu>, then <guimenu>Finish</guimenu> to apply
+        your settings.
+       </para>
+      </step>
+     </substeps>
+    </step>
+   </procedure>
+   <para>
+    Use <guimenu>Configure User Management Settings</guimenu> to edit
+    entries on the LDAP server. Access to the configuration modules on the
+    server is then granted according to the ACLs and ACIs stored on the
+    server. Follow the procedures outlined in
+    <xref
+     linkend="sec.security.ldap.yast.client.conf.mod"/>.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ldap.yast.client.conf.mod">
+   <title>Configuring the &yast; Group and User Administration Modules</title>
+   <para>
+    Use the &yast; LDAP client to adapt the &yast; modules for user and
+    group administration and to extend them as needed. Define templates with
+    default values for the individual attributes to simplify the data
+    registration. The presets created here are stored as LDAP objects in the
+    LDAP directory. The registration of user data is still done with the
+    regular &yast; modules for user and group management. The registered
+    data is stored as LDAP objects on the server.
+   </para>
+   <figure id="fig.ldap.y2.modconf1">
+    <title>&yast;: Module Configuration</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="ldap_y2_modconf1.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="ldap_y2_modconf1.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    The dialog for module configuration
+    (<xref linkend="fig.ldap.y2.modconf1"/>) allows the creation of new
+    modules, selection and modification of existing configuration modules,
+    and design and modification of templates for such modules.
+   </para>
+   <procedure>
+    <para>
+     To create a new configuration module, proceed as follows:
+    </para>
+    <step>
+     <para>
+      In the <guimenu>LDAP Client Configuration</guimenu> click
+      <guimenu>Advanced Configuration</guimenu>, then open the
+      <guimenu>Administration Settings</guimenu> tab. Click
+      <guimenu>Configure User Management Settings</guimenu> and enter the
+      LDAP server credentials.
+     </para>
+    </step>
+    <step>
+     <para>
+      Click <guimenu>New</guimenu> and select the type of module to create.
+      For a user configuration module, select
+      <literal>suseUserConfiguration</literal> and for a group configuration
+      choose <literal>suseGroupConfiguration</literal>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Choose a name for the new template (e.g.,
+      <literal>userConfig</literal>). The content view shows a table listing
+      all attributes allowed in this module and their assigned values.
+     </para>
+    </step>
+    <step>
+     <para>
+      Accept the preset values or adjust the defaults to use in group and
+      user configurations by selecting the relevant attribute, pressing
+      <guimenu>Edit</guimenu>, and entering the new value. Rename a module
+      by changing the <systemitem>cn</systemitem> attribute of the module.
+      Clicking <guimenu>Delete</guimenu> deletes the currently selected
+      module.
+     </para>
+    </step>
+    <step>
+     <para>
+      After you click <guimenu>OK</guimenu>, the new module is added to the
+      selection menu.
+     </para>
+    </step>
+   </procedure>
+   <procedure>
+    <para>
+     The &yast; modules for group and user administration embed templates
+     with standard values. To edit a template associated with a
+     configuration module, start the object template configuration
+     (<xref linkend="fig.ldap.y2.objtemp"/>).
+    </para>
+    <step>
+     <para>
+      In the <guimenu>Module Configuration</guimenu> dialog, click
+      <guimenu>Configure Template</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Determine the values of the general attributes assigned to this
+      template according to your needs or leave them empty. Empty attributes
+      are deleted on the LDAP server.
+     </para>
+    </step>
+    <step>
+     <para>
+      Modify, delete, or add new default values for new objects (user or
+      group configuration objects in the LDAP tree).
+     </para>
+    </step>
+   </procedure>
+   <figure id="fig.ldap.y2.objtemp">
+    <title>&yast;: Configuration of an Object Template</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="ldap_y2_objtemp.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="ldap_y2_objtemp.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    Connect the template to its module by setting the
+    <literal>susedefaulttemplate</literal> attribute value of the module to
+    the DN of the adapted template.
+   </para>
+<?dbfo-need height="10em"?>
+   <tip>
+    <para>
+     The default values for an attribute can be created from other
+     attributes by using a variable instead of an absolute value. For
+     example, when creating a new user, <literal>cn=%sn %givenName</literal>
+     is created automatically from the attribute values for
+     <literal>sn</literal> and <literal>givenName</literal>.
+    </para>
+   </tip>
+   <para>
+    Once all modules and templates are configured correctly and ready to
+    run, new groups and users can be registered in the usual way with
+    &yast;.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.ldap.yast.usergr">
+  <title>Configuring LDAP Users and Groups in &yast;</title><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>administering users</secondary></indexterm><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>administering groups</secondary></indexterm>
+
+  <para>
+   The actual registration of user and group data differs only slightly from
+   the procedure when not using LDAP. The following instructions relate to
+   the administration of users. The procedure for administering groups is
+   analogous.
+  </para>
+
+<!--
+    <figure id="fig.ldap.y2.usergr">
+     <title>&yast;: User Administration</title>
+     <screenshot>
+      <mediaobject>
+       <imageobject role="fo">
+	<imagedata fileref="ldap_y2_usergr.png" width="75%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+	<imagedata fileref="ldap_y2_usergr.png" width="75%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </screenshot>
+    </figure>
+-->
+
+  <procedure>
+   <step>
+    <para>
+     Access the &yast; user administration with <menuchoice>
+     <guimenu>Security and Users</guimenu><guimenu>User and Group
+     Management</guimenu></menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Use <guimenu>Set Filter</guimenu> to limit the view of users to the
+     LDAP users and enter the password for Root DN.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>Add</guimenu> to enter the user configuration. A dialog
+     with four tabs opens:
+    </para>
+    <substeps>
+     <step>
+      <para>
+       Specify username, login, and password in the <guimenu>User
+       Data</guimenu> tab.
+      </para>
+     </step>
+     <step>
+      <para>
+       Check the <guimenu>Details</guimenu> tab for the group membership,
+       login shell, and home directory of the new user. If necessary, change
+       the default to values that better suit your needs. The default values
+       (as well as those of the password settings) can be defined with the
+       procedure described in
+       <xref linkend="sec.security.ldap.yast.client.conf.mod"/>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Modify or accept the default <guimenu>Password Settings</guimenu>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Enter the <guimenu>Plug-Ins</guimenu> tab, select the LDAP plug-in,
+       and click <guimenu>Launch</guimenu> to configure additional LDAP
+       attributes assigned to the new user (see
+       <xref linkend="fig.ldap.y2.adset"/>).
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>OK</guimenu> to apply your settings and leave the user
+     configuration.
+    </para>
+   </step>
+  </procedure>
+
+  <figure id="fig.ldap.y2.adset">
+   <title>&yast;: Additional LDAP Settings</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="ldap_y2_adset.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="ldap_y2_adset.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   The initial input form of user administration offers <guimenu>LDAP
+   Options</guimenu>. This allows you to apply LDAP search filters to the
+   set of available users. Alternatively open the module for configuring
+   LDAP users and groups by selecting <guimenu>LDAP User and Group
+   Configuration</guimenu>.
+  </para>
+ </sect1>
+<?dbfo-need height="20em"?>
+ <sect1 id="sec.security.ldap.browse">
+  <title>Browsing the LDAP Directory Tree</title>
+
+  <para>
+   To conveniently browse the LDAP directory tree and all its entries, use
+   the &yast; LDAP Browser:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     Log in as &rootuser;.
+    </para>
+   </step>
+   <step>
+    <para>
+     Start <menuchoice> <guimenu>&yast;</guimenu> <guimenu>Network
+     Services</guimenu> <guimenu>LDAP Browser</guimenu> </menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter the address of the LDAP server, the Administrator DN, and the
+     password for the Root DN of this server (if you need both to read and
+     write the data stored on the server).
+    </para>
+    <para>
+     Alternatively, choose <guimenu>Anonymous Access</guimenu> and do not
+     provide the password to gain read access to the directory.
+    </para>
+    <para>
+     The <guimenu>LDAP Tree</guimenu> tab displays the content of the LDAP
+     directory to which your machine connected. Click to expand each item's
+     submenu.
+    </para>
+    <figure id="fig.ldap.browsetree">
+     <title>Browsing the LDAP Directory Tree</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="ldap_y2_browsetree.png" width="85%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="ldap_y2_browsetree.png" width="85%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+   <step>
+    <para>
+     To view any entry in detail, select it in the <guimenu>LDAP
+     Tree</guimenu> view and open the <guimenu>Entry Data</guimenu> tab.
+    </para>
+    <para>
+     All attributes and values associated with this entry are displayed.
+    </para>
+    <figure id="fig.ldap.browsedata">
+     <title>Browsing the Entry Data</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="ldap_y2_browsedata.png" width="85%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="ldap_y2_browsedata.png" width="85%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+   <step>
+    <para>
+     To change the value of any of these attributes, select the attribute,
+     click <guimenu>Edit</guimenu>, enter the new value, click
+     <guimenu>Save</guimenu>, and provide the Root DN password when
+     prompted.
+    </para>
+   </step>
+   <step>
+    <para>
+     Leave the LDAP browser with <guimenu>Close</guimenu>.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 id="sec.security.ldap.slapd" os="sles;osuse">
+  <title>Manually Configuring an LDAP Server</title><indexterm>
+
+  <primary>LDAP</primary>
+
+  <secondary>server configuration</secondary>
+
+  <tertiary>manual</tertiary></indexterm><indexterm>
+
+  <primary>configuration files</primary>
+
+  <secondary>slapd.conf</secondary></indexterm>
+
+<!--
+  <para>
+   Your installed system contains a complete configuration file for your
+   LDAP server at <filename>/etc/openldap/slapd.conf</filename>. The single
+   entries are briefly described here and necessary adjustments are
+   explained. Entries prefixed with a hash (#) are inactive. This comment
+   character must be removed to activate them.
+  </para>
+-->
+
+  <para>
+   &yast; uses OpenLDAP's dynamic configuration database
+   (<systemitem>back-config</systemitem>) to store the LDAP server's
+   configuration. For details about the dynamic configuration back-end,
+   see the <systemitem>slapd-config(5)</systemitem> man page or the
+   OpenLDAP Software 2.4 Administrator's Guide located at
+   <filename>/usr/share/doc/packages/openldap2/guide/admin/guide.html</filename>
+   on your system if the <systemitem>openldap2</systemitem> package is
+   installed.
+  </para>
+
+  <tip>
+   <title>Upgrading an Old OpenLDAP Installation</title>
+   <para>
+    &yast; does not use <filename>/etc/openldap/slapd.conf</filename> to
+    store the OpenLDAP configuration anymore. In case of a system upgrade, a
+    copy of the original <filename>/etc/openldap/slapd.conf</filename> file
+    will get created as
+    <filename>/etc/openldap/slapd.conf.YaSTsave</filename>.
+   </para>
+  </tip>
+
+  <para>
+   To conveniently access the configuration back-end, you use SASL external
+   authentication. For example, the following <command>ldapsearch</command>
+   command executed as &rootuser; can be used to show the
+   complete <command>slapd</command> configuration:
+  </para>
+
+<screen>ldapsearch -Y external -H ldapi:/// -b cn=config</screen>
+
+<!--
+  <sect2 id="sec.security.ldap.slapd.global">
+   <title>Global Directives in slapd.conf</title>
+   <example id="aus.ldap.slapd.include">
+    <title>slapd.conf: Include Directive for Schemas</title>
+<screen>include         /etc/openldap/schema/core.schema
+include         /etc/openldap/schema/cosine.schema
+include         /etc/openldap/schema/inetorgperson.schema
+include         /etc/openldap/schema/rfc2307bis.schema
+include         /etc/openldap/schema/yast.schema</screen>
+   </example>
+   <para>
+    This first directive in <filename>slapd.conf</filename>, shown in
+    <xref linkend="aus.ldap.slapd.include"/>, specifies the Schema by which
+    the LDAP directory is organized. The entry
+    <filename>core.schema</filename> is required. Additionally required
+    Schemas are appended to this directive. Find information in the included
+    OpenLDAP documentation.
+   </para>
+   <example id="aus.ldap.slapd.pid">
+    <title>slapd.conf: pidfile and argsfile</title>
+<screen>pidfile /var/run/slapd/slapd.pid
+argsfile /var/run/slapd/slapd.args</screen>
+   </example>
+   <para>
+    These two files contain the PID (process ID) and some of the arguments
+    the <command>slapd</command> process is started with. There is no need
+    for modifications here.
+   </para>
+   <example id="aus.ldap.slapd.acl">
+    <title>slapd.conf: Access Control</title>
+<screen># Sample Access Control
+#       Allow read access of root DSE
+# Allow self write access
+#       Allow authenticated users read access
+#       Allow anonymous users to authenticate
+# access to dn="" by * read
+  access to * by self write
+              by users read
+              by anonymous auth
+#
+# if no access controls are present, the default is:
+#       Allow read by all
+#
+# rootdn can always write!</screen>
+   </example>
+   <para>
+    <xref linkend="aus.ldap.slapd.acl"/> is the excerpt from
+    <filename>slapd.conf</filename> that regulates the access permissions
+    for the LDAP directory on the server. The settings made here in the
+    global section of <filename>slapd.conf</filename> are valid as long as
+    no custom access rules are declared in the database-specific section.
+    These would overwrite the global declarations. As presented here, all
+    users have read access to the directory, but only the administrator
+    (<literal>rootdn</literal>) can write to this directory. Access control
+    regulation in LDAP is a highly complex process. The following tips can
+    help:
+   </para>
+   <indexterm>
+    <primary>LDAP</primary>
+    <secondary>ACLs</secondary>
+   </indexterm>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Every access rule has the following structure:
+     </para>
+<screen>access to &lt;what> by &lt;who> &lt;access></screen>
+    </listitem>
+    <listitem>
+     <para>
+      <replaceable>what</replaceable> is a placeholder for the object or
+      attribute to which access is granted. Individual directory branches
+      can be protected explicitly with separate rules. It is also possible
+      to process regions of the directory tree with one rule by using
+      regular expressions. <command>slapd</command> evaluates all rules in
+      the order in which they are listed in the configuration file. More
+      general rules should be listed after more specific ones&mdash;
+      <command>slapd</command> will apply the first rule that matches, and
+      all the following rules are ignored.
+     </para>
+    </listitem>
+<?dbfo-need height="10em"?>
+    <listitem>
+     <para>
+      <replaceable>who</replaceable> determines who should be granted access
+      to the areas determined with <replaceable>what</replaceable>. Regular
+      expressions may be used. <command>slapd</command> again aborts the
+      evaluation of <systemitem>who</systemitem> after the first match, so
+      more specific rules should be listed before the more general ones. The
+      entries shown in <xref linkend="tab.ldap.acl.who"/> are possible.
+     </para>
+     <table id="tab.ldap.acl.who">
+      <title>User Groups and Their Access Grants</title>
+      <tgroup cols="2">
+       <thead>
+        <row>
+         <entry>
+          <para>
+           Tag
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Scope
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>*</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           All users without exception
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>anonymous</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Not authenticated (<quote>anonymous</quote>) users
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>users</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Authenticated users
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>self</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Users connected with the target object
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>dn.regex=&lt;regex&gt;</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           All users matching the regular expression
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+    <listitem>
+     <para>
+      <replaceable>access</replaceable> specifies the type of access. Use
+      the options listed in <xref linkend="tab.ldap.acl.access"/>.
+     </para>
+     <table id="tab.ldap.acl.access">
+      <title>Types of Access</title>
+      <tgroup cols="2">
+       <thead>
+        <row>
+         <entry>
+          <para>
+           Tag
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Scope of Access
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>none</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           No access
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>auth</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           For contacting the server
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>compare</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           To objects for comparison access
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>search</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           For the employment of search filters
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>read</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Read access
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>write</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Write access
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+     <para>
+      <command>slapd</command> compares the access right requested by the
+      client with those granted in <filename>slapd.conf</filename>. The
+      client is granted access if the rules allow a higher or equal right
+      than the requested one. If the client requests higher rights than
+      those declared in the rules, it is denied access.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    <xref linkend="aus.ldap.slapd.aclex"/> shows an example of a simple
+    access control that can be arbitrarily developed using regular
+    expressions.
+   </para>
+   <example id="aus.ldap.slapd.aclex">
+    <title>slapd.conf: Example for Access Control</title>
+<screen>access to  dn.regex="ou=([^,]+),dc=example,dc=com" 
+by dn.regex="cn=Administrator,ou=$1,dc=example,dc=com" write  
+by user read 
+by * none</screen>
+   </example>
+   <para>
+    This rule declares that only its respective administrator has write
+    access to an individual <literal>ou</literal> entry. All other
+    authenticated users have read access and the rest of the world has no
+    access.
+   </para>
+   <tip>
+    <title>Establishing Access Rules</title>
+    <para>
+     If there is no <literal>access to</literal> rule or no matching
+     <option>by</option> directive, access is denied. Only explicitly
+     declared access rights are granted. If no rules are declared at all,
+     the default principle is write access for the administrator and read
+     access for the rest of the world.
+    </para>
+   </tip>
+   <para>
+    Find detailed information and an example configuration for LDAP access
+    rights in the online documentation of the installed
+    <systemitem class="resource">openldap2</systemitem> package.
+    <indexterm>
+     <primary>LDAP</primary>
+     <secondary>access control</secondary>
+    </indexterm>
+   </para>
+   <para>
+    Apart from the possibility to administer access permissions with the
+    central server configuration file (<filename>slapd.conf</filename>),
+    there is access control information (ACI). ACI allows storage of the
+    access information for individual objects within the LDAP tree. This
+    type of access control is not yet common and is still considered
+    experimental by the developers. Refer to
+    <ulink
+    url="http://www.openldap.org/faq/data/cache/758.html"/> for
+    information.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ldap.slapd.db">
+   <title>Database-Specific Directives in slapd.conf</title>
+   <example id="aus.ldap.slapd.bdb">
+    <title>slapd.conf: Database-Specific Directives</title>
+<screen>database bdb<co id="co.db"/>
+suffix "dc=example,dc=com"<co id="co.suffix"/> 
+checkpoint      1024    5<co id="co.checkp"/>
+cachesize       10000<co id="co.cache"/>
+rootdn "cn=Administrator,dc=example,dc=com"<co id="co.rootdn"/> 
+# Cleartext passwords, especially for the rootdn, should 
+# be avoided.  See slappasswd(8) and slapd.conf(5) for details. 
+# Use of strong authentication encouraged.
+rootpw secret<co id="co.rootpw"/> 
+# The database directory MUST exist prior to running slapd AND 
+# should only be accessible by the slapd/tools. Mode 700 recommended. 
+directory /var/lib/ldap<co id="co.dir"/> 
+# Indices to maintain 
+index   objectClass     eq<co id="co.index"/>
+overlay ppolicy<co id="co.ppolicy"/>
+ppolicy_default "cn=Default Password Policy,dc=example,dc=com"
+ppolicy_hash_cleartext
+ppolicy_use_lockout</screen>
+   </example>
+   <calloutlist>
+    <callout arearefs="co.db">
+     <para>
+      The type of database, a Berkeley database in this case, is set in the
+      first line of this section (see
+      <xref
+     linkend="aus.ldap.slapd.bdb"/>).
+     </para>
+    </callout>
+    <callout arearefs="co.suffix">
+     <para>
+      <literal>suffix</literal> determines for which portion of the LDAP
+      tree this server should be responsible.
+     </para>
+    </callout>
+    <callout arearefs="co.checkp">
+     <para>
+      <literal>checkpoint</literal> determines the amount of data (in KB)
+      that is kept in the transaction log before it is written to the actual
+      database and the time (in minutes) between two write actions.
+     </para>
+    </callout>
+    <callout arearefs="co.cache">
+     <para>
+      <literal>cachesize</literal> sets the number of objects kept in the
+      database's cache.
+     </para>
+    </callout>
+    <callout arearefs="co.rootdn">
+     <para>
+      <literal>rootdn</literal> determines who owns administrator rights to
+      this server. The user declared here does not need to have an LDAP
+      entry or exist as regular user.
+     </para>
+    </callout>
+    <callout arearefs="co.rootpw">
+     <para>
+      <literal>rootpw</literal> sets the administrator password. Instead of
+      using <literal>secret</literal> here, it is possible to enter the hash
+      of the administrator password created by
+      <command>slappasswd</command>.
+     </para>
+    </callout>
+    <callout arearefs="co.dir">
+     <para>
+      The <literal>directory</literal> directive indicates the directory in
+      the file system where the database directories are stored on the
+      server.
+     </para>
+    </callout>
+    <callout arearefs="co.index">
+     <para>
+      The last directive, <literal>index objectClass eq</literal>, results
+      in the maintenance of an index of all object classes. Attributes for
+      which users search most often can be added here according to
+      experience.
+     </para>
+    </callout>
+    <callout arearefs="co.ppolicy">
+     <para>
+      <literal>overlay ppolicy</literal> adds a layer of password control
+      mechanisms. <literal>ppolicy_default</literal> specifies the DN of the
+      pwdPolicy object to use when no specific policy is set on a given
+      user's entry. If there is no specific policy for an entry and no
+      default is given, no policies are enforced.
+      <literal>ppolicy_hash_cleartext</literal> specifies that clear text
+      passwords present in add and modify requests are hashed before being
+      stored in the database. When this option is used, it is recommended to
+      deny compare, search, and read access to the
+      <literal>userPassword</literal> attribute for all directory users,
+      because <literal>ppolicy_hash_cleartext</literal> violates the
+      X.500/LDAP information model. <literal>ppolicy_use_lockout</literal>
+      sends a specific error code when a client tries to connect to a locked
+      account. When your site is sensitive to security issues, disable this
+      option as the error code provides useful information to attackers.
+     </para>
+    </callout>
+   </calloutlist>
+   <para>
+    Custom <literal>Access</literal> rules defined here for the database are
+    used instead of the global <literal>Access</literal> rules.
+   </para>
+  </sect2>
+-->
+
+  <sect2 id="sec.security.ldap.slapd.start">
+   <title>Starting and Stopping the Servers</title>
+   <para>
+    Once the LDAP server is fully configured and all desired entries have
+    been made according to the pattern described in
+    <xref linkend="sec.security.ldap.data"/>, start the LDAP server as
+    &rootuser; by entering <command>rcldap <option>start</option></command>.
+    To stop the server manually, enter the command <command>rcldap
+    <option>stop</option></command>. Query the status of the running LDAP
+    server with <command>rcldap <option>status</option></command>.
+   </para>
+<!-- fs 2013-10-25: This needs to be adapted to systemd 
+
+   <para os="sles">
+    Use the &yast; runlevel editor, described in
+    <xref
+    linkend="sec.boot.runlevel.edit"/>, to have the server started
+    and stopped automatically on system bootup and shutdown. It is also
+    possible to create the corresponding links to the start and stop scripts
+    with the <command>insserv</command> command from a command prompt as
+    described in <xref linkend="sec.boot.init.skripte"/>.
+   </para>
+-->
+  </sect2>
+ </sect1>
+<!-- ==================================================================== -->
+ <sect1 id="sec.security.ldap.data" os="sles;osuse">
+  <title>Manually Administering LDAP Data</title>
+
+  <para>
+   OpenLDAP offers a series of tools for the administration of data in the
+   LDAP directory. The four most important tools for adding to, deleting
+   from, searching through and modifying the data stock are explained in
+   this section.
+  </para>
+
+  <sect2 id="sec.security.ldap.data.add">
+   <title>Inserting Data into an LDAP Directory</title><indexterm>
+   <primary>LDAP</primary>
+   <secondary>adding data</secondary></indexterm><indexterm>
+   <primary>LDAP</primary>
+   <secondary>ldapadd</secondary></indexterm>
+   <para>
+    Once your LDAP server
+<!--in
+    <filename>/etc/openldap/slapd.conf</filename>-->
+    is correctly configured (it features appropriate entries for
+    <literal>suffix</literal>, <literal>directory</literal>,
+    <literal>rootdn</literal>, <literal>rootpw</literal> and
+    <literal>index</literal>), proceed to entering records. OpenLDAP offers
+    the <command>ldapadd</command> command for this task. If possible, add
+    the objects to the database in bundles (for practical reasons). LDAP is
+    able to process the LDIF format (LDAP data interchange format) for this.
+    An LDIF file is a simple text file that can contain an arbitrary number
+    of attribute and value pairs.
+<!-- Refer
+    to the Schema files declared in <filename>slapd.conf</filename> for the
+    available object classes and attributes.-->
+    The LDIF file for creating a rough framework for the example in
+    <xref linkend="fig.ldap.tree"/> would look like the one in
+    <xref linkend="dat.ldap.ldif"/>.
+   </para>
+   <important>
+    <title>Encoding of LDIF Files</title>
+    <para>
+<!-- UTF-8 is the default since ages now...-->
+     LDAP works with UTF-8 (Unicode). Umlauts must be encoded correctly.
+     Otherwise, avoid umlauts and other special characters or use
+     <command>iconv</command> to convert the input to UTF-8.
+    </para>
+   </important>
+   <example id="dat.ldap.ldif">
+    <title>An LDIF File</title>
+<screen># The Organization
+dn: dc=example,dc=com
+objectClass: dcObject
+objectClass: organization
+o: Example dc: example
+
+# The organizational unit development (devel)
+dn: ou=devel,dc=example,dc=com
+objectClass: organizationalUnit
+ou: devel
+
+# The organizational unit documentation (doc)
+dn: ou=doc,dc=example,dc=com
+objectClass: organizationalUnit
+ou: doc
+
+# The organizational unit internal IT (it)
+dn: ou=it,dc=example,dc=com
+objectClass: organizationalUnit
+ou: it</screen>
+   </example>
+   <para>
+    Save the file with the <filename>.ldif</filename> suffix then pass it to
+    the server with the following command:
+   </para>
+<screen>ldapadd -x -D <replaceable>dn_of_the_administrator</replaceable> -W -f <replaceable>file</replaceable>.ldif</screen><indexterm>
+   <primary>commands</primary>
+   <secondary>ldapadd</secondary></indexterm>
+   <para>
+    <literal>-x</literal> switches off the authentication with SASL in this
+    case. <literal>-D</literal> declares the user that calls the operation.
+    The valid DN of the administrator is entered here just like it has been
+    configured in <filename>slapd.conf</filename>. In the current example,
+    this is <literal>cn=Administrator,dc=example,dc=com</literal>.
+    <literal>-W</literal> circumvents entering the password on the command
+    line (in clear text) and activates a separate password prompt.
+<!-- This
+    password was previously determined in <filename>slapd.conf</filename>
+    with <literal>rootpw</literal>. -->
+    The <literal>-f</literal> option passes the filename. See the details of
+    running <command>ldapadd</command> in
+    <xref linkend="aus.ldap.addentry"/>.
+   </para>
+   <example
+    id="aus.ldap.addentry">
+    <title>ldapadd with example.ldif</title>
+<screen>ldapadd -x -D cn=Administrator,dc=example,dc=com -W -f example.ldif 
+
+Enter LDAP password: 
+adding new entry "dc=example,dc=com" 
+adding new entry "ou=devel,dc=example,dc=com" 
+adding new entry "ou=doc,dc=example,dc=com" 
+adding new entry "ou=it,dc=example,dc=com"</screen>
+   </example>
+   <para>
+    The user data of individuals can be prepared in separate LDIF files.
+    <xref
+     linkend="aus.ldap.addtux"/> adds
+    <systemitem class="username">Tux</systemitem> to the new LDAP directory.
+   </para>
+   <example id="aus.ldap.addtux">
+    <title>LDIF Data for Tux</title>
+<screen># coworker Tux
+dn: cn=Tux Linux,ou=devel,dc=example,dc=com
+objectClass: inetOrgPerson
+cn: Tux Linux
+givenName: Tux
+sn: Linux
+mail: tux@example.com
+uid: tux
+telephoneNumber: +49 1234 567-8</screen>
+   </example>
+   <para>
+    An LDIF file can contain an arbitrary number of objects. It is possible
+    to pass directory branches (entirely or in part) to the server in one
+    go, as shown in the example of individual objects. If it is necessary to
+    modify some data relatively often, a fine subdivision of single objects
+    is recommended.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ldap.data.change">
+   <title>Modifying Data in the LDAP Directory</title><indexterm>
+   <primary>LDAP</primary>
+   <secondary>modifying data</secondary></indexterm><indexterm>
+   <primary>LDAP</primary>
+   <secondary>ldapmodify</secondary></indexterm>
+   <para>
+    The tool <command>ldapmodify</command> is provided for modifying the
+    data stock. The easiest way to do this is to modify the corresponding
+    LDIF file and pass the modified file to the LDAP server. To change the
+    telephone number of colleague Tux from <literal>+49 1234 567-8</literal>
+    to <literal>+49 1234 567-10</literal>, edit the LDIF file like in
+    <xref
+     linkend="aus.ldap.ldif.tux"/>.
+   </para>
+   <example id="aus.ldap.ldif.tux">
+    <title>Modified LDIF File tux.ldif</title>
+<screen># coworker Tux
+dn: cn=Tux Linux,ou=devel,dc=example,dc=com 
+changetype: modify
+replace: telephoneNumber 
+telephoneNumber: +49 1234 567-10</screen>
+   </example>
+   <para>
+    Import the modified file into the LDAP directory with the following
+    command:
+   </para>
+<screen>ldapmodify -x -D cn=Administrator,dc=example,dc=com -W -f tux.ldif</screen><indexterm>
+   <primary>commands</primary>
+   <secondary>ldapmodify</secondary></indexterm>
+   <para>
+    Alternatively, pass the attributes to change directly to
+    <command>ldapmodify</command> as follows:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Start <command>ldapmodify</command> and enter your password:
+     </para>
+<screen>ldapmodify -x -D cn=Administrator,dc=example,dc=com -W 
+Enter LDAP password:</screen>
+    </step>
+    <step>
+     <para>
+      Enter the changes while carefully complying with the syntax in the
+      order presented below:
+     </para>
+<screen>dn: cn=Tux Linux,ou=devel,dc=example,dc=com
+changetype: modify
+replace: telephoneNumber
+telephoneNumber: +49 1234 567-10</screen>
+    </step>
+   </procedure>
+   <para>
+    For more information about <command>ldapmodify</command> and its syntax,
+    see the <command>ldapmodify</command> man page.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ldap.data.search">
+   <title>Searching or Reading Data from an LDAP Directory</title><indexterm>
+   <primary>LDAP</primary>
+   <secondary>searching data</secondary></indexterm><indexterm>
+   <primary>LDAP</primary>
+   <secondary>ldapsearch</secondary></indexterm>
+   <para>
+    OpenLDAP provides, with <command>ldapsearch</command>, a command line
+    tool for searching data within an LDAP directory and reading data from
+    it. This is a simple query:
+   </para>
+<screen>ldapsearch -x -b dc=example,dc=com "(objectClass=*)"</screen><indexterm>
+   <primary>commands</primary>
+   <secondary>ldapsearch</secondary></indexterm>
+   <para>
+    The <option>-b</option> option determines the search base (the section
+    of the tree within which the search should be performed). In the current
+    case, this is <literal>dc=example,dc=com</literal>. To perform a more
+    finely-grained search in specific subsections of the LDAP directory (for
+    example, only within the <literal>devel</literal> department), pass this
+    section to <command>ldapsearch</command> with <option>-b</option>.
+    <option>-x</option> requests activation of simple authentication.
+    <literal>(objectClass=*)</literal> declares that all objects contained
+    in the directory should be read. This command option can be used after
+    the creation of a new directory tree to verify that all entries have
+    been recorded correctly and the server responds as desired. For more
+    information about the use of <command>ldapsearch</command>, see the
+    <systemitem>ldapsearch(1)</systemitem> man page.
+   </para>
+  </sect2>
+
+  <sect2 id="sec.security.ldap.data.del">
+   <title>Deleting Data from an LDAP Directory</title><indexterm>
+   <primary>LDAP</primary>
+   <secondary>deleting data</secondary></indexterm><indexterm>
+   <primary>LDAP</primary>
+   <secondary>ldapdelete</secondary></indexterm>
+   <para>
+    Delete unwanted entries with <command>ldapdelete</command>. The syntax
+    is similar to that of the other commands. To delete, for example, the
+    complete entry for <literal>Tux Linux</literal>, issue the following
+    command:
+   </para>
+<screen>ldapdelete -x -D cn=Administrator,dc=example,dc=com -W cn=Tux \
+Linux,ou=devel,dc=example,dc=com</screen><indexterm>
+   <primary>commands</primary>
+   <secondary>ldapdelete</secondary></indexterm>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.security.ldap.info">
+  <title>For More Information</title>
+
+  <para>
+   More complex subjects (like SASL configuration or establishment of a
+   replicating LDAP server that distributes the workload among multiple
+   slaves) were omitted from this chapter. Find detailed information about
+   both subjects in the <emphasis>OpenLDAP 2.4 Administrator's
+   Guide</emphasis>&mdash;see at
+   <xref linkend="list.ldap.info.adminguide"/>.
+  </para>
+
+  <para>
+   The Web site of the OpenLDAP project offers exhaustive documentation for
+   beginner and advanced LDAP users:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>OpenLDAP Faq-O-Matic</term>
+    <listitem>
+     <para>
+      A detailed question and answer collection applying to the
+      installation, configuration, and use of OpenLDAP. Find it at
+      <ulink url="http://www.openldap.org/faq/data/cache/1.html"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Quick Start Guide</term>
+    <listitem>
+     <para>
+      Brief step-by-step instructions for installing your first LDAP server.
+      Find it at
+      <ulink
+       url="http://www.openldap.org/doc/admin24/quickstart.html"/>
+      or on an installed system in Section 2 of
+      <filename>/usr/share/doc/packages/openldap2/guide/admin/guide.html</filename>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry id="list.ldap.info.adminguide">
+    <term>OpenLDAP 2.4 Administrator's Guide</term>
+    <listitem>
+     <para>
+      A detailed introduction to all important aspects of LDAP
+      configuration, including access controls and encryption. See
+      <ulink url="http://www.openldap.org/doc/admin24/"/> or, on an
+      installed system,
+      <filename>/usr/share/doc/packages/openldap2/guide/admin/guide.html</filename>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Understanding LDAP</term>
+    <listitem>
+     <para>
+      A detailed general introduction to the basic principles of LDAP:
+      <ulink
+       url="http://www.redbooks.ibm.com/redbooks/pdfs/sg244986.pdf"/>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Printed literature about LDAP:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <citetitle>LDAP System Administration</citetitle> by Gerald Carter
+     (ISBN 1-56592-491-6)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <citetitle>Understanding and Deploying LDAP Directory
+     Services</citetitle> by Howes, Smith, and Good (ISBN 0-672-32316-8)
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   The ultimate reference material for the subject of LDAP are the
+   corresponding RFCs (request for comments), 2251 to 2256.
+  </para><indexterm class="endofrange" startref="idx.LDAP"/>
+ </sect1>
+</chapter>
