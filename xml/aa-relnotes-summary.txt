@@ -1,32 +1,73 @@
 AppArmor changes since 2.3
 --------------------------
 
+AppArmor changes since 2.3
+--------------------------
+
 REMOVED:
-* The ability for an unconfined process to arbitrarily set a tasks profile via the /proc/<pid>/attr/current interface was removed
-* Path based mediation of chmod and chown was lost (BUT WAS RE-INTRODUCED, see new features below)
-* Path based mediation of xattrs was lost
-* Path based mediation of unix domain sockets was lost
 * set capabilities - this feature is dangerous, has never been completed
+
+# correct - and it's already (partly) removed in the current documentation
+
 * gnome apparmor applet - replaced by aa-notify
 
 
 NEW FEATURES:
 * Profile names can now contain regular expressions allowing all profile to match against multiple binaries
+eg.
+  /foo/** { }
+  profile /foo/** { }
+
+
+# see the bin.ping profile for a (simple) example
+
 * pux transition - profile transitions so that x transitions can fall back to unconfined if a profile is not present
-* file chmod, chown mediation reintroduced - write permission on the file is required
-* change_hatv - The change_hatv api allows up to 16 hats to be specified, in order of preference, at the same time. This reduces or eliminates the need of probing for hats using the old change_hat api
-* hierarchical namespaces
+
+# and also other fallbacks like Cix, Cux, Pix
+
+New x transition fallbacks Pux, Cux, to allow falling back to "unconfined" when the profile isn't found. (hrmm and maybe Pix, Cix (though I think those were in 2.3)
+  eg.
+     /path pux,
+     /path pux -> <profile>,
+     pux /path,
+     pux /path -> <profile>,
+
+
+
+Policy Namespaces
+-----------------
+multiple policy namespaces can be created (this was an experimental feature in 2.3). Unlike the 2.3 version they are hierarchical. A namespace can see its children but a child can not see its parent.
+
+Policy namespace names start with a : followed by an alpha numeric string, a trailing : and an optional //
+eg.
+  :childns://
+
+profiles loaded to a child namespace will be prefixed with their namespace name (if viewed from a parent)
+eg.
+  :childns://apache
+
+
+Policy namespaces are used to provide different profiles set. Say one for the system, another for a chroot or container
+
+Policy namespaces can be entered via the change_profile API or named profile transitions
+  eg.
+     /some/exec px -> :childns://profile,
+
+
+
+
 * alias allowing mapping to more than a single target
+
 * new profile flags controlling profile path lookup behavior (chroot_relative,namespace_relative,attach_disconnected,no_attach_disconnected,chroot_attach,chroot_no_attach):
 Two new profile flags have been introduced to aid in mediation of disconnected paths. AppArmor's default behavior is to reject new accesses to disconnected paths reporting back the pathname without a leadeding / Unfortunately this can break some applications, if a profile must allow for mediation of disconnected paths then the profile flag attach_disconnected can be used. This prepend a leading / to the reported name, however this may not result in the original name of the file as AppArmor can only attach the file to root, not to its original location.
 /some/profile (attach_disconnected) {
    ...
 }
 
-* aa-decode utility - aa-decode is a new utility for decoding log messages, when values have been mangled
-* apparmor_notifier - the apparmor notifier was rewritten to use the system notification infrastructure.
-* standardize on all utils using the "aa-" prefix
-* aa-disable, a utility to disable profiles
+
+
+# the GSoC version (which will be in 3.0) of aa-disable can also re-enable profiles
+
 * Profile Naming and Attachment Specification
 Profiles can now have a name and an attachment specification. This allows for profiles with a logical name that can be more meaningful to users/administrators than a profile name that contains globbing. For example, the default profile:
   /** { .. }    # a default profile
@@ -54,21 +95,228 @@ is the same as
 The safe/unsafe keywords are mutually exclusive and can be used in a file rule after the owner keyword
  ie. [audit] [deny] [owner] [safe|unsafe] filerule,
 
-* Consistent x (execute) Permissions
-Leading and trailing x (execute) permissions have been made consistent. Previously when x permissions where used in the leading position
- px /example
-The case of the x modifier was ignored and the unsafe keyword was required to indicate environment variable scrubbing was not to be done on exec. The case on the leading x permissions is now consistent with the use when the x permissions are specified after the path in a rule.
-The safe and unsafe keywords retain the same function but can be used with all file rules that have x transitions.
-This behavior change may affect profiles written using leading x permission that used lower case exec modifiers.
-* Support for systemd
-* prefer /var/log/syslog over /var/log/messages
-* /var/run -> /run updates
-* Basic mount rules are now supported (requires mount kernel patch)
-* New introspection interface - the features file has been converted to a directory if new kernel patches or linux 3.4 is used
-* aa-exec utility to launch programs under a specific profile
-* aa-easyprof templated profile generation tool
+# I'm quite sure that nearly nobody uses the "safe" and "unsafe" keywords ;-)
 
 
 CHANGES:
 * null-complain-profile replaced by null-XXXX
 * Audit changes - The kernel records create a the 'c' permission and delete as the 'd' permission.
+
+# these two changes are only relevant if someone manually writes profiles based on the audit.log
+
+
+
+New Tools - moved tools to aa- prefix except apparmor_parser
+-----
+aa-disable
+aa-exec
+aa-notify
+aa-decode
+aa-status - rewritten in python, should be largely the same picked up a few changes
+aa-easyprof
+aa-sandbox
+
+
+libvirt support
+---------------
+  support has been added to libvirt to support apparmor as a security model
+
+
+lxc support
+-----------
+  lxc has support to use apparmor as a security model
+
+
+
+
+
+Policy
+-------
+Alias rule
+ alias <source> -> <target>,
+
+ allows declaring a source and alias of target (think of source like a symlink to target). This results in all rules beginning with source also allowing access to target. The source rule is retained allowing essentially allowing access to source and target.
+ eg.
+   alias /home/ -> /data/home/
+
+
+file - the optional file keyword was added. This allows file rules to resemble other rule types which all start with a keyword (network, mount, ...)
+  file /example/rule r,
+  file,     # grant access to all files
+
+
+allow - the optional allow prefix was added. If it is not specified and deny is not used it is implied
+  allow file /example r,
+  allow /example r,
+  allow network,
+
+
+capability rules can now list multiple capabilities in a single rule, or all caps with a bare keyword
+  capability dac_override sys_admin,
+  capability,     # Grant all capabilities
+
+Support for several new capabilities have been added
+  audit_write, audit_control, setfcap, mac_override, mac_admin, syslog, wake_alarm, block_suspend
+
+File rules can use leading or trailing permissions
+  File rule permissions do not need to be specified as a trailing permission any more. They can be used at the start of the rule. This is important in that, while not currently used, it makes file rules behave like other rule types.
+  eg.
+     /path rw,    #old style
+     rw /path,    #leading perm
+     file rw /path,
+     allow file rw /path,
+
+
+Policy Development
+------------------
+apparmor.vim - for syntax highlighting in vim editor
+
+
+Alternate methods of declaring the complain and disabling a profile. This allows setting these modes without disturbing the profile file which might be owned by package management
+The
+  force_complain
+and
+  disable
+directories (and support for) have been added. Placing a symlink in these directories back to the profile will result in the profile mode being set
+
+
+
+Logging Message Format
+----------------------
+Logging was moved to LSM audit. It is largely the same as the format in aa2.3 however the base field type is now 1400 (auditd knows this as AVC) instead of 150X and instead of the log type (DENIED, ALLOWED, STATUS, ...) being encoded in the X value of the type there is an apparmor= field
+eg.
+  [229656.398829] type=1400 audit(1383816826.833:8093): apparmor="DENIED" operation="open" parent=1260 profile="/usr/lib/libvirt/virt-aa-helper" name="/home/jj/.libvirt/images/quantal.img" pid=14948 comm="virt-aa-helper" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+
+The learning profile has transitioned from being
+  null-complain-profile
+to
+  null-XXX
+where XXX is a unique string to the new profile being learned
+
+
+
+
+Configuration
+-------------
+/etc/apparmor/parser.conf - this file allow specifying a default set options that the parser will by default (see man apparmor_parser)
+
+
+
+
+
+
+
+
+Interfaces
+----------
+- unconfined is a profile mode that can be reported via ps -Z or the profile interface (aa-status). This will show up on profiles that don't that have are not the unconfined profile.
+  eg.
+  /foo (unconfined)
+
+
+
+
+
+
+Kernel Interfaces (new low level interfaces - API provides a front end for some of theses)
+-----------------
+
+AppArmor filesystem (still mounted/registered as part of mounting securityfs, this assumes security fs is mounted at /sys/kernel/security)
+- profiles file is virtualized and will report policy namespaces, and profiles in subnamespaces.
+  /sys/kernel/security/apparmor/profiles
+
+- features directory (the features file was converted to a directory that carries a lot more information)
+  /sys/kernel/security/apparmor/features/
+
+- policy directory (3.12 kernel or out of tree patch). This provides a directory of loaded policy. It contains all the information in the profiles files but includes extra info like attachment, and profile hash
+  /sys/kernel/security/apparmor/policy
+
+- .access file for policy queries (coming in aa3.0). This is used by the API to provide permission queries to trusted helpers in userspace.
+  /sys/kernel/security/apparmor/.access
+
+
+- /proc/<pid>/attr/prev  - allows querying what the parent profile is when in a hat profile
+
+- /proc/<pid>/attr/exec  - allows setting/querying the change_onexec profile that will be used at the next exec
+
+- apparmor parameters that can be configured on grub kernel command line
+
+  apparmor.enabled  or read via /sys/module/apparmor/parameters/enabled
+    Controls whether apparmor is enabled on boot (alternative to apparmor=0), and allows introspecting if apparmor is enabled
+    values - Y/N
+    eg.
+      apparmor.enabled=N
+      cat /sys/module/apparmor/parameters/enabled
+      N
+
+  apparmor.audit   or via /sys/module/apparmor/parameters/audit
+    Controls apparmors audit behavior
+    Values - "normal", "quiet_denied" - quiets denied messages, "quiet" - quiet all auditing, "noquiet" - don't use quieting of denials so you can see rejects that are normally hidden by the deny keyword, "all" - audit everything
+    eg.
+      apparmor.audit=noquiet
+      cat /sys/module/apparmor/parameters/audit
+      noquiet
+      echo "normal" >/sys/module/apparmor/parameters/audit
+
+  apparmor.audit_header or via /sys/module/apparmor/parameters/audit_header
+    Controls turning on and off the apparmor=type field in the log. This was useful for older kernels that used the type=150X as it is redundant information. Now it is pretty much required
+    Values - Y/N
+
+  apparmor.debug  or via /sys/module/apparmor/parameters/debug
+    Controls whether some extra debug output is on. Only really useful for developers and bug hunting
+
+  apparmor.lock_policy use only via /sys/module/apparmor/parameters/lock_policy
+    One way lock on policy. Once set can not be reversed. Do not use from grub command line or you can not load policy
+    Values - Y/N
+
+  apparmor.logsyscall
+    Currently unused
+
+  apparmor.mode or via /sys/module/apparmor/parameters/mode
+    apparmor enforement mode
+    Values - "enforce" - normal mode, "complain" - put profiles in complain mode, "kill" - put profiles in kill on denial mode, "unconfined" - put profile in unconfined mode,
+
+  apparmor.paranoid_load or via /sys/module/apparmor/parameters/paranoid_load
+    Additional check on policy load. This is deprecated and will become a dead toggle with paranoid checks always being applied
+
+  apparmor.path_max boot only on newer kernels
+    Allow setting a different max path_buffer size, or introspective the value at run time. This option if set to low can cause a lot of failures, it should only be used with extreme caution.
+    Values - valid integer specifying the number of bytes that is the maximum
+
+
+  apparmor= 0/1  - enable/disable apparmor at boot
+  eg.
+    apparmor=0      # disable apparmor on boot
+    apparmor=1      # enable apparmor on boot
+
+  security=<LSM>   allows setting/overriding what the default/active lsm is.
+
+  the security and apparmor parameters can be combined in different ways dependent on whether apparmor is configured (compiled) to be enabled by default
+
+  Eg. apparmor disabled by default, but set as default lsm
+    - No parameters capabilities are used
+    - apparmor=1  apparmor is used
+
+  Eg. apparmor enabled by default set as default lsm
+    - No parameters apparmor is used
+    - apparmor=0  capabilities are used
+
+  Eg. apparmor enabled by default NOT set as default lsm
+    - No parameters alt LSM or capabilities used
+    - security=apparmor  apparmor is used
+
+  Eg. apparmor disabled by default NOT set ad default lsm
+    - No parameters alt LSM or capabilities used
+    - security=apparmor  capabilities are used because apparmor is disabled
+    - security=apparmor apparmor=1  apparmor is used
+
+  Generally apparmor is configured enabled, and it is system dependent what the default LSM is
+
+
+
+
+
+
+
+
+
