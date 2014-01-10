@@ -241,7 +241,7 @@
   </para>
 
   <procedure>
-  <title>Setting up Web server environment</title>
+   <title>Setting up Web server environment</title>
    <step>
     <para>
      Make sure <literal>apparmor</literal> and <literal>php5</literal>
@@ -254,28 +254,29 @@
 <screen>rcapache2 restart</screen>
    </step>
    <step>
-   <para>
-   Make sure&mysql; is running. If unsure, restart it with
-   </para>
-   <screen>rcmysql restart</screen>
+    <para>
+     Make sure &mysql; is running. If unsure, restart it with
+    </para>
+<screen>rcmysql restart</screen>
    </step>
    <step>
-   <para>
-   Download Adminer from <ulink url="http://www.adminer.org"/>, copy it to
-   <filename>/srv/www/htdocs/adminer/</filename>, and rename it to
-   <filename>adminer.php</filename>, so that its full path is
-   <filename>/srv/www/htdocs/adminer/adminer.php</filename>.
-   </para>
+    <para>
+     Download Adminer from <ulink url="http://www.adminer.org"/>, copy it to
+     <filename>/srv/www/htdocs/adminer/</filename>, and rename it to
+     <filename>adminer.php</filename>, so that its full path is
+     <filename>/srv/www/htdocs/adminer/adminer.php</filename>.
+    </para>
    </step>
    <step>
-   <para>
-   Test Adminer in your Web browser by enetering
-   <literal>http://localhost/adminer/adminer.php</literal> in its URI address
-   field. Note that if you installed Adminer to remote a server, replace
-   <literal>localhost</literal> with the real hostname of the server.
-   </para>
+    <para>
+     Test Adminer in your Web browser by enetering
+     <literal>http://localhost/adminer/adminer.php</literal> in its URI
+     address field. Note that if you installed Adminer to remote a server,
+     replace <literal>localhost</literal> with the real hostname of the
+     server.
+    </para>
     <figure>
-      <title>Adminer login page</title>
+     <title>Adminer login page</title>
      <mediaobject>
       <imageobject role="fo">
        <imagedata format="PNG" fileref="aa_changehat_adminer.png" width="75%" />
@@ -287,23 +288,204 @@
      </mediaobject>
     </figure>
     <tip>
-    <para>
-    If you encounter problems viewing the Adminer login page, try to look for
-    help in the Apache error log
-    <filename>/var/log/apache2/error.log</filename>. Another reason why you
-    may not access the Web page may be the fact that your Apache is already
-    under &aa; control and its &aa; profile is too tight to permit viewing
-    Adminer. Check it with <command>aa-status</command>, and if needed, set
-    Apache temporarily in a complain mode with
-    </para>
-    <screen>aa-complain usr.sbin.httpd2-prefork</screen>
+     <para>
+      If you encounter problems viewing the Adminer login page, try to look
+      for help in the Apache error log
+      <filename>/var/log/apache2/error.log</filename>. Another reason why
+      you may not access the Web page may be the fact that your Apache is
+      already under &aa; control and its &aa; profile is too tight to permit
+      viewing Adminer. Check it with <command>aa-status</command>, and if
+      needed, set Apache temporarily in a complain mode with
+     </para>
+<screen>aa-complain usr.sbin.httpd2-prefork</screen>
     </tip>
    </step>
   </procedure>
-  <para>
 
+  <para>
+   After the Web environment for Adminer is ready, you need to configure
+   Apache's mod_apparmor, so that &aa; can detect accesses to Adminer and
+   change to the specific <quote>hat</quote>.
   </para>
 
+  <procedure>
+   <title>Configuring mod_apparmor</title>
+   <step>
+    <para>
+     Apache has several configuration files under
+     <filename>/etc/apache2/</filename> and
+     <filename>/etc/apache2/conf.d/</filename>. Choose your preferred one
+     and open it in your favorite text editor. In this example, I use the
+     <command>vim</command> editor, and prefer to create a new configuration
+     file <filename>/etc/apache2/conf.d/apparmor.conf</filename>.
+    </para>
+<screen>vim /etc/apache2/conf.d/apparmor.conf</screen>
+   </step>
+   <step>
+    <para>
+     Copy the following snippet in the edited file.
+    </para>
+<screen>&lt;Directory /srv/www/htdocs/adminer>
+  AAHatName adminer
+&lt;/Directory></screen>
+    <para>
+     It tells Apache to let &aa; know about a change_hat event when the Web
+     user accesses the directory <filename>/adminer</filename> (and and any
+     file/directory inside) in Apache's document root. Remember - we placed
+     the <filename>adminer.php</filename> application there.
+    </para>
+   </step>
+   <step>
+    <para>
+     Save the file, close the editor, and restart Apache with
+    </para>
+<screen>rcapache2 restart</screen>
+   </step>
+  </procedure>
+
+  <para>
+   Apache now knows about our Adminer and changing a <quote>hat</quote> for
+   it. It is time to create ithe related hat for Adminer in the &aa;
+   configuration. &aa; comes with a number of ready profiles for frequently
+   used applications - such as Apache. Because Apache's main binary is
+   <filename>/usr/sbin/httpd2-prefork</filename>, let us focus on its
+   related profile
+   <filename>/etc/apparmor.d/usr.sbin.httpd2-prefork</filename>.
+  </para>
+
+  <procedure>
+   <title>Creating a Hat for Adminer</title>
+   <step>
+    <para>
+     Open (or create one if it does not exist) the file
+     <filename>/etc/apparmor.d/usr.sbin.httpd2-prefork</filename> in a text
+     editor. Its contents should be similar to the following:
+    </para>
+<screen>#include &lt;tunables/global>
+
+/usr/sbin/httpd2-prefork {
+  #include &lt;abstractions/apache2-common>
+  #include &lt;abstractions/base>
+  #include &lt;abstractions/php5>
+
+  capability kill,
+  capability setgid,
+  capability setuid,
+
+  /etc/** r,
+  /run/httpd.pid rw,
+  /usr/lib{,32,64}/** mr,
+  /var/log/apache2/** rw,
+
+  ^DEFAULT_URI {
+    #include &lt;abstractions/apache2-common>
+    deny /srv/www/htdocs/adminer/adminer.php r,
+    /var/log/apache2/** rw,
+  }
+
+  ^HANDLING_UNTRUSTED_INPUT {
+    #include &lt;abstractions/apache2-common>
+    /var/log/apache2/** w,
+  }
+}</screen>
+   </step>
+   <step>
+    <para>
+     Before the closing curly bracket (<literal>}</literal>), insert the
+     following section:
+    </para>
+<screen>^adminer(complain) {
+}</screen>
+    <para>
+     Note the <literal>(complain)</literal> addition after the hat name - it
+     tells &aa; to leave the adminer hat in a complain mode. That is because
+     we need to learn the hat profile by accessing Adminer later on.
+    </para>
+   </step>
+   <step>
+    <para>
+     Save the file, and then restart &aa;, then Apache.
+    </para>
+<screen>rcapparmor restart &amp;&amp; rcapache2 restart</screen>
+   </step>
+   <step>
+    <para>
+     Check if the adminer hat really is in a complain mode.
+    </para>
+<screen># aa-status 
+apparmor module is loaded.
+39 profiles are loaded.
+37 profiles are in enforce mode.
+[...]
+   /usr/sbin/httpd2-prefork
+   /usr/sbin/httpd2-prefork//DEFAULT_URI
+   /usr/sbin/httpd2-prefork//HANDLING_UNTRUSTED_INPUT
+[...]
+2 profiles are in complain mode.
+   /usr/bin/getopt
+   /usr/sbin/httpd2-prefork//adminer
+[...]
+</screen>
+    <para>
+     As we can see, the <literal>httpd2-prefork//adminer</literal> is loaded
+     in a complain mode. Good.
+    </para>
+   </step>
+  </procedure>
+
+  <para>
+   Our last task is to find out the right set of rules for the adminer hat.
+   That is why we set the adminer hat into a complain mode - the logging
+   facility collects useful information about
+   <filename>adminer.php</filename>'s access requirements as we use it via
+   the Web borwser. <command>aa-logprof</command> then helps us with
+   creating the hat's profile itself.
+  </para>
+
+  <procedure>
+   <title>Generating Rules for the Adminer Hat</title>
+   <step>
+    <para>
+     Open Adminer in the Web browser. If you installed it locally, the the
+     URI is <literal>http://localhost/adminer/adminer.php</literal>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Choose the database engine you want to use (&mysql; in our case), and
+     log in to Adminer using existing database username and password. You do
+     not have to specify the database name as you can do so after logging
+     in. Perform any operations with Adminer as you like - create a new
+     database, create a new table for it, set user privileges, and so on.
+    </para>
+   </step>
+   <step>
+    <para>
+     After the short testing of Adminer's user interface, switch back to
+     console, and examine the log for collected data.
+    </para>
+<screen>aa-logprof usr.sbin.httpd2-prefork
+Reading log entries from /var/log/messages.
+Updating AppArmor profiles in /etc/apparmor.d.
+Complain-mode changes:
+
+Profile:  /usr/sbin/httpd2-prefork^adminer
+Path:     /dev/urandom
+Mode:     r
+Severity: 3
+
+  1 - #include &amp;abstractions/apache2-common> 
+  2 - #include &amp;abstractions/base> 
+  3 - #include &amp;abstractions/gnome> 
+  4 - #include &amp;abstractions/kde> 
+  5 - #include &amp;abstractions/libvirt-qemu> 
+  6 - #include &amp;abstractions/ubuntu-gnome-terminal> 
+  7 - #include &amp;abstractions/ubuntu-konsole> 
+ [8 - /dev/urandom]
+
+[(A)llow] / (D)eny / (G)lob / Glob w/(E)xt / (N)ew / Abo(r)t / (F)inish / (O)pts</screen>
+   </step>
+  </procedure>
 
 <!-- toba split here -->
 
