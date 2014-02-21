@@ -542,6 +542,377 @@ mkfs.msdos -C /var/lib/libvirt/images/floppy.img 1440</screen>
    </step>
   </procedure>
  </sect1>
+
+ <sect1 id="sec.libvirt.config.io">
+  <title>Adding SR-IOV Devices</title>
+  <para>
+   Single Root I/O Virtualization (SR-IOV) capable PCIe devices are able to
+   replicate their resources, so they appear to be multiple devices. Each of
+   these "pseudo-devices" can be assigned to a &vmguest;.
+  </para>
+  <para>
+   SR-IOV is an industry specification that was created by the Peripheral
+   Component Interconnect Special Interest Group (PCI-SIG) consortium. It
+   introduces physical functions (PF) and virtual functions (VF). PFs are full
+   PCIe functions used to manage and configure the device. PFs also have the
+   ability to move data. VFs lack the configuration and management
+   part&mdash;they only have the ability to move data and a reduced set of
+   configuration functions. Since VFs do not have all PCIe functions, the host
+   operating system or the hypervisor must support SR-IOV in order to be able
+   to access and initialize VFs.  The theoretical maximum for VFs is 256 per
+   device (consequently the maximum for a dual port Ethernet card would be
+   512). In practice this maximum is much lower, since each VF consumes
+   resources.
+  </para>
+
+  <sect2 id="sec.libvirt.config.io.requirements">
+   <title>Requirements</title>
+   <para>
+    The following requirements must be met in order to be able to use SR-IOV:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      An SR-IOV-capable network card (as of &productname; &productnumber;
+      only network cards support SR-IOV)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      .n x86_64 host supporting hardware virtualization (AMD-V or Intel VT-x),
+      see <xref linkend="sec.kvm.requires.hardware"/> for more information
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      a chipset that supports device assignment (AMD-Vi or Intel VT-d)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      libvirt-0.9.10 or better
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      SR-IOV drivers must be loaded and configured on the host system
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      iommu enabled in the hypervisor (e.g. <literal>intel_iommu=on</literal>
+      on the linux commandline of the host)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      a list of the PCI addresses of the VF(s) that will be assigned to
+      &vmguest;s
+     </para>
+    </listitem>
+   </itemizedlist>
+
+   <tip>
+    <title>Checking if a Device is SR-IOV Capable</title>
+    <para>
+     The information whether a device is SR-IOV capable can be obtained from
+     it's PCI descriptor by running <command>lspci</command>. A device that
+     supports SR-IOV reports a capability similar to the following:
+    </para>
+    <screen>Capabilities: [160 v1] Single Root I/O Virtualization (SR-IOV)</screen>
+   </tip>
+  </sect2>
+  
+  <sect2 id="sec.libvirt.config.io.config">
+   <title>Load and configure the SR-IOV Host drivers</title>
+   <para>
+    In order to be able to access and initialize VFs, an SR-IOV capable driver
+    has to be loaded on the host system. <!-- See <xref linkend="???"/> for a
+    list of supported cards and theit corresponding drivers. --> 
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Before loading the driver, make sure the card is properly detected by
+      running <command>lspci</command>. The following example shows the lspci
+      output for the dual port Intel 82576NS network card:
+     </para>
+     <screen>~ > sudo /sbin/lspci | grep 82576
+01:00.0 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+01:00.1 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+04:00.0 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+04:00.1 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)</screen>
+     <para>
+      In case the card is not detected, it is likely that the hardware
+      virtualization support in the BIOS/EFI has not been enabled.
+     </para>
+    </step>
+    <step>
+     <para>
+      Check whether the SR-IOV driver is already loaded by running
+      <command>lsmod</command>. In the following example a check for the igb
+      driver (for the Intel 82576NS network card) returns a result. That means
+      the driver is already loaded. If the command returns nothing, the driver
+      is not loaded.
+     </para>
+     <screen>~ > sudo /sbin/lsmod | egrep "^igb "
+igb                   185649  0</screen>
+    </step>
+    <step>
+     <para>
+      Skip this step if the driver is already loaded.
+     </para>
+     <para>
+      If the SR-IOV driver is not yet loaded, the non-SR-IOV driver needs to
+      be removed first, before loading the new driver. Use
+      <command>rmmod</command> to unload a driver. The following examples
+      unload the non-SR-IOV driver for the Intel 82576NS network card:
+     </para>
+     <screen>sudo /sbin/rmmod igbvf</screen>
+     <para>
+      Load the SR-IOV driver subsequently using the
+      <command>modprobe</command> command:
+     </para>
+     <screen>sudo /sbin/modprobe igb</screen>
+    </step>
+    <step>
+     <para>
+      Re-run the lspci command from the first step of this procedure. If the
+      SR-IOV driver was loaded successfully you should see additional lines
+      for the VFs:
+     </para>
+     <screen>01:00.0 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+01:00.1 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+01:10.0 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)
+01:10.1 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)
+01:10.2 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)
+[...]
+04:00.0 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+04:00.1 Ethernet controller: Intel Corporation 82576NS Gigabit Network Connection (rev 01)
+04:10.0 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)
+04:10.1 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)
+04:10.2 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)
+[...]</screen>
+    </step>
+    <step>
+     <para>
+      Configure the driver by adding the number of VFs you would like to make
+      available and&mdash;if necessary&mdash; by blacklisting the non-SR-IOV
+      driver:
+     </para>
+     <screen>sudo echo -e "options igb max_vfs=8\nblacklist igbvf" >> /etc/modprobe.d/50-igb/</screen>
+     <para>
+      Make sure to replace the example values <literal>igb</literal>,
+      <literal>igbvf</literal> and <literal>50-igb</literal> by values
+      appropriate for your driver.
+     </para>
+    </step>
+    <step>
+     <para>
+      Now make sure the driver is loaded on boot. Edit
+      <filename>/etc/sysconfig/kernel</filename> and add the driver to
+      <envar>MODULES_LOADED_ON_BOOT</envar>:
+     </para>
+     <screen>MODULES_LOADED_ON_BOOT="igb"</screen>
+     <para>
+      Make sure to replace the example value <literal>igb</literal> by a value
+      appropriate for your driver.
+     </para>
+    </step>
+    <step>
+     <para>
+      Reboot the machine and check if the SR-IOV driver is loaded. 
+     </para>
+    </step>
+   </procedure>    
+  </sect2>
+
+  <sect2 id="sec.libvirt.config.io.attach">
+   <title>Adding a VF network device to an existing &vmguest;</title>
+   <para>
+    Once the SR-IOV hardware is properly set up on the &vmhost;, you can add
+    VFs to &vmguest;s. In order to do so, you need to collect some data first.
+   </para>
+   <procedure>
+    <para>
+     Note: The following procedure is using example data. Make sure to replace
+     it by appropriate data from your setup.
+    </para>
+    <step>
+     <para>
+      Use the <command>virsh nodedev-list</command> command to get the PCI
+      address of the VF you you want to assign and it's corresponding
+      PF. Numerical values from the lspci output shown in <xref
+      linkend="sec.libvirt.config.io.config"/> (for example
+      <literal>01:00.0</literal> or <literal>04:00.1</literal>) are
+      transformed by adding the prefix "pci_0000_" and by replacing colons and
+      dots with underscores.  So a PCI ID listed as "04:00.0" by lspci is
+      listed as "pci_0000_04_00_0" by virsh.  The following example lists the
+      PCI IDs for the second port of the Intel 82576NS network card:
+     </para>
+     <screen>~ > virsh nodedev-list | grep 0000_04_
+pci_0000_04_00_0
+pci_0000_04_00_1
+pci_0000_04_10_0
+pci_0000_04_10_1
+pci_0000_04_10_2
+pci_0000_04_10_3
+pci_0000_04_10_4
+pci_0000_04_10_5
+pci_0000_04_10_6
+pci_0000_04_10_7
+pci_0000_04_11_0
+pci_0000_04_11_1
+pci_0000_04_11_2
+pci_0000_04_11_3
+pci_0000_04_11_4
+pci_0000_04_11_5</screen>
+     <para>
+      The first two entries represent the PFs whereas the other entries
+      represent the VFs.
+     </para>
+    </step>
+    <step>
+     <para>
+      Get more data that will be needed by running the command <command>virsh
+      nodedev-dumpxml</command> on the PCI ID of the VF you want to add:
+     </para>
+<screen>~ > virsh nodedev-dumpxml pci_0000_04_10_0
+&lt;device>
+  &lt;name>pci_0000_04_10_0&lt;/name>
+  &lt;parent>pci_0000_00_02_0&lt;/parent>
+  &lt;capability type='pci'>
+    &lt;domain>0&lt;/domain>
+    &lt;bus>4&lt;/bus>
+    &lt;slot>16&lt;/slot>
+    &lt;function>0&lt;/function>
+    &lt;product id='0x10ca'>82576 Virtual Function&lt;/product>
+    &lt;vendor id='0x8086'>Intel Corporation&lt;/vendor>
+    &lt;capability type='phys_function'>
+      &lt;address domain='0x0000' bus='0x04' slot='0x00' function='0x0'/>
+    &lt;/capability>
+  &lt;/capability>
+&lt;/device></screen>
+     <para>
+      The following data is needed for the next step:
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+	&lt;domain>0&lt;/domain>
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+	&lt;bus>4&lt;/bus>
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+	&lt;slot>16&lt;/slot>
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+	&lt;function>0&lt;/function>
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      Create a temporary XML file (for example
+      <filename>/tmp/vf-interface.xml</filename> containing the data
+      necessary to add a VF network device to an existing &vmguest;. The
+      minimal content of the file needs to look like the following:
+     </para>
+     <screen>&lt;interface type='hostdev'><co id="sriov.iface"/>
+ &lt;source>
+  &lt;address type='pci' domain='0' bus='11' slot='16' function='0'2/><co id="sriov.data"/>
+ &lt;/source>
+&lt;/interface></screen>
+     <calloutlist>
+      <callout arearefs="sriov.iface">
+       <para>
+	VFs do not get a fixed MAC address, it changes everytime the host
+	reboots.  When adding network devices the <quote>traditional</quote>
+	way with &lt;hostdev>, it would require to reconfigure the &vmguest;'s
+	network device after each reboot of the host, because of the MAC
+	address change.  To avoid this kind of problems, libvirt introduced
+	the <quote>interface type='hostdev'</quote> directive, which sets up
+	network specific data <emphasis>before</emphasis> assigning the device.
+       </para>
+      </callout>
+      <callout arearefs="sriov.data">
+       <para>
+	Specify the data you acquired in the previous step here.
+       </para>
+      </callout>
+     </calloutlist>
+    </step>
+    <step>
+     <para>
+      Last, add the VF interface to an existing &vmguest;:
+     </para>
+     <screen>virsh attach-device <replaceable>GUEST</replaceable> /tmp/vf-interface.xml --<replaceable>OPTION</replaceable></screen>
+     <para>
+      <replaceable>GUEST</replaceable> needs to be replace by the domain name,
+      id or uuid of the &vmguest; and --<replaceable>OPTION</replaceable> can
+      be one of the following:
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><option>--persistent</option></term>
+       <listitem>
+	<para>
+	  This option will always add the device to the domain's persistent
+	  XML. In addition, if the domain is running, it will be hotplugged.
+	</para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><option>--config</option></term>
+       <listitem>
+	<para>
+	 This option will only affect the persistent XML, even if the domain
+	 is running., The device will only show up in the guest on next boot
+	</para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><option>--live</option></term>
+       <listitem>
+	<para>
+	 This option will only affect a running domain. If the domain is
+	 inactive, the operation will fail.  The device is not persisted in
+	 the XML and won't be available in the guest on next boot.
+	</para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>--current</term>
+       <listitem>
+	<para>
+	 This option affects the current state of the domain. If the domain is
+	 inactive, the device is added to the persistent XML and will be
+	 available on next boot. If the domain is active, the device is
+	 hotplugged but not added to the persistent XML.
+	</para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+
+     <para>
+      To detach a VF interface, use the <command>virsh detach-device</command>
+      command which also takes the options listed above.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+  
+  
+ </sect1>
+
  <sect1 id="sec.kvm.managing.clock">
   <title>Clock Settings</title>
 
