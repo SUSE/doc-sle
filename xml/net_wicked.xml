@@ -5,10 +5,6 @@
   <!ENTITY % entities SYSTEM "entity-decl.ent">
   %entities;
 ]>
-<!--
-initially based on
-/usr/share/doc/packages/wicked/README
--->
 <sect1 id="sec.basicnet.manconf">
  <title>Configuring a Network Connection Manually</title>
 
@@ -20,12 +16,193 @@ initially based on
  </para>
 
  <sect2>
+  <!--
+      initially based on
+      /usr/share/doc/packages/wicked/README
+  -->
   <title>The <command>wicked</command> Network Configuration</title>
 
   <para>
   The tool and library called <command>wicked</command> provides a new
   framework for network configuration.
   </para>
+
+  <para>
+   One of the challenges with traditional network interface management
+   is that different layers of network management get jumbled together
+   into one single script, or at most two different scripts, that
+   interact with each other in a not-really-well-defined way, with side
+   effects that are difficult to be aware of, obscure constraints and
+   conventions, etc.  Several layers of special hacks for a variety of
+   different scenarios increase the maintenance burden.  Address
+   configuration protocols are being used that are implemented via
+   daemons like dhcpcd, which interact rather poorly with the rest of
+   the infrastructure. Funky interface naming schemes that require heavy
+   udev support are introduced to achieve persistent identification of
+   interfaces.
+  </para>
+
+  <para>
+   The idea of wicked is to decompose the problem in several ways. None
+   of them is entirely novel, but trying to put ideas from different
+   projects together is hopefully going to create a better solution
+   overall.
+  </para>
+
+  <para>
+   One approach is to use a client/server model. This allows wicked to
+   define standardized facilities for things like address configuration
+   that are well integrated with the overall framework. For example,
+   with address configuration, the administrator may request that an
+   interface should be configured via dhcp or ipv4 zeroconf, and all the
+   address configuration service does is obtain the lease from its
+   server, and pass it on to the wicked server process, which installs
+   the requested addresses and routes.
+  </para>
+
+  <para>
+   The other approach to decomposing the problem is to enforce the
+   layering aspect. For any type of network interface, it is possible to
+   define a dbus service that configures the network interface's device
+   layer&mdash;a VLAN, a bridge, a bonding, or a paravirtualized
+   device.  Common functionality, such as address configuration, is
+   implemented by joint services that are layered on top of these device
+   specific services, without having to implement them specifically.
+  </para>
+
+  <para>
+   The wicked framework implements these two aspects by using a variety
+   of dbus services, which get attached to a network interface depending
+   on its type.  Here is a rough overview of the current object
+   hierarchy in wicked.
+  </para>
+
+  <para>
+Each network interface is represented via a child object of
+/org/opensuse/Network/Interfaces. The name of the child object is given
+by its ifindex, so e.g. the loopback interface, which usually gets
+ifindex 1, is /org/opensuse/Network/Interfaces/1, the first ethernet
+interface registered is /org/opensuse/Network/Interfaces/2, etc.
+  </para>
+  <para>
+Each network interface has a <quote>class</quote> associated with it,
+which is used to select the dbus interfaces it supports. By default,
+each network interface is of class <literal>netif</literal>, and wickedd
+will automatically attach all interfaces compatible with this class. In
+the current implementation, this includes the following interfaces:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>org.opensuse.Network.Interface</term>
+    <listitem>
+     <para>
+      Generic network interface functions, such as taking the link
+      up or down, assigning an MTU, etc.
+     </para>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term>org.opensuse.Network.Addrconf.ipv4.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv6.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv4.auto</term>
+    <term>org.opensuse.Network.Addrconf.ipv6.auto</term>
+    <listitem>
+     <para>
+      Address configuration services for DHCP, ipv6 autoconf, ipv4
+      zeroconf, etc.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Beyond this, network interfaces may require or offer special
+   configuration mechanisms. For example, for an Ethernet device, you
+   may want to be able to control the link speed, offloading of
+   checksumming, etc. To achieve this, Ethernet devices have a class of
+   their own, called <literal>netif-ethernet</literal>, which is a
+   subclass of <literal>netif</literal>. As a consequence, the dbus
+   interfaces assigned to an Ethernet interface include all the services
+   listed above, plus
+   <systemitem>org.opensuse.Network.Ethernet</systemitem>, which is a
+   service available only to objects belonging to the
+   <literal>netif-ethernet</literal> class.
+  </para>
+  <para>
+   Similarly, there exist classes for interface types like bridges,
+   VLANs, bonds, or infinibands.
+  </para>
+  <para>
+   How do you interact with an interface that needs to be created
+   first&mdash;such as a VLAN, which is really a virtual network
+   interface that sits on top of an Ethernet device.  For these, wicked
+   defines factory interfaces, such as
+   <systemitem>org.opensuse.Network.VLAN.Factory</systemitem>. Such a
+   factory interface offers a single function that lets you create an
+   interface of the requested type.  These factory interfaces are
+   attched to the /org/opensuse/Network/Interfaces list node.
+  </para>
+
+  <sect3>
+   <title>What's Currently Supported</title>
+
+   <para>
+    <command>wicked</command> currently supports:
+   </para>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      Configuration file back-ends to parse SUSE and RedHat style
+      <filename>/etc/sysconfig/network</filename> files. Since the
+      development is on a SUSE installation, the former are probably
+      significantly more stable than the RedHat ones.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      A configuration file back-end to represent network interface
+      configuration in XML. The syntax evolved out of what netcf uses.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Bring up and shutdown of <quote>normal</quote> network interfaces
+      such as Ethernet or InfiniBand, as well as VLAN, bridges, and
+      bonding devices.  Bridging and bonding may still have some issues.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Wireless, not yet complete and limited to one network.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      A built-in DHCPv4 client and a built-in DHCPv6 client.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      There is some experimental code that should help to
+      automatically bring up interfaces as soon as a link
+      is detected.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      An XML reader/writer implementation, which is far from being fully
+      standards conforming, but which has a small footprint and seems
+      reasonably fast.  This comes along with a partial implementation of
+      XPath 1.0, which lets you extract information from an XML interface
+      description without having to do any XML parsing yourself.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect3>
  </sect2>
 
  <xi:include
