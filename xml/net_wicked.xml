@@ -17,8 +17,10 @@
 
  <sect2>
   <!--
-      initially based on
+      initially and heavily based on
       /usr/share/doc/packages/wicked/README
+      The version of that README used here, I stored at
+      background_information/wicked-readme
   -->
   <title>The <command>wicked</command> Network Configuration</title>
 
@@ -361,8 +363,147 @@ ip route show</screen>
    <para>
     For more information, see the <command>wicked</command> manpage.
    </para>
+  </sect3>
+  <!-- ============================================================== -->
+  <sect3>
+   <title>Bringing Up Multiple Interfaces</title>
 
+   <para>
+    For bonds and bridges, it may make sense to define the
+    entire device topology in one file, and bringing it up in one
+    go. This particularly makes sense for bonding, where you may need to
+    create the slave devices first (if they are virtual devices, such as
+    VLANs).
+   </para>
+   <para>
+    For such a scenario, define the device topology in one file, and
+    call wicked to bring up the whole configuration.  Find an example at
+    <filename>samples/wicked/bridge-static.xml</filename> in package
+    documentation (<filename>/usr/share/doc/packages/wicked</filename>).
+    This configuration defines an Ethernet bridge built from two VLAN
+    interfaces. To bring it up, call:
+   </para>
 
+   <screen>wicked ifup --ifconfig ./samples/wicked/bridge-static.xml all</screen>
+   <para>
+    The client will bring up the devices in the appropriate order:
+    creating the two VLAN interfaces first, then the bridge, and finally
+    add the VLAN interfaces as ports to the bridge.
+   </para>
+  </sect3>
+  <!-- ============================================================== -->
+  <sect3>
+   <title>Handling Incremental Changes</title>
+   <para>
+    With <command>wicked</command>, there is no need to actually take
+    down an interface to reconfigure it (unless it is required by the
+    kernel). For example, in order to add another IP address or route to
+    a statically configured network interface, add the IP address to the
+    interface definition, and do another <quote>ifup</quote>
+    operation. The server will try hard to update only those settings
+    that have changed. This applies to link-level options such as the
+    device MTU or the MAC address, as well as network level settings,
+    such as addresses, routes, or even the address configuration mode
+    (for example, when moving from a static configuration to DHCP).
+   </para>
+   <para>
+    Things get tricky of course with virtual interfaces combining
+    several real devices such as bridges or bonds. For bonded devices,
+    it is not possible to change certain parameters while the device is
+    up. Doing that will result in an error.
+   </para>
+   <para>
+    However, what should still work, is the act of adding or removing
+    the child devices of a bond or bridge, or choosing a bond's primary
+    interface.
+   </para>
+  </sect3>
+  <!-- ============================================================== -->
+  <sect3>
+   <title>Wicked Extensions: Address Configuration</title>
+
+   <para>
+    <command>wicked</command> is designed to be extensible with shell
+    scripts.  These extensions can be defined in the
+    <filename>config.xml</filename> file.
+   </para>
+
+   <para>
+    Currently, several different classes of extensions are supported:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      link configuration: these are scripts responsible for setting
+      up a device's link layer according to the configuration
+      provided by the client, and for tearing it down again.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      address configruation: these are scripts responsible for managing
+      a device's address configuration.  Usually address configuration
+      and DHCP are managed by <command>wicked</command> itself, but can
+      be implemented by means extensions.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      firewall extension: these scripts can apply firewall rules.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Typically, extensions have a start and a stop command, an optional
+    <quote>pid file</quote>, and a set of environment variables that get
+    passed to the script.
+   </para>
+
+   <para>
+    To illustrate how this is supposed to work, look at a firewall
+    extension defined in <filename>etc/server.xml</filename>:
+   </para>
+
+   <screen><![CDATA[<dbus-service interface="org.opensuse.Network.Firewall">
+ <action name="firewallUp"   command="/etc/wicked/extensions/firewall up"/>
+ <action name="firewallDown" command="/etc/wicked/extensions/firewall down"/>
+
+ <!-- default environment for all calls to this extension script -->
+ <putenv name="WICKED_OBJECT_PATH" value="$object-path"/>
+ <putenv name="WICKED_INTERFACE_NAME" value="$property:name"/>
+ <putenv name="WICKED_INTERFACE_INDEX" value="$property:index"/>
+</dbus-service>]]></screen>
+   <para>
+    The extension is attached to dbus-service interface and defines
+    commands to execute for the actions of this interface. Further, the
+    declaration can define and initialize environment variables passed
+    to the actions.
+   </para>
+  </sect3>
+  <!-- ============================================================== -->
+  <sect3>
+   <title>Wicked Extensions: Configuration Files</title>
+
+   <para>
+    You can extend the handling of configuration files with scripts as
+    well.  For example, DNS updates from leases are ultimately handled
+    by the <filename>extensions/resolver</filename> script, with
+    behavior configured in <filename>server.xml</filename>:
+   </para>
+<screen><![CDATA[<system-updater name="resolver">
+ <action name="backup" command="/etc/wicked/extensions/resolver backup"/>
+ <action name="restore" command="/etc/wicked/extensions/resolver restore"/>
+ <action name="install" command="/etc/wicked/extensions/resolver install"/>
+ <action name="remove" command="/etc/wicked/extensions/resolver remove"/>
+</system-updater>]]></screen>
+   <para>
+    When an update arrives in wickedd, the system updater routines parse
+    the lease and call the appropriate commands
+    (<literal>backup</literal>, <literal>install</literal>, etc.)  in
+    the resolver script. This in turn configures the DNS settings using
+    <command>/sbin/netconfig</command>, or by manually writing
+    <filename>/etc/resolv.conf</filename> as a fallback.
+   </para>
   </sect3>
  </sect2>
 
