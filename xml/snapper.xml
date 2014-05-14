@@ -6,7 +6,7 @@
   %entities;
 ]>
 <chapter id="cha.snapper">
- <title>Snapshot Management with Snapper</title>
+ <title>System Recovery and Snapshot Management with Snapper</title>
  <abstract>
   <para>
    Being able to do file system snapshots providing the ability to do
@@ -27,67 +27,56 @@
   </para>
  </abstract>
 
- <sect1 id="sec.snapper.requirements">
-  <title>Requirements</title>
-
+ <sect1 id="sec.snapper.requires.diskspace">
+  <title>Snapshots and Disk Space</title>
   <para>
-   Since <literal>Btrfs</literal> is the only file system on &productname;
-   supporting snapshots, it is required on all partitions or subvolumes you
-   want to <quote>snapshot</quote>. Snapshotting volumes is supported for
-   thin-provisioned LVM volumes formatted with XFS, Ext4 or Ext3.
+   When a snapshot is created, both the snapshot and the original point to the
+   same blocks in the file system. So, initially a snapshot does not occupy
+   additional disk space. If data in the original file system is modified,
+   changed data blocks are copied while the old data blocks are kept for the
+   snapshot. Therefore, a snapshot occupies the same amount of space as the
+   data modified. So, over time, the amount of space a snapshot allocates,
+   constantly grows. As a consequence, deleting files from a
+   <literal>Btrfs</literal> file system containing snapshots may
+   <emphasis>not</emphasis> free disk space!
   </para>
-
-  <sect2 id="sec.snapper.requires.diskspace">
-   <title>Snapshots and Disk Space</title>
+  <note>
+   <title>Snapshot Location</title>
    <para>
-    When a snapshot is created, both the snapshot and the original point to
-    the same blocks in the file system. So, initially a snapshot does not
-    occupy additional disk space. If data in the original file system is
-    modified, changed data blocks are copied while the old data blocks are
-    kept for the snapshot. Therefore, a snapshot occupies the same amount of
-    space as the data modified. So, over time, the amount of space a
-    snapshot allocates, constantly grows. As a consequence, deleting files
-    from a <literal>Btrfs</literal> file system containing snapshots may
-    <emphasis>not</emphasis> free disk space!
+    Snapshots always reside on the same partition or subvolume that has been
+    <quote>snapshotted</quote>. It is not possible to store snapshots on a
+    different partition or subvolume.
    </para>
-   <note>
-    <title>Snapshot Location</title>
-    <para>
-     Snapshots always reside on the same partition or subvolume that has
-     been <quote>snapshotted</quote>. It is not possible to store snapshots
-     on a different partition or subvolume.
-    </para>
-   </note>
+  </note>
+  <para>
+   As a result, partitions containing snapshots need to be larger than
+   <quote>normal</quote> partitions. The exact amount strongly depends on the
+   number of snapshots you keep and the amount of data modifications.  As a
+   rule of thumb you should consider using twice the size than you normally
+   would.
+  </para>
+  <tip>
+   <title>Freeing space / Disk Usage</title>
    <para>
-    As a result, partitions containing snapshots need to be larger than
-    <quote>normal</quote> partitions. The exact amount strongly depends on
-    the number of snapshots you keep and the amount of data modifications.
-    As a rule of thumb you should consider using twice the size than you
-    normally would.
+    In order to free space on a <literal>Btrfs</literal> partition containing
+    snapshots you need to delete unneeded snapshots rather than files. Older
+    snapshots occupy more space than recent ones.
    </para>
-   <tip>
-    <title>Freeing space / Disk Usage</title>
-    <para>
-     In order to free space on a <literal>Btrfs</literal> partition
-     containing snapshots you need to delete unneeded snapshots rather than
-     files. Older snapshots occupy more space than recent ones.
-    </para>
-    <para>
-     Since the <command>df</command> does not show the correct disk usage on
-     <literal>Btrfs</literal> file systems, you need to use the command
-     <command>btrfs filesystem df
-     <replaceable>MOUNT_POINT</replaceable></command>. Displaying the amount
-     of disk space a snapshot allocates is currently not supported by the
-     <literal>Btrfs</literal> tools.
-    </para>
-    <para>
-     Doing an upgrade from one service pack to another results in snapshots
-     occupying a lot of disk space on the system subvolumes, because a lot
-     of data gets changed (package updates). Manually deleting these
-     snapshots once they are no longer needed is recommended.
-    </para>
-   </tip>
-  </sect2>
+   <para>
+    Since the <command>df</command> does not show the correct disk usage on
+    <literal>Btrfs</literal> file systems, you need to use the command
+    <command>btrfs filesystem df
+    <replaceable>MOUNT_POINT</replaceable></command>. Displaying the amount of
+    disk space a snapshot allocates is currently not supported by the
+    <literal>Btrfs</literal> tools.
+   </para>
+   <para>
+    Doing an upgrade from one service pack to another results in snapshots
+    occupying a lot of disk space on the system subvolumes, because a lot of
+    data gets changed (package updates). Manually deleting these snapshots
+    once they are no longer needed is recommended.
+   </para>
+  </tip>
  </sect1>
 
  <sect1 id="sec.snapper.setup">
@@ -1480,6 +1469,60 @@ TIMELINE_MIN_AGE="1800"</screen>
    </para>
   </sect2>
  </sect1>
+ 
+ <sect1 id="sec.snapper.snapshot-boot">
+  <title>System Recovery by Booting from Snapshots</title>
+  <para>
+   The &grub; version included on &productname; is able to boot from
+   Btrfs snapshots. Together with Snapper's rollback feature, this allows to
+   recover a misconfigured system. All snapshots created by snapper are
+   available for booting. On the boot screen they can be selected from the
+   <guimenu>Bootable snapshots</guimenu> entry in the boot menu.
+  </para>
+  <para>
+   When booting a snapshot, the parts of the file system included in the
+   snapshot are marked read-only
+  </para>
+
+<!--
+Excluded:
+
+/boot/grub2/i386-pc (on ix86 and x86-64)
+/boot/grub2/x86_64-efi (on x86-64)
+/boot/grub2/power-ieee1275 (on POWER)
+/boot/grub2/s390x (on System z)
+/home (prefered: own partition)
+/opt
+/srv
+/tmp
+/usr/local
+/var/crash
+/var/lib/mailman
+/var/lib/named
+/var/lib/pgqsl
+/var/log
+/var/opt
+/var/spool
+/var/tmp
+
+We need to exclude /opt because ISVs will install their software there, but
+this means, that add-ons like OES, which install in that directory, or other
+software provided with the distribution, like /opt/kde3, will not be part of
+the snapshot/rollback and can be broken after a rollback. We need to exclude
+/srv to avoid bigger data lossage, but this always means, that after a
+rollback, software like php stops working. /var/log, /var/mail and /var/spool
+can lead to data lossage by changed file locations, permissions,
+ownerships. In general, we cannot avoid data lossage or broken services, if
+parts of an RPM are installed in the excluded directories and the software
+update changes the data/ownership/permissions.
+
+-->
+
+
+ </sect1>
+ 
+
+
  <sect1 id="sec.snapper.limits">
   <title>Limitations</title>
 
