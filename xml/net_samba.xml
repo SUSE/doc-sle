@@ -1052,25 +1052,176 @@ smbpasswd -a -m hostname</screen><indexterm>
  </sect1>
  <sect1 id="samba.advanced">
   <title>Advanced Topics</title>
-  <para>
-   This section introduces more advanced techniques to manage both the client
-   and server part of the SAMBA suite.
-  </para>
-  <sect2 id="samba.advanced.snapshots">
-   <title>Snapshots of SAMBA Shares</title>
-   <para>
 
+  <para>
+   This section introduces more advanced techniques to manage both the
+   client and server part of the Samba suite.
+  </para>
+
+  <sect2 id="samba.advanced.compress">
+   <title>Transparent File Compression on Btrfs</title>
+   <para>
+    Samba allows clients to remotely manipulate file and directory
+    compression flags for shares placed on the Btrfs filesystem. Windows
+    Explorer provides the ability to flag files/folders for transparent
+    compression via the
+    <menuchoice><guimenu>File</guimenu><guimenu>Properties</guimenu><guimenu>Advanced</guimenu></menuchoice>
+    dialog box:
+   </para>
+   <figure>
+    <title>Windows Explorer <guimenu>Advanced Attributes</guimenu> Dialog</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="samba_win_expl_advattr.png" width="30%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="samba_win_expl_advattr.png" width="30%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    Files flagged for compression are transparently compressed and
+    uncompressed by the underlying file system when accessed or modified.
+    This results in a storage capacity saved at the expense of an extra CPU
+    overhead when accessing the file. New files and folders inherit the
+    compression flag from the parent folder, unless created with the
+    FILE_NO_COMPRESSION option.
+   </para>
+   <para>
+    Windows Explorer presents compressed files and folders visually
+    different to those that are not compressed:
+   </para>
+   <figure>
+    <title>Windows Explorer Directory Listing with Compressed Files</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="samba_win_expl_view_compressed.png" width="30%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="samba_win_expl_view_compressed.png" width="30%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    You can enable Samba share compression either manually by adding
+   </para>
+<screen>[...]
+vfs objects = btrfs
+[...]</screen>
+   <para>
+    to the share configuration in <filename>/etc/samba/smb.conf</filename>,
+    or using &yast;: <menuchoice><guimenu>Network
+    Services</guimenu><guimenu>Samba
+    Server</guimenu><guimenu>Add</guimenu></menuchoice>, and checking
+    <guimenu>Utilize Btrfs Features</guimenu>.
+   </para>
+  </sect2>
+
+  <sect2 id="samba.advanced.snapshots">
+   <title>Snapshots of Samba Shares</title>
+   <para>
+    Shadow copy &dash; also known as Volume Snapshot Service (VSS) &dash; is
+    a recent Windows Server technology to allow taking manual or automatic
+    backup copies (snapshots) of individual files, or complete volumes. File
+    Server Remote VSS Protocol (FSRVP) defines an interface for a client to
+    remotely request for the creation and exposure of snapshots of network
+    shares.
+   </para>
+   <para>
+    The Samba suite supports managing of remote snapshots through the FSRVP
+    protocol on both the server and client side.
    </para>
    <sect3 id="samba.advanced.snapshots.server">
     <title>Server Configuration</title>
     <para>
-
+     To enable the shadow copy feature on a Samba server, the following
+     conditions must be fulfilled:
     </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       The SMB network share resides on a Btrfs subvolume.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       The SMB network share path has a related snapper configuration file.
+       You can create the snapper file with
+      </para>
+<screen>snapper -c &lt;cfg_name&gt; create-config <option>/path/to/share</option></screen>
+      <para>
+       For more information on snapper, see <xref linkend="cha.snapper"/>.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       The snapshot directory tree must allow access for relevant users. For
+       more information, see the PERMISSIONS section of the vfs_snapper
+       manual page (<command>man 8 vfs_snapper</command>).
+      </para>
+     </listitem>
+    </itemizedlist>
+    <para>
+     To support remote snapshots, you need to modify the
+     <filename>/etc/samba/smb.conf</filename> file. You can do it either
+     with <menuchoice><guimenu>&yast;</guimenu><guimenu>Network
+     Services</guimenu><guimenu>Samba Server</guimenu></menuchoice>, or
+     manually by enhancing the global section with
+    </para>
+<screen>[global]
+[...]
+rpc_daemon:fssd = fork
+registry shares = yes
+include = registry
+[...]</screen>
+    <para>
+     and the relevant share section with
+    </para>
+<screen>[share_name]
+[...]
+vfs objects = snapper
+[...]</screen>
+    <para>
+     Note that you need to restart the Samba service for the changes to take
+     effect:
+    </para>
+<screen>systemctl restart nmb.service smb.service</screen>
+    <figure id="fig.yast2.samba.snapshot">
+     <title>Adding a New Samba Share with Snapshotting Enabled</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_samba_snapshot.png" width="70%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_samba_snapshot.png" width="75%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
    </sect3>
    <sect3 id="samba.advanced.snapshots.client">
-    <title>Managing Snapshots from a Client</title>
+    <title>Working with Snapshots in Windows Explorer</title>
     <para>
-
+     Windows Explorer, the default file browser in the Microsoft Windows
+     environment, can do basic manipulations with file/folder snapshots.
+     After you open an SMB share served by Samba in the Windows Explorer,
+     you can right click selected files or folders, and navigate to the
+     <guimenu>Previous Versions</guimenu> tab.
+    </para>
+    <figure id="fig.samba.win_explorer">
+     <title>The <guimenu>Previous Versions</guimenu> tab in Windows Explorer</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="samba_winexpl_previous_versions.png" width="70%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="samba_winexpl_previous_versions.png" width="75%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+    <para>
+     You can view the file/folder as it was saved in the snapshot, or copy
+     its snapshotted version to a new location, or overwrite the current
+     state of the file with the contents from the snapshot.
     </para>
    </sect3>
   </sect2>
