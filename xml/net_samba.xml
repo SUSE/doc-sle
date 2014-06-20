@@ -1237,7 +1237,7 @@ vfs objects = snapper
      <title>Using <command>rpcclient</command> to Request Windows Server 2012</title>
      <para>
       Connect to <literal>samba.example.com</literal> server as an
-      adminstrator in <literal>TEST</literal> domain:
+      administrator in <literal>TEST</literal> domain:
      </para>
 <screen># rpcclient -U '<replaceable>TEST</replaceable>\administrator' ncacn_np:<replaceable>samba.example.com</replaceable>[ndr64,sign]
 Enter TEST/administrator's password:</screen>
@@ -1252,7 +1252,7 @@ password:       (null)</screen>
      <para>
       Check that the SMB share supports snapshot creation
      </para>
-     <screen># rpcclient $> fss_is_path_sup windows_server_2012_share \
+<screen># rpcclient $> fss_is_path_sup windows_server_2012_share \
 UNC \\TEST\windows_server_2012_share\ supports shadow copy requests</screen>
      <para>
       Request the creation of a share snapshot:
@@ -1295,6 +1295,113 @@ remark:
 path:   C:\Shares\windows_server_2012_share
 password:       (null)</screen>
     </example>
+   </sect3>
+   <sect3 id="samba.advanced.snapshots.client.winserver">
+    <title>Managing Snapshots Remotely from Windows Server</title>
+    <para>
+     You can manage snapshots of SMB shares on the Linux Samba server from
+     the Windows environment acting as a client as well. Windows Server 2012
+     includes the <command>DiskShadow.exe</command> utility that can manage
+     remote shares similar to the <command>rpcclient</command> described in
+     <xref linkend="samba.advanced.snapshots.client.winserver"/>. Please
+     note that you need to carefully set up the Samba server first.
+    </para>
+    <para>
+     Following is an example procedure to set up the Samba server so that
+     the Windows Server client can manage its share's snapshots. Note that
+     AD_DOMAIN is the Active Directory domain used in the testing
+     environment, fsrvp-clienti.example.com is the host name of the Samba
+     server, and <filename>/srv/smb</filename> is the path to the SMB share.
+    </para>
+    <procedure>
+     <title>Detailed Samba Server Configuration</title>
+     <step>
+      <para>
+       Join Active Directory domain via &yast;. For more information,
+       <xref linkend="sec.samba.adnet"/>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Ensure that the Active Domain DNS entry was correct:
+      </para>
+<screen>fsrvp-client:~ # net -U 'administrator' ads dns register \
+fsrvp-client.example.com &lt;IP address>
+Successfully registered hostname with DNS</screen>
+     </step>
+     <step>
+      <para>
+       Create Btrfs subvolume at <filename>/srv/smb</filename>
+      </para>
+<screen>fsrvp-client:~ # btrfs subvolume create /srv/smb</screen>
+     </step>
+     <step>
+      <para>
+       Create snapper configuration file for path
+       <filename>/srv/smb</filename>
+      </para>
+<screen>fsrvp-client:~ # snapper -c &lt;snapper_config> create-config /srv/smb</screen>
+     </step>
+     <step>
+      <para>
+       Create new share with path <filename>/srv/smb</filename>, and &yast;
+       <guimenu>Expose Snapshots</guimenu> check-box enabled. Make sure to
+       add the following snippets to the global section of
+       <filename>/etc/samba/smb.conf</filename> as mentioned in
+       <xref
+         linkend="samba.advanced.snapshots.server"/>:
+      </para>
+<screen>[global]
+ rpc_daemon:fssd = fork
+ registry shares = yes
+ include = registry
+ [...]</screen>
+     </step>
+     <step>
+      <para>
+       Restart Samba with <command>systemctl restart nmb.service
+       smb.service</command>
+      </para>
+     </step>
+     <step>
+      <para>
+       Configure snapper permissions:
+      </para>
+<screen>fsrvp-client:~ # snapper -c &lt;snapper_config> set-config SYNC_ACL=yes</screen>
+      <para>
+       Ensure that any ALLOW_USERS are also permitted traversal of the
+       <filename>.snapshots</filename> subdirectory.
+      </para>
+<screen>fsrvp-client:~ # snapper -c &lt;snapper_config> set-config \
+ALLOW_USERS="AD_DOMAIN\\\\Administrator AD_DOMAIN\\\\example_user$"</screen>
+      <important>
+       <title>Path Escaping</title>
+       <para>
+        Be careful about the '\' escapes! Escape twice to ensure that the
+        value stored in
+        <filename>/etc/snapper/configs/&lt;snapper_config></filename> is
+        escaped once.
+       </para>
+      </important>
+      <para>
+       "AD_DOMAIN\example_user$" corresponds to the Windows client computer
+       account. Windows issues initial FSRVP requests while authenticated
+       with this account.
+      </para>
+     </step>
+     <step>
+      <para>
+       Grant Windows client account necessary privileges:
+      </para>
+<screen>fsrvp-client:~ # net -U 'administrator' rpc rights grant \
+"AD_DOMAIN\\example_user$" SeBackupPrivilege
+Successfully granted rights.</screen>
+      <para>
+       The previous command is not needed for the "AD_DOMAIN\\Administrator"
+       user, which has privileges already granted.
+      </para>
+     </step>
+    </procedure>
    </sect3>
   </sect2>
  </sect1>
