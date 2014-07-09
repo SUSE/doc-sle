@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.lxc2libvirt">
+ <title>Migration from &lxc; to <systemitem>libvirt-lxc</systemitem></title>
+ <para>
+  Since &sls; 12, &lxc; is integrated into &libvirt; library. This decision
+  has several advantages over using &lxc; as a separate virtualization
+  solution&mdash;such as unified approach with other virtualization
+  solutions or independence on the kernel used.
+ </para>
+ <para>
+  This chapter describes steps needed to migrate existing &lxc; environment
+  for use with the &libvirt; library. The typical situation you will need
+  such migration is after upgrading &sls; 11 SP3 running guests as &lxc;
+  containers to &sls; 12.
+ </para>
+ <sect1 id="lxc2libvirt.host">
+  <title>Host Migration</title>
+
+  <para>
+   The migration itself has two phases. You first need to migrate the host,
+   then the &lxc; containers. After that, you will be able to run the
+   original containers as &vmguest;s in the &libvirt; environment.
+  </para>
+
+  <procedure>
+   <title>Host Migration</title>
+   <step>
+    <para>
+     Upgrade the host to &sls; 12 using the official DVD media.
+    </para>
+   </step>
+   <step>
+    <para>
+     After the upgrade, install the
+     <systemitem>libvirt-daemon-lxc</systemitem> and
+     <systemitem>libvirt-daemon-config-network</systemitem> packages.
+    </para>
+   </step>
+   <step>
+    <para>
+     Create a &libvirt; XML configuration
+     <filename>lxc_container.xml</filename> from the existing container
+     <literal>lxc_container</literal>:
+    </para>
+<screen># virt-lxc-convert /etc/lxc/lxc_container/config > lxc_container.xml</screen>
+   </step>
+   <step>
+    <para>
+     Check the host network configuration and fix it if needed. A &libvirt;
+     managed guest is usually connected to the network through a network
+     bridge. If you do not have a network bridge configured on the host
+     machine, you can do so with &yast; - <menuchoice><guimenu>Network
+     Devices</guimenu><guimenu>Network
+     Settings</guimenu><guimenu>Add</guimenu></menuchoice> and select
+     <guimenu>Bridge</guimenu> from the <guimenu>Device Type</guimenu> list.
+    </para>
+   </step>
+   <step>
+    <para>
+     Check the <filename>lxc_container.xml</filename> file for weird or
+     missing configuration. Note that some of the &lxc; configuration cannot
+     be mapped to &libvirt; configuration. Although the conversion should be
+     fine in most cases, check <xref linkend="lxc.diff"/> for more details.
+    </para>
+   </step>
+   <step>
+    <para>
+     Define the container in &libvirt; based on the created XML definition:
+    </para>
+<screen># virsh -c lxc:/// define lxc_container.xml</screen>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 id="lxc2libvirt.container">
+  <title>Container Migration</title>
+
+  <para>
+   After the host is migrated, the &lxc; container in &libvirt; will not
+   boot. It needs to be migrated to &sls; 12 as well in order to get
+   everything working.
+  </para>
+
+  <procedure>
+   <title>Container Migration</title>
+   <step>
+    <para>
+     The <filename>baseproduct</filename> file is missing (and
+     <command>zypper</command> keeps complaining about it). Create the
+     relevant symbolic link:
+    </para>
+<screen># ROOTFS=/var/lib/lxc/container1/rootfs
+# ln -s $ROOTFS/etc/products.d/SUSE_SLES.prod $ROOTFS/etc/products.d/baseproduct</screen>
+   </step>
+   <step>
+    <para>
+     Add the DVD repository. Note that you need to replace the DVD device
+     with the one attached to your container:
+    </para>
+<screen># zypper --root $ROOTFS ar \
+cd:///?devices=/dev/disk/by-id/ata-QEMU_DVD-ROM_QM00002 SLES12-12</screen>
+   </step>
+   <step>
+    <para>
+     Disable or remove previous repositories:
+    </para>
+<screen># zypper --root $ROOTFS lr
+  | Alias                       | Name                         | Enabled | Refresh
+--+-----------------------------+------------------------------+---------+--------
+1 | SLES12-12                   | SLES12-12                    | Yes     | No
+2 | SUSE-[...]-Server-11-SP3 38 | SUSE-[...]-Server-11-SP3 138 | Yes     | No
+
+# zypper --root $ROOTFS rr 2</screen>
+   </step>
+   <step>
+    <para>
+     Upgrade the container:
+    </para>
+<screen># zypper --root $ROOTFS dup</screen>
+   </step>
+   <step>
+    <para>
+     Install the <emphasis>Minimal</emphasis> pattern to make sure
+     everything required is installed:
+    </para>
+<screen># zypper --root $ROOTFS in -t pattern Minimal</screen>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 id="lxc2libvirt.start">
+  <title>Starting the Container</title>
+
+  <para>
+   After the host and container migration is complete, the container can be
+   started:
+  </para>
+
+<screen># virsh -c lxc:/// start lxc_container</screen>
+
+  <para>
+   If you need to get a console to view the logging messages produced by the
+   container, run:
+  </para>
+
+<screen># virsh -c lxc:/// console lxc_container</screen>
+ </sect1>
+</chapter>
