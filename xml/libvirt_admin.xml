@@ -268,12 +268,147 @@ qemu+tls://&exampleuser;@&wsIname;/system</screen>
     </para>
    </note>
   </sect2>
+  <!-- Step by step example -->
+  <sect2 id="sec.libvirt.migrate.stepbstep">
+   <title>Step by Step example</title>
+   <para/>
+   <sect3 id="sec.migrate.stepbstep.export">
+    <title>Exporting the storage</title>
+    <para>
+     First you need to export the storage, to share the Guest image
+     between host. This can be done by an NFS server. In the following
+     example we want to share the <filename>/volume1/VM</filename> directory
+     for all machines which are on the network 10.0.1.0/24. We will use a
+     &sle; NFS server.
+     As root user edit the <filename>/etc/exports</filename> file and add:
+    </para>
+    <screen>/volume1/VM 10.0.1.0/24  (rw,sync,no_root_squash)</screen>
+    <para>
+     You need to restart the NFS server:
+    </para>
+    <screen>&prompt.root;systemctl restart nfsserver
+&prompt.root;exportfs 
+/volume1/VM      10.0.1.0/24</screen>
+   </sect3>
+   <sect3 id="sec.migrate.stepbstep.pool">
+    <title>Defining the Pool on target hosts</title>
+    <para>
+     On each host where you want to migrate the VM guest the pool must be 
+     define to be able to access the volume (which contains the Guest image).
+     Our NFS server ip address is 10.0.1.99, it's share the
+     <filename>/volume1/VM</filename> directory, and we want to get it mounted
+     in <filename>/var/lib/libvirt/images/VM</filename> directory. The pool
+     name will be <emphasis>VM</emphasis>.
+     To define this pool create a <filename>VM.xml</filename> file with the following content:
+    </para>
+    <screen>
+     <![CDATA[<pool type='netfs'>
+  <name>VM</name>name>
+  <source>
+    <host name='10.0.1.99'/>>
+    <dir path='/volume1/VM'/>>
+    <format type='auto'/>>
+  </source>source>
+  <target>
+    <path>/var/lib/libvirt/images/VM</path>path>
+    <permissions>
+      <mode>0755</mode>mode>
+      <owner>-1</owner>owner>
+      <group>-1</group>group>
+    </permissions>permissions>
+  </target>target>
+  </pool>pool>]]></screen>
+    <para>
+     Then load it into &libvirt; using the pool-define command:
+    </para>
+    <screen>&prompt.root;virsh pool-define VM.xml</screen>
+    <para>
+     An alternative way to define this pool is to use the <command>virsh</command> command:
+    </para>
+    <screen>&prompt.root;virsh pool-define-as VM --type netfs --source-host 10.0.1.99 \
+     --source-path /volume1/VM --target /var/lib/libvirt/images/VM
+Pool VM created</screen>
+    <para>
+    Then the pool can be set to start automatically at host boot (autostart
+    option):
+    </para>
+    <screen>virsh # pool-autostart VM
+Pool VM marked as autostarted</screen>
+   <para>
+    If you want to disable the autostart:
+   </para>
+   <screen>virsh # pool-autostart VM --disable
+Pool VM unmarked as autostarted</screen>
+   <para>
+    Check the pool pool is present:
+   </para>
+   <screen>virsh # pool-list --all
+ Name                 State      Autostart
+-------------------------------------------
+ default              active     yes
+ VM                   active     yes
+
+virsh # pool-info VM
+Name:           VM
+UUID:           42efe1b3-7eaa-4e24-a06a-ba7c9ee29741
+State:          running
+Persistent:     yes
+Autostart:      yes
+Capacity:       2,68 TiB
+Allocation:     2,38 TiB
+Available:      306,05 GiB</screen>
+   <warning>
+    <para>
+     Remenber: this pool must be defined on each host where you want to be able to
+     migrate your VM guest.
+    </para>
+   </warning>
+   </sect3>
+   <sect3 id="sec.migrate.stepbstep.volume">
+    <title>Creating the Volume</title>
+    <para>
+     The pool has been defined, now we need a volume which will contains the 
+     disk image:
+    </para>
+    <screen>virsh # vol-create-as VM sled12.qcow12 8G --format qcow2
+Vol sled12.qcow12 created</screen>
+   <para>
+    The volume names shown will be used later to install the guest with virt-install.
+   </para>
+   </sect3>
+   <sect3 id="sec.migrate.stepbstep.guest">
+    <title>Creating the guest</title>
+    <para>
+     Lets create an &sled; Guest VM with the <command>virt-install</command>
+     command. The <emphasis>VM</emphasis> pool will be specified with the
+     <command>--disk</command> option, <emphasis>cache=none</emphasis> is
+     recommended if you don't want to use the <command>--unsafe</command>
+     option while doing the migration.
+    </para>
+   <screen>&prompt.root;virt-install --connect qemu:///system --virt-type kvm --name \
+   sled12 --memory 1024 --disk vol=VM/sled12.qcow2,cache=none --cdrom \
+   /mnt/install/ISO/SLE-12-Desktop-DVD-x86_64-Build0327-Media1.iso --graphics \
+   vnc --os-variant sled12
+Starting install...
+Creating domain...</screen>
+   </sect3>
+   <sect3 id="sec.migrate.stepbstep.migrate">
+    <title>Migrate the VM guest</title>
+    <para>
+     Everything is ready to do the migration now. Just run the
+     <command>migrage</command> command on the host which is currently 
+     hosting the Guest VM, and choose the destination.
+    </para>
+    <screen>virsh # migrate --live sled12 --verbose qemu+ssh://<replaceable>IP/Hostname</replaceable>/system
+Password:
+Migration: [ 12 %]</screen>
+   </sect3>
+  </sect2>
  </sect1>
+
  <sect1 id="cha.libvirt.admin.monitor">
   <title>Monitoring</title>
-
   <para/>
-
   <sect2 id="cha.libvirt.admin.monitor.virt-manager">
    <title>Monitoring with &vmm;</title>
    <para>
