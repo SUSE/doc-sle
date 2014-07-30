@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd"
+[
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter id="cha.tuning.numactl">
+ <title>Automatic Non-Uniform Memory Access (NUMA) Balancing</title>
+ <abstract>
+  <para>
+   There are physical limitations to hardware that are encountered when large
+   numbers of CPU and memory are required. For the purposes of this article
+   the important limitation is that there is limited communication bandwidth
+   between the CPUs and memory. One architecture modification that was
+   introduced to address this is Non-Uniform Memory Access (NUMA).
+  </para>
+  <para>
+   In this configuration there are multiple nodes, each which contains a
+   subset of CPUs and memory. The access speed to main memory is determined by
+   the locality of the memory relative to the CPU. The performance of a
+   workload depends on the application threads accessing data that is local to
+   the CPU the thread is executing on. Automatic NUMA Balancing is a new
+   feature that will be available in SLE 12 that migrates data on demand to
+   memory nodes that are local to the CPU accessing that data. Depending on
+   the workload this can dramatically boost performance when using NUMA
+   hardware.
+  </para>
+ </abstract>
+ 
+ <sect1 id="sec.tuning.numactl.implementation">
+  <title>Implementation</title>
+  <para>
+   Automatic NUMA balancing has three basic components:
+  </para>
+  <orderedlist>
+   <listitem>
+    <para>
+     A task will periodically scan a portion of its address space and mark the
+     memory to force a page fault when the data is next accessed.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     The next access to the data will resulting in a NUMA Hinting Fault. Based
+     on this fault the data may be migrated on fault to a memory node local to
+     the task accessing the memory.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     The scheduler will attempt to keep tasks running CPUs local to the data
+     being accessed by grouping tasks that share data together.
+    </para>
+   </listitem>
+  </orderedlist>
+  <para>
+   The unmapping of data and page fault handling incurs some overhead. The
+   expectation is that the overhead will be offset by threads accessing data
+   local to the CPU.
+  </para>
+ </sect1>
+
+ <sect1 id="sec.tuning.numactl.configuration">
+  <title>Configuration</title>
+  <para>
+   Static configuration has been the recommended for tuning workloads on NUMA
+   hardware for some time using memory policies set with numactl, taskset or
+   cpusets. Programming APIs are available to applications that are NUMA
+   aware. In cases where the static policies have been written then automatic
+   NUMA balancing should be disabled as the data access should already be
+   local.
+  </para>
+  <para>
+   <command>numactl <option>--hardware</option></command> will show the memory
+   configuration of the machine and whether it supports NUMA or not. This is
+   example output from a 4-node machine.
+  </para>
+  <screen>&prompt.root;numactl --hardware
+  available: 4 nodes (0-3)
+  node 0 cpus: 0 4 8 12 16 20 24 28 32 36 40 44
+  node 0 size: 16068 MB
+  node 0 free: 15909 MB
+  node 1 cpus: 1 5 9 13 17 21 25 29 33 37 41 45
+  node 1 size: 16157 MB
+  node 1 free: 15948 MB
+  node 2 cpus: 2 6 10 14 18 22 26 30 34 38 42 46
+  node 2 size: 16157 MB
+  node 2 free: 15981 MB
+  node 3 cpus: 3 7 11 15 19 23 27 31 35 39 43 47
+  node 3 size: 16157 MB
+  node 3 free: 16028 MB
+  node distances:
+  node   0   1   2   3 
+    0:  10  20  20  20 
+    1:  20  10  20  20 
+    2:  20  20  10  20 
+    3:  20  20  20  10</screen>
+  <para>
+   Automatic NUMA balancing can be enabled or disabled for the current session
+   by writing <literal>NUMA</literal> or <literal>NO_NUMA</literal> to
+   <filename>/sys/kernel/debug/sched_features</filename>, which will enable or
+   disable the feature respectively. To permanently enable or disable it, use
+   the kernel command line option
+   <literal>numa_balancing=[enabled|disabled]</literal>.
+  </para>
+  <para>
+   Once enabled there are settings that control the task scanner behavior
+   which balances the overhead of automatic NUMA balancing with the length of
+   time it takes to identify the best placement of data. The settings of
+   interest are:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term><literal>numa_balancing_scan_delay_ms</literal></term>
+    <listitem>
+     <para>
+      The amount of CPU time a thread must consume before its data is
+      scanned. This prevents short-lived processes incurring overhead.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>
+     <literal>numa_balancing_scan_period_min_ms</literal> and
+     <literal>numa_balancing_scan_period_max_ms</literal>
+    </term>
+    <listitem>
+     <para>
+      Control how frequently a tasks data is being scanned. Depending on the
+      locality of the faults the scan rate will increase or decrease. These
+      settings control the min and max scan rates.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_balancing_scan_size_mb</literal></term>
+    <listitem>
+     <para>
+      Controls how much address space is scanned when the task scanner is
+      active.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.tuning.numactl.monitoring">
+  <title>Monitoring</title>
+  <para>
+   The most important task is to assign metrics to your workload and measure
+   the performance with Automatic NUMA Balancing enabled and disabled to
+   measure the impact. Profiling tools may be used to monitor local and remote
+   memory accesses if the CPU supports such monitoring. Automatic NUMA
+   Balancing activity may be monitored via the following parameters in
+   <filename>/proc/vmstat</filename>:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term><literal>numa_pte_updates</literal></term>
+    <listitem>
+     <para>
+      The amount of base pages that were marked for NUMA hinting faults.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_huge_pte_updates</literal></term>
+    <listitem>
+     <para>
+      The amount of transparent huge pages were marked for NUMA hinting
+      faults. In combination with <literal>numa_pte_updates</literal> the
+      total address space that was marked can be calculated.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_hint_faults</literal></term>
+    <listitem>
+     <para>
+      Records how many NUMA hinting faults were trapped.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_hint_faults_local</literal></term>
+    <listitem>
+     <para>
+      Shows how many of the hinting faults were to local nodes. In combination
+      with <literal>numa_hint_faults</literal> the percentage of local versus
+      remote faults can be calculated. A high percentage of local hinting
+      faults indicates that the workload is closer to being converged.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_pages_migrated</literal></term>
+    <listitem>
+     <para>
+      Records how many pages were migrated due to being misplaced. This copy
+      operation is the most expensive piece of overhead incurred by automatic
+      NUMA balancing.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+
+ <sect1 id="sec.tuning.numactl.impact">
+  <title>Impact</title>
+  <para>
+   The impact for each workload will vary but here is a simple test case of a
+   4-node NUMA machine running the SpecJBB 2005 using a single instead of the
+   JVM with no static tuning around memory policies. This is based on a
+   pre-release version of &productname; 12.
+  </para>
+  <screen>            Balancing disabled      Balancing enabled
+TPut 1      26629.00 (  0.00%)     26507.00 ( -0.46%)
+TPut 2      55841.00 (  0.00%)     53592.00 ( -4.03%)
+TPut 3      86078.00 (  0.00%)     86443.00 (  0.42%)
+TPut 4     116764.00 (  0.00%)    113272.00 ( -2.99%)
+TPut 5     143916.00 (  0.00%)    141581.00 ( -1.62%)
+TPut 6     166854.00 (  0.00%)    166706.00 ( -0.09%)
+TPut 7     195992.00 (  0.00%)    192481.00 ( -1.79%)
+TPut 8     222045.00 (  0.00%)    227143.00 (  2.30%)
+TPut 9     248872.00 (  0.00%)    250123.00 (  0.50%)
+TPut 10    270934.00 (  0.00%)    279314.00 (  3.09%)
+TPut 11    297217.00 (  0.00%)    301878.00 (  1.57%)
+TPut 12    311021.00 (  0.00%)    326048.00 (  4.83%)
+TPut 13    324145.00 (  0.00%)    346855.00 (  7.01%)
+TPut 14    345973.00 (  0.00%)    378741.00 (  9.47%)
+TPut 15    354199.00 (  0.00%)    394268.00 ( 11.31%)
+TPut 16    378016.00 (  0.00%)    426782.00 ( 12.90%)
+TPut 17    392553.00 (  0.00%)    437772.00 ( 11.52%)
+TPut 18    396630.00 (  0.00%)    456715.00 ( 15.15%)
+TPut 19    399114.00 (  0.00%)    484020.00 ( 21.27%)
+TPut 20    413907.00 (  0.00%)    493618.00 ( 19.26%)
+TPut 21    413173.00 (  0.00%)    510386.00 ( 23.53%)
+TPut 22    420256.00 (  0.00%)    521016.00 ( 23.98%)
+TPut 23    425581.00 (  0.00%)    536214.00 ( 26.00%)
+TPut 24    429052.00 (  0.00%)    532469.00 ( 24.10%)
+TPut 25    426127.00 (  0.00%)    526548.00 ( 23.57%)
+TPut 26    422428.00 (  0.00%)    531994.00 ( 25.94%)
+TPut 27    424378.00 (  0.00%)    488340.00 ( 15.07%)
+TPut 28    419338.00 (  0.00%)    543016.00 ( 29.49%)
+TPut 29    403347.00 (  0.00%)    529178.00 ( 31.20%)
+TPut 30    408681.00 (  0.00%)    510621.00 ( 24.94%)
+TPut 31    406496.00 (  0.00%)    499781.00 ( 22.95%)
+TPut 32    404931.00 (  0.00%)    502313.00 ( 24.05%)
+TPut 33    397353.00 (  0.00%)    522418.00 ( 31.47%)
+TPut 34    382271.00 (  0.00%)    491989.00 ( 28.70%)
+TPut 35    388965.00 (  0.00%)    493012.00 ( 26.75%)
+TPut 36    374702.00 (  0.00%)    502677.00 ( 34.15%)
+TPut 37    367578.00 (  0.00%)    500588.00 ( 36.19%)
+TPut 38    367121.00 (  0.00%)    496977.00 ( 35.37%)
+TPut 39    355956.00 (  0.00%)    489430.00 ( 37.50%)
+TPut 40    350855.00 (  0.00%)    487802.00 ( 39.03%)
+TPut 41    345001.00 (  0.00%)    468021.00 ( 35.66%)
+TPut 42    336177.00 (  0.00%)    462260.00 ( 37.50%)
+TPut 43    329169.00 (  0.00%)    467906.00 ( 42.15%)
+TPut 44    329475.00 (  0.00%)    470784.00 ( 42.89%)
+TPut 45    323845.00 (  0.00%)    450739.00 ( 39.18%)
+TPut 46    323878.00 (  0.00%)    435457.00 ( 34.45%)
+TPut 47    310524.00 (  0.00%)    403914.00 ( 30.07%)
+TPut 48    311843.00 (  0.00%)    459017.00 ( 47.19%)
+
+                        Balancing Disabled        Balancing Enabled
+ Expctd Warehouse          48.00 (  0.00%)          48.00 (  0.00%)
+ Expctd Peak Bops      310524.00 (  0.00%)      403914.00 ( 30.07%)
+ Actual Warehouse          25.00 (  0.00%)          29.00 ( 16.00%)
+ Actual Peak Bops      429052.00 (  0.00%)      543016.00 ( 26.56%)
+ SpecJBB Bops            6364.00 (  0.00%)        9368.00 ( 47.20%)
+ SpecJBB Bops/JVM        6364.00 (  0.00%)        9368.00 ( 47.20%)</screen>
+  <para>
+   Automatic NUMA Balancing takes away some of the pain when tuning workloads
+   for high performance on NUMA machines. Where possible, it will still be
+   better to statically tune the workload to partition it within each
+   node. Where that is not possible then automatic NUMA balancing should boost
+   performance.
+  </para>
+ </sect1>
+</chapter>
