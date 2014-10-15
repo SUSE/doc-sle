@@ -31,7 +31,8 @@
    A &kg; patch is a kernel module, limited to replacing whole functions and constants
    in the kernel. &kg; offers tools for creating the live patch modules.
   </para>
-</abstract>
+ </abstract>
+
 <sect1>
   <title>Advantages of &kg;</title>
   <para>
@@ -52,11 +53,73 @@
    module can replace an existing patch if necessary.
   </para>
   <para>
+   &kg; is also lean, it contains only a small amount of code, because it
+   leverages other standard Linux technologies.
+  </para>
+  <!--  <para>
    &kg; has also some technical limitations. It is designed for fixing
    critical bugs, that means primarily for simple changes. Cahnges in kernel
    data structure require special care and, if the change is too large,
    rebooting might be required.
-  </para>
+  </para>-->
+</sect1>
+<sect1>
+ <title>Limitations of &kg;</title>
+ <para>
+  &kg; has also some technical limitations. &kg; is designed for fixing
+  critical bugs, that means primarily for simple changes. Changes in kernel
+  data structure require special care and, if the change is too large,
+  rebooting might be required. &kg; also depends on a stable build
+  environment, it cannot patch an unknown third-party kernel. &kg; also
+  doesn't specifically handle situations where one compiler is used to compile
+  the old kernel and another compiler is used for compiling the patch. 
+ </para>
+ <para>
+  <!--kernelové thready, EAL6+ stability fixes, data loss-->
+ </para>
+</sect1>
+<sect1>
+ <title>Low-level Function of &kg;</title>
+ <para>
+  &kg; uses the ftrace infrastructure to perform patching. To patch a kernel
+  function, &kg; needs some space at the start of the function to insert a
+  jump to a new function. The space is provided by GCC profiling.
+ </para>
+ <para>
+  At boot, fentry call instructions are replaced by 5-byte NOP (no operation)
+  instructions. Then, the first byte is replaced by the INT3 isntruction and
+  the remaining four bytes are replaced by the address to the new function.
+  Then the first byte is replaced by the JMP (long jump) instruction.
+  Inter-processor non-maskable interrupts (IPI NMI) are used throughout the
+  process to flush speculative decoding queues of other CPUs in the system.
+  This allows switching to the new function without ever stopping the kernel,
+  not even for a very short moment. The interruptions by IPI NMIs can be
+  measured in microseconds.
+ </para>
+ <para>
+  Callers are never patched, instead, callee's NOPs are replaced by a JMP to
+  the new function. JMP instructions remain forever. This takes care of
+  function pointers, including in structures, and does not require saving any
+  old data for possibility of un-patching.
+ </para>
+ <para>
+  However, these steps alone would not be good enough: since the functions
+  would be replaced non-atomically, a new fixed function in one part of the
+  kernel could still be calling an old function elsewhere or vice versa. If
+  the semantics of the function interfaces changed in the patch, chaos would
+  ensue.
+ </para>
+ <para>
+  Thus, until all functions are replaced, &kg; uses an approach based on
+  trampolines and similar to RCU (read-copy-update), to ensure a consistent
+  view of the world to each userspace thread, kernel thread or kernel
+  interrupt. A per-thread flag is set on each kernel entry and exit.
+  This way, an old function always would call another old function
+  and a new function always a new one. Once all processes have the "new
+  universe" flag set patching is complete, trampolines can be removed
+  and the code can operate at full speed without performance impact other
+  than an extra long jump for each patched function.
+ </para>
 </sect1>
 <sect1>
  <title>Installing &kg; Patches</title>
@@ -90,14 +153,16 @@
     First, check the global flag in
     <filename>/sys/kernel/kgraft/in_progress</filename>. The value
     <literal>1</literal> signifies existing sleeping processes that still need
-    an update, the value <literal>0</literal> signifies that the patch was
-    copletely finished.
+    an update (the patching is still in progress), the value
+    <literal>0</literal> signifies that the patch was completely finished.
+    Alternatively, use the <command>kgr status</command> command.
    </para>
    <para>
     To get a list of all sleeping processes, check the number in
     <filename>/proc/<replaceable>process_number</replaceable>/kgr_in_progress</filename>
     for each process. The value <literal>1</literal> signifies sleeping
-    process that still needs an update.
+    process that still needs an update. Alternatively, use the <command>kgr
+     blocking</command> command to output the list of sleeping processes.
    </para>
   </step>
   <step>
@@ -105,7 +170,8 @@
     It is up to the system administrator to decide how to deal with
     the sleeping processes. One possibility is to wait, another
     possibility is to send a SIGSTOP signal followed by a SIGCONT
-    signal to all the sleeping processes.
+    signal to all the sleeping processes. It can be achieved easily
+    using the <command>kgr poke</command> command.
    </para>
   </step>
  </procedure>
@@ -140,5 +206,53 @@
   </step>
   </procedure>
 </sect1>
-
+<sect1>
+ <title>The <command>kgr</command> Tool</title>
+  <para>
+   Several &kg; management tasks can be simplified
+   with the <command>kgr</command> tool. The available commands are:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term><command>kgr status</command></term>
+    <listitem>
+     <para>
+      Displays the overall status of &kg; patching (<literal>ready</literal> or
+      <literal>in_progress</literal>). It takes the information from
+      <filename>/sys/kernel/kgraft/in_progress</filename>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr patches</command></term>
+    <listitem>
+     <para>
+      Displays the list of loaded &kg; patches.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr blocking</command></term>
+    <listitem>
+     <para>
+      Lists processes that are preventing &kg; patching from finishing. By
+      default just the PIDs are listed. Specifying <option>-v</option> prints
+      out command lines. Another <option>-v</option> displays also strack
+      traces.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr poke</command></term>
+    <listitem>
+     <para>
+      Sends SIGSTOP and SIGCONT to all processess that are blocking &kg; patching from finishing.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+  <para>
+   For detailed information, see <command>man kgr</command>.
+  </para>
+</sect1>
 </article>
