@@ -18,7 +18,8 @@
  </articleinfo>
  <abstract>
   <para>
-   This document describes the basic principles of the &kg; live patching technology.
+   This document describes the basic principles of the &kg; live patching
+   technology and provides usage guidelines for the SLE Live Patching service.
   </para>
   <para>
    &kg; is a live patching technology for run-time patching of the Linux kernel, without
@@ -29,8 +30,14 @@
   </para>
   <para>
    A &kg; patch is a kernel module, intended for replacing whole functions
-   in the kernel. &kg; offers tools for creating the live patch modules and
-   integrating them with kernel code at runtime.
+   in the kernel. &kg; primarily offers in-kernel infrastructure for
+   integration of the patched code with base kernel code at runtime.
+  </para>
+  <para>
+   SLE Live Patching is a service provided on top of regular SUSE Linux
+   Enterprise Server maintenance.  &kg; patches distributed through SLE Live
+   Patching supplement regular SLES maintenance updates.  Common update stack
+   and procedures can be used for SLE Live Patching deployment.
   </para>
  </abstract>
 
@@ -44,7 +51,7 @@
   </para>
   <para>
    The main advantage of &kg; is that it never requires stopping the kernel,
-   not even for a short time period like competing technologies.
+   not even for a short time period.
   </para>
   <para>
    A &kg; patch is a <filename>.ko</filename> kernel module in a KMP RPM
@@ -63,12 +70,13 @@
  <para>
   &kg; uses the ftrace infrastructure to perform patching. To patch a kernel
   function, &kg; needs some space at the start of the function to insert a
-  jump to a new function. The space is provided by GCC profiling.
+  jump to a new function. The space is provided by GCC profiling.  The
+  following describes the implementation on the x86-64 architecture.
  </para>
  <para>
   At boot, fentry call instructions are replaced by 5-byte NOP (no operation)
   instructions. After patching starts, the first byte is replaced by the INT3
-  isntruction and the remaining four bytes are replaced by the address to the
+  instruction and the remaining four bytes are replaced by the address to the
   new function. Then the first byte is replaced by the JMP (long jump)
   instruction. Inter-processor non-maskable interrupts (IPI NMI) are used
   throughout the process to flush speculative decoding queues of other CPUs in
@@ -77,7 +85,7 @@
   can be measured in microseconds.
  </para>
  <para>
-  Callers are never patched, instead, callee's NOPs are replaced by a JMP to
+  Callers are never patched. Instead, callee's NOPs are replaced by a JMP to
   the new function. JMP instructions remain forever. This takes care of
   function pointers, including in structures, and does not require saving any
   old data for possibility of un-patching.
@@ -102,26 +110,27 @@
  </para>
 </sect1>
 <sect1>
- <title>Installing &kg; Patches</title>
- <para>
-  To aplly a &kg; patch, follow these steps:
- </para>
+  <title>Installing &kg; Patches</title>
+  <para>
+   To activate SLE Live Patching on your system, go to YaST2 Control Center,
+   select SUSE Customer Center Configuration and proceed with Select Extensions
+   to activate the SLE Live Patching.  This will install the base &kg;
+   components on your system together with the initial live patch.
+  </para>
+ <sect2>
+  <title>Updating System</title>
  <procedure>
   <step>
    <para>
-    Using <command>zypper</command>, install the &kg; patch from
-    &kg; channel. Choose the appropriate patch for your kernel
-    version (<filename>-default</filename> or <filename>-xen</filename>).
+    SLE Live Patching updates are distributed in a form that allows using
+    standard SLE update stack for patch application.  The initial live patch
+    can be updated using <command>zypper patch</command>, YaST2 Online Update
+    or equivalent method.
    </para>
-   <para>
-    When installing the first patch, the <systemitem>kgraft</systemitem>
-    package with the necessary &kg; scripts is also installed.
-   </para>
-   <!--FIXME name of the channel?-->
   </step>
   <step>
    <para>
-    The kernel is patched automatically after the package installation.
+    The kernel is patched automatically during the package installation.
     However, the old kernel functions are not completely removed until
     all sleeping processes wake up and get out of the way. This can
     take a considerable amount of time. Sleeping processes using the
@@ -155,6 +164,7 @@
    </para>
   </step>
  </procedure>
+ </sect2>
 </sect1>
 <sect1>
   <title>Removing a &kg; Patch</title>
@@ -168,12 +178,12 @@
     First remove the patch itself using zypper:
    </para>
    <screen>
-    zypper rm kgraft-patch-default
+    zypper rm kgraft-patch-<replaceable>3_12_28-4-default</replaceable>
    </screen>
   </step>
   <step>
    <para>
-    Rebuild the initrd:
+    Then rebuild initrd:
    </para>
    <screen>
     mkinitrd
@@ -181,10 +191,44 @@
   </step>
   <step>
    <para>
-    Reboot the machine.
+    And reboot the machine.
    </para>
   </step>
   </procedure>
+</sect1>
+<sect1>
+ <title>Emergency Procedures And Experimental Functionality</title>
+ <para>
+  &kg; allows some experimental and emergency procedures.
+ </para>
+  <sect2>
+   <title>Stuck Kernel Execution Threads</title>
+   <para>
+    Kernel threads need to be prepared to handle &kg;. Third-party software may
+    not be completely ready for &kg; adoption and its kernel modules may spawn
+    kernel execution threads. These threads will block the patching process
+    indefinitely. As an emergency measure &kg; offers the possibility to force
+    finishing of the patching process without waiting for all execution threads
+    to cross the safety checkpoint. This can be achieved by writing
+    <literal>0</literal> into
+    <filename>/sys/kernel/kgraft/in_progress</filename>. Please consult SUSE
+    Support before performing this procedure.
+   </para>
+  </sect2>
+  <sect2>
+   <title>Live Patch Removal</title>
+   <para>
+    As an experimental feature &kg; supports patch removal. The low-level
+    procedure is similar to patch installation. After writing
+    <literal>1</literal> to
+    <filename>/sys/kernel/kgraft/<replaceable>patch_name</replaceable>/revert</filename>
+    the patch removal process starts. Again, processes need to leave kernel and
+    kernel execution threads need to pass their checkpoints. After patching is
+    finished the corresponding module can be removed from kernel. Please note
+    that after performing this procedure support for the system cannot be
+    claimed on SUSE.
+   </para>
+  </sect2>
 </sect1>
 <sect1>
  <title>The <command>kgr</command> Tool</title>
@@ -236,26 +280,54 @@
   </para>
 </sect1>
 <sect1>
- <title>Limitations of &kg;</title>
+ <title>Scope of &kg; Technology and SLE Live Patching</title>
  <para>
-  &kg; has also some technical limitations. &kg; only replaces functions, not data.
-  Changes in kernel data structure require special care and, if the change is too
-  large, rebooting might be required. &kg; also doesn't specifically handle situations
-  where one compiler is used to compile the old kernel and another compiler is used
-  for compiling the patch.
+  &kg; is based on replacing functions.  Data structure alteration can be
+  accomplished only indirectly with &kg;.  As a result, changes to kernel data
+  structure require special care and, if the change is too large, rebooting
+  might be required. &kg; also might not be able to handle situations where one
+  compiler is used to compile the old kernel and another compiler is used for
+  compiling the patch.
  </para>
  <para>
   Sending SIGSTOP and SIGCONT signals to processes in D process state
   (uninterruptible sleep) does not make them to cross the kernel/user space
   boundary and does not have the intended effect. Also, kernel threads by
-  definition do leave the kernel space and the &kg; patching must be supported
-  at the code level. Support for third-party modules is therefore limited.
+  definition do not leave the kernel space and the &kg; patching must be
+  supported at the kernel code level. Support for third-party modules is
+  therefore limited.
  </para>
  <para>
-  Only CVSS (Common Vulnerability Scoring System) level 6+ vulnerabilities
-  related to system stability or data corruption will be patched using &kg;.
-  For more information on CVSS, see <ulink url="http://nvd.nist.gov/cvss.cfm/" />.
-  <!--kernelové thready, EAL6+ stability fixes, data loss-->
+  Fixes for CVSS (Common Vulnerability Scoring System) level 6+ vulnerabilities
+  and bug fixes related to system stability or data corruption will be shipped
+  in scope of SLE Live Patching.  It might not be possible to produce a live
+  patch for all kinds of fixes fulfilling the above criteria.  SUSE reserves
+  the right to skip fixes where production of a kernel live patch is unviable
+  due to technical reasons.  For more information on CVSS, see <ulink
+  url="http://nvd.nist.gov/cvss.cfm/" />.
+ </para>
+</sect1>
+<sect1>
+ <title>Interaction With the Support Processes</title>
+ <para>
+  In the course of resolving a technical difficulty with SUSE Support, you may
+  receive so called Program Temporary Fix (PTF).  PTFs may be issued for
+  various packages including those forming the base of SLE Live Patching.
+ </para>
+ <para>
+  PTFs issued for the &kg; patch packages can be installed as usual and SUSE
+  will make every effort so that the system in question does not have to be
+  rebooted and future live updates apply cleanly.
+ </para>
+ <para>
+  PTFs issued for the base kernel disrupt the live patching process.  First,
+  installing the PTF kernel means a reboot as kernel cannot be replaced as
+  whole at runtime.  Second, another reboot is needed to replace the PTF with
+  regular maintenance update, for which the live patches are issued.
+ </para>
+ <para>
+  PTFs for other packages in SLE Live Patching can be treated like regular PTFs
+  with the usual guarantees.
  </para>
 </sect1>
 </article>
