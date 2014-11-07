@@ -1,0 +1,1269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd" [
+  <!ENTITY % NOVDOC.DEACTIVATE.IDREF "INCLUDE">
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  %entities;
+]>
+<chapter conformance="sles11,Novell,no,,80" id="raidresize" lang="en" revision="02/22/07">
+  <title>Resizing Software RAID Arrays with mdadm</title>
+  <para>
+   This section describes how to increase or reduce the size of a software
+   RAID 1, 4, 5, or 6 device with the Multiple Device Administration
+   (<command>mdadm(8)</command>) tool.
+  </para>
+  <warning>
+   <para>
+    Before starting any of the tasks described in this section, ensure that
+    you have a valid backup of all of the data.
+   </para>
+  </warning>
+  <itemizedlist role="subtoc">
+   <listitem>
+    <para>
+     <xref linkend="resizeunderstand" xrefstyle="SectTitleOnPage"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="resizeincr" xrefstyle="SectTitleOnPage"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="resizedecr" xrefstyle="SectTitleOnPage"/>
+    </para>
+   </listitem>
+  </itemizedlist>
+  <sect1 id="resizeunderstand">
+   <title>Understanding the Resizing Process</title>
+
+   <para>
+    Resizing an existing software RAID device involves increasing or
+    decreasing the space contributed by each component partition.
+   </para>
+
+   <itemizedlist role="subtoc">
+    <listitem>
+     <para>
+      <xref linkend="b8ppjxz" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <xref linkend="b8pr3ol" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+   </itemizedlist>
+
+   <sect2 id="b8ppjxz">
+    <title>Guidelines for Resizing a Software RAID</title>
+    <para>
+     The <command>mdadm(8)</command> tool supports resizing only for
+     software RAID levels 1, 4, 5, and 6. These RAID levels provide disk
+     fault tolerance so that one component partition can be removed at a
+     time for resizing. In principle, it is possible to perform a hot resize
+     for RAID partitions, but you must take extra care for your data when
+     doing so.
+    </para>
+    <para>
+     The file system that resides on the RAID must also be able to be
+     resized in order to take advantage of the changes in available space on
+     the device. In &productname;, file system resizing utilities are
+     available for file systems Ext2, Ext3, and ReiserFS. The utilities
+     support increasing and decreasing the size as follows:
+    </para>
+    <table id="biuzuno" frame="topbot" rowsep="1" pgwide="0">
+     <title>File System Support for Resizing</title>
+     <tgroup cols="4">
+      <colspec colnum="1" colname="1" colwidth="2500*"/>
+      <colspec colnum="2" colname="2" colwidth="2500*"/>
+      <colspec colnum="3" colname="3" colwidth="2500*"/>
+      <colspec colnum="4" colname="4" colwidth="2500*"/>
+      <thead>
+       <row id="biuzunp">
+        <entry>
+         <para>
+          File System
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Utility
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Increase Size
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Decrease Size
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row id="biuzunq">
+        <entry>
+         <para>
+          Ext2 or Ext3
+         </para>
+        </entry>
+        <entry>
+         <para>
+          resize2fs
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Yes, offline only
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Yes, offline only
+         </para>
+        </entry>
+       </row>
+       <row id="biuzunr">
+        <entry>
+         <para>
+          ReiserFS
+         </para>
+        </entry>
+        <entry>
+         <para>
+          resize_reiserfs
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Yes, online or offline
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Yes, offline only
+         </para>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+    <para>
+     Resizing any partition or file system involves some risks that can
+     potentially result in losing data.
+    </para>
+    <warning>
+     <para>
+      To avoid data loss, ensure that you back up your data before you begin
+      any resizing task.
+     </para>
+    </warning>
+   </sect2>
+
+   <sect2 id="b8pr3ol">
+    <title>Overview of Tasks</title>
+    <para>
+     Resizing the RAID involves the following tasks. The order in which
+     these tasks is performed depends on whether you are increasing or
+     decreasing its size.
+    </para>
+    <table id="b8ppko3" frame="topbot" rowsep="1" pgwide="0">
+     <title>Tasks Involved in Resizing a RAID</title>
+     <tgroup cols="4">
+      <colspec colnum="1" colname="1" colwidth="2500*"/>
+      <colspec colnum="2" colname="2" colwidth="5001*"/>
+      <colspec colnum="3" colname="3" colwidth="1250*"/>
+      <colspec colnum="4" colname="4" colwidth="1250*"/>
+      <thead>
+       <row id="b8pps5o">
+        <entry>
+         <para>
+          Tasks
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Description
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Order If Increasing Size
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Order If Decreasing Size
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row id="b8pps5p">
+        <entry>
+         <para>
+          Resize each of the component partitions.
+         </para>
+         <para/>
+        </entry>
+        <entry>
+         <para>
+          Increase or decrease the active size of each component partition.
+          You remove only one component partition at a time, modify its
+          size, then return it to the RAID.
+         </para>
+        </entry>
+        <entry>
+         <para>
+          1
+         </para>
+        </entry>
+        <entry>
+         <para>
+          2
+         </para>
+        </entry>
+       </row>
+       <row id="b8pps5q">
+        <entry>
+         <para>
+          Resize the software RAID itself.
+         </para>
+        </entry>
+        <entry>
+         <para>
+          The RAID does not automatically know about the increases or
+          decreases you make to the underlying component partitions. You
+          must inform it about the new size.
+         </para>
+        </entry>
+        <entry>
+         <para>
+          2
+         </para>
+        </entry>
+        <entry>
+         <para>
+          3
+         </para>
+        </entry>
+       </row>
+       <row id="b8pps5r">
+        <entry>
+         <para>
+          Resize the file system.
+         </para>
+        </entry>
+        <entry>
+         <para>
+          You must resize the file system that resides on the RAID. This is
+          possible only for file systems that provide tools for resizing,
+          such as Ext2, Ext3, and ReiserFS.
+         </para>
+        </entry>
+        <entry>
+         <para>
+          3
+         </para>
+        </entry>
+        <entry>
+         <para>
+          1
+         </para>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+    <para/>
+   </sect2>
+  </sect1>
+  <sect1 id="resizeincr">
+   <title>Increasing the Size of a Software RAID</title>
+
+   <para>
+    Before you begin, review the guidelines in
+    <xref linkend="resizeunderstand" xrefstyle="SectTitleOnPage"/>.
+   </para>
+
+   <itemizedlist role="subtoc">
+    <listitem>
+     <para>
+      <xref linkend="resizeincrpart" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <xref linkend="resizeincrraid" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <xref linkend="resizeincrfs" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+   </itemizedlist>
+
+   <sect2 id="resizeincrpart">
+    <title>Increasing the Size of Component Partitions</title>
+    <para>
+     Apply the procedure in this section to increase the size of a RAID 1,
+     4, 5, or 6. For each component partition in the RAID, remove the
+     partition from the RAID, modify its size, return it to the RAID, then
+     wait until the RAID stabilizes to continue. While a partition is
+     removed, the RAID operates in degraded mode and has no or reduced disk
+     fault tolerance. Even for RAIDs that can tolerate multiple concurrent
+     disk failures, do not remove more than one component partition at a
+     time.
+    </para>
+    <warning>
+     <para>
+      If a RAID does not have disk fault tolerance, or it is simply not
+      consistent, data loss results if you remove any of its partitions. Be
+      very careful when removing partitions, and ensure that you have a
+      backup of your data available.
+     </para>
+    </warning>
+    <para>
+     The procedure in this section uses the device names shown in the
+     following table. Ensure that you modify the names to use the names of
+     your own devices.
+    </para>
+    <table id="b8prrn8" frame="topbot" rowsep="1" pgwide="0">
+     <title>Scenario for Increasing the Size of Component Partitions</title>
+     <tgroup cols="2">
+      <colspec colnum="1" colname="1" colwidth="5001*"/>
+      <colspec colnum="2" colname="2" colwidth="5001*"/>
+      <thead>
+       <row id="b8pry2e">
+        <entry>
+         <para>
+          RAID Device
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Component Partitions
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row id="b8pry2f">
+        <entry>
+         <para>
+          <filename>/dev/md0</filename>
+         </para>
+        </entry>
+        <entry>
+         <para>
+          <filename>/dev/sda1</filename>
+         </para>
+         <para>
+          <filename>/dev/sdb1</filename>
+         </para>
+         <para>
+          <filename>/dev/sdc1</filename>
+         </para>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+    <para>
+     To increase the size of the component partitions for the RAID:
+    </para>
+    <procedure id="b8pp3av">
+     <step id="b8progi">
+      <para>
+       Open a terminal console, then log in as the
+       <systemitem>root</systemitem> user or equivalent.
+      </para>
+     </step>
+     <step id="b8pp3aw">
+      <para>
+       Ensure that the RAID array is consistent and synchronized by entering
+      </para>
+<screen>
+cat /proc/mdstat
+</screen>
+      <para>
+       If your RAID array is still synchronizing according to the output of
+       this command, you must wait until synchronization is complete before
+       continuing.
+      </para>
+     </step>
+     <step id="b8pp3ax">
+      <para>
+       Remove one of the component partitions from the RAID array. For
+       example, to remove <filename>/dev/sda1</filename>, enter
+      </para>
+<screen>
+mdadm /dev/md0 --fail /dev/sda1 --remove /dev/sda1
+</screen>
+      <para>
+       In order to succeed, both the fail and remove actions must be done.
+      </para>
+     </step>
+     <step id="b8pp3ay">
+      <para>
+       Increase the size of the partition that you removed in
+       <xref linkend="b8pp3ax" xrefstyle="StepXRef"/> by doing one of the
+       following:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Increase the size of the partition, using a disk partitioner such
+         as <command>fdisk(8)</command>, <command>cfdisk(8)</command>, or
+         <command>parted(8)</command>. This option is the usual choice.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         Replace the disk on which the partition resides with a
+         higher-capacity device.
+        </para>
+        <para>
+         This option is possible only if no other file systems on the
+         original disk are accessed by the system. When the replacement
+         device is added back into the RAID, it takes much longer to
+         synchronize the data because all of the data that was on the
+         original device must be rebuilt.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </step>
+     <step id="b8pp3az">
+      <para>
+       Re-add the partition to the RAID array. For example, to add
+       <filename>/dev/sda1</filename>, enter
+      </para>
+<screen>
+mdadm -a /dev/md0 /dev/sda1
+</screen>
+      <para>
+       Wait until the RAID is synchronized and consistent before continuing
+       with the next partition.
+      </para>
+     </step>
+     <step id="b8ps27a">
+      <para>
+       Repeat <xref linkend="b8pp3aw" xrefstyle="StepXRef"/> through
+       <xref linkend="b8pp3az" xrefstyle="StepXRef"/> for each of the
+       remaining component devices in the array. Ensure that you modify the
+       commands for the correct component partition.
+      </para>
+     </step>
+     <step id="b8ps2tp">
+      <para>
+       If you get a message that tells you that the kernel could not re-read
+       the partition table for the RAID, you must reboot the computer after
+       all partitions have been resized to force an update of the partition
+       table.
+      </para>
+     </step>
+     <step id="b8q915s">
+      <para>
+       Continue with
+       <xref linkend="resizeincrraid" xrefstyle="SectTitleOnPage"/>.
+      </para>
+     </step>
+    </procedure>
+   </sect2>
+
+   <sect2 id="resizeincrraid">
+    <title>Increasing the Size of the RAID Array</title>
+    <para>
+     After you have resized each of the component partitions in the RAID
+     (see <xref linkend="resizeincrpart" xrefstyle="SectTitleOnPage"/>), the
+     RAID array configuration continues to use the original array size until
+     you force it to be aware of the newly available space. You can specify
+     a size for the RAID or use the maximum available space.
+    </para>
+    <para>
+     The procedure in this section uses the device name
+     <filename>/dev/md0</filename> for the RAID device. Ensure that you
+     modify the name to use the name of your own device.
+    </para>
+    <procedure id="b8pp3b0">
+     <step id="b8psa0o">
+      <para>
+       Open a terminal console, then log in as the
+       <systemitem>root</systemitem> user or equivalent.
+      </para>
+     </step>
+     <step id="b8pp3b1">
+      <para>
+       Check the size of the array and the device size known to the array by
+       entering
+      </para>
+<screen>
+mdadm -D /dev/md0 | grep -e "Array Size" -e "Device Size"
+</screen>
+     </step>
+     <step id="b8psbwk">
+      <para>
+       Do one of the following:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Increase the size of the array to the maximum available size by
+         entering
+        </para>
+<screen>
+mdadm --grow /dev/md0 -z max
+</screen>
+       </listitem>
+      </itemizedlist>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Increase the size of the array to the maximum available size by
+         entering
+        </para>
+<screen>
+mdadm --grow /dev/md0 -z max --assume-clean
+</screen>
+        <para>
+         The array makes use of any space that has been added to the
+         devices, but this space will not be synchronized. This is
+         recommended for RAID1 because the sync is not needed. It can be
+         useful for other RAID levels if the space that was added to the
+         member devices was pre-zeroed.
+        </para>
+       </listitem>
+      </itemizedlist>
+      <itemizedlist>
+       <listitem>
+        <para>
+         Increase the size of the array to a specified value by entering
+        </para>
+<screen>
+mdadm --grow /dev/md0 -z <replaceable>size</replaceable>
+</screen>
+        <para>
+         Replace <replaceable>size</replaceable> with an integer value in
+         kilobytes (a kilobyte is 1024 bytes) for the desired size.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </step>
+     <step id="b8pp3b3">
+      <para>
+       Recheck the size of your array and the device size known to the array
+       by entering
+      </para>
+<screen>
+mdadm -D /dev/md0 | grep -e "Array Size" -e "Device Size"
+</screen>
+     </step>
+     <step id="b8psgk9">
+      <para>
+       Do one of the following:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         If your array was successfully resized, continue with
+         <xref linkend="resizeincrfs" xrefstyle="SectTitleOnPage"/>.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         If your array was not resized as you expected, you must reboot,
+         then try this procedure again.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </step>
+    </procedure>
+   </sect2>
+
+   <sect2 id="resizeincrfs">
+    <title>Increasing the Size of the File System</title>
+    <para>
+     After you increase the size of the array (see
+     <xref linkend="resizeincrraid" xrefstyle="SectTitleOnPage"/>), you are
+     ready to resize the file system.
+    </para>
+    <para>
+     You can increase the size of the file system to the maximum space
+     available or specify an exact size. When specifying an exact size for
+     the file system, ensure that the new size satisfies the following
+     conditions:
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       The new size must be greater than the size of the existing data;
+       otherwise, data loss occurs.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       The new size must be equal to or less than the current RAID size
+       because the file system size cannot extend beyond the space
+       available.
+      </para>
+     </listitem>
+    </itemizedlist>
+    <sect3 id="b8uks1t">
+     <title>Ext2 or Ext3</title>
+     <para>
+      Ext2 and Ext3 file systems can be resized when mounted or unmounted
+      with the <command>resize2fs</command> command.
+     </para>
+     <procedure id="b8uksb5">
+      <step id="b8uksb6">
+       <para>
+        Open a terminal console, then log in as the
+        <systemitem>root</systemitem> user or equivalent.
+       </para>
+      </step>
+      <step id="b8uksjw">
+       <para>
+        Increase the size of the file system using one of the following
+        methods:
+       </para>
+       <itemizedlist>
+        <listitem>
+         <para>
+          To extend the file system size to the maximum available size of
+          the software RAID device called <filename>/dev/md0</filename>,
+          enter
+         </para>
+<screen>
+resize2fs /dev/md0
+</screen>
+         <para>
+          If a size parameter is not specified, the size defaults to the
+          size of the partition.
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          To extend the file system to a specific size, enter
+         </para>
+<screen>
+resize2fs /dev/md0 <replaceable>size</replaceable>
+</screen>
+         <para>
+          The <replaceable>size</replaceable> parameter specifies the
+          requested new size of the file system. If no units are specified,
+          the unit of the size parameter is the block size of the file
+          system. Optionally, the size parameter can be suffixed by one of
+          the following the unit designators: s for 512 byte sectors; K for
+          kilobytes (1 kilobyte is 1024 bytes); M for megabytes; or G for
+          gigabytes.
+         </para>
+        </listitem>
+       </itemizedlist>
+       <para>
+        Wait until the resizing is completed before continuing.
+       </para>
+      </step>
+      <step id="b8ule4k">
+       <para>
+        If the file system is not mounted, mount it now.
+       </para>
+       <para>
+        For example, to mount an Ext2 file system for a RAID named
+        <filename>/dev/md0</filename> at mount point
+        <filename>/raid</filename>, enter
+       </para>
+<screen>
+mount -t ext2 /dev/md0 /raid
+</screen>
+      </step>
+      <step id="b8ul4ag">
+       <para>
+        Check the effect of the resize on the mounted file system by
+        entering
+       </para>
+<screen>
+df -h
+</screen>
+       <para>
+        The Disk Free (<command>df</command>) command shows the total size
+        of the disk, the number of blocks used, and the number of blocks
+        available on the file system. The -h option print sizes in
+        human-readable format, such as 1K, 234M, or 2G.
+       </para>
+      </step>
+     </procedure>
+    </sect3>
+    <sect3 id="b8ul8fq">
+     <title>ReiserFS</title>
+     <para>
+      As with Ext2 and Ext3, a ReiserFS file system can be increased in size
+      while mounted or unmounted. The resize is done on the block device of
+      your RAID array.
+     </para>
+     <procedure id="b8ul8cv">
+      <step id="b8ul8cw">
+       <para>
+        Open a terminal console, then log in as the
+        <systemitem>root</systemitem> user or equivalent.
+       </para>
+      </step>
+      <step id="b8ul8cx">
+       <para>
+        Increase the size of the file system on the software RAID device
+        called <filename>/dev/md0</filename>, using one of the following
+        methods:
+       </para>
+       <itemizedlist>
+        <listitem>
+         <para>
+          To extend the file system size to the maximum available size of
+          the device, enter
+         </para>
+<screen>
+resize_reiserfs /dev/md0
+</screen>
+         <para>
+          When no size is specified, this increases the volume to the full
+          size of the partition.
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          To extend the file system to a specific size, enter
+         </para>
+<screen>
+resize_reiserfs -s <replaceable>size</replaceable> /dev/md0
+</screen>
+         <para>
+          Replace <replaceable>size</replaceable> with the desired size in
+          bytes. You can also specify units on the value, such as 50000K
+          (kilobytes), 250M (megabytes), or 2G (gigabytes). Alternatively,
+          you can specify an increase to the current size by prefixing the
+          value with a plus (+) sign. For example, the following command
+          increases the size of the file system on
+          <filename>/dev/md0</filename> by 500 MB:
+         </para>
+<screen>
+resize_reiserfs -s +500M /dev/md0
+</screen>
+        </listitem>
+       </itemizedlist>
+       <para>
+        Wait until the resizing is completed before continuing.
+       </para>
+      </step>
+      <step id="b8ulei7">
+       <para>
+        If the file system is not mounted, mount it now.
+       </para>
+       <para>
+        For example, to mount an ReiserFS file system for a RAID named
+        <filename>/dev/md0</filename> at mount point
+        <filename>/raid</filename>, enter
+       </para>
+<screen>
+mount -t reiserfs /dev/md0 /raid
+</screen>
+      </step>
+      <step id="b8ul8cy">
+       <para>
+        Check the effect of the resize on the mounted file system by
+        entering
+       </para>
+<screen>
+df -h
+</screen>
+       <para>
+        The Disk Free (<command>df</command>) command shows the total size
+        of the disk, the number of blocks used, and the number of blocks
+        available on the file system. The -h option print sizes in
+        human-readable format, such as 1K, 234M, or 2G.
+       </para>
+      </step>
+     </procedure>
+    </sect3>
+   </sect2>
+  </sect1>
+  <sect1 id="resizedecr">
+   <title>Decreasing the Size of a Software RAID</title>
+
+   <para>
+    Before you begin, review the guidelines in
+    <xref linkend="resizeunderstand" xrefstyle="SectTitleOnPage"/>.
+   </para>
+
+   <itemizedlist role="subtoc">
+    <listitem>
+     <para>
+      <xref linkend="resizedecrfs" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <xref linkend="resizedecrraid" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <xref linkend="resizedecrpart" xrefstyle="SectTitleOnPage"/>
+     </para>
+    </listitem>
+   </itemizedlist>
+
+   <sect2 id="resizedecrfs">
+    <title>Decreasing the Size of the File System</title>
+    <para>
+     When decreasing the size of the file system on a RAID device, ensure
+     that the new size satisfies the following conditions:
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       The new size must be greater than the size of the existing data;
+       otherwise, data loss occurs.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       The new size must be equal to or less than the current RAID size
+       because the file system size cannot extend beyond the space
+       available.
+      </para>
+     </listitem>
+    </itemizedlist>
+    <para>
+     In SUSE Linux Enterprise Server, Ext2, Ext3, and ReiserFS provide
+     utilities for decreasing the size of the file system. Use the
+     appropriate procedure below for decreasing the size of your file
+     system.
+    </para>
+    <para>
+     The procedures in this section use the device name
+     <filename>/dev/md0</filename> for the RAID device. Ensure that you
+     modify commands to use the name of your own device.
+    </para>
+    <itemizedlist role="subtoc">
+     <listitem>
+      <para>
+       <xref linkend="bznzca1" xrefstyle="HeadingOnPage"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <xref linkend="bznzca8" xrefstyle="HeadingOnPage"/>
+      </para>
+     </listitem>
+    </itemizedlist>
+    <sect3 id="bznzca1">
+     <title>Ext2 or Ext3</title>
+     <para>
+      The Ext2 and Ext3 file systems can be resized when mounted or
+      unmounted.
+     </para>
+     <procedure id="bznzca2">
+      <step id="bznzca3">
+       <para>
+        Open a terminal console, then log in as the
+        <systemitem>root</systemitem> user or equivalent.
+       </para>
+      </step>
+      <step id="bznzca4">
+       <para>
+        Decrease the size of the file system on the RAID by entering
+       </para>
+<screen>
+resize2fs /dev/md0 &lt;size&gt;
+</screen>
+       <para>
+        Replace <replaceable>size</replaceable> with an integer value in
+        kilobytes for the desired size. (A kilobyte is 1024 bytes.)
+       </para>
+       <para>
+        Wait until the resizing is completed before continuing.
+       </para>
+      </step>
+      <step id="bznzca5">
+       <para>
+        If the file system is not mounted, mount it now. For example, to
+        mount an Ext2 file system for a RAID named
+        <filename>/dev/md0</filename> at mount point
+        <filename>/raid</filename>, enter
+       </para>
+<screen>
+mount -t ext2 /dev/md0 /raid
+</screen>
+      </step>
+      <step id="bznzca6">
+       <para>
+        Check the effect of the resize on the mounted file system by
+        entering
+       </para>
+<screen>
+df -h
+</screen>
+       <para>
+        The Disk Free (<command>df</command>) command shows the total size
+        of the disk, the number of blocks used, and the number of blocks
+        available on the file system. The -h option print sizes in
+        human-readable format, such as 1K, 234M, or 2G.
+       </para>
+      </step>
+      <step id="bznzca7">
+       <para>
+        Continue with
+        <xref linkend="resizedecrraid" xrefstyle="SectTitleOnPage"/>.
+       </para>
+      </step>
+     </procedure>
+    </sect3>
+    <sect3 id="bznzca8">
+     <title>ReiserFS</title>
+     <para>
+      ReiserFS file systems can be decreased in size only if the volume is
+      unmounted.
+     </para>
+     <procedure id="bznzca9">
+      <step id="bznzcaa">
+       <para>
+        Open a terminal console, then log in as the
+        <systemitem>root</systemitem> user or equivalent.
+       </para>
+      </step>
+      <step id="bznzcab">
+       <para>
+        Unmount the device by entering
+       </para>
+<screen>
+umount /mnt/point
+</screen>
+       <para>
+        If the partition you are attempting to decrease in size contains
+        system files (such as the root (<filename>/</filename>) volume),
+        unmounting is possible only when booting from a removable device.
+       </para>
+      </step>
+      <step id="bznzcac">
+       <para>
+        Decrease the size of the file system on the software RAID device
+        called <filename>/dev/md0</filename> by entering
+       </para>
+<screen>
+resize_reiserfs -s <replaceable>size</replaceable> /dev/md0
+</screen>
+       <para>
+        Replace <replaceable>size</replaceable> with the desired size in
+        bytes. You can also specify units on the value, such as 50000K
+        (kilobytes), 250M (megabytes), or 2G (gigabytes). Alternatively, you
+        can specify a decrease to the current size by prefixing the value
+        with a minus (-) sign. For example, the following command reduces
+        the size of the file system on <filename>/dev/md0</filename> by 500
+        MB:
+       </para>
+<screen>
+resize_reiserfs -s -500M /dev/md0
+</screen>
+       <para>
+        Wait until the resizing is completed before continuing.
+       </para>
+      </step>
+      <step id="bznzcad">
+       <para>
+        Mount the file system by entering
+       </para>
+<screen>
+mount -t reiserfs /dev/md0 /mnt/point
+</screen>
+      </step>
+      <step id="bznzcae">
+       <para>
+        Check the effect of the resize on the mounted file system by
+        entering
+       </para>
+<screen>
+df -h
+</screen>
+       <para>
+        The Disk Free (<command>df</command>) command shows the total size
+        of the disk, the number of blocks used, and the number of blocks
+        available on the file system. The -h option print sizes in
+        human-readable format, such as 1K, 234M, or 2G.
+       </para>
+      </step>
+      <step id="bznzcaf">
+       <para>
+        Continue with
+        <xref linkend="resizedecrraid" xrefstyle="SectTitleOnPage"/>.
+       </para>
+      </step>
+     </procedure>
+    </sect3>
+   </sect2>
+
+   <sect2 id="resizedecrraid">
+    <title>Decreasing the Size of the RAID Array</title>
+    <para>
+     After you have resized the file system, the RAID array configuration
+     continues to use the original array size until you force it to reduce
+     the available space. Use the <command>mdadm --grow</command> mode to
+     force the RAID to use a smaller segment size. To do this, you must use
+     the -z option to specify the amount of space in kilobytes to use from
+     each device in the RAID. This size must be a multiple of the chunk
+     size, and it must leave about 128KB of space for the RAID superblock to
+     be written to the device.
+    </para>
+    <para>
+     The procedure in this section uses the device name
+     <filename>/dev/md0</filename> for the RAID device. Ensure that you
+     modify commands to use the name of your own device.
+    </para>
+    <procedure id="bznzcau">
+     <step id="bznzcav">
+      <para>
+       Open a terminal console, then log in as the
+       <systemitem>root</systemitem> user or equivalent.
+      </para>
+     </step>
+     <step id="bznzcaw">
+      <para>
+       Check the size of the array and the device size known to the array by
+       entering
+      </para>
+<screen>
+mdadm -D /dev/md0 | grep -e "Array Size" -e "Device Size"
+</screen>
+     </step>
+     <step id="bznzcax">
+      <para>
+       Decrease the size of the array’s device size to a specified value
+       by entering
+      </para>
+<screen>
+mdadm --grow /dev/md0 -z <replaceable>&lt;size</replaceable>&gt;
+</screen>
+      <para>
+       Replace <replaceable>size</replaceable> with an integer value in
+       kilobytes for the desired size. (A kilobyte is 1024 bytes.)
+      </para>
+      <para>
+       For example, the following command sets the segment size for each
+       RAID device to about 40 GB where the chunk size is 64 KB. It includes
+       128 KB for the RAID superblock.
+      </para>
+<screen>
+mdadm --grow /dev/md2 -z 41943168
+</screen>
+     </step>
+     <step id="bznzcay">
+      <para>
+       Recheck the size of your array and the device size known to the array
+       by entering
+      </para>
+<screen>
+mdadm -D /dev/md0 | grep -e "Array Size" -e "Device Size"
+</screen>
+     </step>
+     <step id="bznzcaz">
+      <para>
+       Do one of the following:
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         If your array was successfully resized, continue with
+         <xref linkend="resizedecrpart" xrefstyle="SectTitleOnPage"/>.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         If your array was not resized as you expected, you must reboot,
+         then try this procedure again.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </step>
+    </procedure>
+   </sect2>
+
+   <sect2 id="resizedecrpart">
+    <title>Decreasing the Size of Component Partitions</title>
+    <para>
+     After you decrease the segment size that is used on each device in the
+     RAID, the remaining space in each component partition is not used by
+     the RAID. You can leave partitions at their current size to allow for
+     the RAID to grow at a future time, or you can reclaim this now unused
+     space.
+    </para>
+    <para>
+     To reclaim the space, you decrease the component partitions one at a
+     time. For each component partition, you remove it from the RAID, reduce
+     its partition size, return the partition to the RAID, then wait until
+     the RAID stabilizes. To allow for metadata, you should specify a
+     slightly larger size than the size you specified for the RAID in
+     <xref linkend="resizedecrraid" xrefstyle="SectTitleOnPage"/>.
+    </para>
+    <para>
+     While a partition is removed, the RAID operates in degraded mode and
+     has no or reduced disk fault tolerance. Even for RAIDs that can
+     tolerate multiple concurrent disk failures, you should never remove
+     more than one component partition at a time.
+    </para>
+    <warning>
+     <para>
+      If a RAID does not have disk fault tolerance, or it is simply not
+      consistent, data loss results if you remove any of its partitions. Be
+      very careful when removing partitions, and ensure that you have a
+      backup of your data available.
+     </para>
+    </warning>
+    <para>
+     The procedure in this section uses the device names shown in the
+     following table. Ensure that you modify the commands to use the names
+     of your own devices.
+    </para>
+    <table id="b8q9r5c" frame="topbot" rowsep="1" pgwide="0">
+     <title>Scenario for Increasing the Size of Component Partitions</title>
+     <tgroup cols="2">
+      <colspec colnum="1" colname="1" colwidth="5001*"/>
+      <colspec colnum="2" colname="2" colwidth="5001*"/>
+      <thead>
+       <row id="bznzcai">
+        <entry>
+         <para>
+          RAID Device
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Component Partitions
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row id="bznzcaj">
+        <entry>
+         <para>
+          <filename>/dev/md0</filename>
+         </para>
+        </entry>
+        <entry>
+         <para>
+          <filename>/dev/sda1</filename>
+         </para>
+         <para>
+          <filename>/dev/sdb1</filename>
+         </para>
+         <para>
+          <filename>/dev/sdc1</filename>
+         </para>
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+    <para>
+     To decrease the size of the component partitions for the RAID:
+    </para>
+    <procedure id="bznzcak">
+     <step id="bznzcal">
+      <para>
+       Open a terminal console, then log in as the
+       <systemitem>root</systemitem> user or equivalent.
+      </para>
+     </step>
+     <step id="bznzcam">
+      <para>
+       Ensure that the RAID array is consistent and synchronized by entering
+      </para>
+<screen>
+cat /proc/mdstat
+</screen>
+      <para>
+       If your RAID array is still synchronizing according to the output of
+       this command, you must wait until synchronization is complete before
+       continuing.
+      </para>
+     </step>
+     <step id="bznzcan">
+      <para>
+       Remove one of the component partitions from the RAID array. For
+       example, to remove <filename>/dev/sda1</filename>, enter
+      </para>
+<screen>
+mdadm /dev/md0 --fail /dev/sda1 --remove /dev/sda1
+</screen>
+      <para>
+       In order to succeed, both the fail and remove actions must be done.
+      </para>
+     </step>
+     <step id="bznzcao">
+      <para>
+       Decrease the size of the partition that you removed in
+       <xref linkend="b8pp3ax" xrefstyle="StepXRef"/> to a size that is
+       slightly larger than the size you set for the segment size. The size
+       should be a multiple of the chunk size and allow 128 KB for the RAID
+       superblock. Use a disk partitioner such as <command>fdisk</command>,
+       <command>cfdisk</command>, or <command>parted</command> to decrease
+       the size of the partition.
+      </para>
+     </step>
+     <step id="bznzcap">
+      <para>
+       Re-add the partition to the RAID array. For example, to add
+       <filename>/dev/sda1</filename>, enter
+      </para>
+<screen>
+mdadm -a /dev/md0 /dev/sda1
+</screen>
+      <para>
+       Wait until the RAID is synchronized and consistent before continuing
+       with the next partition.
+      </para>
+     </step>
+     <step id="bznzcaq">
+      <para>
+       Repeat <xref linkend="b8pp3aw" xrefstyle="StepXRef"/> through
+       <xref linkend="b8pp3az" xrefstyle="StepXRef"/> for each of the
+       remaining component devices in the array. Ensure that you modify the
+       commands for the correct component partition.
+      </para>
+     </step>
+     <step id="bznzcar">
+      <para>
+       If you get a message that tells you that the kernel could not re-read
+       the partition table for the RAID, you must reboot the computer after
+       resizing all of its component partitions.
+      </para>
+     </step>
+     <step id="bzo0b0b">
+      <para>
+       (Optional) Expand the size of the RAID and file system to use the
+       maximum amount of space in the now smaller component partitions:
+      </para>
+      <substeps>
+       <step id="bznzcas">
+        <para>
+         Expand the size of the RAID to use the maximum amount of space that
+         is now available in the reduced-size component partitions:
+        </para>
+<screen>
+mdadm --grow /dev/md0 -z max
+</screen>
+       </step>
+       <step id="bzo00hx">
+        <para>
+         Expand the size of the file system to use all of the available
+         space in the newly resized RAID. For information, see
+         <xref linkend="resizeincrfs" xrefstyle="SectTitleOnPage"/>.
+        </para>
+       </step>
+      </substeps>
+     </step>
+    </procedure>
+   </sect2>
+  </sect1>
+ </chapter>
