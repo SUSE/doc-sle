@@ -252,6 +252,104 @@
    project, <ulink url="http://www.netfilter.org"/>
   </para>
  </sect1>
+ <sect1 id="sec.tuning.network.rps">
+  <title>
+   Improving the Network Performance with Receive Packet Steering (RPS)
+  </title>
+  <para>
+   Modern network interface devices can move so many packets that the host
+   can become the limiting factor for achieving maximum performance. In order
+   to keep up, the system must be able to distribute the work across multiple
+   CPU cores.
+  </para>
+  <para>
+   Some modern network interfaces can help distribute the work to multiple CPU
+   cores through the implementation of multiple transmission and multiple
+   receive queues in hardware. However, others are only equipped with a single
+   queue and the driver must deal with all incoming packets in a single,
+   serialized stream. To work around this issue, the operating system must
+   "parallelize" the stream to distribute the work across multiple CPUs. On
+   &productname; this is done via Receive Packet Steering (RPS). RPS can also
+   be used in virtual environments.
+  </para>
+  <para>
+   RPS creates a unique hash for each data stream using IP addresses and port
+   numbers. The use of this hash ensures that packets for the same data stream
+   ta are sent to the same CPU, which helps to increase performance.
+  </para>
+  <para>
+   RPS is configured per network device receive queue and interface. The
+   configuration file names match the following scheme:
+  </para>
+  <screen>/sys/class/net/<replaceable>&lt;device&gt;</replaceable>/queues/<replaceable>&lt;rx-queue&gt;</replaceable>/rps_cpus</screen>
+  <para>
+   where <replaceable>&lt;device&gt;</replaceable> is the network device, such as
+   <literal>eth0</literal>, <literal>eth1</literal>, and
+   <replaceable>&lt;rx-queue&gt;</replaceable> is the receive queue, such as
+   <literal>rx-0</literal>, <literal>rx-1</literal>.
+  </para>
+  <para>
+   If the network interface hardware only supports a single receive queue,
+   only <literal>rx-0</literal> will exist. If it supports multiple receive
+   queues, there will be an rx-<replaceable>N</replaceable> directory for each
+   receive queue.
+  </para>
+  <para>
+   These configuration files contain a comma-delimited list of CPU bitmaps. By
+   default, all bits are set to <literal>0</literal>. With this setting RPS is
+   disabled and therefore the CPU which handles the interrupt will also
+   process the packet queue.
+  </para>
+  <para>
+   To enable RPS and enable specific CPUs to process packets for the receive
+   queue of the interface, set the value of their positions in the bitmap to
+   <literal>1</literal>. For example, to enable CPUs 0-3 to process packets
+   for the first receive queue for eth0, you would need to set bit positions
+   0-3 to 1 in binary, this value is <literal>00001111</literal>. Tt needs to
+   be converted to hex&mdash;which results in <literal>F</literal> in this
+   case. Set this hex value with the following command:
+  </para>
+  <screen>echo "f" > /sys/class/net/eth0/queues/rx-0/rps_cpus</screen>
+  <para>
+   If you wanted to enable CPUs 8-15:
+  </para>
+  <screen>1111 1111 0000 0000 (binary)
+15     15    0    0 (decimal)
+F       F    0    0 (hex)</screen>
+  <para>
+   The command to set the hex value of  <literal>ff00</literal> would be:
+  </para>
+  <screen>echo "ff00" > /sys/class/net/eth0/queues/rx-0/rps_cpus</screen>
+
+  <para>
+   On NUMA machines, best performance can be achieved by configuring RPS to
+   use the CPUs on the same NUMA node as the interrupt for the interface's
+   receive queue.
+  </para>
+  <para>
+   On non-NUMA machines, all CPUs can be used. If the interrupt rate is very
+   high, excluding the CPU handling the network interface can boost performance.
+   The CPU being used for the network interface can be determined from
+   <filename>/proc/interrupts</filename>. For example:
+  </para>
+  <screen>&prompt.root;cat /proc/interrupts 
+            CPU0       CPU1       CPU2       CPU3
+...
+  51:  113915241          0          0          0      Phys-fasteoi   eth0
+...</screen>
+
+  <para>
+   In this case, <literal>CPU 0</literal>, is the only CPU processing
+   interrupts for <literal>eth0</literal>, since only <literal>CPU0</literal>
+   contains a non-zero value.
+  </para>
+  <para>
+   On i586 and x86_64 platforms, <command>irqbalance</command> can be used to
+   distribute hardware interrupts across CPUs. See <command>man 1
+   irqbalance</command> for more details.
+  </para>
+ </sect1>
+
 <!-- tuning NFS performance:
       http://blogs.techrepublic.com.com/opensource/?p=64&tag=rbxccnbtr1
  -->
