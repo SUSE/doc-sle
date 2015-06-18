@@ -1,0 +1,458 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd">
+<!--
+*********************************
+Please see LICENSE.txt for this document's license.
+*********************************
+-->
+<chapter xml:base="uefi.xml" id="cha.uefi">
+ <title>UEFI (Unified Extensible Firmware Interface)</title>
+ <para>
+  UEFI (Unified Extensible Firmware Interface) は、システムハードウェアに付属のファームウェア、システムのすべてのハードウェアコンポーネント、およびオペレーティングシステムの間のインタフェースです。
+ </para>
+ <para>
+  UEFIは、従来のPC-BIOSに代わって、PCで幅広く利用されるようになっています。例えば、UEFIは64ビットシステムを適切にサポートし、最も重要な機能の1つである安全なブート(<quote>セキュアブート</quote>、ファームウェアバージョン2.3.1c以降が必要)を提供します。最後に、UEFIを使用すると、すべてのx86プラットフォームで標準のファームウェアが利用可能になります。
+ </para>
+ <para>
+  さらに、UEFIには以下の利点があります。
+ </para>
+ <itemizedlist mark="bullet" spacing="normal">
+  <listitem>
+   <para>
+    GUIDパーティションテーブル(GPT)を使う大きなディスク(2 TiB以上)からのブート。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    CPUに依存しないアーキテクチャおよびドライバ。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    ネットワーク機能を持つ柔軟なプレOS環境。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    PC-BIOSライクなエミュレーション経由でレガシーオペレーティングシステムのブートをサポートするCSM(Compatibiity Support Module)。
+   </para>
+  </listitem>
+ </itemizedlist>
+ <para>
+  詳細については、<ulink url="http://en.wikipedia.org/wiki/Unified_Extensible_Firmware_Interface"/>を参照してください。以降のセクションは、UEFIの一般的な概要を示すものではなく、特定の機能がSUSE Linux Enterpriseにどのように実装されているかを示すヒントです。
+ </para>
+ <sect1 id="sec.uefi.secboot">
+  <title>セキュアブート</title>
+
+
+
+  <para>
+   UEFIの世界では、ブートストラッププロセスの保護とは、信頼チェーンの確立を意味します。SUSE Linux Enterpriseとの関連では、<quote/>「プラットフォーム」はこの信頼チェーンのルートであり、マザーボードおよびオンボードファームウェアが<quote/>「プラットフォーム」とみなされます。また、別の言い方をすれば、ハードウェアベンダー、およびそのハードウェアベンダーからコンポーネントの製造元やOSベンダーなどにつながる信頼チェーンです。
+  </para>
+
+  <para>
+   信頼は公開鍵の暗号で表されます。ハードウェアベンダーは、ファームウェアにいわゆるプラットフォームキー(PK)を設定し、信頼のルートを表します。オペレーティングシステムベンダーなどとの信頼関係は、このプラットフォームキーを使ってキーに署名することによって文書化されます。
+  </para>
+
+  <para>
+   最後に、これらの<quote/>「信頼された」キーのいずれかで署名されていない限りファームウェアがコード(OSブートローダも、PCI Expressカードやディスクのフラッシュメモリに保存されたドライバも、ファームウェアのアップデートも)を実行できないようにすることによって、セキュリティが確立されます。
+  </para>
+
+  <para>
+   基本的に、セキュアブートを使用するには、ファームウェアによって信頼されたキーで署名されたOSローダが必要であり、読み込むカーネルが信頼できることを検証するためにOSローダが必要です。
+  </para>
+
+  <para>
+
+   キー交換キー(KEK)をUEFIキーデータベースに追加できます。この方法で、PKのプライベート部分で署名されている限り、他の証明書を使用できます。
+
+  </para>
+
+  <sect2 id="sec.uefi.secboot.sle">
+   <title>SUSE Linux Enterpriseへの実装</title>
+   <para>
+    Microsoftのキー交換キー(KEK)がデフォルトでインストールされます。
+   </para>
+   <note>
+    <title>GUIDパーティションテーブル(GPT)が必要</title>
+    <para>
+     セキュアブート機能を使用するには、マスタブートレコード(MBR)を使用した古いパーティションをGUIDパーティションテーブル(GPT)に置換する必要があります。
+    </para>
+    <para>
+     YaSTは、インストール時にEFIモードを検出すると、GPTパーティションの作成を試みます。UEFIでは、FATフォーマットのEFIシステムパーティション(ESP)上でEFIプログラムが見つかるものと想定されます。
+    </para>
+   </note>
+
+   <para>
+    UEFIセキュアブートに対応するには、基本的に、ブートローダがデジタル署名されており、ファームウェアがそのデジタル署名を信頼されたキーとして認識することが必要です。SUSE Linux Enterpriseのお客様の利便性を考え、このキーはファームウェアによってあらかじめ信頼されているので、手動での操作は不要です。
+   </para>
+   <para>
+    これには2つの方法があります。1つは、ハードウェアベンダーにSUSEキーを署名してもらい、SUSEがその署名を使ってブートローダに署名する方法です。もう1つは、MicrosoftのWindows Logo Certificationプログラムを利用してブートローダの認定を受け、MicrosoftにSUSE署名キーを認識してもらう(つまり、MicrosoftのKEKを使って署名してもらう)方法です。これで、SUSEは、UEFI署名サービス(この場合はMicrosoft)によって署名されたローダを入手できます。
+   </para>
+
+   <figure id="fig.uefi.secure.boot.mok2">
+    <title>UEFIのセキュアブートプロセス</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="uefi-secure-boot-mok2.png" width="50%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="uefi-secure-boot-mok2.png" width="80%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    実装階層においてSUSEは<systemitem>shim</systemitem>ローダを使用します。これは法的問題を回避するスマートなソリューションで、証明書および署名の手順が大幅に簡素化されます。<systemitem>shim</systemitem>ローダの処理は、ELILOやGRUB 2などのブートローダをロードすることです。次にこのブートローダが、SUSEキーのみで署名されたカーネルをロードします。SUSEは、UEFIセキュアブートが有効化されたSLE11 SP3の新規インストールで、この機能を提供します。
+   </para>
+
+
+
+   <para>
+    信頼ユーザには2種類あります。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      1つ目は、キーを保持するユーザです。プラットフォームキー(PK)によって、ほとんどすべてのことが許可されます。キー交換キー(KEK)では、PKの変更を除き、PKに可能なすべてのことが許可されます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      2つ目は、マシンに物理的にアクセスできる任意のユーザです。物理的にアクセスできるユーザは、マシンを再起動したりUEFIを設定したりできます。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    UEFIには、これらのユーザのニーズを満たすため、2種類の変数があります。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      1つ目は<quote>認証変数</quote>と呼ばれるもので、ブートプロセス(いわゆるブートサービス環境)および実行中のOSの両方から更新できますが、更新できるのは、古い変数値の署名に使用されたものと同じキーを使って新しい変数値が署名されている場合のみです。また、この変数は、より大きなシリアル番号を持つ値にのみ追加または変更できます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      2つ目は、<quote>ブートサービス専用変数</quote>と呼ばれるものです。この変数は、ブートプロセス中に動作する任意のコードにアクセスできます。ブートプロセスの終了後、OSが起動する前に、ブートローダは<literal>ExitBootServices</literal>コールを呼び出す必要があります。その後、これらの変数にはアクセスできなくなり、OSはこれらに触れられません。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    さまざまなUEFIキーリストは1つ目のタイプなので、オンラインでの更新、追加、および、キー/ドライバ/ファームウェアの指紋のブラックリスト登録ができます。セキュアブートの実装に役立つのは、2つ目の<quote>Boot Service Only Variable(ブートサービス専用変数)</quote>です。これは、安全かつオープンソースで使いやすくなっており、GPL v3と互換性があるためです。
+   </para>
+   <para>
+    SUSEは、最初にFedoraによった開発された<systemitem>shim</systemitem> (小さくシンプルなEFIブートローダ)で起動します。システム上のUEFIキーデータベースで利用可能なKEKにもとづいて、SUSE KEKで署名された証明書およびMicrosoft発行の証明書によって署名されます。
+   </para>
+   <para>
+    これによって<systemitem>shim</systemitem>のロードおよび実行が可能になります。
+   </para>
+   <para>
+    <systemitem>shim</systemitem>は、続いて、ロードしようとしているブートローダが信頼されていることを確認します。デフォルトで、<systemitem>shim</systemitem>は、本体に組み込まれている独自のSUSE証明書を使用します。また、<systemitem>shim</systemitem>は、追加のキーを<quote>登録</quote>してデフォルトのSUSEキーを上書きできます。以下、これらを<quote>マシン所有者キー</quote>、または省略してMOKと呼びます。
+   </para>
+   <para>
+    次に、ブートローダはカーネルを検証および起動し、カーネルがモジュールで同じことを実行します。
+   </para>
+  </sect2>
+
+  <sect2 id="sec.uefi.secboot.mok">
+   <title>Machine Owner Key(マシン所有者キー、MOK)</title>
+
+   <para>
+    ユーザ(<quote>マシンの所有者</quote>)がブートプロセスの任意のコンポーネントを置換する場合は、Machine Owner Key(マシン所有者キー、MOK)を使用します。<systemitem>mokutils</systemitem>ツールがコンポーネントの署名およびMOKの管理を支援します。
+   </para>
+   <para>
+    登録プロセスでは、まずマシンを起動し、<systemitem>shim</systemitem>のロード中に(キーを押すなどして)ブートプロセスを中断します。これによって<systemitem>shim</systemitem>が登録モードに移行するので、ユーザは、デフォルトのSUSEキーをブートパーティションのファイルに含まれるキーに置換できます。ユーザがこの処理を選択すると、<systemitem>shim</systemitem>はそのファイルのハッシュを計算し、結果を<quote>Boot Service Only(ブートサービス専用)</quote>変数にします。これによって<systemitem>shim</systemitem>は、ブートサービス以外でファイルが変更された場合にその変更を検出でき、ユーザ承認済みのMOKリストの改ざんを回避できます。
+   </para>
+   <para>
+    これらすべてがブート時に行われ、検証済みのコードのみが実行されます。このため、コンソールにいるユーザのみがマシン所有者のキーセットを使用できます。OSにリモートアクセスするマルウェアやハッカーではあり得ません。ハッカーやマルウェアはファイルの変更しかできず、<quote>Boot Service Only(ブートサービス専用)</quote>変数に保存されたハッシュを変更できないためです。
+   </para>
+   <para>
+    いったんロードされ<systemitem>shim</systemitem>によって検証されたブートローダは、カーネルを検証する場合は<systemitem>shim</systemitem>にコールバックします(検証コードの複製を避けるため)。<systemitem>shim</systemitem>はMOKと同じリストを使用し、カーネルをロードできるかどうかをブートローダに知らせます。
+   </para>
+   <para>
+    このようにして、独自のカーネルまたはブートローダをインストールできます。物理的にそこにいることによって新しいキーセットをインストールしそれを認証する必要があるのは、最初の再起動時のみです。MOKは単一のMOKではなくリストなので、<systemitem>shim</systemitem>に複数のベンダーのキーを信頼させることができ、ブートローダからのデュアルブートやマルチブートが可能です。
+   </para>
+  </sect2>
+
+  <sect2 id="sec.uefi.secboot.custom">
+   <title>カスタムカーネルのブート</title>
+   <para>
+    以下は<ulink url="http://en.opensuse.org/openSUSE:UEFI#Booting_a_custom_kernel"/>にもとづいています。
+   </para>
+   <para>
+    セキュアブートでは、セルフコンパイルカーネルを使用できます。ただし、独自の証明書を使って署名し、その証明書をファームウェアまたはMOKに知らせる必要があります。
+   </para>
+   <procedure>
+    <step performance="required">
+     <para>
+      カスタムのX.509キー、および署名に使用される証明書を作成します。
+     </para>
+<screen>openssl req -new -x509 -newkey rsa:2048 -keyout key.asc \
+  -out cert.pem -nodes -days 666 -subj "/CN=$USER/"</screen>
+     <para>
+
+      証明書の作成の詳細については、<ulink url="http://en.opensuse.org/openSUSE:UEFI_Image_File_Sign_Tools#Create_Your_Own_Certificate"/>を参照してください。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      PKCS#12形式でキーと証明書をパッケージ化します。
+     </para>
+<screen>openssl pkcs12 -export -inkey key.asc -in cert.pem \
+  -name kernel_cert -out cert.p12</screen>
+    </step>
+    <step performance="required">
+     <para>
+      <command>pesign</command>とともに使用するNSSデータベースを生成します。
+     </para>
+<screen>certutil -d . -N</screen>
+    </step>
+    <step performance="required">
+     <para>
+      PKCS#12に含まれるキーおよび証明書をNSSデータベースにインポートします。
+     </para>
+<screen>pk12util -d . -i cert.p12</screen>
+    </step>
+    <step performance="required">
+     <para>
+      <command>pesign</command>を使用して、新しい署名でカーネルを<quote>bless</quote>します。
+     </para>
+<screen>pesign -n . -c kernel_cert -i arch/x86/boot/bzImage \
+  -o vmlinuz.signed -s</screen>
+    </step>
+    <step performance="required">
+     <para>
+      カーネルイメージの署名をリスト表示します。
+     </para>
+<screen>pesign -n . -S -i vmlinuz.signed</screen>
+     <para>
+      その時点で、通常通り<filename>/boot</filename>にカーネルをインストールできます。カーネルにはカスタム署名があるため、署名に使用された証明書をUEFIファームウェアまたはMOKにインポートする必要があります。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      ファームウェアまたはMOKにインポートするため、証明書をDERフォーマットに変換します。
+     </para>
+<screen>openssl x509 -in cert.pem -outform der -out cert.der</screen>
+    </step>
+    <step performance="required">
+     <para>
+      よりアクセスしやすくするため、証明書をESPにコピーします。
+     </para>
+<screen>sudo cp cert.der /boot/efi/</screen>
+    </step>
+    <step performance="required">
+     <para>
+      <command>mokutil</command>を使用して自動的にMOKリストを起動します。
+     </para>
+     <substeps performance="required">
+      <step performance="required">
+       <para>
+        証明書をMOKにインポートします。
+       </para>
+<screen>mokutil --root-pw --import cert.der</screen>
+       <para>
+        <option>--root-pw</option>オプションにより、<systemitem class="username">root</systemitem>ユーザを直接使用できます。
+       </para>
+      </step>
+      <step performance="required">
+       <para>
+        これから登録する証明書のリストを確認します。
+       </para>
+<screen>mokutil --list-new</screen>
+      </step>
+      <step performance="required">
+       <para>
+        システムを再起動します。<systemitem>shim</systemitem>によってMokManagerが起動されるはずです。<systemitem class="username">root</systemitem>パスワードを入力して、MOKリストに証明書をインポートすることを確認してください。
+       </para>
+      </step>
+      <step performance="required">
+       <para>
+        新しくインポートしたキーが登録されたかどうかを確認します。
+       </para>
+<screen>mokutil --list-enrolled</screen>
+      </step>
+     </substeps>
+     <substeps performance="required">
+      <step performance="required">
+       <para>
+        また、MOKを手動で起動する場合は以下の手順を実行します。
+       </para>
+       <para>
+        再起動
+       </para>
+      </step>
+      <step performance="required">
+       <para>
+        GRUB 2メニューで&lt;<literal>c</literal>&gt;キーを押します。
+       </para>
+      </step>
+      <step performance="required">
+       <para>
+        以下のコマンドをタイプします。
+       </para>
+<screen>chainloader $efibootdir/MokManager.efi
+boot</screen>
+      </step>
+      <step performance="required">
+       <para>
+        <guimenu>Enroll key from disk</guimenu>を選択します。
+       </para>
+      </step>
+      <step performance="required">
+       <para>
+        <filename>cert.der</filename>ファイルに移動して&lt;<keycap function="enter"/>&gt;キーを押します。
+       </para>
+      </step>
+      <step performance="required">
+       <para>
+        指示に従ってキーを登録します。通常、「<literal>0</literal>」を押してから「<literal>y</literal>」を押して確認します。
+       </para>
+       <para>
+        また、ファームウェアメニューに、署名データベースに新しいキーを追加する方法が用意されている場合があります。
+       </para>
+      </step>
+     </substeps>
+    </step>
+   </procedure>
+
+
+  </sect2>
+
+  <sect2 id="sec.uefi.secboot.feats">
+
+   <title>機能と制限</title>
+   <para>
+    セキュアブートモードでブートする場合、次の機能が適用されます。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      UEFIのデフォルトのブートローダがある場所へのインストール。これは、EFIブートエントリを維持または復元するメカニズムです。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      UEFIを介して再起動する。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      フォールバック先のレガシーBIOSがない場合、XenハイバーバイザはUEFIを使用してブートする。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      UEFI IPv6 PXEブートのサポート。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      UEFIはビデオモードのサポートを利用できる。カーネルはUEFIからビデオモードを取得して、同じパラメータでKMSモードを設定できます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      USBデバイスからのUEFIブートがサポートされる。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    セキュアブートモードでブートする場合、次の制限が適用されます。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      セキュアブートを簡単に回避できないようにするため、セキュアブートで実行する場合は一部のカーネル機能が無効になっています。
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      ブートローダ、カーネル、およびカーネルモジュールが署名されている必要があります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      KexecおよびKdumpは無効になっています。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ハイバネーション(ディスクの休止)は無効になっています。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ルートユーザであっても、<filename>/dev/kmem</filename>および<filename>/dev/mem</filename>にアクセスできません。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ルートユーザであっても、I/Oポートにアクセスできません。すべてのX11グラフィカルドライバはカーネルドライバを使用する必要があります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      sysfs経由でPCI BARにアクセスすることはできません。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ACPIの<literal>custom_method</literal>は使用できません。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      asus-vmiモジュールに対してdebufgsを使用できません。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>acpi_rsdp</literal>パラメータはカーネルに影響を及ぼしません。
+     </para>
+    </listitem>
+   </itemizedlist>
+
+  </sect2>
+ </sect1>
+ <sect1 id="sec.uefi.moreinfo">
+  <title>その他の情報</title>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <ulink url="http://www.uefi.org"/> —UEFIのホームページです。現在のUEFI仕様が掲載されています。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Olaf Kirch氏およびVojtěch Pavlík氏によるブログ記事(上の章の内容はこれらの記事に基づいています)。
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       <ulink url="http://www.suse.com/blogs/uefi-secure-boot-plan/"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <ulink url="http://www.suse.com/blogs/uefi-secure-boot-overview/"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <ulink url="http://www.suse.com/blogs/uefi-secure-boot-details/"/>
+      </para>
+     </listitem>
+    </itemizedlist>
+   </listitem>
+   <listitem>
+    <para>
+     <ulink url="http://en.opensuse.org/openSUSE:UEFI"/> —UEFIとopenSUSEに関するページです。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+
+</chapter>

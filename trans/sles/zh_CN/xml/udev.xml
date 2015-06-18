@@ -1,0 +1,767 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd">
+<!--
+*********************************
+Please see LICENSE.txt for this document's license.
+*********************************
+-->
+<chapter xml:base="udev.xml" id="cha.udev">
+ <title>使用 <systemitem class="service">udev</systemitem> 进行动态内核设备管理</title>
+ <para>
+  内核几乎可以添加或删除运行系统中的任何设备。设备状态的更改（无论插入还是移除设备）需要传播给用户空间。插入或者识别设备后需要进行配置。某个设备已识别状态的任何更改都需要通知给此设备的用户。<systemitem class="service">udev</systemitem> 可提供所需的基础结构来动态维护 <filename>/dev</filename> 目录中的设备节点文件和符号链接。<systemitem class="service">udev</systemitem> 规则提供了将外部工具插入内核设备事件处理的方式。这使您能够自定义 <systemitem class="service">udev</systemitem> 设备处理，例如通过添加特定脚本来作为内核设备处理的一部分执行，或者请求并导入额外数据以在设备处理期间评估。
+ </para>
+ <sect1 id="sec.udev.devdir">
+  <title><filename>/dev</filename> 目录</title>
+
+  <para>
+   <filename>/dev</filename> 目录中的设备节点提供对相应的内核设备的访问。使用 <systemitem class="service">udev</systemitem> 时，<filename>/dev</filename> 目录反映内核的当前状态。每个内核设备都有相应的设备文件。如果设备从系统断开，则删除此设备节点。
+  </para>
+
+  <para>
+   <filename>/dev</filename> 目录的内容保存在临时文件系统中，所有文件都是在每个系统启动时提供的。手动创建或修改的文件在重引导时是有意不保存的。无论可使用 systemd-tmpfiles 创建的相应内核设备状态如何，静态文件和目录都始终应存在于 <filename>/dev</filename> 目录中。配置文件位于 <filename>/usr/lib/tmpfiles.d/</filename> 和 <filename>/etc/tmpfiles.d/</filename> 中。有关详细信息，请参见 <systemitem>systemd-tmpfiles(8)</systemitem> 手册页。
+  </para>
+ </sect1>
+ <sect1 id="sec.udev.kernel">
+  <title>内核 <systemitem class="service">uevents</systemitem> 和 <systemitem class="service">udev</systemitem></title>
+
+  <para>
+   必需的设备信息由 <systemitem class="filesystem">sysfs</systemitem> 文件系统导出。对于内核检测到并已初始化的设备，将创建一个带有该设备名称的目录。它包含带有特定于设备属性的属性文件。
+  </para>
+
+  <para>
+   每次添加或删除设备时，内核都会发送 uevent 来向 <systemitem class="service">udev</systemitem> 通知更改。一旦启动，<systemitem class="service">udev</systemitem> 守护程序便会读取和分析 <filename>/etc/udev/rules.d/*.rules</filename> 文件中提供的所有规则，并将它们保留在内存中。如果更改、添加或删除了规则文件，则守护程序可以使用命令 <command>udevadm control reload_rules</command> 重新装载所有规则在内存中的表示形式。有关 <systemitem class="service">udev</systemitem> 规则及其语法的更多细节，请参见<xref linkend="sec.udev.rules"/>。
+  </para>
+
+  <para>
+   每个接收到的事件都根据所提供的规则集进行匹配。这些规则可以增加或更改事件环境键、为要创建的设备节点请求特定名称、添加指向该节点的符号链接或者添加设备节点创建后运行的程序。从内核 netlink 套接字接收驱动程序核心 <systemitem class="service">uevent</systemitem>。
+  </para>
+ </sect1>
+ <sect1 id="sec.udev.drivers">
+  <title>驱动程序、内核模块和设备</title>
+
+  <para>
+   设备的内核总线驱动程序探测。对于每个检测到的设备，内核都会在驱动程序核心将 uevent 发送到 <systemitem class="service">udev</systemitem> 守护程序时创建内部设备结构。总线设备通过特殊格式的 ID 来标识自己，这可以识别设备的类型。通常，这些 ID 由供应商和产品 ID 以及其他特定于子系统的值组成。每个总线都有自己对于这些 ID 的方案，称为 <envar>MODALIAS</envar>。内核获取设备信息，由此组成一个 <envar>MODALIAS</envar> ID 字符串，并将该字符串与事件一起发送。对于 USB 鼠标，如下所示：
+  </para>
+
+<screen>MODALIAS=usb:v046DpC03Ed2000dc00dsc00dp00ic03isc01ip02</screen>
+
+  <para>
+   每个设备驱动程序都带有它可以处理的设备的已知别名列表。这个列表包含在内核模块文件中。程序 depmod 读取 ID 列表并在内核的 <filename>/lib/modules</filename> 目录中为所有当前可用的模块创建文件 <filename>modules.alias</filename>。使用这种基础结构，模块的装载就如为每个带有 <command>MODALIAS</command> 关键字的事件调用 <literal>modprobe</literal> 一样简单。如果调用 <command>modprobe $MODALIAS</command>，它将组成该设备的设备别名与模块提供的别名相匹配。如果找到匹配的项，则装载该模块。所有这些操作均由 <systemitem class="service">udev</systemitem> 自动触发。
+  </para>
+ </sect1>
+ <sect1 id="sec.udev.boot">
+  <title>引导和启动设备设置</title>
+
+  <para>
+   在 <systemitem class="service">udev</systemitem> 守护程序运行之前的引导进程中发生的所有设备事件都会丢失，因为处理这些事件的基础结构保存在 root 文件系统中，并且此时不可用。为了弥补此损失，内核提供了一个 <filename>uevent</filename> 文件，该文件位于 sysfs 文件系统每个设备的设备目录中。<systemitem class="filesystem"/>通过将 <literal>add</literal> 写入到该文件，内核将再次发送引导时丢失的相同事件。<filename>/sys</filename> 触发器中所有 <filename>uevent</filename> 文件的简单循环将再次触发所有事件来创建设备节点并执行设备设置。
+  </para>
+
+  <para>
+   例如，在引导期间出现的 USB 鼠标可能不会由早期引导逻辑初始化，因为驱动程序在那时不可用。此设备发现的事件丢失并且不能为该设备查找内核模块。不用手动搜索可能连接的设备，<systemitem class="service">udev</systemitem> 会在根文件系统可用后从内核请求所有设备事件，以便 USB 鼠标设备的事件可以再次运行。现在它在装入的 root 文件系统上找到内核模块，因此可以初始化 USB 鼠标。
+  </para>
+
+  <para>
+   在用户空间中，设备冷插入序列和运行时期间发现的设备之间没有明显的区别。在这两种情况下，使用相同的规则来匹配并且运行相同的配置程序。
+  </para>
+ </sect1>
+ <sect1 id="sec.udev.debug">
+  <title>监视正在运行的 <systemitem class="service">udev</systemitem> 守护程序</title>
+
+  <para>
+   程序 <command>udevadm monitor</command> 可以用于将驱动程序核心事件和 udev 事件处理的计时可视化。<systemitem class="service"/>
+  </para>
+
+<screen>UEVENT[1185238505.276660] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UDEV  [1185238505.279198] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UEVENT[1185238505.279527] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UDEV  [1185238505.285573] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UEVENT[1185238505.298878] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UDEV  [1185238505.305026] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UEVENT[1185238505.305442] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)
+UEVENT[1185238505.306440] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.325384] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.342257] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)</screen>
+
+  <para>
+   <literal>UEVENT</literal> 行显示内核已经通过 netlink 发送的事件。<literal>UDEV</literal> 行显示已经完成的 udev 事件处理程序。<systemitem class="service"/>计时以微秒为单位显示。<literal>UEVENT</literal> 和 <literal>UDEV</literal> 之间的时间是 udev 用于处理此事件或者 udev 守护程序延迟执行从而同步此事件与相关以及已运行的事件的时间。<systemitem class="service"/><systemitem class="service"/>例如，硬盘分区的事件总是等待主磁盘设备事件完成，因为分区事件可能依赖于主磁盘事件从硬件查询的数据。
+  </para>
+
+  <para>
+   <command>udevadm monitor --env</command> 显示完整的事件环境：
+  </para>
+
+<screen>ACTION=add
+DEVPATH=/devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10
+SUBSYSTEM=input
+SEQNUM=1181
+NAME="Logitech USB-PS/2 Optical Mouse"
+PHYS="usb-0000:00:1d.2-1/input0"
+UNIQ=""
+EV=7
+KEY=70000 0 0 0 0
+REL=103
+MODALIAS=input:b0003v046DpC03Ee0110-e0,1,2,k110,111,112,r0,1,8,amlsfw</screen>
+
+  <para>
+   <systemitem class="service">udev 也将消息发送给 syslog。</systemitem>用于控制将哪些消息发送到系统日志的默认系统日志优先级在 <systemitem class="service">udev</systemitem> 配置文件 <filename>/etc/udev/udev.conf</filename> 中指定。可以使用 <command>udevadm control log_priority=<replaceable>level/number</replaceable></command> 更改正在运行的守护程序的日志优先权。
+  </para>
+ </sect1>
+ <sect1 id="sec.udev.rules">
+  <title>使用 <systemitem class="service">udev</systemitem> 规则影响内核设备事件处理</title>
+
+  <para>
+   <systemitem class="service">udev</systemitem> 规则可以与内核添加到事件本身的属性或者内核导出到 <filename>sysfs</filename> 的任何信息匹配。规则还可以从外部程序请求其他信息。根据提供的规则匹配每个事件。所有规则都位于 <filename>/etc/udev/rules.d</filename> 目录下。
+  </para>
+
+  <para>
+   规则文件中的每一行至少包含一个关键字值对。有两种类型的关键字，匹配关键字和指派关键字。如果所有匹配关键字与它们的值匹配，则应用此规则并将指派关键字指派给特定的值。匹配规则可以指定设备节点的名称、添加指向该节点的符号链接或者运行作为事件处理一部分的特定程序。如果找不到匹配的规则，则使用默认设备节点名来创建设备节点。<systemitem class="service">udev</systemitem> 手册页中描述了有关规则语法和提供用来与数据匹配或导入数据的关键字的详细信息。以下示例规则提供了 <systemitem class="service">udev</systemitem> 规则语法的基本介绍。这些示例规则全部取自 <filename>/etc/udev/rules.d/50-udev-default.rules</filename> 下的 <systemitem class="service">udev</systemitem> 默认规则集。
+  </para>
+
+  <example id="ex.rules">
+   <title>示例 <systemitem class="service">udev</systemitem> 规则</title>
+<screen># console
+KERNEL=="console", MODE="0600", OPTIONS="last_rule"
+
+# serial devices
+KERNEL=="ttyUSB*", ATTRS{product}=="[Pp]alm*Handheld*", SYMLINK+="pilot"
+
+# printer
+SUBSYSTEM=="usb", KERNEL=="lp*", NAME="usb/%k", SYMLINK+="usb%k", GROUP="lp"
+
+# kernel firmware loader
+SUBSYSTEM=="firmware", ACTION=="add", RUN+="firmware.sh"</screen>
+  </example>
+
+  <para>
+   <systemitem>console</systemitem> 规则由三个键构成：一个匹配键 (<literal>KERNEL</literal>) 和两个赋值键（<literal>MODE</literal>、<literal>OPTIONS</literal>）。<literal>KERNEL</literal> 匹配规则搜索设备列表以查找类型为 <literal>console</literal> 的所有项。只有完全匹配才有效，才能触发执行此规则。在这种情况下，<literal>MODE</literal> 关键字为设备节点指派特殊权限，仅为此设备的拥有者指派读写权限。<literal>OPTIONS</literal> 关键字将该规则标记为此类型的所有设备最后采用的规则。匹配此特殊设备类型的任何后续规则都不产生任何影响。
+  </para>
+
+  <para>
+   <filename>50-udev-default.rules</filename> 中不再提供 <systemitem>serial devices</systemitem> 规则，但该规则仍然值得考虑。该规则由两个匹配关键字（<literal>KERNEL</literal> 和 <literal>ATTRS</literal>）和一个赋值关键字 (<literal>SYMLINK</literal>) 构成。<literal>KERNEL</literal> 关键字搜索类型为 <literal>ttyUSB</literal> 的所有设备。该关键字使用 <literal>*</literal> 通配符匹配这些设备中的几个。第二个匹配关键字 <literal>ATTRS</literal> 检查任何 <literal>ttyUSB</literal> 设备的 <literal>sysfs</literal> 中的 <filename>product</filename> 属性文件是否包含特定字符串。赋值关键字 (<literal>SYMLINK</literal>) 将符号链接添加至该设备的 <filename>/dev/pilot</filename> 下。此关键字中使用的运算符 (<literal>+=</literal>) 告知 udev 进一步执行此操作，即使前面或后面的规则添加其他符号链接。<systemitem class="service"/>由于此规则包含两个匹配关键字，因此仅当两个条件都满足时，才应用。
+  </para>
+
+  <para>
+   <systemitem>printer</systemitem> 规则处理 USB 打印机，其中包含两个匹配关键字（<literal>SUBSYSTEM</literal> 和 <literal>KERNEL</literal>），并且必须同时应用这两个关键字，才能应用整个规则。三个赋值键处理该设备类型的命名 (<literal>NAME</literal>)、符号设备链接 (<literal>SYMLINK</literal>) 的创建，以及此设备类型的组成员资格 (<literal>GROUP</literal>)。在 <literal>KERNEL</literal> 关键字中使用通配符 <literal>*</literal> 将使其匹配若干 <literal>lp</literal> 打印机设备。<literal>NAME</literal> 和 <literal>SYMLINK</literal> 关键字中都使用了替换项，以便按内部设备名称扩展这些字符串。例如，指向第一个 <literal>lp</literal> USB 打印机的符号链接为 <filename>/dev/usblp0</filename>。
+  </para>
+
+  <para>
+   <systemitem>kernel firmware loader</systemitem> 规则用于使 udev 在运行时期间通过外部助手脚本装载其他固件。<systemitem class="service"/><literal>SUBSYSTEM</literal> 匹配关键字搜索 <literal>firmware</literal> 子系统。<literal>ACTION</literal> 关键字检查是否添加了属于 <literal>firmware</literal> 子系统的任何设备。<literal>RUN+=</literal> 关键字触发执行 <literal>firmware.sh</literal> 脚本，以便找到应装载的固件。
+  </para>
+
+  <para>
+   所有规则具有一些共同的特征：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     每个规则由一个或多个以逗号分隔的关键字值对构成。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     关键字的运算由运算符确定。<systemitem class="service">udev</systemitem> 规则支持多个不同的运算符。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     每个给定值必须用引号引起来。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     规则文件的每一行代表一个规则。如果某个规则超过一行，请使用 <literal>\</literal> 合并不同行，就像在外壳语法中一样。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service">udev</systemitem> 规则支持与 <literal>*</literal>、<literal>?</literal> 和 <literal>[]</literal> 模式匹配的外壳式模式。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service">udev</systemitem> 规则支持替换。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 id="sec.udev.rules.ops">
+   <title>在 <systemitem class="service">udev</systemitem> 规则中使用运算符</title>
+   <para>
+    创建可以从若干不同运算符选择的关键字，具体取决于希望创建的关键字类型。匹配键通常用于查找匹配或明显不匹配搜索值的值。匹配关键字包含以下运算符之一：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>==</literal>
+     </term>
+     <listitem>
+      <para>
+       比较等于性。如果关键字包含搜索模式，则匹配该模式的所有结果均有效。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>!=</literal>
+     </term>
+     <listitem>
+      <para>
+       比较不等于性。如果关键字包含搜索模式，则匹配该模式的所有结果均有效。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    赋值关键字可以使用下面的任何运算符：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>=</literal>
+     </term>
+     <listitem>
+      <para>
+       为关键字指派值。如果关键字以前由一列值构成，关键字将重置，并且仅指派一个值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>+=</literal>
+     </term>
+     <listitem>
+      <para>
+       为包含一列项的关键字添加一个值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>:=</literal>
+     </term>
+     <listitem>
+      <para>
+       指派最终值。不允许后面的规则进行任何后续更改。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.udev.rules.subst">
+   <title>在 <systemitem class="service">udev</systemitem> 规则中使用替换项</title>
+   <para>
+    <systemitem class="service">udev</systemitem> 规则支持使用占位符和替换项。请按照在其他任何脚本中的相同方式使用。在 <systemitem class="service">udev</systemitem> 规则中可使用以下替换项：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>%r</literal>、<literal>$root</literal>
+     </term>
+     <listitem>
+      <para>
+       设备目录 <filename>/dev</filename>（默认）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%p</literal>、<literal>$devpath</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>DEVPATH</envar> 的值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%k</literal>、<literal>$kernel</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>KERNEL</envar> 的值或内部设备名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%n</literal>、<literal>$number</literal>
+     </term>
+     <listitem>
+      <para>
+       设备号。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%N</literal>、<literal>$tempnode</literal>
+     </term>
+     <listitem>
+      <para>
+       设备文件的临时名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%M</literal>、<literal>$major</literal>
+     </term>
+     <listitem>
+      <para>
+       设备的主编号。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%m</literal>、<literal>$minor</literal>
+     </term>
+     <listitem>
+      <para>
+       设备的次编号。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%s{<replaceable>attribute</replaceable>}</literal>/<literal>$attr{<replaceable>attribute</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       <filename>sysfs</filename> 属性的值（由 <replaceable>attribute</replaceable> 指定）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%E{<replaceable>variable</replaceable>}</literal>、<literal>$attr{<replaceable>variable</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       环境变量的值（由 <replaceable>variable</replaceable> 指定）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%c</literal>、<literal>$result</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>PROGRAM</envar> 的输出。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%%</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>%</literal> 字符。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>$$</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>$</literal> 字符。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.udev.rules.match">
+   <title>使用 <systemitem class="service">udev</systemitem> 匹配关键字</title>
+   <para>
+    匹配关键字描述应用 <systemitem class="service">udev</systemitem> 规则之前必须满足的条件。以下匹配关键字可用：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>ACTION</literal>
+     </term>
+     <listitem>
+      <para>
+       事件操作的名称，如 <literal>add</literal> 或 <literal>remove</literal>（添加或删除设备时）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DEVPATH</literal>
+     </term>
+     <listitem>
+      <para>
+       事件设备的设备路径，如 <literal>DEVPATH=/bus/pci/drivers/ipw3945</literal>，用于搜索与 ipw3945 驱动程序有关的所有事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNEL</literal>
+     </term>
+     <listitem>
+      <para>
+       事件设备的内部（内核）名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEM</literal>
+     </term>
+     <listitem>
+      <para>
+       事件设备的子系统，如 <literal>SUBSYSTEM=usb</literal>（用于与 USB 设备有关的所有事件）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>filename</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="filesystem">事件设备的 sysfs 属性。</systemitem>例如，要匹配 <filename>vendor</filename> 属性文件名中包含的字符串，可以使用 <literal>ATTR{vendor}=="On[sS]tream"</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNELS</literal>
+     </term>
+     <listitem>
+      <para>
+       让 <systemitem class="service">udev</systemitem> 向上搜索设备路径以查找匹配的设备名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEMS</literal>
+     </term>
+     <listitem>
+      <para>
+       让 <systemitem class="service">udev</systemitem> 向上搜索设备路径以查找匹配的设备子系统名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DRIVERS</literal>
+     </term>
+     <listitem>
+      <para>
+       让 <systemitem class="service">udev</systemitem> 向上搜索设备路径以查找匹配的设备驱动程序名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTRS{<replaceable>filename</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       让 <systemitem class="service">udev</systemitem> 向上搜索设备路径以查找具有匹配的 <systemitem class="filesystem">sysfs</systemitem> 属性值的设备。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>key</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       环境变量的值，如 <literal>ENV{ID_BUS}="ieee1394</literal>，用于搜索与该 FireWire 总线 ID 有关的所有事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>PROGRAM</literal>
+     </term>
+     <listitem>
+      <para>
+       让 <systemitem class="service">udev</systemitem> 执行外部程序。程序必须返回退出码零，才能成功。<literal>RESULT</literal> 键可使用程序的输出（打印到 stdout）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RESULT</literal>
+     </term>
+     <listitem>
+      <para>
+       匹配上次 <literal>PROGRAM</literal> 调用的输出字符串。在与 <literal>PROGRAM</literal> 关键字相同的规则中包含该关键字，或在后面的一个中。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 id="sec.udev.rules.assign">
+   <title>使用 <systemitem class="service">udev</systemitem> 指派关键字</title>
+   <para>
+    与上述匹配键相比，赋值键未描述必须满足的条件。它们将值、名称和操作指派给由 <systemitem class="service">udev</systemitem> 维护的设备节点。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>NAME</literal>
+     </term>
+     <listitem>
+      <para>
+       将创建的设备节点的名称。在一个规则设置节点名称之后，将对该节点忽略带有 <literal>NAME</literal> 键的其他所有规则。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SYMLINK</literal>
+     </term>
+     <listitem>
+      <para>
+       与要创建的节点有关的符号链接名称。多个匹配的规则可添加要使用设备节点创建的符号链接。也可以通过使用空格字符分隔符号链接名称，在一个规则中为一个节点指定多个符号链接。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OWNER, GROUP, MODE</literal>
+     </term>
+     <listitem>
+      <para>
+       新设备节点的权限。此处指定的值重写已编译的任何值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>key</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       指定要写入事件设备的 <systemitem class="filesystem">sysfs</systemitem> 属性的值。如果使用 <literal>==</literal> 运算符，也将使用该关键字匹配 <systemitem class="filesystem">sysfs</systemitem> 属性的值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>key</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 将变量导出到环境。如果使用 <literal>==</literal> 运算符，也将使用该关键字匹配环境变量。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RUN</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 向程序列表添加要为该设备执行的程序。请记住，将此程序限制于很短的任务，以免妨碍此设备的后续事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>LABEL</literal>
+     </term>
+     <listitem>
+      <para>
+       添加 <literal>GOTO</literal> 可跳至的标签。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>GOTO</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 跳过一些规则，继续执行具有按 <literal>GOTO</literal> 关键字引用的标签的规则。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>IMPORT{<replaceable>type</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       将变量装载入外部程序输出之类的事件环境中。<systemitem class="service">udev</systemitem> 导入不同类型的若干变量。如果未指定任何类型，<systemitem class="service">udev</systemitem> 将尝试根据文件许可权限的可执行位来自行确定类型。
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>program</literal> 告知 <systemitem class="service">udev</systemitem> 执行外部程序并导入其输出。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>file</literal> 告知 <systemitem class="service">udev</systemitem> 导入文本文件。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>parent</literal> 告知 <systemitem class="service">udev</systemitem> 从父设备导入储存的关键字。
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>WAIT_FOR_SYSFS</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 等待要为某个设备创建的指定 <systemitem class="filesystem">sysfs</systemitem> 文件。例如，<literal>WAIT_FOR_SYSFS="ioerr_cnt"</literal> 通知 <systemitem class="service">udev</systemitem> 等待 <filename>ioerr_cnt</filename> 文件创建完成。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OPTIONS</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>OPTION</literal> 关键字可能有若干值：
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>last_rule</literal> 告知 <systemitem class="service">udev</systemitem> 忽略后面的所有规则。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_device</literal> 告知 <systemitem class="service">udev</systemitem> 完全忽略此事件。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_remove</literal> 告知 <systemitem class="service">udev</systemitem> 忽略后面针对设备的所有删除事件。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>all_partitions</literal> 告知 <systemitem class="service">udev</systemitem> 为块设备上的所有可用分区创建设备节点。
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 id="sec.udev.persdev">
+  <title>永久设备命名</title>
+
+  <para>
+   动态设备目录和 <systemitem class="service">udev</systemitem> 规则基础架构可以为所有磁盘设备提供固定名称，而不考虑它们的识别顺序或设备使用的连接。内核创建的每个相应的块设备由工具根据有关特定总线、驱动器类型或者文件系统的特殊知识进行检查。除了动态内核提供的设备节点名，<systemitem class="service">udev</systemitem> 还维护各种指向该设备的永久符号链接：
+  </para>
+
+<screen>/dev/disk
+|-- by-id
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B -&gt; ../../sda
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part1 -&gt; ../../sda1
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part6 -&gt; ../../sda6
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part7 -&gt; ../../sda7
+|   |-- usb-Generic_STORAGE_DEVICE_02773 -&gt; ../../sdd
+|   `-- usb-Generic_STORAGE_DEVICE_02773-part1 -&gt; ../../sdd1
+|-- by-label
+|   |-- Photos -&gt; ../../sdd1
+|   |-- SUSE10 -&gt; ../../sda7
+|   `-- devel -&gt; ../../sda6
+|-- by-path
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0 -&gt; ../../sda
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part1 -&gt; ../../sda1
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part6 -&gt; ../../sda6
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part7 -&gt; ../../sda7
+|   |-- pci-0000:00:1f.2-scsi-1:0:0:0 -&gt; ../../sr0
+|   |-- usb-02773:0:0:2 -&gt; ../../sdd
+|   |-- usb-02773:0:0:2-part1 -&gt; ../../sdd1
+`-- by-uuid
+    |-- 159a47a4-e6e6-40be-a757-a629991479ae -&gt; ../../sda7
+    |-- 3e999973-00c9-4917-9442-b7633bd95b9e -&gt; ../../sda6
+    `-- 4210-8F8C -&gt; ../../sdd1</screen>
+ </sect1>
+ <sect1 id="sec.udev.files">
+  <title><systemitem class="service">udev</systemitem> 使用的文件</title>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/sys/*</filename>
+    </term>
+    <listitem>
+     <para>
+      Linux 内核提供的虚拟文件系统，用于导出所有当前已知设备。此信息由 <systemitem class="service">udev</systemitem> 用于在 <filename>/dev</filename> 中创建设备节点
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/dev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      动态创建的设备节点和使用 systemd-tmpfiles 创建的静态内容。有关详细信息，请参见 <systemitem>systemd-tmpfiles(8)</systemitem> 手册页。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   以下文件和目录包含 <systemitem class="service">udev</systemitem> 基础结构的关键元素：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/etc/udev/udev.conf</filename>
+    </term>
+    <listitem>
+     <para>
+      主 <systemitem class="service">udev</systemitem> 配置文件。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/udev/rules.d/*</filename>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">udev</systemitem> 事件匹配规则。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/tmpfiles.d/</filename> 和 <filename>/etc/tmpfiles.d/</filename>
+    </term>
+    <listitem>
+     <para>
+      负责静态 <filename>/dev</filename> 内容。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/udev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      从 <systemitem class="service">udev</systemitem> 规则调用的帮助程序。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.udev.moreinfo">
+  <title>更多信息</title>
+
+  <para>
+   有关 <systemitem class="service">udev</systemitem> 基础结构的更多信息，请参见以下手册页：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><systemitem class="service">udev</systemitem>
+    </term>
+    <listitem>
+     <para>
+      有关 <systemitem class="service">udev</systemitem>、关键字、规则和其他重要配置问题的常规信息。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>udevadm</command>
+    </term>
+    <listitem>
+     <para>
+      <command>udevadm</command> 可用于控制 <systemitem class="service">udev</systemitem> 的运行时行为、请求内核事件、管理事件队列，以及提供简单的调试机制。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem class="daemon">udevd</systemitem>
+    </term>
+    <listitem>
+     <para>
+      有关 <systemitem class="daemon">udev</systemitem> 事件管理守护程序的信息。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+</chapter>

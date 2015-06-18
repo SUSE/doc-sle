@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd">
+<!--
+*********************************
+Please see LICENSE.txt for this document's license.
+*********************************
+-->
+<chapter xml:base="deployment_kiwi.xml" id="cha.autokiwi">
+
+ <title>预装载映像的自动部署</title>
+ <abstract>
+  <para>
+   通过 KIWI，您可以创建操作系统映像。本章描述了将系统映像部署到空客户端计算机中的过程。要实现此目的，需要创建包含可引导 RAW 映像的预装载映像。该文件包含两个重要部分：分区表和实际操作系统。此 RAW 映像将写入空的硬盘，且操作系统第一次引导时将扩展到剩余的磁盘空间。
+  </para>
+
+ </abstract>
+ <para>
+  要创建此类映像，请参见<ulink url="http://doc.opensuse.org/projects/kiwi/doc/"/>。构建 ISO 映像时，可在目标目录中找到 RAW 文件。有多种方法可以将原始映像转储到磁盘。
+ </para>
+ <itemizedlist mark="bullet" spacing="normal">
+  <listitem>
+   <para>
+    将磁盘插入部署服务器并将映像复制到原始设备。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    通过 HTTP 或 FTP 服务器提供原始映像，并将其转储到客户端计算机的磁盘上。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    创建一个网络引导映像，以获取映像并将其转储到磁盘上。这是进行大批量部署的好方法。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    引导一个救援磁盘，然后从救援映像手动执行转储。
+   </para>
+  </listitem>
+ </itemizedlist>
+ <para>
+  要快速启动，最好使用<xref linkend="sec.autokiwi.manual"/>中描述的方法之一。
+ </para>
+ <sect1 id="sec.autokiwi.manual">
+  <title>从救援映像手动部署系统</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>使用 KIWI 生成的 ISO 文件进行部署：</term>
+    <listitem>
+     <orderedlist spacing="normal">
+      <listitem>
+       <para>
+        在 CD/DVD 中刻录您在执行 KIWI 构建过程后获取的 ISO 映像。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        从该媒体中引导到客户端计算机中。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        选择用于安装的硬盘。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        重启动客户端计算机并从硬盘引导。
+       </para>
+      </listitem>
+     </orderedlist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>通过救援系统进行部署：</term>
+    <listitem>
+     <orderedlist spacing="normal">
+      <listitem>
+       <para>
+        使用救援系统引导客户端计算机。此类系统在所有 SUSE 安装 CD 或 DVD 上都可用。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        以 <systemitem class="username">root</systemitem> 身份登录。不要输入密码。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        配置网络。如果网络中有可用的 DHCP，仅使用命令 <command>ifup-dhcp eth0</command>。如果必须手动执行此操作，使用命令 <command>ip</command> 配置网络。输出启动 DHCP 还会告诉您计算机的 IP 地址。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        在网络未使用的端口（如 <systemitem>1234</systemitem>）上侦听，并通过以下命令将进来的数据转储到磁盘：
+       </para>
+<screen>netcat -l -p 1234 &gt; /dev/sda</screen>
+      </listitem>
+      <listitem>
+       <para>
+        在映像服务器上，通过以下命令将原始映像发送到客户端计算机：
+       </para>
+<screen>netcat &lt;IP of client&gt; 1234 &lt; $HOME/preload_image/&lt;image_name&gt;</screen>
+      </listitem>
+      <listitem>
+       <para>
+        传输映像时，请从 CD 或 DVD 驱动器上去除救援系统，并关闭客户端计算机。在重新引导时，引导加载程序 <literal>GRUB</literal> 将在客户端启动，且 firstboot 系统将接管。
+       </para>
+      </listitem>
+     </orderedlist>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 id="sec.autokiwi.pxe">
+  <title>通过 PXE 引导进行自动部署</title>
+
+  <para>
+   如果要在相似硬件上进行多次操作系统安装，花些精力准备操作系统的批量部署以最大限度减少实际部署所需的时间非常有用。本章将介绍该过程。目标是实现只需以下操作即可完成安装：插上计算机、将计算机与网络连接、启动网络引导并等待计算机关闭。
+  </para>
+
+  <para>
+   要完成此任务，需要执行以下操作：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>设置引导与安装服务器</term>
+    <listitem>
+     <para>
+      应当准备好一个专用的计算机来提供 PXE 引导以及 FTP 或 Web 服务器，从而提供预装载映像。最好为计算机提供足够的内存以在内存中存放所有必需的安装数据。对于默认安装，应至少具有 4 GB 的内存。可通过 SUSE Linux Enterprise Server 完成所有必需任务。有关细节，请参见<xref linkend="sec.autokiwi.instserver"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>准备预装载映像</term>
+    <listitem>
+     <para>
+      实际的安装是通过将操作系统的原始映像复制到新硬盘来完成的。必须细心准备和测试所有功能及设置。要提供此类映像，可使用 KIWI（SUSE Linux Enterprise 操作系统的 SDK 中会提供）。<ulink url="http://doc.opensuse.org/projects/kiwi/doc/"/> 中提供了有关使用 KIWI 创建映像的更多信息。有关预装载映像的要求的更多细节，请参见<xref linkend="sec.autokiwi.preloadimage"/>。
+     </para>
+     <para>
+      包含 KIWI 的 SDK 是 SUSE Linux Enterprise 的附加产品，可从 <ulink url="http://download.suse.com/"/> 下载，搜索 <literal>SUSE Linux Enterprise 软件开发包</literal>即可找到。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>创建用于部署的初始系统</term>
+    <listitem>
+     <para>
+      此任务要求具备一些 Linux 专业知识。<xref linkend="sec.autokiwi.initrd"/>中提供了有关通过示例安装完成此任务的方法描述。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>配置用于自动部署的引导服务器</term>
+    <listitem>
+     <para>
+      必须命令 PXE 引导来引导安装系统，安装系统随即从服务器获取预装载映像并将其复制到硬盘。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 id="sec.autokiwi.instserver">
+   <title>设置引导与安装服务器</title>
+   <para>
+    要在安装 SUSE Linux Enterprise Server 之后执行此任务，需要完成四个步骤：
+   </para>
+   <procedure id="proc.autokiwi.instserver">
+    <step performance="required">
+     <para>
+      按<xref linkend="sec.deployment.remoteinst.instserver"/>中所述设置安装源。选择 HTTP 或 FTP 网络服务器。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      设置 TFTP 服务器以存放引导映像（该映像将在稍后步骤中创建）。<xref linkend="sec.deployment.remoteinst.boot.tftp"/>中对此进行了描述。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      设置 DHCP 服务器以向所有计算机指派 IP 地址，并向目标系统显示 TFTP 服务器的位置。<xref linkend="sec.deployment.remoteinst.boot.dhcp"/>中对此进行了描述。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      准备安装服务器 PXE 引导。<xref linkend="sec.deployment.remoteinst.boot.pxe"/>中对此有详细描述。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    注意，如果您为此计算机提供了足够的内存来存放预装载映像，则实际安装过程将受益良多。此外，使用千兆以太网可以显著地加快部署速度（与使用较慢网络相比）。
+   </para>
+  </sect2>
+
+  <sect2 id="sec.autokiwi.preloadimage">
+   <title>创建预装载映像</title>
+   <para>
+    <ulink url="http://doc.opensuse.org/projects/kiwi/doc/"/> 中介绍了使用 KIWI 创建映像的过程。但是，要创建有用的映像以进行批量部署，应考虑若干注意事项：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      典型的预装载映像将使用以下类型：
+     </para>
+<screen>&lt;type primary="true" filesystem="btrfs" boot="oemboot/suse-SLES12"&gt;vmx&lt;/type&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      在设置预装载映像期间，映像创建过程多次运行。本地计算机上应提供构建映像所需的安装源。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      根据对预装载的所需使用情况，应花些精力来配置首次引导。请在<xref linkend="cha.deployment_firstboot"/>中查找有关首次引导的更多细节。通过此方法，还可要求用户在系统首次引导时进行初始配置。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      可以为映像配置许多附加功能，如添加更新安装源或在首次引导时进行更新。但无法在本文档中描述所有可能情况，并且（根据不同要求）预装载映像的创建可能要求深入了解创建映像系统 KIWI 以及 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 中使用的若干其他技术。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    要部署的实际映像必须能够从您在安装服务器上提供的 FTP 或 HTTP 服务器中获取。
+   </para>
+  </sect2>
+
+  <sect2 id="sec.autokiwi.initrd">
+   <title>创建初始系统以部署预装载映像</title>
+   <para>
+    要运行自动部署，需要启动目标计算机上的初始 Linux 系统。在典型安装期间，内核和初始 RAM 文件系统从某个引导媒体读取并由 BIOS 启动。所需的功能可在 RAM 文件系统中实施，该文件系统连同内核一起充当初始系统。
+   </para>
+   <para>
+    初始系统必须提供的主要功能是支持硬盘访问和提供网络连接。这两个功能均依赖于要部署的硬件。原则上说，可全新创建一个初始系统，但为了简化此任务，还可修改计算机在引导期间使用的初始 RAM 文件系统。
+   </para>
+   <para>
+    以下过程提供了如何创建所需初始 RAM 文件系统的一个示例：
+   </para>
+   <procedure>
+    <step performance="required">
+     <para>
+      在目标系统上进行 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的标准安装。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      在系统上安装包 <systemitem>busybox</systemitem>。
+     </para>
+    </step>
+    <step performance="required">
+
+     
+     
+     <para>
+      使用以下命令创建新的 RAM 文件系统：
+     </para>
+<screen>mkinitrd -f busybox -D eth0</screen>
+     <para>
+      注意，eth0 代表您的网络电缆挂接到的以太网设备。参数 <systemitem>-f busybox</systemitem> 将多个调用二进制文件 <systemitem>busybox</systemitem> 添加到 RAM 文件系统。进行此操作后，便可在此系统中使用很多标准 unix 命令。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      使用以下命令将新的 RAM 文件系统和内核复制到引导服务器：
+     </para>
+<screen>scp /boot/initrd /boot/vmlinuz pxe.example.com:</screen>
+     <para>
+      请用本地引导服务器的名称或 IP 地址替换 pxe.example.com。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      以 <systemitem class="username">root</systemitem> 用户身份登录到引导服务器，在您可以修改 RAM 文件系统的位置创建一个目录：
+     </para>
+<screen>mkdir ~/bootimage</screen>
+    </step>
+    <step performance="required">
+     <para>
+      通过 <command>cd ~/bootimage</command> 命令将工作目录切换到此目录。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      使用以下命令解压缩先前复制的初始 RAM 文件系统：
+     </para>
+<screen>zcat ../initrd | cpio -i</screen>
+    </step>
+    <step performance="required">
+     <para>
+      编辑文件 <filename>run_all.sh</filename>。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      搜索以下行，删除该行及剩余部分：
+     </para>
+<screen>[ "$debug" ] &amp;&amp; echo preping 21-nfs.sh </screen>
+    </step>
+    <step performance="required">
+     <para>
+      在文件 <filename>run_all.sh</filename> 的结尾添加以下行：
+     </para>
+<screen>[ "$debug" ] &amp;&amp; echo preping 92-install.sh
+[ "$debug" ] &amp;&amp; echo running 92-install.sh
+source boot/92-install.sh
+[ "$modules" ] &amp;&amp; load_modules
+     </screen>
+    </step>
+    <step performance="required">
+     <para>
+      使用以下内容创建新脚本 <filename>boot/92-install.sh</filename>：
+     </para>
+<screen>#!/bin/bash
+if [ "$(get_param rawimage)" ]; then
+  rawimage=$(get_param rawimage)
+  if  [ "$(get_param rawdevice)" ]; then
+    rawdevice=$(get_param rawdevice)
+    echo "wget -O ${rawdevice} ${rawimage}"
+    wget -O ${rawdevice} ${rawimage}
+    sync
+    sleep 5
+    echo "DONE"
+  fi
+fi
+# /bin/bash
+/bin/poweroff -f
+</screen>
+    </step>
+    <step performance="required">
+     <para>
+      如果希望在计算机关闭前具有一个调试外壳，请删除 <filename>/bin/bash</filename> 前的注释符号。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      通过命令 <command>chmod 755 boot/92-install.sh</command> 使此脚本可执行。
+     </para>
+    </step>
+    <step performance="required">
+     <para>
+      使用以下命令创建新的初始 RAM 文件系统：
+     </para>
+<screen>mkdir -p /srv/tftpboot
+find . | cpio --quiet -H newc -o | gzip -9 -n &gt; \
+/srv/tftpboot/initrd.boot</screen>
+    </step>
+    <step performance="required">
+     <para>
+      将内核复制到此目录：
+     </para>
+<screen>cp ../vmlinuz /srv/tftpboot/linux.boot</screen>
+    </step>
+   </procedure>
+   <para>
+    初始 RAM 文件系统现已准备好采用两个新的内核命令行参数。参数 <systemitem>rawimage=&lt;URL&gt;</systemitem> 用于标识预装载映像的位置。可使用 wget 能理解的任何 URL。参数 <systemitem>rawdevice=&lt;设备&gt;</systemitem> 用于标识目标计算机上硬盘的块设备。
+   </para>
+  </sect2>
+
+  <sect2>
+   <title>引导服务器配置</title>
+   <para>
+    在若干不同章节中详细描述了引导服务器的配置，如<xref linkend="sec.autokiwi.instserver"/>中所列。本节提供了一个核对清单，涵盖了配置系统所必需的步骤。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      设置 DHCP 服务器。安装有计算机的子网需要以下附加行：
+     </para>
+<screen>filename "pxelinux.0";
+next-server 192.168.1.115;</screen>
+     <para>
+      在此示例中，192.168.1.115 是 PXE 服务器 pxe.example.com 的 IP 地址。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      按照<xref linkend="sec.deployment.remoteinst.boot.pxe"/>中的描述配置 PXE 服务器。编辑 <filename>/srv/tftpboot/pxelinux.cfg/default</filename> 时，添加以下项：
+     </para>
+<screen>default bootinstall
+label bootinstall
+  kernel linux.boot
+  append initrd=initrd.boot \
+  rawimage=ftp://192.168.1.115/preload/preloadimage.raw rawdevice=/dev/sda</screen>
+    </listitem>
+    <listitem>
+     <para>
+      设置 ftp 服务器并将准备好的预装载映像复制到 <filename>/srv/ftp/preload/preloadimage.raw</filename>。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    通过使用 PXE 网络引导来引导目标系统以测试安装。这会自动将准备好的预装载映像复制到硬盘，并在就绪时关闭计算机。
+   </para>
+  </sect2>
+
+
+ </sect1>
+
+
+
+
+
+
+
+</chapter>

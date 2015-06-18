@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd">
+<!--
+*********************************
+Please see LICENSE.txt for this document's license.
+*********************************
+-->
+<chapter xml:base="bootconcept.xml" id="cha.boot">
+ <title>引导 Linux 系统</title>
+ <abstract>
+  <para>
+   引导 Linux 系统涉及不同组件和任务。BIOS 或 UEFI 会初始化硬件本身，并通过引导加载程序启动内核。在此之后，引导进程完全由操作系统控制，并由 <systemitem class="daemon">systemd</systemitem> 处理。<systemitem class="daemon">systemd</systemitem> 会提供一组<quote>目标</quote>，用于引导与日常使用、维护或紧急情况相关的设置。
+  </para>
+ </abstract>
+ <sect1 id="sec.boot.proc">
+  <title>Linux 引导进程</title>
+
+  <para>
+   Linux 引导进程包括多个阶段，每个阶段由一个不同组件来代表。下面的列表简要总结了引导过程并介绍了所涉及的所有主要组件：
+  </para>
+
+  <orderedlist spacing="normal">
+   <listitem>
+    <formalpara>
+     <title>BIOS/UEFI</title>
+     <para>
+      在打开计算机之后，BIOS 或 UEFI 将初始化屏幕和键盘并测试主内存。直到这一阶段，计算机不访问任何大容量储存媒体。随后，将从 CMOS 值装载有关当前日期、时间和最重要的外设的信息。当识别出第一块硬盘及其几何属性之后，系统控制将从 BIOS 传递到引导加载程序。如果 BIOS 支持网络引导，则也可以配置提供引导加载程序的引导服务器。在 x86_64 系统上需要 PXE 引导。其他体系结构通常使用 BOOTP 协议获得引导加载程序。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>引导加载程序</title>
+     <para>
+      第一块硬盘的前 512 个字节的物理数据扇区将被装载到主储存器中，位于此扇区开始位置的<emphasis>引导加载程序</emphasis>将接管系统控制。引导加载程序执行的命令决定了引导进程剩余的部分。因此，第一块硬盘的前 512 个字节被称为<emphasis>主引导记录</emphasis> (MBR)。引导加载程序随后将控制权交给实际的操作系统（在本例中即 Linux 内核）。有关 Linux 引导加载程序 GRUB 2 的更多信息，请参见<xref linkend="cha.grub2"/>。对于网络引导，BIOS 充当了引导加载程序。它会从引导服务器获取引导映像，然后启动系统。这完全不依赖本地硬盘。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>内核和 <systemitem>initramfs</systemitem></title>
+     <para>
+      为了转交系统控制，引导加载程序会将内核和基于 RAM 的初始文件系统 (<systemitem>initramfs</systemitem>) 两者都装载到内存中。内核可以直接使用 <systemitem>initramfs</systemitem> 的内容。<systemitem>initramfs</systemitem> 包含一个小的可执行文件，称为 <systemitem>init</systemitem>，可以处理真实 root 文件系统的装入。如果需要特殊硬盘驱动程序才能访问大容量储存，则这些程序必须在 <systemitem>initramfs</systemitem> 中。有关 <systemitem>initramfs</systemitem> 的详细信息，请参见<xref linkend="sec.boot.initrd"/>。如果系统没有本地硬盘，则 <systemitem>initramfs</systemitem> 必须为内核提供根文件系统。这应该通过网络块设备（如 iSCSI 或 SAN）的帮助进行，但也可以使用 NFS 作为 root 设备。
+     </para>
+    </formalpara>
+    <note>
+     <title><systemitem>init</systemitem> 进程命名</title>
+     <para>
+      有两个不同的程序通常命名为<quote>init</quote>：
+     </para>
+     <orderedlist spacing="normal">
+      <listitem>
+       <para>
+        用于装入根文件系统的 <systemitem>initramfs</systemitem> 进程
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        用于设置系统的操作系统进程
+       </para>
+      </listitem>
+     </orderedlist>
+     <para>
+      在本章中，我们将它们分别称为<quote><systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem></quote>和<quote><systemitem class="daemon">systemd</systemitem></quote>。
+     </para>
+    </note>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title><systemitem/>initramfs 中的 init<systemitem/></title>
+     <para>
+      此程序执行装入正确根文件系统所需的全部操作。它为所需的文件系统提供内核功能，并为使用 <systemitem class="service">udev</systemitem> 的大量储存控制器提供设备驱动程序。找到 root 文件系统后，对其进行错误检查并装入。如果装入成功，系统会清理 <systemitem>initramfs</systemitem> 并执行根文件系统上的 <systemitem class="daemon">systemd</systemitem> 守护程序。有关 <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 的更多信息，请参见<xref linkend="sec.boot.linuxrc"/>。有关 <systemitem class="service">udev</systemitem> 的详细信息，请参见<xref linkend="cha.udev"/>。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title><systemitem class="daemon">systemd</systemitem></title>
+     <para>
+      <systemitem class="daemon">systemd</systemitem> 通过启动服务并装入文件系统来处理实际的系统引导。<xref linkend="cha.systemd"/>中介绍了 <systemitem class="daemon">systemd</systemitem>。
+     </para>
+    </formalpara>
+   </listitem>
+  </orderedlist>
+ </sect1>
+  <sect1 id="sec.boot.initrd">
+   <title><systemitem>initramfs</systemitem></title>
+   <para>
+    <systemitem>initramfs</systemitem> 是一个内核可以装载到 RAM 磁盘的小型 cpio 存档。它提供了一个最小的 Linux 环境，可在装入实际 root 文件系统之前执行程序。这个最小的 Linux 环境由 BIOS 或 UEFI 例程载入内存，而且除了需要足够的内存外没有特定的硬件要求。<systemitem>initramfs</systemitem> 存档必须始终提供一个名为 <systemitem>init</systemitem> 的可执行文件，该文件执行根文件系统上的 <systemitem class="daemon">systemd</systemitem> 守护程序，使引导进程得以继续。
+   </para>
+   <para>
+    在能够装入 root 文件系统并启动操作系统之前，内核需要相应的驱动程序来访问 root 文件系统所在的设备。这些驱动程序可能包括用于特定类型硬盘的特殊驱动程序，甚至还可能包括访问网络文件系统所需的网络驱动程序。root 文件系统所需的模块可以由 <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 来装载。装载模块后，<systemitem class="service">udev</systemitem> 将为 <systemitem>initramfs</systemitem> 提供所需的设备。在引导过程的后面，更改 root 文件系统之后需要重新生成设备。将 <systemitem class="daemon">systemd</systemitem> 单元 <filename>udev.service</filename> 与 <command>udevtrigger</command> 命令结合使用可以实现此目的。
+   </para>
+   <para>
+    如果需要更改已安装系统的硬件（例如硬盘），并且该硬件要求引导时内核中有不同的驱动程序，则必须更新 <systemitem>initramfs</systemitem> 文件。通过调用 <command>dracut <option>-f</option></command>（选项 <option>-f</option> 会覆盖现有 initramfs 文件）执行此操作。要添加适用于新硬件的驱动程序，编辑 <filename>/etc/dracut.conf.d/01-dist.conf</filename> 并添加以下行。 
+   </para>
+   <screen>force_drivers+="<replaceable>driver1</replaceable>"</screen>
+   <para>
+    使用驱动程序的模块名称替换 <replaceable>driver1</replaceable>。如果您需要添加多个驱动程序，请全部列出并以空格分隔（<literal><replaceable>driver1</replaceable> <replaceable>driver2</replaceable></literal>）。
+   </para>
+
+   <important>
+    <title>
+     更新 <systemitem>initramfs</systemitem> 或 <systemitem>init</systemitem>
+    </title>
+    <para>
+     引导加载程序装载 <systemitem>initramfs</systemitem> 或 <systemitem>init</systemitem> 的方式与内核相同。更新 <systemitem>initramfs</systemitem> 或 <systemitem>init</systemitem> 后无需重新安装 GRUB 2，因为 GRUB 2 会在引导时从目录中搜索正确的文件。
+    </para>
+   </important>
+  </sect1>
+
+  <sect1 id="sec.boot.linuxrc">
+   <title><systemitem>initramfs</systemitem> 上的 init</title>
+   <para>
+    <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 的主要用途是准备真实 root 文件系统的装入和访问。根据您的系统配置的不同，<systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 负责以下任务。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>装载内核模块</term>
+     <listitem>
+      <para>
+       根据硬件配置的不同，可能需要一些特殊的驱动程序来访问计算机的硬件组件（最重要的组件是硬盘）。要访问最终的 root 文件系统，内核需要装载正确的文件系统驱动程序。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>提供块特殊文件</term>
+     <listitem>
+      <para>
+       内核对每个装载的模块生成设备事件。<systemitem class="service">udev</systemitem> 会处理这些事件并在 RAM 文件系统的 <filename>/dev</filename> 中生成所需的特殊块文件。没有这些特殊文件，文件系统和其他设备将不可访问。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>管理 RAID 和 LVM 设置</term>
+     <listitem>
+      <para>
+       如果将系统配置为在 RAID 或 LVM 下保存根文件文件系统，则 <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 将设置 LVM 或 RAID 以支持以后对根文件系统的访问。在<xref linkend="cha.advdisk"/>中查找关于 RAID 和 LVM 的信息。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry id="ve.net">
+     <term>管理网络配置</term>
+     <listitem>
+      <para>
+       如果将系统配置为使用通过网络装入的根文件系统（通过 NFS 装入），则 <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 必须确保装载了正确的网络驱动程序，并确保将其设置为支持访问根文件系统。
+      </para>
+      <para>
+       如果文件系统驻留在一个联网的块设备（如 iSCSI 或 SAN）上，则与储存服务器的连接也由 <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem> 设置。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    如果在安装过程的初始引导阶段调用 <systemitem>initramfs</systemitem> 上的 <systemitem>init</systemitem>，它要执行的任务将与上述任务不同：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>查找安装媒体</term>
+     <listitem>
+      <para>
+       当您启动安装进程时，计算机会装载一个安装内核以及一个包含 YaST 安装程序的特殊 <systemitem>init</systemitem>。YaST 安装程序在 RAM 文件系统中运行，它需要知道安装媒体的位置，才能访问安装媒体以安装操作系统。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>
+      启动硬件识别并装载适当的内核模块
+     </term>
+     <listitem>
+      <para>
+       如<xref linkend="sec.boot.initrd"/> 中所述，引导进程从可用于大多数硬件配置的一组最小的驱动程序开始。<systemitem>init</systemitem> 将启动初始硬件扫描进程，以确定适合您的硬件配置的一组驱动程序。这些驱动程序用于生成引导系统所需的自定义 <systemitem>initramfs</systemitem>。如果引导时不需要这些模块，但冷插拔时需要，您可以使用 <systemitem class="daemon">systemd</systemitem> 装载这些模块。有关详细信息，请参见<xref linkend="sec.boot.systemd.advanced.kernel_modules"/>。
+       
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>装载安装系统</term>
+     <listitem>
+      <para>
+       系统在正确识别硬件后即会装载相应的驱动程序。<systemitem class="service">udev</systemitem> 程序会建立特殊的设备文件，<systemitem>init</systemitem> 将使用 YaST 安装程序启动安装系统。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>启动 YaST</term>
+     <listitem>
+      <para>
+       最后，<systemitem>init</systemitem> 将启动 YaST，由后者启动包安装和系统配置。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+ </sect1>
+</chapter>

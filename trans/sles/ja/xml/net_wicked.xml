@@ -1,0 +1,552 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE sect1 PUBLIC "-//Novell//DTD NovDoc XML V1.0//EN" "novdocx.dtd">
+<!--
+*********************************
+Please see LICENSE.txt for this document's license.
+*********************************
+-->
+<sect1 xml:base="net_wicked.xml" id="sec.basicnet.manconf">
+ <title>ネットワークの手動環境設定</title>
+
+ <para>
+  ネットワークソフトウェアの手動環境設定は、最後の手段です。設定には可能な限りYaSTを使用してください。しかし、ここで説明するネットワーク環境設定の背景知識がYaSTでの設定作業に役立つことがあります。
+ </para>
+
+ <sect2 id="sec.basicnet.manconf.wicked">
+
+  <title><command>wicked</command>ネットワーク環境設定</title>
+  <para>
+   <command>wicked</command>と呼ばれるツールとライブラリは、ネットワーク環境設定用の新しいフレームワークを提供します。
+  </para>
+  <para>
+   ネットワーク管理は相互に影響を持つ複数の層で構成されていますが、その相互作用は明確とはいえず、悪影響があっても把握しづらかったり、あいまいな制約や慣習があったりします。このようなネットワーク管理のさまざまな層を1つのスクリプト(多くても2つ程度のスクリプト)に寄せ集めている点が、従来のネットワークインタフェース管理における問題の1つです。異なるシナリオに対応するために特別なハックを使った層がいくつもあると、保守負担が増加します。現状では、dhcpcdなどのデーモンによって実装されるアドレス設定プロトコルが使用されていますが、他のインフラストラクチャとの相互作用は十分ではありません。そこで、インタフェースを永続的に識別できるようにするため、多くのudevサポートを必要とするインタフェース命名スキームが導入されたものの、これは洗練されているとはいいがたい手段です。
+  </para>
+  <para>
+   wickedというアイデアが生まれたのは、この問題をさまざまな方法で分解するためです。どの方法もまったく新しいものではありませんが、異なるプロジェクトから得たアイデアをまとめようとする試みから、総合的により優れた解決策が生まれることが期待できます。
+  </para>
+  <para>
+   アプローチの1つは、クライアント/サーバモデルを使用することです。これにより、wickedは、アドレス設定のような作業について、フレームワーク全体と効果的に統合された標準化機能を定義できます。たとえば、アドレス設定では、管理者はDHCPまたはIPv4 zeroconf経由でインタフェースを設定するよう要求できます。アドレス設定サービスが実行するのは、サーバからリースを取得してwickedサーバプロセスに渡すことだけで、その後はwickedサーバプロセスが要求されたアドレスおよびルートをインストールします。
+  </para>
+  <para>
+   問題を分解するもう1つのアプローチは、階層化を強制的に導入することです。すべてのタイプのネットワークインタフェースに対して、ネットワークインタフェースのデバイス層(VLAN、ブリッジ、ボンド、または準仮想化されたデバイス)を設定するdbusサービスを定義できます。アドレス設定といった共通の機能は、こうしたデバイス固有のサービスの上に階層化した結合サービスによって実装します。これにより、サービスを個別に実装する必要がなくなります。
+  </para>
+  <para>
+   wickedフレームワークは、そのタイプに応じてネットワークインタフェースにアタッチされるさまざまなdbusサービスを使用して、これら2つの側面を実装します。ここでは、wickedにおける現在のオブジェクト階層をおおまかに説明します。
+  </para>
+  <para>
+   各ネットワークインタフェースは、<systemitem>/org/opensuse/Network/Interfaces</systemitem>の子オブジェクトを介して表されます。子オブジェクトの名前は、そのifindexで指定されます。たとえば、ループバックインタフェースは通常、ifindex 1を取り、<systemitem>/org/opensuse/Network/Interfaces/1</systemitem>です。登録されている最初のEthernetインタフェースは、<systemitem>/org/opensuse/Network/Interfaces/2</systemitem>です。
+  </para>
+  <para>
+   各ネットワークインタフェースには「クラス」が関連付けられており、そのクラスを使用して、サポートするdbusインタフェースが選択されます。<quote/>デフォルトでは、各ネットワークインタフェースは、クラス<literal>netif</literal>に属し、wickeddはこのクラスと互換性のあるすべてのインタフェースを自動的にアタッチします。現在の実装では、これには次のインタフェースが含まれます。
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>org.opensuse.Network.Interface</term>
+    <listitem>
+     <para>
+      リンクアップとリンクダウンの取得、MTUの割り当てなどの、一般的なネットワークインタフェース機能。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>org.opensuse.Network.Addrconf.ipv4.dhcp
+</term>
+    <term>org.opensuse.Network.Addrconf.ipv6.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv4.auto</term>
+    <term>org.opensuse.Network.Addrconf.ipv6.auto</term>
+    <listitem>
+     <para>
+      DHCP、IPv6 autoconf、IPv4 zeroconfなどのアドレス設定サービス。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+  <para>
+   これ以外に、ネットワークインタフェースで特別な設定メカニズムが必要な場合や、ネットワークインタフェースがこのようなメカニズムを備えている場合もあります。たとえば、Ethernetデバイスの場合、リンク速度、チェックサム計算のオフロードなどを制御可能にしたい場合があります。これを実現するために、Ethernetデバイスには、<literal>netif</literal>のサブクラスである、<literal>netif-ethernet</literal>という独自のクラスがあります。このため、Ethernetインタフェースに割り当てられたdbusインタフェースには、上記に一覧にされているすべてのサービス、および<literal>netif-ethernet</literal>クラスに属するオブジェクトでのみ使用可能なサービスである<systemitem>org.opensuse.Network.Ethernet</systemitem>が含まれています。
+  </para>
+  <para>
+   同様に、ブリッジ、VLAN、ボンド、インフィニバンドなどのインタフェースタイプのクラスも存在します。
+  </para>
+  <para>
+   Ethernetデバイスの上に位置し、実際には仮想ネットワークインタフェースであるVLANなど、最初に作成する必要があるインタフェースとはどのように相互作用すればよいのでしょうか。このような場合、wickedは、<systemitem>org.opensuse.Network.VLAN.Factory</systemitem>などのファクトリインタフェースを定義します。このようなファクトリインタフェースは、要求されたタイプのインタフェースを作成できる単一の機能を提供します。これらのファクトリインタフェースは、<systemitem>/org/opensuse/Network/Interfaces</systemitem>リストノードにアタッチされます。
+  </para>
+  <sect3 id="sec.basicnet.manconf.supported">
+   <title>現在サポートされている内容</title>
+   <para>
+    <command>wicked</command>は現在、以下をサポートしています。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      SUSEおよびRedHatスタイルの<filename>/etc/sysconfig/network</filename>ファイルを解析する環境設定ファイルバックエンド。開発はSUSEのインストール済み環境上で行われるため、多くの場合、前者の方がRedHat用ファイルよりも安定しています。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ネットワークインタフェース設定をXMLで表す環境設定ファイルバックエンド。netcfが使用する設定から発展した構文。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Ethernetやインフィニバンド、VLAN、ブリッジ、ボンドデバイスなどの、「標準」のネットワークインタフェースの起動とシャットダウン。<quote/>ブリッジとボンドには、依然としていくつかの問題があります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ワイヤレス。まだ完全ではなく、1つのネットワークに制限されています。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      内蔵DHCPv4クライアントおよび内蔵DHCPv6クライアント。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      リンクが検出されるとすぐに、自動的にインタフェースを起動することができるいくつかの実験コードがあります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      XMLリーダ/ライタの実装。これは規格に完全準拠しているとはいえないものの、コンパクトなフットプリントを持ち、適度に高速であると思われます。これにはXPath 1.0の部分的な実装も付属していて、XMLによるインタフェースの記述から情報を抽出できるため、XMLを自分自身で解析する必要はありません。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect3>
+  <sect3 id="sec.basicnet.manconf.using_wicked">
+   <title><command>wicked</command>の使用</title>
+   <para>
+    SUSE Linux Enterpriseでは、NetworkManagerを選択しなかった場合、<command>wicked</command>がデフォルトで実行されています。これを有効化する必要がある場合には、次を呼び出します。
+   </para>
+<screen>systemctl enable --force wicked.service</screen>
+   <para>
+    これにより、wickedサービスが有効になり、<filename>wicked.service</filename>エイリアスリンクに対して<filename>network.service</filename>が作成され、次回ブート時にネットワークを起動します。
+   </para>
+   <para>
+    サーバプロセスを起動します。
+   </para>
+<screen>systemctl start wickedd.service</screen>
+   <para>
+    これにより、<command>wickedd</command> (メインサーバ)および関連するサプリカントがデバッグモードで起動し、トレース情報をsyslogに出力します。
+   </para>
+<screen>/usr/sbin/wickedd --foreground
+/usr/lib/wicked/bin/wickedd-dhcp4 --foreground
+/usr/lib/wicked/bin/wickedd-auto4 --foreground
+/usr/lib/wicked/bin/wickedd-dhcp6 --foreground</screen>
+   <para>
+    ネットワークを起動します。
+   </para>
+<screen>systemctl start wicked.service</screen>
+   <para>
+    または、<filename>network.service</filename>エイリアスを使用します。
+   </para>
+<screen>systemctl start network.service</screen>
+   <para>
+    これらのコマンドは、デフォルト、または<filename>/etc/wicked/client.xml</filename>で定義されるシステム設定ソースを使用しています。
+   </para>
+   <para>
+    デバッグを有効にするには、<filename>/etc/sysconfig/network/config</filename>で<literal>WICKED_DEBUG_PARAM</literal>を設定します(これは将来変更される場合があります)。次に例を示します。
+   </para>
+<screen>WICKED_DEBUG_PARAM="--debug most"</screen>
+   <para>
+    クライアントユーティリティを使用して、すべてのインタフェース、または<replaceable>ifname</replaceable>で指定したインタフェースに関するインタフェース情報を表示します。
+   </para>
+<screen>wicked show all
+wicked show <replaceable>ifname</replaceable></screen>
+   <para>
+    XML出力の場合は、以下を実行します。
+   </para>
+<screen>wicked show-xml all
+wicked show-xml <replaceable>ifname</replaceable></screen>
+   <para>
+    1つのインタフェースを起動します。
+   </para>
+<screen>wicked ifup eth0
+wicked ifup wlan0
+...</screen>
+   <para>
+    設定ソースが指定されていないため、wickedクライアントは、<filename>/etc/wicked/client.xml</filename>で定義されている設定のデフォルトソースを確認します。
+   </para>
+   <orderedlist spacing="normal">
+    <listitem>
+
+     <para>
+      <literal>firmware:</literal> iBFT (iSCSI Boot Firmware Table)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>compat:</literal> <literal>ifcfg</literal>ファイル—互換性のため実装
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>wicked:<replaceable>PATH</replaceable></literal> (デフォルト: <filename>/etc/wicked/ifconfig</filename>)に保存される<replaceable>PATH</replaceable>ネイティブのwicked XML設定フォーマット
+     </para>
+    </listitem>
+   </orderedlist>
+   <para>
+    特定のインタフェースに対して<command>wicked</command>がこれらのソースから取得した設定がすべて適用されます。重要度の順序は、<literal>firmware</literal>、<literal>compat</literal>、<literal>wicked</literal>の順です。これは将来、ifcfgの互換性要件が緩和されれば変更される可能性があります。
+   </para>
+   <para>
+    続いて、サンプルVLANインタフェースなど、関心の高いものを起動します。
+   </para>
+<screen>wicked ifup --ifconfig ./samples/wicked/vlan-static.xml eth0.42</screen>
+   <para>
+    これは、<quote>eth0.42</quote>という名前のVLANインタフェースを起動します。VLANタグ42と数個のIPアドレスが静的に割り当てられています。動作しているかどうかを確認するため、以下を実行してみます。
+   </para>
+<screen>ip addr show
+ip route show</screen>
+   <para>
+    上のコマンドは、指定されたファイルからすべてのインタフェースの記述を取得し、<quote>eth0.42</quote>というインタフェースを起動します。このファイルに含まれているインタフェース1つだけであるため、インタフェース名の代わりに<literal>all</literal>を使用することもできます。名前が示すように、これは、このファイルに一覧にされているすべてのインタフェースを起動します。
+   </para>
+   <para>
+    単一のインタフェースを起動するため、クライアントはXML要素から、複数のサーバメソッドと引数を実行し、目的のインタフェースの状態を<quote>up</quote>に切り替えるようサーバに命令します。この操作により、まだVLANインタフェースがない場合は、ただちに作成されます。
+   </para>
+   <para>
+    同様の方法でインタフェースを停止します。
+   </para>
+<screen>wicked ifdown eth0.42</screen>
+   <para>
+    インタフェースを停止して削除するには、以下を使用します。
+   </para>
+<screen>wicked ifdown --delete --ifconfig ./samples/wicked/vlan-static.xml eth0.42</screen>
+   <para>
+    詳細については、<command>wicked</command>のマニュアルページを参照してください。
+   </para>
+  </sect3>
+
+  <sect3 id="sec.basicnet.manconf.multiple">
+   <title>複数のインタフェースの起動</title>
+   <para>
+    ボンドおよびブリッジの場合、1つのファイルにデバイストポロジ全体を定義し、それをまとめて起動します。これは、特にボンドにとって重要です。ボンドの場合、最初にスレーブデバイスを作成する必要があるためです(スレーブデバイスがVLANなどの仮想デバイスである場合)。
+   </para>
+   <para>
+    このようなシナリオの場合、1つのファイルでデバイストポロジを定義し、wickedを呼び出して、設定全体を起動します。例については、パッケージのマニュアル(<filename>/usr/share/doc/packages/wicked</filename>)の<filename>samples/wicked/bridge-static.xml</filename>を参照してください。この設定は、2つのVLANインタフェースから構築されたEthenetブリッジを定義します。これを起動するには、次を呼び出します。
+   </para>
+<screen>wicked ifup --ifconfig ./samples/wicked/bridge-static.xml all</screen>
+   <para>
+    クライアントは適切な順序でデバイスを起動します。最初に2つのVLANインタフェースを作成してからブリッジを作成し、最後にVLANインタフェースをポートとしてブリッジに追加します。
+   </para>
+  </sect3>
+
+  <sect3 id="sec.basicnet.manconf.incremental">
+   <title>増分変更の処理</title>
+   <para>
+    <command>wicked</command>では、再設定のためにインタフェースを実際に停止する必要はありません(カーネルによって要求される場合を除く)。たとえば、静的に設定されたネットワークインタフェースに別のIPアドレスまたはルートを追加するには、インタフェース定義にIPアドレスを追加して、もう一度<quote>ifup</quote>操作を実行します。サーバは変更された設定のみを更新しようとします。これは、リンクレベルのオプション(デバイスMTUやMACアドレスなど)に加え、静的設定からDHCPに切り替える場合などはネットワークレベルの設定(アドレス、ルート、アドレス設定モードなど)にも適用されます。
+   </para>
+   <para>
+    もちろん、ブリッジやボンドなど複数の実デバイスを組み合わせる仮想インタフェースでは、処理は複雑になります。ボンドデバイスの場合、デバイスの稼働中に特定のパラメータを変更することはできません。これを行うと、エラーが発生します。
+   </para>
+   <para>
+    ただし、この状態でも、ボンドまたはブリッジの子デバイスを追加または削除したり、ボンドのプライマリインタフェースを選択したりする操作は有効です。
+   </para>
+  </sect3>
+
+  <sect3 id="sec.basicnet.manconf.address_config">
+   <title>Wicked拡張機能: アドレス設定</title>
+   <para>
+    <command>wicked</command>は、シェルスクリプトによって拡張可能な設計になっています。これらの拡張機能は、<filename>config.xml</filename>ファイルで定義できます。
+   </para>
+   <para>
+    現状では、複数の異なるクラスの拡張機能がサポートされています。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      リンク設定: クライアントによって提供される環境設定に従ってデバイスのリンク層を設定し、それを再び終了するスクリプトです。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      アドレス設定: デバイスのアドレス設定を管理するスクリプトです。通常、アドレス設定およびDHCPは、<command>wicked</command>自体で管理されますが、拡張機能によって実装できます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ファイアウォール拡張機能: これらのスクリプトでファイアウォールルールを適用できます。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    通常、拡張機能には、開始および終了コマンド、オプションの「pid file」、およびスクリプトに渡される一連の環境変数があります。<quote/>
+   </para>
+   <para>
+    これがどのように機能するかを説明するために、<filename>etc/server.xml</filename>で定義されているファイウォール拡張機能を取り上げます。
+   </para>
+<screen>&lt;dbus-service interface="org.opensuse.Network.Firewall"&gt;
+ &lt;action name="firewallUp"   command="/etc/wicked/extensions/firewall up"/&gt;
+ &lt;action name="firewallDown" command="/etc/wicked/extensions/firewall down"/&gt;
+
+ &lt;!-- default environment for all calls to this extension script --&gt;
+ &lt;putenv name="WICKED_OBJECT_PATH" value="$object-path"/&gt;
+ &lt;putenv name="WICKED_INTERFACE_NAME" value="$property:name"/&gt;
+ &lt;putenv name="WICKED_INTERFACE_INDEX" value="$property:index"/&gt;
+&lt;/dbus-service&gt;</screen>
+   <para>
+    拡張機能は、dbusサービスインタフェースにアタッチされ、このインタフェースのアクションに対して実行するコマンドを定義します。さらに、宣言によって、アクションに渡される環境変数を定義および初期化できます。
+   </para>
+  </sect3>
+
+  <sect3 id="sec.basicnet.manconf.configuration_files">
+   <title>Wicked拡張機能: 環境設定ファイル</title>
+   <para>
+    スクリプトを使用して環境設定ファイルの処理を拡張することもできます。たとえば、DNSのリースの更新は、最終的には、<filename>server.xml</filename>で動作が設定された<filename>extensions/resolver</filename>スクリプトで処理されます。
+   </para>
+<screen>&lt;system-updater name="resolver"&gt;
+ &lt;action name="backup" command="/etc/wicked/extensions/resolver backup"/&gt;
+ &lt;action name="restore" command="/etc/wicked/extensions/resolver restore"/&gt;
+ &lt;action name="install" command="/etc/wicked/extensions/resolver install"/&gt;
+ &lt;action name="remove" command="/etc/wicked/extensions/resolver remove"/&gt;
+&lt;/system-updater&gt;</screen>
+   <para>
+    更新内容が<systemitem>wickedd</systemitem>に届くと、システムアップデータルーチンがリースを解析して、適切なコマンド(<literal>backup</literal>、<literal>install</literal>など)をリゾルバスクリプトで呼び出します。これにより、<command>/sbin/netconfig</command>を使用してDNSを設定するか、フォールバックとして手動で<filename>/etc/resolv.conf</filename>を作成してDNSを設定します。
+   </para>
+  </sect3>
+ </sect2>
+
+ <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="net_config_files.xml" parse="xml"/>
+
+ <sect2 id="sec.basicnet.manconf.testing">
+  <title>設定のテスト</title>
+  <para>
+   設定内容を設定ファイルに書き込む前に、それをテストすることができます。テスト環境を設定するには、<command>ip</command>コマンドを使用します。接続をテストするには、<command>ping</command>コマンドを使用します。
+  </para>
+  <para>
+   <command>ip</command>コマンドは、ネットワーク設定を直接変更します。ただし、変更内容は環境設定ファイルに保存されません。正しい環境設定ファイルに変更内容を保存しない限り、変更したネットワーク設定は再起動時に失われてしまいます。
+  </para>
+  <note>
+   <title><command>ifconfig</command>および<command>route</command>は廃止</title>
+   <para>
+    <command>ifconfig</command>および<command>route</command>ツールは廃止されました。代わりに、<command>ip</command>を使用してください。たとえば、<command>ifconfig</command>では、インタフェース名は9文字に制限されます。
+   </para>
+  </note>
+  <sect3 id="sec.basicnet.manconf.ip">
+   <title><command>ip</command>によるネットワークインタフェースの設定</title><indexterm> <primary>コマンド</primary> <secondary>ip</secondary> </indexterm>
+   
+   
+   <para>
+    <command>ip </command>は、ネットワークデバイス、ルーティング、ポリシールーティング、およびトンネルの表示と設定を行うツールです。
+   </para>
+   <para>
+    <command>ip</command>は非常に複雑なツールです。一般的には、<command>ip</command><option><replaceable>options</replaceable><replaceable>object</replaceable><replaceable>command</replaceable></option>の形式で指定します。objectの部分には、次のオブジェクトを指定することができます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>リンク</term>
+     <listitem>
+      <para>
+       ネットワークデバイスを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>アドレス</term>
+     <listitem>
+      <para>
+       デバイスのIPアドレスを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>隣接</term>
+     <listitem>
+      <para>
+       このオブジェクトは、ARPまたはNDISCのキャッシュエントリを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>route</term>
+     <listitem>
+      <para>
+       ルーティングテーブルエントリを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ルール</term>
+     <listitem>
+      <para>
+       ルーティングポリシーデータベース中のルールを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>maddress</term>
+     <listitem>
+      <para>
+       マルチキャストアドレスを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mroute</term>
+     <listitem>
+      <para>
+       マルチキャストルーティングキャッシュエントリを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>tunnel</term>
+     <listitem>
+      <para>
+       IPトンネルを表します。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    commandを指定しないと、デフォルトのコマンド(通常は<command>list</command>)が使用されます。
+   </para>
+   <para>
+    デバイスの状態を変更するには、<command>ip link set</command><option><replaceable>device_name</replaceable></option> <command><replaceable>command</replaceable></command>コマンドを使用します。たとえば、デバイスeth0を無効にするには、<command>ip link set</command><option>eth0 down</option>を実行します。このデバイスを再び有効にする場合は、<command>ip link set</command><option>eth0 up</option>を実行します。
+   </para>
+   <para>
+    デバイスを有効にしたら、そのデバイスを設定することができます。デバイスのIPアドレスを使用する場合は、<command>ip addr add</command><option><replaceable>ip_address</replaceable> + dev <replaceable>device_name</replaceable></option>を使用します。たとえば、インタフェースeth0にアドレス「 192.168.12.154/30」を設定し、標準のブロードキャスト(<option>brd</option>オプション)を使用する場合は、「<command>ip addr</command><option>add 192.168.12.154/30 brd + dev eth0</option>」と入力します。
+   </para>
+   <para>
+    接続を実際に利用可能にするには、デフォルトゲートウェイの設定も必要です。システムのゲートウェイを設定するには、「<command>ip route add</command> <option>gateway_ip_address</option>」を入力します。あるIPアドレスを別のIPアドレスに変換するには、<command>nat</command>: <command>ip route add nat</command> <option>ip_address</option> <command>via</command> <option>other_ip_address</option>を使用します。
+   </para>
+   <para>
+    すべてのデバイスを表示する場合は、<command>ip link ls</command>を使用します。動作しているインタフェースだけを表示する場合は、<command>ip link ls up</command>を使用します。デバイスのインタフェース統計情報を印刷する場合は、「<command>ip -s link ls</command><option>device_name</option>」と入力します。デバイスのアドレスを表示する場合は、「<command>ip addr</command>」と入力します。<command>ip addr</command>の出力には、デバイスのMACアドレスに関する情報も表示されます。すべてのルートを表示する場合は、<command>ip route show</command>を使用します。
+   </para>
+   <para>
+    <command>ip</command>の使用方法の詳細については、<command>ip</command><option>help</option>を入力するか、または<systemitem>ip(8)</systemitem>マニュアルページを参照してください。<option>help</option>オプションは、すべての<command>ip</command>サブコマンドに関して利用できます。たとえば、<command>ip</command> <option>addr</option>のヘルプが必要な場合は、<command>ip</command><option>addr help</option>と入力します。<command>ip</command>マニュアルについては、 <filename>/usr/share/doc/packages/iproute2/ip-cref.pdf</filename>を参照してください。
+   </para>
+  </sect3>
+  <sect3 id="sec.basicnet.manconf.testingping">
+   <title>pingを使った接続のテスト</title><indexterm> <primary>コマンド</primary> <secondary>ping</secondary> </indexterm> <indexterm> <primary>ping</primary> </indexterm>
+   <para>
+    <command>ping</command>コマンドは、TCP/IP接続が正常に動作しているかどうかを調べるための、標準ツールです。pingコマンドはICMPプロトコルを使って、小さなデータパケットECHO_REQUESTデータグラムを、宛先ホストに送信し、即時応答を要求します。これが機能した場合、<command>ping</command>はそのことを示すメッセージを表示します。これは、ネットワークリンクが機能していることを示します。
+   </para>
+   <para>
+    <command>ping</command>は、2台のコンピュータ間の接続機能をテストするだけでなく、接続品質に関する基本的な情報も提供します。ping<xref linkend="ex.basicnet.manconf.ping"/>コマンドの実行結果例は、<command>を参照してください。</command>最後から2番目の行に、転送パケット数、失われたパケット数、および<command>ping</command>の実行時間の合計が記載されています。
+   </para>
+   <para>
+    pingの宛先には、ホスト名またはIPアドレスを指定することができます。たとえば、<command>ping</command> <option>example.com</option>や<command>ping</command> <option>192.168.3.100</option>のように指定します。pingコマンドを実行すると、&lt;<keycombo><keycap function="control"/><keycap>C</keycap></keycombo>&gt;を押すまでの間、継続的にパケットが送信されます。
+   </para>
+   <para>
+    接続されているかどうかを確認するだけで良い場合は、<option>-c</option>オプションを使って送信するパケット数を指定することができます。たとえば、PINGを3パケットに制限する場合は、「<command>ping</command> <option>-c 3 example.com</option>」を入力します。
+   </para>
+   <example id="ex.basicnet.manconf.ping">
+    <title>pingコマンドの出力</title>
+<screen>ping -c 3 example.com
+PING example.com (192.168.3.100) 56(84) bytes of data.
+64 bytes from example.com (192.168.3.100): icmp_seq=1 ttl=49 time=188 ms
+64 bytes from example.com (192.168.3.100): icmp_seq=2 ttl=49 time=184 ms
+64 bytes from example.com (192.168.3.100): icmp_seq=3 ttl=49 time=183 ms
+--- example.com ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2007ms
+rtt min/avg/max/mdev = 183.417/185.447/188.259/2.052 ms</screen>
+   </example>
+   <para>
+    デフォルトでは、pingは1秒ごとにパケットを送信します。間隔を変更するには、 <option>-i </option>オプションを指定します。たとえば、pingの間隔を10秒に増やす場合は、「<command>ping</command> <option>-i 10 example.com</option>」と入力します。
+   </para>
+   <para>
+    複数のネットワークデバイスを持つシステムの場合、特定のインタフェースアドレスを指定してpingを実行することができます。その場合は、<option>-I</option>オプションを、選択したデバイスの名前とともに使用します。たとえば、<command>ping</command> <option>-I wlan1 example.com</option>と指定します。
+   </para>
+   <para>
+    pingのオプションと使用方法の詳細については、「<command>ping</command><option>-h</option>」と入力するか、または<systemitem>ping(8)</systemitem>のマニュアルページを参照してください。
+   </para>
+   <tip>
+    <title>IPv6アドレスのping</title>
+    <para>
+     IPv6の場合は、<command>ping6</command>コマンドを使用します。ただし、リンクローカルアドレスをpingするには、<option>-I</option>でインタフェースを指定する必要があります。アドレスが<literal>eth1</literal>を介して到達可能な場合は、次のコマンドが有効です。
+    </para>
+<screen>ping6 -I eth1 fe80::117:21ff:feda:a425</screen>
+   </tip>
+  </sect3>
+
+ </sect2>
+
+ <sect2 id="sec.basicnet.manconf.scripts">
+  <title>ユニットファイルと起動スクリプト</title><indexterm> <primary>スクリプト</primary> <secondary>init.d</secondary> </indexterm>
+  <para>
+   上の環境設定ファイルに加え、マシンのブート時にネットワークサービスをロードするさまざまなスクリプトも用意されています。これらは、システムが<systemitem>multi-user.target</systemitem>のいずれかに切り替わったときに起動します。これらのユニットファイルの一部は、<xref linkend="var.net.start.scripts"/>で説明されています。<systemitem>systemd</systemitem>の詳細については、<xref linkend="cha.systemd"/>を参照してください。<systemitem>systemd</systemitem>ターゲットの詳細については、<systemitem>systemd.special</systemitem>のマニュアルページ(<command>man systemd.special</command>)を参照してください。
+   
+  </para>
+  <variablelist id="var.net.start.scripts">
+   <title>ネットワークプログラム用のユニットファイルと起動スクリプト</title>
+   <varlistentry>
+    <term><systemitem>network.target</systemitem> <indexterm> <primary>ユニットファイル</primary> <secondary>network.target</secondary></indexterm>
+
+    </term>
+    <listitem>
+     <para>
+      <systemitem>network.target</systemitem>は、ネットワークのsystemdターゲットですが、その意味はシステム管理者が指定した設定により異なります。
+     </para>
+     <para>
+      詳細については、<ulink url="http://www.freedesktop.org/wiki/Software/systemd/NetworkTarget/"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>multi-user.target</systemitem>
+    </term>
+    <listitem>
+     <para>
+
+      <indexterm> <primary>ユニットファイル</primary> <secondary>multi-user.target</secondary> </indexterm> <systemitem>multi-user.target</systemitem>は、必要なすべてのネットワークサービスを持つ、マルチユーザシステムのsystemdターゲットです。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>xinetd.service</systemitem>
+    </term>
+    <listitem>
+     <para>
+      xinetdを開始します。xinetdを使用すると、サーバサービスがシステム上で利用できるようになります。たとえば、FTP接続の開始時に必ずvsftpdを起動することができます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>rpcbind.service</systemitem>
+    </term>
+    <listitem>
+     <para>
+      RPCプログラム番号をユニバーサルアドレスに変換するrpcbindユーティリティを起動します。NFSサーバなどのRPCサービスで必要です。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>ypserv.service</systemitem>
+    </term>
+    <listitem>
+     <para>
+      NISサーバを起動します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>ypbind.service</systemitem>
+    </term>
+    <listitem>
+     <para>
+      NISクライアントを起動します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/init.d/nfsserver</filename>
+    </term>
+    <listitem>
+     <para>
+      NFSサーバを起動します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/init.d/postfix</filename>
+    </term>
+    <listitem>
+     <para>
+      postfixプロセスを制御します。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+ </sect2>
+</sect1>
