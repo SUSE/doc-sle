@@ -514,16 +514,16 @@ lrwxrwxrwx 1 root root 0 Jun 17 14:35 /sys/devices/pci0000:00/0000:00:08.0/virti
      with the <command>free</command> command):
     </para>
 <screen># echo 25 > /proc/sys/vm/swappiness</screen>
-<screen># free 
+<screen># free
              total       used       free     shared    buffers     cached
-Mem:       8066704    7120652     946052     436972     267388    4086588
--/+ buffers/cache:    2766676    5300028
-Swap:      2108412     140304    1968108</screen>
+Mem:      24616680    4991492   19625188     167056     144340    2152408
+-/+ buffers/cache:    2694744   21921936
+Swap:      6171644          0    6171644</screen>
     <para>
      To get this permanently add a line in
      <filename>/etc/systcl.conf</filename>:
     </para>
-<screen>vm.swappiness = 25</screen>
+<screen>vm.swappiness = 35</screen>
    </sect3>
   </sect2>
 
@@ -908,7 +908,7 @@ node   0   1   2   3
     </listitem>
    </itemizedlist>
    <para>
-    Now you should found where the &vmguest; has allocated his pages with <command>cat /proc/<replaceable>PID</replaceable>numa_maps</command> and <command>cat /sys/fs/cgroup/memory/sysdefault/libvirt/qemu/<replaceable>KVM_NAME</replaceable>memory.numa_stat</command>. You should avoid allocating &vmguest; memory across NUMA nodes, and prevent vCPUs from floating across NUMA nodes.
+    Now you should found where the &vmguest; has allocated his pages with <command>cat /proc/<replaceable>PID</replaceable>/numa_maps</command> and <command>cat /sys/fs/cgroup/memory/sysdefault/libvirt/qemu/<replaceable>KVM_NAME</replaceable>memory.numa_stat</command>. You should avoid allocating &vmguest; memory across NUMA nodes, and prevent vCPUs from floating across NUMA nodes.
    </para>
    <para>
     You can change memory policy mode with <command>cgset</command> tool:
@@ -934,17 +934,12 @@ node   0   1   2   3
       <para>
       HugeTLB
       </para>
-      <para>
-      Policy for allocation in NUMA topology:  strict,  interleave,  preferred
-      </para>
       </sect2>
  -->
  </sect1>
  <sect1 xml:id="vt.best.stor">
   <title>Storage and Filesystem</title>
-
   <para>
-   plop
   </para>
 
 <!--
@@ -1103,7 +1098,21 @@ node   0   1   2   3
 	</para>
       </listitem>
       </itemizedlist>
-    </sect3>
+      <sect4>
+	<title>Cluster Size</title>
+	<para>qcow2 format offer the capabilities to change the cluster
+	size. Thee value must be between 512 and 2M. Smaller cluster sizes can
+	improve the image file size whereas larger cluster sizes
+        generally provide better performance.</para>
+      </sect4>
+      <sect4>
+	<title>Pre allocation</title>
+	<para>
+	  An image with preallocated metadata is initially larger but can
+	  improve performance when the image needs to grow.
+	</para>
+      </sect4>
+   </sect3>
     <sect3>
       <title>qed format</title>
       <para>
@@ -1171,13 +1180,13 @@ Format specific information:
      <para>
        Please refer to <link
        xlink:href="https://www.suse.com/documentation/sles-12/singlehtml/book_virt/book_virt.html#cha.qemu.guest_inst.qemu-img.create">SLE12
-       qemu-img documentation</link> for more information on qemu-img tool an example.
+       qemu-img documentation</link> for more information on <command>qemu-img</command> tool and examples.
      </para>
      </sect3>
      <sect3>
        <title>Overlay Storage Image</title>
        <para>
-	 The qcow2 format provide a way to create a base-image, but also a way
+	 The qcow2 and qed formats provide a way to create a base-image, but also a way
 	 to create available overlay disk images (backing file) on top of the
 	 base image. Backing file is useful to be able to revert to a know
 	 state and discard the overlay.
@@ -1185,14 +1194,37 @@ Format specific information:
        <para>
 	 To create an overlay image:
        </para>
-       <screen> qemu-img create -o backing_file=vmguest.raw,backing_fmt=raw -f qcow2 vmguest.cow</screen>
+       <screen> qemu-img create -o<co xml:id="co.1.minoro"/>backing_file=vmguest.raw<co xml:id="co.1.backingfile"/>,backing_fmt=raw<co
+       xml:id="co.1.backingfmt"/>\
+       -f<co xml:id="co.1.minorf"/> qcow2 vmguest.cow<co xml:id="co.1.imagename"/></screen>
+       <calloutlist>
+	 <callout arearefs="co.1.minoro">
+           <para>a comma separated list of format specific options in a
+	   <option>name=value</option> format. Use <option>-o ?</option> for an overview of the options</para>
+         </callout>
+	 <callout arearefs="co.1.backingfile">
+	   <para>the backing file name</para>
+	 </callout>
+	 <callout arearefs="co.1.backingfmt">
+	   <para>specify the file format for the backing file</para>
+	 </callout>
+	 <callout arearefs="co.1.minorf">
+	   <para>specify the image format for the &vmguest;</para>
+	 </callout>
+	 <callout arearefs="co.1.imagename">
+	   <para>image name of the &vmguest;, it will only record the
+	   differences from the backing_file</para>
+	 </callout>
+       </calloutlist>
        <para>
 	 Now you can start your &vmguest;, use it do some modification
 	 etc.... the backing image will be untouched and all changes to the
-	 storage will be recorded in the overlay image file.
+	 storage will be recorded in the overlay image file. The backing file will
+	 never be modified unless you use the <option>commit</option> monitor command (or
+	 <command>qemu-img commit</command>).
        </para>
        <warning>
-	 <title>Backing image</title>
+	 <title>Backing Image Path</title>
 	 <para>
 	   You should not change the path to the backing image, or you need to
 	   adjust it. The path is stored is the overlay image file. If you
@@ -1200,9 +1232,105 @@ Format specific information:
 	   original path to the new path and then use the
 	   <command>qemu-img</command> <option>-rebase</option> option.
 	   <screen># ln -sf /var/lib/images/vmguest.raw  /var/lib/images/SLE12/vmguest.raw</screen>
-	   <screen># qemu-img rebase -b /var/lib/images/vmguest.raw /var/lib/images/SLE12/vmguest.cow</screen>
+	   <screen># qemu-img rebase<co xml:id="co.2.rebase"/> -b<co xml:id="co.2.minorb"/> /var/lib/images/vmguest.raw /var/lib/images/SLE12/vmguest.cow</screen>
+	   <calloutlist>
+	     <callout arearefs="co.2.rebase">
+	       <para>changes the backing file of an image
+	       </para>
+	     </callout>
+	     <callout arearefs="co.2.minorb">
+	       <para>specify the backing file image</para>
+	     </callout>
+	   </calloutlist>
 	 </para>
        </warning>
+       <para>
+	 A current usage is to initiate a new guest with the backing file. Let's
+	 assume we have a <filename>vmguest-sle12_base.img</filename> &vmguest;
+	 ready to use (fresh installation without any modification). This will
+	 be our backing file.
+	 Now you need to test a new package, on an updated system, and on a
+	 system with a different kernel.
+	 We can use <filename>vmguest-sle12_base.img</filename> to instance new &sle; &vmguest; by 
+	 creating a qcow2 overlay files, pointing to this backing file
+	 (<filename>vmguest-sle_base.img</filename>).
+       </para>
+       <para>
+	 In our example we will use <filename>vmguest-sle12_updated.qcow2</filename>
+	 for the updated system, and
+	 <filename>vmguest-sle12_updated.qcow2</filename>
+	 for the system with a different kernel.
+       </para>
+       <para>To create the two thin provisionned system use the
+       <command>qemu-img</command> command
+       line with <option>-b</option> option:</para>
+       <screen># qemu-img create -b /var/lib/libvirt/vmguest-sle12_base.img -f qcow2 \
+/var/lib/libvirt/vmguest-sle12_updated.qcow2
+Formatting 'vmguest-sle12_updated.qcow2', fmt=qcow2 size=17179869184
+       backing_file='vmguest-sle12_base.img' encryption=off cluster_size=65536 
+       lazy_refcounts=off nocow=off</screen>
+       <screen># qemu-img create -b /var/lib/libvirt/vmguest-sle12_base.img -f qcow2 \
+/var/lib/libvirt/vmguest-sle12_kernel.qcow2
+Formatting 'vmguest-sle12_kernel.qcow2', fmt=qcow2 size=17179869184
+       backing_file='vmguest-sle12_base.img' encryption=off cluster_size=65536 
+       lazy_refcounts=off nocow=off</screen>
+       <para>
+	 The images are now usable, and you can do your test without touching the
+	 initial <filename>vmguest-sle12_base.img</filename> backing file, all
+	 change will be stored in the new images. Moreover, you can also use
+	 these new images as a backing file, and create a new overlay.
+       </para>
+       <screen># qemu-img create -b vmguest-sle12_kernel.qcow2 -f qcow2 vmguest-sle12_kernel_TEST.qcow2</screen>
+       <para>
+	 <command>qemu-img info</command> with the option
+	 <option>--backing-chain</option> will return all information of the
+	 entire backing chain recursively:
+       </para>
+       <screen>qemu-img info --backing-chain<co xml:id="co.3.backingchain"/> \
+       /var/lib/libvirt/images/vmguest-sle12_kernel_TEST.qcow2
+image: vmguest-sle12_kernel_TEST.qcow2
+file format: qcow2
+virtual size: 16G (17179869184 bytes)
+disk size: 196K
+cluster_size: 65536
+backing file: vmguest-sle12_kernel.qcow2
+Format specific information:
+    compat: 1.1
+    lazy refcounts: false
+
+image: vmguest-sle12_kernel.qcow2
+file format: qcow2
+virtual size: 16G (17179869184 bytes)
+disk size: 196K
+cluster_size: 65536
+backing file: SLE12.qcow2
+Format specific information:
+    compat: 1.1
+    lazy refcounts: false
+
+image: vmguest-sle12_base.img
+file format: qcow2
+virtual size: 16G (17179869184 bytes)
+disk size: 16G
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    lazy refcounts: true</screen>
+       <calloutlist>
+         <callout arearefs="co.3.backingchain">
+           <para>will enumerate information about backing files in a disk image chain</para>
+         </callout>
+       </calloutlist>
+       <note>
+	 <title>Lazy Refcounts</title>
+	 <para> reference count updates are postponed with the goal of
+	 avoiding metadata I/O and improving performance. This is
+         particularly interesting with <option>cache=writethrough</option> which doesn't
+	 batch metadata updates. The tradeoff is that after a host crash, the
+	 reference count tables must be rebuilt (On the next open an
+	 (automatic) 
+	 <command>qemu-img check -r all</command> is required, which may take some time.</para>
+       </note>
      </sect3>
   </sect2>
 
