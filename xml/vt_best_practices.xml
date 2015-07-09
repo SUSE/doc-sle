@@ -506,14 +506,16 @@ lrwxrwxrwx 1 root root 0 Jun 17 14:35 /sys/devices/pci0000:00/0000:00:08.0/virti
      value of <emphasis>swappiness</emphasis> result in a more swapping
      system. Value available are from <option>0</option> to
      <option>100</option>. A value of <option>100</option> told the system
-     to find inactive pages and put them in swap.
+     to find inactive pages and put them in swap. A value of
+     <option>0</option> reduce the system tendency to swap userland processes
+     but do not disable swap completly (this is now the case with kernel => 3.5).
     </para>
     <para>
      To change the value and do some experiment on a live system, you just
      need to do an echo of the value, and check you system memory usage (ie:
      with the <command>free</command> command):
     </para>
-<screen># echo 25 > /proc/sys/vm/swappiness</screen>
+<screen># echo 35 > /proc/sys/vm/swappiness</screen>
 <screen># free
              total       used       free     shared    buffers     cached
 Mem:      24616680    4991492   19625188     167056     144340    2152408
@@ -524,7 +526,35 @@ Swap:      6171644          0    6171644</screen>
      <filename>/etc/systcl.conf</filename>:
     </para>
 <screen>vm.swappiness = 35</screen>
-   </sect3>
+   <para>
+     You can also control the swap using the
+     <emphasis>swap_hard_limit</emphasis> 
+     element in the XML configuration of your &vmguest;. It is higly recommended to
+     do some test before setting this parameter and using it in a production
+     environment as the host can kill the domain if the value is too low.
+   </para>
+   <screen>&lt;memtune&gt;<co xml:id="co.mem.1"/>
+  &lt;hard_limit unit='G'&gt;1&lt;/hard_limit&gt;<co xml:id="co.mem.hard"/>
+  &lt;soft_limit unit='M'&gt;128&lt;/soft_limit&gt;<co xml:id="co.mem.soft"/>
+  &lt;swap_hard_limit unit='G'&gt;2&lt;/swap_hard_limit&gt;<co xml:id="co.mem.swap"/>
+&lt;/memtune&gt;</screen>
+   <calloutlist>
+     <callout arearefs="co.mem.1">
+       <para>this element provides memory tunable parameters for the domain. 
+       If this is omitted, it defaults to the OS provided defaults</para>
+     </callout>
+     <callout arearefs="co.mem.hard">
+       <para>maximum memory the guest can use. To avoid any problem on the
+       &vmguest; it is strongly recommended to do not use this parameter</para>
+      </callout>
+      <callout arearefs="co.mem.soft">
+	<para>the memory limit to enforce during memory contention</para>
+      </callout>
+      <callout arearefs="co.mem.swap">
+	<para>the maximum memory plus swap the &vmguest; can use</para>
+      </callout>
+   </calloutlist>
+    </sect3>
   </sect2>
 
   <sect2 xml:id="vt.best.perf.io">
@@ -821,7 +851,17 @@ w /sys/block/sdb/queue/scheduler - - - - noop</screen>
     You should also consider that multiple sockets with a single core and
     thread generally give best performance.
    </para>
-   <para>To get all capabilities and topology available on your system use <command>virsh capabilities</command> command.</para>
+   <para>To get all capabilities and topology available on your system use
+   <command>virsh capabilities</command> command.</para>
+   <note>
+     <title>host-passthrough</title>
+     <para>
+       The CPU visible to the guest should be exactly the same as the host
+       CPU even in the aspects that &libvirt; does not understand. Though the
+       downside of this mode is that the guest environment cannot be reproduced
+       on different hardware. Thus, if you hit any bugs, you are on your own.
+     </para>
+   </note>
    </sect3>
    <sect3>
     <title>vCPU Pinning</title>
@@ -882,6 +922,57 @@ node   0   1   2   3
   1:  20  10  20  20 
   2:  20  20  10  20 
   3:  20  20  20  10</screen>
+   <para>
+     &vmguest; NUMA topology should be specified using the
+     <emphasis>numa</emphasis> element in the XML configuration:
+   </para>
+   <screen>&lt;cpu&gt;
+...
+  &lt;numa&gt;
+    &lt;cell<co xml:id="co.numa.cell"/> id='0'<co xml:id="co.numa.id"/> cpus='0-1'<co xml:id="co.numa.cpus"/> memory='512000' unit='KiB'/&gt;
+    &lt;cell id='1' cpus='2-3' memory='256000'<co xml:id="co.numa.mem"/> unit='KiB'<co xml:id="co.numa.unit"/> memAccess='shared'<co xml:id="co.numa.memaccess"/>/&gt;  &lt;/numa&gt;
+...
+&lt;/cpu&gt;</screen>
+  <calloutlist>
+    <callout arearefs="co.numa.cell">
+      <para>
+	Each <emphasis>cell</emphasis> element specifies a NUMA cell or a NUMA node
+      </para>
+    </callout>
+    <callout arearefs="co.numa.id">
+      <para>
+	all cells should have id attribute in case referring to some cell is necessary in the code,
+	otherwise the cells are assigned ids in the increasing order starting
+	from 0
+      </para>
+    </callout>
+    <callout arearefs="co.numa.cpus">
+      <para>
+	 cpus specifies the CPU or range of CPUs that are part of the node
+      </para>
+    </callout>
+    <callout arearefs="co.numa.mem">
+      <para>
+	memory specifies the node memory in kilobytes (i.e. blocks of 1024 bytes)
+      </para>
+    </callout>
+    <callout arearefs="co.numa.unit">
+      <para>
+	attribute to define units in which memory is specified
+      </para>
+    </callout>
+    <callout arearefs="co.numa.memaccess">
+      <para>
+	optional attribute which can control whether the memory is to be
+	mapped as <option>shared</option> or <option>private</option>.
+	This is valid only for hugepages-backed memory. 
+      </para>
+    </callout>
+  </calloutlist>
+  <warning>
+    <title>NUMA specification</title>
+    <para>The guest NUMA specification is currently available only for QEMU/KVM.</para>
+  </warning>
   <para>
    There is 3 memory cpuset policy mode available: interleave, bind, prefered. 
   </para>
@@ -1222,8 +1313,7 @@ node   0   1   2   3
        -f<co xml:id="co.1.minorf"/> qcow2 vmguest.cow<co xml:id="co.1.imagename"/></screen>
        <calloutlist>
 	 <callout arearefs="co.1.minoro">
-           <para>a comma separated list of format specific options in a
-	   <option>name=value</option> format. Use <option>-o ?</option> for an overview of the options</para>
+           <para>use <option>-o ?</option> for an overview of available options</para>
          </callout>
 	 <callout arearefs="co.1.backingfile">
 	   <para>the backing file name</para>
@@ -1255,12 +1345,14 @@ node   0   1   2   3
 	   original path to the new path and then use the
 	   <command>qemu-img</command> <option>-rebase</option> option.
 	   <screen># ln -sf /var/lib/images/vmguest.raw  /var/lib/images/SLE12/vmguest.raw</screen>
-	   <screen># qemu-img rebase<co xml:id="co.2.rebase"/> -b<co xml:id="co.2.minorb"/> /var/lib/images/vmguest.raw /var/lib/images/SLE12/vmguest.cow<co xml:id="co.2.image"/></screen>
+	   <screen># qemu-img rebase<co xml:id="co.2.rebase"/>-u<co xml:id="co.2.unsafe"/> -b<co xml:id="co.2.minorb"/> /var/lib/images/vmguest.raw /var/lib/images/SLE12/vmguest.cow<co xml:id="co.2.image"/></screen>
 	   <calloutlist>
 	     <callout arearefs="co.2.rebase">
-	       <para>changes the backing file image
-	       </para>
+	       <para>changes the backing file image</para>
 	     </callout>
+	     <callout arearefs="co.2.unsafe">
+               <para>use the unsafe mode (see note below)</para>
+             </callout>
 	     <callout arearefs="co.2.minorb">
 	       <para>specify the backing file image to use</para>
 	     </callout>
@@ -1271,8 +1363,25 @@ node   0   1   2   3
 	 </para>
 	 <note>
 	   <title>Safe or Unsafe rebase</title>
-	   <para></para>
-	 </note>
+	   <para>There are two different modes in which <option>rebase</option> can operate:</para>
+	   <itemizedlist>
+	     <listitem>
+	       <para>
+		 <emphasis>Safe</emphasis>: this is the default mode and performs a real rebase
+		 operation. The safe mode is an expensive operation.
+	       </para>
+	     </listitem>
+	     <listitem>
+	       <para>
+		 <emphasis>Unsafe</emphasis>: the unsafe mode
+		 (<option>-u</option>) only change the backing file name and
+		 format of filename without any checks on the file
+		 contents. You should use this mode to rename or moving
+		 backing file.
+	       </para>
+	     </listitem>
+	   </itemizedlist>
+	   </note>
        </warning>
        <para>
 	 A current usage is to initiate a new guest with the backing file. Let's
