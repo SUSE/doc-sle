@@ -151,13 +151,14 @@
    <para>
     In SUSE Linux Enterprise it is recommended to use the &libvirt;
     framework to do any operation on hosts, containers and &vmguest;. If you
-    use other tools this may not appear or be propagated in you system. For
+    use another tools this may not appear or be propagated in your system. For
     example creating a system image by hand with <command>qemu-img
     create data.raw 10G</command> will not be displayed in the
     <command>virt-manager</command> pool section. If you use a
     <command>qemu-system-arch</command> command this will no be visible
     under &libvirt;. So you should carefully used any other management tools
-    and keep in mind their usage won't be probably reflected on other tools.
+    and keep in mind that using them won't be probably reflected on &libvirt; or
+    virt-manager tools.
    </para>
    <note>
     <para>
@@ -268,6 +269,13 @@ clocksource (if host CPU supports TSC)
 
  <sect1>
   <title>I/O in Virtualization</title>
+  <para>
+   SUSE products support various of I/O Virtualization technologies. The
+   following table list all advantages and drawbacks choosing one. For more
+   information about I/O in virtualization please refer to <link
+   xlink:href="https://www.suse.com/documentation/sles-12/book_virt/data/sec_vt_io.html">Virtualization
+   Guide, I/O in Virtualization</link>.
+  </para>
   <para>
    <table>
     <title>I/O Virtualization Solutions</title>
@@ -451,7 +459,7 @@ clocksource (if host CPU supports TSC)
    &lt;model type='virtio' /&gt;
 &lt;/interface&gt;</screen>
   </sect2>
-  <sect2>
+  <sect2 xml:id="vt.best.virtio.balloon">
    <title>virtio balloon</title>
    <para>
     <emphasis>virtio_balloon</emphasis> is a PV driver to give or take
@@ -563,9 +571,229 @@ virtio_rng.0</screen>
   You should install the <emphasis>rn-tools</emphasis> package on the &vmguest;,
   enable the service, and start it. Under SLE12 do:
  </para>
- <screen># zypper in rng-tools</screen>
- <screen># systemctl enable rng-tools</screen>
- <screen># systemctl start rng-tools</screen>
+ <screen># zypper in rng-tools
+# systemctl enable rng-tools
+# systemctl start rng-tools</screen>
+ </sect1>
+
+ <sect1 xml:id="vt.best.mem">
+  <title>Memory and Pages</title>
+  <para>
+   Linux manages memory in units called pages. On most system default page
+   size is 4KB.
+   Linux and the CPU have to store which page belong to which
+   process and stored it (in a page table). If you have a lot of process running,
+   it takes more time to find where the memory is mapped, because searching in
+   this table take times. To speed up the search in the table the TLB 
+   (Translation Lookaside Buffer) was invented, but on a system with a lot of
+   memory the TLB is not enough. To avoid any fallback to normal page table
+   (so without cache which is time costly), the hugepages can be used. Using
+   hugepages will reduce TLB overhead and TLB misses (pagewalk). An host with
+   32GB (32*1014*1024 = 33554432KB) of memory has by default with 4KB of
+   default page size has a: <emphasis>3355443/4 = 8 388 608</emphasis> TLB
+   size pages. With 2MB (2048KB) it has only <emphasis>3355443/ 2048 = 16384</emphasis> TLB
+   size pages, so this will reduce the TLB misses.
+  </para>
+  <sect2>
+   <title>Hugepages</title>
+   <para>
+    Current CPU architecture support bigger pages than 4KB: hugepages.
+    To determine what the size of huge pages available on your system
+    (could be 2MB or 1GB) check the flag in the <filename>/proc/cpuinfo</filename>.
+   </para>
+   <table>
+    <title>DETERMINE HUGE PAGES SIZE</title>
+    <tgroup cols="2">
+     <colspec colnum="1" colname="1" colwidth="10%"/>
+     <colspec colnum="2" colname="2" colwidth=""/>
+     <thead>
+      <row>
+       <entry>
+        <para>CPU flag</para>
+       </entry>
+       <entry>
+        <para>Huge pages Size available</para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry><para>Empty string</para></entry>
+       <entry><para>No Huge pages available</para></entry>
+      </row>
+      <row>
+       <entry><para>pse</para></entry>
+       <entry><para>2MB</para></entry>
+      </row>
+      <row>
+       <entry><para>pdpe1gb</para></entry>
+       <entry><para>1GB</para></entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <para>
+    Using hugepages should improve performance of &vmguest; and reduce host
+    memory consumption.
+   </para>
+   <para>
+    By default the system use THP, to get huge pages available on your system
+    you need to activate it at boot time with <option>hugepages=1</option>, 
+    and optionally add the hugepages size with <option>hugepagesz=2MB</option>.
+   </para>
+   <note>
+    <title>1GB hugepages</title>
+    <para>
+     1GB pages can only be allocated at boot time and not freed afterwards.
+    </para>
+   </note>
+   <para>
+    To be able to allocate and use Huge page table (HugeTlbPage) you need a
+    mounted <filename>hugetlbfs</filename> with correct permissions.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Mount <option>hugetlbfs</option> to <filename>/dev/hugepages</filename>:
+     </para>
+     <screen># mount -t hugetlbfs hugetlbfs /dev/hugepages</screen>
+    </step>
+    <step>
+     <para>
+      To reserve memory for huge pages use <command>sysctl</command> or
+      <command>echo <replaceable>NUMBER</replaceable></command>. If your
+      system as a <emphasis>Hugepagesize</emphasis> of 2MB (2048KB), and you
+      want to reserve 1GB (1048576KB) for you &vmguest;, you need <emphasis>1048576/2048=512</emphasis>
+      pages in the pool.
+     </para>
+     <screen># sysctl vm.nr_hugepages=512</screen>
+     <para>Or:</para>
+     <screen># echo 512 > /proc/sys/vm/nr_hugepages<co
+     xml:id="co.hp.nrhp"/></screen>
+     <calloutlist>
+      <callout arearefs="co.hp.nrhp">
+      <para>
+       Current number of <emphasis>persistent</emphasis> hugepages in the
+       kernel's huge page pool.
+      <emphasis>Persistent</emphasis> huge pages will be returned to the huge
+      page pool when freed by a task</para>
+      </callout>
+     </calloutlist>
+    </step>
+    <step>
+     <para>
+      Add the <emphasis>memoryBacking</emphasis> element in the &vmguest; config:
+     </para>
+     <screen>&lt;memoryBacking&gt;
+    &lt;hugepages/&gt;
+&lt;/memoryBacking&gt;</screen> 
+    </step>
+    <step>
+     <para>
+     Start your &vmguest; and check on the host that it uses the hugepages
+     </para>
+     <screen># cat /proc/meminfo | grep HugePages_
+HugePages_Total:<co xml:id="co.hp.total"/>    512
+HugePages_Free:<co xml:id="co.hp.free"/>       92
+HugePages_Rsvd:<co xml:id="co.hp.rsvd"/>        0
+HugePages_Surp:<co xml:id="co.hp.surp"/>        0</screen>
+    <calloutlist>
+     <callout arearefs="co.hp.total">
+      <para>Size of the pool of huge pages</para>
+     </callout>
+     <callout arearefs="co.hp.free">
+      <para>Number of huge pages in the pool that are not yet allocated</para>
+     </callout>
+     <callout arearefs="co.hp.rsvd">
+      <para>Number of huge pages for which a commitment to allocate from the pool has been made, but no allocation has yet been made</para>
+     </callout>
+     <callout arearefs="co.hp.surp">
+      <para>number of huge pages in the pool above the value in
+      <filename>/proc/sys/vm/nr_hugepages</filename>. The maximum number of surplus huge pages is controlled by
+      <filename>/proc/sys/vm/nr_overcommit_hugepages</filename></para>
+     </callout>
+    </calloutlist>
+    </step>
+   </procedure>
+   <note>
+    <para>
+     Even if Hugepages should perform the best, this has some drawback, you
+     loose some features like: Memory ballooning (see <xref linkend="vt.best.virtio.balloon"/>,
+     KSM (see <xref linkend="vt.best.perf.ksm"/>, and hugepage can not be
+     swapped.
+    </para>
+   </note>
+  </sect2>
+  <sect2 xml:id="vt.best.mem.thp">
+   <title>Transparent Hugepages</title>
+   <para>
+    Transparent Hugepages is a way to dynamically allocate HugePage with the
+    <command>khugepaged</command> kernel thread instead of get them allocate
+    at boot time. It is enable by default. In some situation this is
+    preferable to disable THP (like running Orable database). Just add the
+    kernel parameter <option>transparent_hugepage=never</option>, rebuild your
+    grub2 config, and reboot. Check this is done with:
+   </para>
+   <screen>cat /sys/kernel/mm/transparent_hugepage/enabled 
+always madvise [never]</screen>
+  <note>
+   <para>THP is not available under &xen;</para>
+  </note>
+  </sect2>
+  <sect2 xml:id="vt.best.mem.hot">
+   <title>Memory Hotplug</title>
+   <para>
+    To optimize the usage of your memory, it could be useful to plug more
+    memory to running &vmguest;. First you must configure the 
+    <emphasis>&lt;maxMemory&gt;</emphasis> tag in the XML configuration:
+   </para>
+   <screen>&lt;maxMemory<co xml:id="co.mem.hot.max"/> slots='16'<co   xml:id="co.mem.hot.slots"/> unit='KiB'&gt;20971520<co   xml:id="co.mem.hot.size"/>&lt;/maxMemory&gt;
+   &lt;memory<co   xml:id="co.mem.hot.mem"/> unit='KiB'&gt;1048576&lt;/memory&gt;
+&lt;currentMemory<co xml:id="co.mem.hot.curr"/> unit='KiB'&gt;1048576&lt;/currentMemory&gt;</screen>
+   <calloutlist>
+    <callout arearefs="co.mem.hot.max">
+     <para>Run time maximum memory allocation of the guest. </para>
+    </callout>
+    <callout arearefs="co.mem.hot.slots">
+     <para>Number of slots available for adding memory to the guest
+     </para>
+    </callout>
+    <callout arearefs="co.mem.hot.size">
+     <para>Valid units are:</para>
+     <itemizedlist>
+      <listitem><para>"KB" for kilobytes (1,000 bytes)</para></listitem>
+      <listitem><para>"k" or "KiB" for kibibytes (1024 bytes)</para></listitem>
+      <listitem><para>"MB" for megabytes (1,000,000 bytes)</para></listitem>
+      <listitem><para>"M" or "MiB" for mebibytes (1,048,576 bytes)</para></listitem>
+      <listitem><para>"GB" for gigabytes (1,000,000,000 bytes)</para></listitem>
+      <listitem><para>"G" or "GiB" for gibibytes (1,073,741,824 bytes)</para></listitem>
+      <listitem><para>"TB" for terabytes (1,000,000,000,000 bytes)</para></listitem>
+      <listitem><para>"T" or "TiB" for tebibytes (1,099,511,627,776 bytes)</para></listitem>
+     </itemizedlist>
+    </callout>
+    <callout arearefs="co.mem.hot.mem">
+     <para>Maximum allocation of memory for the guest at boot time</para>
+    </callout>
+    <callout arearefs="co.mem.hot.curr">
+     <para>Actual allocation of memory for the guest</para>
+    </callout>
+   </calloutlist>
+   <para>
+    To hot plug a memory devices into the slots, use <command>virsh
+    attach-device vm-name mem-dev.xml</command>.
+   </para>
+   <screen># cat mem-dev.xml
+&lt;memory model='dimm'&gt;
+   &lt;target&gt;
+     &lt;size unit='KiB'>524287&lt;/size&gt;
+     &lt;node>0&lt;/node&gt;
+   &lt;/target&gt;
+&lt;/memory&gt;</screen>
+    <para>
+     For memory device hotplug, the guest must have at least 1 NUMA cell
+     defined (see <xref linkend="vt.best.numa.topo"/>).
+    </para>
+  </sect2>
  </sect1>
 
  <sect1 xml:id="vt.best.perf.ksm">
@@ -1026,6 +1254,22 @@ w /sys/block/sdb/queue/scheduler - - - - noop</screen>
      on different hardware. Thus, if you hit any bugs, you are on your own.
     </para>
    </note>
+   <para>
+    If you want to specify a strict model of a CPU for a &vmguest; like the
+    new Broadwell CPU model:
+   </para>
+   <screen>&lt;cpu mode='custom' match='exact'&gt;
+   &lt;model&gt;Broadwell&lt;/model&gt;
+&lt;/cpu&gt;</screen>
+   <para>
+    If you want to add the <emphasis>invtsc</emphasis> (Invariant TSC) CPU feature
+    add a <emphasis>feature</emphasis> element between the
+    <emphasis>&lt;cpu&gt;</emphasis> element:
+   </para>
+   <screen>&lt;cpu&gt;
+   ....
+   &lt;feature name='invtsc'/&gt;
+&lt;/cpu&gt;</screen>
   </sect2>
   <sect2>
    <title>vCPU Pinning</title>
@@ -1370,73 +1614,6 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
   </sect2>
  </sect1>
 
- <sect1 xml:id="vt.best.mem">
-  <title>Memory</title>
-  <para>
-   Linux manages memory in units called pages. Most of the time 
-  </para>
-  <sect2 xml:id="vt.best.mem.hot">
-   <title>Memory Hotplug</title>
-   <para>
-    To optimize the usage of your memory, it could be useful to plug more
-    memory to running &vmguest;. First you must configure the 
-    <emphasis>&lt;maxMemory&gt;</emphasis> tag in the XML configuration:
-   </para>
-   <screen>&lt;maxMemory<co xml:id="co.mem.hot.max"/> slots='16'<co xml:id="co.mem.hot.slots"/> unit='KiB'&gt;20971520<co xml:id="co.mem.hot.size"/>&lt;/maxMemory&gt;
-&lt;memory<co xml:id="co.mem.hot.mem"/> unit='KiB'&gt;1048576&lt;/memory&gt;
-&lt;currentMemory<co xml:id="co.mem.hot.curr"/> unit='KiB'&gt;1048576&lt;/currentMemory&gt;</screen>
-   <para>
-    To hot plug a memory devices into the slots, use <command>virsh
-    attach-device vm-name mem-dev.xml</command>.
-   </para>
-   <screen># cat mem-dev.xml
-&lt;memory model='dimm'&gt;
-   &lt;target&gt;
-     &lt;size unit='KiB'>524287&lt;/size&gt;
-     &lt;node>0&lt;/node&gt;
-   &lt;/target&gt;
-&lt;/memory&gt;</screen>
-    <para>
-     For memory device hotplug, the guest must have at least 1 NUMA cell
-     defined (see <xref linkend="vt.best.numa.topo"/>).
-    </para>
-  </sect2>
-  <sect2 xml:id="vt.best.mem.thp">
-   <title>Transparent Hugepages</title>
-   <para>
-    Transparent Hugepages is a way to dynamically allocate HugePage with the
-    <command>khugepaged</command> kernel thread instead of get them allocate
-    at boot time. It is enable by default. In some situation this is
-    preferable to disable THP (like running Orable database). Just add the
-    kernel parameter <option>transparent_hugepage=never</option>, rebuild your
-    grub2 config, and reboot. Check this is done with
-   </para>
-   <screen>cat /sys/kernel/mm/transparent_hugepage/enabled 
-always madvise [never]</screen>
-  </sect2>
-  <sect2>
-   <title>Hugetlbfs</title>
-   <para>
-    Hugetlbfs should perform the best, but loose: 
-    ballooning, KSM, ability to swap VM when memory pressure is high
-   </para>
-   <screen># cat /proc/cpuinfo | grep pdpe1gb
-
-  transparent_hugepage=never hugepagesz=1G hugepages=1 default_hugepagesz=1G
-    # grep Huge /proc/meminfo
-AnonHugePages:   1939456 kB
-HugePages_Total:       0
-HugePages_Free:        0
-HugePages_Rsvd:        0
-HugePages_Surp:        0
-Hugepagesize:       2048 kB</screen>
-   <para> 
-
-https://www.suse.com/releasenotes/x86_64/SUSE-SLES/11-SP2/#fate-311931
-http://www.linux-kvm.org/images/1/19/2012-forum-memory-mgmt.pdf
-   </para>
-  </sect2>
- </sect1>
 
  <sect1 xml:id="vt.best.stor">
   <title>Storage and Filesystem</title>
@@ -2464,7 +2641,7 @@ mlock=off -smp 4,sockets=4,cores=1,threads=1 -uuid 8616d00f-5f05-4244-97cc-86aea
   <screen>&lt;filesystem type='mount'<co xml:id="co.fs.mount"/> accessmode='mapped'<co xml:id="co.fs.mode"/>&gt;
       &lt;source dir='/data/shared'<co xml:id="co.fs.sourcedir"/>&gt;
       &lt;target dir='shared'<co xml:id="co.fs.targetdir"/>/&gt;
-      &lt;/filesystem&gt;</screen>
+&lt;/filesystem&gt;</screen>
       
       <calloutlist>
        <callout arearefs="co.fs.mount">
@@ -2584,7 +2761,6 @@ mlock=off -smp 4,sockets=4,cores=1,threads=1 -uuid 8616d00f-5f05-4244-97cc-86aea
 <para>
 Connection to guest: security policy
 Authentication for libvirtd and VNC need to be configured separately
-RNG and entropy
 &qemu; Guest Agent
 The VNC TLS (set at start)
 </para>
@@ -2933,9 +3109,8 @@ VGA trouble debug
   </table>
  </sect1>
 
- 
  <sect1>
-  <title>References</title>
+  <title>External References</title>
   <para>
   </para>
   <itemizedlist>
@@ -2981,6 +3156,24 @@ VGA trouble debug
      <link
        xlink:href="http://events.linuxfoundation.org/sites/events/files/slides/CloudOpen2013_Khoa_Huynh_v3.pdf">Dr. Khoa
      Huynh, IBM Linux Technology Center</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link
+       xlink:href="https://www.kernel.org/doc/Documentation/kernel-parameters.txt">Kernel Parameters</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://lwn.net/Articles/374424/">Huge pages
+     Administration (Mel Gorman)</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link
+       xlink:href="https://www.kernel.org/doc/Documentation/vm/hugetlbpage.txt">kernel hugetlbpage</link>
     </para>
    </listitem>
    <listitem>
