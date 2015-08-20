@@ -43,6 +43,14 @@
    options depending on your usage. Fixing configuration issue and doing
    performance tuning will increase &vmguest; performance near to bare metal.
   </para>
+  <remark>
+   Bruce 20150806: There is no mention of caching considerations, of migration inhibitors, or
+   basic strategies for how to do your storage or networking infrastructure,
+   and only a little bit about how to map your virtualization requirements to
+   host capabilities.
+   I see that the doc doesn't address the issue of when to use Xen PV vs Xen FV
+   vs KVM at all.
+  </remark>
   <!-- Todo
        <Table Rowsep="1">
        <title>Scenario</title>
@@ -148,6 +156,8 @@
   <title>Recommended</title>
   <sect2 xml:id="vt.best.intro.libvirt">
    <title>Prefer &libvirt; Framework</title>
+   <remark>add some explanation about how to enable/disable kvm with
+   qemu-system-arch</remark>
    <para>
     In SUSE Linux Enterprise it is recommended to use the &libvirt;
     framework to do any operation on hosts, containers and &vmguest;. If you
@@ -155,7 +165,7 @@
     example creating a system image by hand with <command>qemu-img
     create data.raw 10G</command> will not be displayed in the
     <command>virt-manager</command> pool section. If you use a
-    <command>qemu-system-arch</command> command this will no be visible
+    <command>qemu-system-arch</command> <remark>Bruce 20150806: explain qemu-system-arch</remark>command this will no be visible
     under &libvirt;. So you should carefully used any other management tools
     and keep in mind that using them won't be probably reflected on &libvirt; or
     virt-manager tools.
@@ -170,6 +180,8 @@
   </sect2>
   <sect2 xml:id="vt.best.intro.qemu">
    <title>qemu-system-i386 VS qemu-system-x86_64</title>
+   <remark>Lin 20150808: Should we add some explanation about how to enable/disable kvm
+   with qemu-system-arch</remark>
    <para>
     Just as a modern 64 bit x86 PC supports running a 32 bit OS as well as a
     64 bit OS, <command>qemu-system-x86_64</command> runs 32 bit OS's
@@ -421,14 +433,14 @@ clocksource (if host CPU supports TSC)
    <warning>
     <title>&qemu; option</title>
     <para>
-     The <option>-hd[ab]</option> for virtio disk won't work, you must use
+     The <option>-hd[abcd]</option> for virtio disk won't work, you must use
      <option>-drive</option> instead.
     </para>
    </warning>
    <warning>
     <title>Disk Name Change</title>
     <para>
-     Disk will show up as <option>/dev/vd[a-z][1-9]</option>, if you
+     For a Linux guest, the disk will show up as <option>/dev/vd[a-z][1-9]</option>, if you
      migrate from a non-virtio disk you need to change
      <option>root=</option> in GRUB config, and regenerate the
      <filename>initrd</filename> file or the system won't be able to boot.
@@ -462,8 +474,27 @@ clocksource (if host CPU supports TSC)
   <sect2 xml:id="vt.best.virtio.balloon">
    <title>virtio balloon</title>
    <para>
+    The virtio balloon is used for host memory over-commits for guests.
+    For linux guests, Balloon driver runs in guest kernel, for windows guests,
+    Balloon driver is in VMDP package.
     <emphasis>virtio_balloon</emphasis> is a PV driver to give or take
-    memory from a &vmguest;. It's controlled by
+    memory from a &vmguest;. 
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      <emphasis>Inflate balloon</emphasis>: Return memory from guest to host kernel(for kvm) or
+      to hypervisor(for xen)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis>Deflate balloon</emphasis>: Guest will have more available memory
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    It's controlled by
     <emphasis>currentMemory</emphasis> and <emphasis>memory</emphasis>
     option.
    </para>
@@ -473,6 +504,10 @@ clocksource (if host CPU supports TSC)
 &lt;devices&gt;
    &lt;memballoon model='virtio'/&gt;
 &lt;/devices&gt;</screen>
+  <para>
+   You can also use <command>virsh</command> to change it:
+  </para>
+  <screen>virsh setmem <replaceable>DOMAIN_ID</replaceable> <replaceable>MEMORY in KB</replaceable></screen>
   </sect2>
   <sect2>
    <title>Checking virtio Presence</title>
@@ -536,6 +571,13 @@ virtio-net-pci.any_layout=on/off
    To get 16bit color, high compatibility and better performance it's
    recommended to use the <emphasis>cirrus</emphasis> video driver.
   </para>
+  <note>
+   <title>&libvirt;</title>
+   <para>
+    &libvirt; ignore the vram value because video size was been hardcoded in
+    &qemu;.
+   </para>
+  </note>
   <screen>&lt;video&gt;
   &lt;model type='cirrus' vram='9216' heads='1'/&gt;
 &lt;/video&gt;</screen>
@@ -543,6 +585,13 @@ virtio-net-pci.any_layout=on/off
 
  <sect1 xml:id="vt.best.entropy">
   <title>Better Entropy</title>
+  <para>
+   Virtio RNG is a paravirtualized device that is exposed as a hardware RNG
+   device to the guest. On the host side, it can be wired up to one of
+   several sources of entropy, including a real hardware RNG device as well
+   as the host's <filename>/dev/random</filename> if hardware support doesn't exist.
+   The Linux kernel contains the guest driver for the device since version 2.6.26.
+  </para>
   <para>
    The system entropy is collected from various non-deterministic hardware
    events and is mainly used by cryptographic applications.
@@ -793,6 +842,15 @@ always madvise [never]</screen>
      For memory device hotplug, the guest must have at least 1 NUMA cell
      defined (see <xref linkend="vt.best.numa.topo"/>).
     </para>
+  </sect2>
+  <sect2>
+   <title>xenstore in tmpfs</title>
+   <para>
+    If you have multiple &vmguest; you can move the 
+    XENSTORED_ROOTDIR to a tmpfs place to speed up the system.
+    Mount the <filename>/var/lib/xenstored</filename> as a tmpfs:
+   </para>
+   <screen># mount -t tmpfs tmpfs /var/lib/xenstored/</screen>
   </sect2>
  </sect1>
 
@@ -1284,7 +1342,10 @@ w /sys/block/sdb/queue/scheduler - - - - noop</screen>
    <para>
     You can pin a vCPU to a specific physical CPU. vCPU will increase CPU cache hit ratio. To pin a vCPU to a specific core:
    </para>
-   <screen>virsh# vcpupin <replaceable>DOMAIN</replaceable> --vpcu <replaceable>vCPU_NUMBER</replaceable>
+   <note>
+    <para>vCPU pinning can also be used for a non-numa node</para>
+   </note>
+   <screen>virsh# vcpupin <replaceable>DOMAIN_ID</replaceable> --vcpu <replaceable>vCPU_NUMBER</replaceable>
 VCPU: CPU Affinity
 ----------------------------------
 0: 0-7
@@ -1311,6 +1372,9 @@ virsh # vcpupin SLE12 --vcpu 0 0 --config</screen>
      take into consideration that live migration of a pinned &vmguest; is
      difficult, because the resource may not be available on the host, or the
      NUMA topology could be different on the destination host.
+     For more recommendation about Live Migration see <link
+     xlink:href="https://www.suse.com/documentation/sles-12/book_virt/data/sec_libvirt_admin_migrate.html#libvirt_admin_live_migration_requirements">Virtualization
+     Live Migration Requirements</link>
     </para>
    </warning>
   </sect2>
@@ -2212,7 +2276,7 @@ lazy_refcounts=off nocow=off</screen>
 	device:
        </para>
        <screen># losetup -f<co xml:id="co.losetup.find"/>
-/dev/loop0</screen>
+/dev/loop1</screen>
        <calloutlist>
 	<callout arearefs="co.losetup.find">
 	 <para>Find first unused device</para>
