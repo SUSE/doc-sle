@@ -2025,7 +2025,7 @@ calls      retrans    authrefrsh
      qemu-img documentation</link> for more information on <command>qemu-img</command> tool and examples.
     </para>
    </sect3>
-   <sect3>
+   <sect3 xml:id="vt.best.overlay">
     <title>Overlay Storage Image</title>
     <para>
      The qcow2 and qed formats provide a way to create a base-image, but also a way
@@ -3115,6 +3115,143 @@ VGA trouble debug
     </tbody>
    </tgroup>
   </table>
+  <sect2>
+   <title>Getting the best of the two worlds</title>
+   <para>
+    Even if the above table seems to indicate that running a single application
+    in a very secure way is not possible, starting with &sls; 12 SP 1
+    <command>virt-sandbox</command> will allow running a single application
+    in a &kvm; guest. <command>virt-sandbox</command> bootstraps any command
+    within a linux kernel with a minimal root file system.
+   </para>
+   <para>
+    The guest root file system can either be the root file system mounted read-only
+    or a disk image. The following steps will show how to setup a sandbox with
+    qcow2 disk image as root file system.
+   </para>
+   <procedure>
+    <step>
+     <para>Create the disk image using <command>qemu-img</command></para>
+     <screen>qemu-img create -f qcow2 rootfs.qcow2 6G</screen>
+    </step>
+    <step>
+     <para>Format the disk image</para>
+     <screen>modprobe nbd<co xml:id="co.vsmkfs.modprobe"/>
+/usr/bin/qemu-nbd --format qcow2 -n -c /dev/nbd0 $PWD/test-base.qcow2<co xml:id="co.vsmkfs.qemu-nbd"/>
+mkfs.ext3 /dev/nbd0<co xml:id="co.vsmkfs.do"/>
+     </screen>
+     <calloutlist>
+      <callout arearefs="co.vsmkfs.modprobe">
+       <para>
+        Make sur the nbd module is loaded: it is not loaded by default and
+        will only be used to format the qcow image.</para>
+      </callout>
+      <callout arearefs="co.vsmkfs.qemu-nbd">
+       <para>
+        Create an nbd device for the qcow2 image. This device will then behave like
+        any other block device. The example uses <replaceable>/dev/nbd0</replaceable>
+        but any other free NBD device will work.
+       </para>
+      </callout>
+      <callout arearefs="co.vsmkfs.do">
+       <para>
+        Format the disk image directly. Note that no partition table has been
+        created: virt-sandbox considers the image to be a partition, not a disk.
+       </para>
+       <para>
+        The partition formats which can be used are restricted: the linux kernel
+        bootstrapping the sandbox need to have the corresponding features builtin.
+        The ext4 module is also available at the sandbox start up time.
+       </para>
+      </callout>
+     </calloutlist>
+    </step>
+    <step>
+     <para>
+      Now populate the newly formatted image.
+     </para>
+     <screen>guestmount -a base.qcow2 -m /dev/sda:/ /mnt<co xml:id="co.vsfs.mount"/>
+zypper --root /mnt ar cd:///?devices=/dev/dvd SLES12_DVD
+zypper --root /mnt in -t pattern Minimal<co xml:id="co.vsfs.install"/>
+guestunmount /mnt<co xml:id="co.vsfs.unmount"/>
+     </screen>
+     <calloutlist>
+      <callout arearefs="co.vsfs.mount">
+       <para>
+        Mount the qcow2 image using the <command>guestfs</command> tools.
+       </para>
+      </callout>
+      <callout arearefs="co.vsfs.install">
+       <para>
+        Use zypper with the <emphasis>--root</emphasis> parameter to add a &sls;
+        repository and install the Minimal pattern in the disk image. Any additional
+        package or configuration change should be done in this step.
+       </para>
+       <note>
+        <title>Using backing chains</title>
+        <para>
+         In order to share the root file system between several sandboxes, create
+         qcow2 images with a common disk image as backing chain as described in the
+         <link xlink:href="#vt.best.overlay">Overlay Storage Image section</link>.
+        </para>
+       </note> 
+      </callout>
+      <callout arearefs="co.vsfs.unmount">
+       <para>Unmount the qcow2 image.</para>
+      </callout>
+     </calloutlist>
+    </step>
+    <step>
+     <para>
+      Run the sandbox, using <command>virt-sandbox</command>. This command has many
+      interesting options, read its man page to discover them all. It can either be
+      running as root or as an unprivileged user.
+     </para>
+     <screen>virt-sandbox -n <replaceable>name</replaceable> \
+             -m host-image:/=$PWD/rootfs.qcow2 \ <co xml:id="co.vs.rootfs"/>
+             -m host-bind:/srv/www=/guests/www \ <co xml:id="co.vs.bind"/>
+             -m ram:/tmp=100MiB \
+             -m ram:/run=100MiB \ <co xml:id="co.vs.tmpfs"/>
+             -N source=default,address=192.168.122.12/24 \ <co xml:id="co.vs.net"/>
+             -- \
+             <replaceable>/bin/sh</replaceable>
+     </screen>
+     <calloutlist>
+      <callout arearefs="co.vs.rootfs">
+       <para>
+        Mount the created disk image as the root file system. Note, that without any
+        image being mounted as <emphasis>/</emphasis>, the host root file system is
+        read-only mounted as the guest one.
+       </para>
+       <para>
+        The host-image mount is not reserved for the root file system, it can be used
+        to mount any disk image anywhere in the guest.
+       </para>
+      </callout>
+      <callout arearefs="co.vs.bind">
+       <para>
+        The host-bind mount is pretty convenient to share files and folders between the
+        host and the guest. In this example the host folder <replaceable>/guests/www</replaceable>
+        is mounted as <replaceable>/srv/www</replaceable> in the sandbox.
+       </para>
+      </callout>
+      <callout arearefs="co.vs.tmpfs">
+       <para>
+        The ram mounts are defining <emphasis>tmpfs</emphasis> mounts in the sandbox.
+       </para>
+      </callout>
+      <callout arearefs="co.vs.net">
+       <para>
+        The network uses a network defined in libvirt. When running as unprivileged user, the
+        source can be omitted, and the &kvm; user networking feature will be used. Using this
+        option requires <emphasis>dhcp-client</emphasis> and <emphasis>iproute2</emphasis>, which
+        is the case with &sls; Minimal pattern.
+       </para>
+      </callout>
+     </calloutlist>
+    </step>
+   </procedure>
+  </sect2>
  </sect1>
 
  <sect1>
