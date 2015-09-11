@@ -8,15 +8,15 @@
 <chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.snapper">
  <title>System Recovery and Snapshot Management with Snapper</title>
  <info>
-      <abstract>
-        <para>
+  <abstract>
+   <para>
     Being able to do file system snapshots providing the ability to do
     rollbacks on Linux is a feature that was often requested in the past.
     Snapper, in conjunction with the <literal>Btrfs</literal> file system or
     thin-provisioned LVM volumes now fills that gap.
    </para>
-        <para>
-          <literal>Btrfs</literal>, a new copy-on-write file system for Linux,
+   <para>
+    <literal>Btrfs</literal>, a new copy-on-write file system for Linux,
     supports file system snapshots (a copy of the state of a subvolume at a
     certain point of time) of subvolumes (one or more separately mountable
     file systems within each physical partition). Snapshots are also
@@ -425,6 +425,37 @@
 10  &lt;/solvables&gt;
 11 &lt;/snapper-zypp-plugin-conf&gt;</screen>
    </sect3>
+   
+   <sect3 xml:id="sec.snapper.setup.customizing.new_subvolume">
+    <title>Creating and Mounting New Subvolumes</title>
+    <para>
+     Creating a new subvolume underneath the <filename>/</filename>-hierarchy
+     and permanently mounting it is supported. However, you need to make sure
+     not to create it inside a snapshot, since you would not be able to delete
+     snapshots anymore after a rollback.
+    </para>
+    <para>
+     &productname; is configured with the <filename>/@/</filename> subvolume
+     which serves as an independent root for permanent subvolumes such as
+     <filename>/opt</filename>, <filename>/srv</filename>,
+     <filename>/home</filename> and others. Any new subvolume you create and
+     permanently mount need to be created in this initial root file system.
+    </para>
+    <para>
+     To do so, run the following commands. In this example, a new subvolume
+     <filename>/usr/important</filename> is created from
+     <filename>/dev/sda2</filename>.
+    </para>
+    <screen>mount /dev/sda2 -o subvol=@ /mnt
+btrfs subvolume create /mnt/usr/important
+umount /mnt</screen>
+    <para>
+     The corresponding entry in <filename>/etc/fstab</filename> needs to look
+     like the following:
+    </para>
+    <screen>/dev/sda2 /usr/important btrfs subvol=@/usr/important 0 0</screen>
+   </sect3>
+   
    <sect3 xml:id="sec.snapper.setup.customize.archiving">
     <title>Controlling Snapshot Archiving</title>
     <para>
@@ -921,15 +952,18 @@ c..... /var/lib/rpm/Sigmd5</screen>
   <para>
    The &grub; version included on &productname; is able to boot from
    Btrfs snapshots. Together with Snapper's rollback feature, this allows to
-   recover a misconfigured system. All snapshots created by Snapper are
-   available for booting and can be selected from the boot menu.
+   recover a misconfigured system. Only snapshots created for the default
+   Snapper configuration (<literal>root</literal>) are bootable.
   </para>
 
   <important>
-   <title>Bootable Snapshots</title>
+   <title>Supported Configuration</title>
    <para>
-    Only snapshots from the root file system (defined by Snapper's root
-    configuration) are bootable.
+    <!-- fs 2015-09-11: This will change with SP2 - see FATE #316347 -->
+    As of &productname; &productnumber; system rollbacks are only supported by
+    SUSE if the default
+    Snapper configuration (<literal>root</literal>) and the default
+    configuration of the root partition has not been changed.
    </para>
   </important>
 
@@ -1038,7 +1072,7 @@ c..... /var/lib/rpm/Sigmd5</screen>
       <para>
        If you want to perform the rollback, run
       </para>
-<screen>sudo snapper rollback</screen>
+      <screen>sudo snapper rollback</screen>
       <para>
        and reboot afterwards. On the boot screen, choose the default boot
        entry to reboot into the reinstated system.
@@ -1047,15 +1081,103 @@ c..... /var/lib/rpm/Sigmd5</screen>
     </substeps>
    </step>
   </procedure>
+  
+  <tip>
+   <title>Rolling Back to a Specific Installation State</title>
+   <para>
+    If snapshots are not disabled during installation, an initial bootable
+    snapshot is created at the end of the initial system installation. You can
+    go back to that state at any time by booting this snapshot. The snapshot
+    can be identified by the description <literal>after installation</literal>.
+   </para>
+   <para>
+    A bootable snapshot is also created when starting a system upgrade to a
+    service pack or a new major release (provided snapshots are not disabled).
+   </para>
+  </tip>
 
-  <sect2 xml:id="sec.snapper.limits">
+  <sect2 xml:id="sec.snapper.snapshot-boot.identify">
+   <title>Accessing and Identifying Snapshot Boot Entries</title>
+   <para>
+    To boot from a snapshot, reboot your machine and choose <guimenu>Start
+    Bootloader from a read-only snapshot</guimenu>. A screen listing all
+    bootable snapshots opens. The most recent snapshot is listed first, the
+    oldest last. Use the keys <keycap function="down"/> and <keycap
+    function="up"/> to navigate and press <keycap function="enter"/> to
+    activate the selected snapshot. Activating a snapshot from the boot menu
+    does not reboot the machine immediately, but rather opens the boot loader
+    of selected snapshot.
+   </para>
+   <figure xml:id="fig.snapper.snapshot-boot.identify">
+    <title>Boot Loader: Snapshots</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="boot_snapshots.png" width="75%" format="png"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="boot_snapshots.png" width="75%" format="png"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    Each snapshots entry in the boot loader follows a naming scheme which
+    makes it possible to identify it easily:
+   </para>
+   <screen>[*]<co xml:id="snapper.boot.important"/><replaceable>OS</replaceable><co xml:id="snapper.boot.os"/> (<replaceable>KERNEL</replaceable><co xml:id="snapper.boot.kernel"/>,<replaceable>DATE</replaceable><co xml:id="snapper.boot.date"/>T<replaceable>TIME</replaceable><co xml:id="snapper.boot.time"/>,<replaceable>DESCRIPTION</replaceable><co xml:id="snapper.boot.description"/>)</screen>
+   <calloutlist>
+    <callout arearefs="snapper.boot.important">
+     <para>
+      If the snapshot was marked <literal>important</literal>, the entry is
+      marked with a <literal>*</literal>.
+     </para>
+    </callout>
+    <callout arearefs="snapper.boot.os">
+     <para>Operating system label.</para>
+    </callout>
+    <callout arearefs="snapper.boot.date">
+     <para>Date in the format <literal>YYYY-MM-DD</literal>.</para>
+    </callout>
+    <callout arearefs="snapper.boot.time">
+     <para>Time in the format <literal>HH:MM</literal>.</para>
+    </callout>
+    <callout arearefs="snapper.boot.description">
+     <para>
+      This field contains a description of the snapshot. In case of a manually
+      created snapshot this is the string created with the option
+      <option>--description</option> or a custom string (see <xref
+      linkend="tip.snapper.snapshot-boot.custom_descr"/>). In case of an
+      automatically created snapshot, it is the tool that was called, for
+      example <literal>zypp(zypper)</literal> or
+      <literal>yast_sw_single</literal>). Long descriptions may be truncated,
+      depending on the size of the boot screen.
+     </para>
+    </callout>
+   </calloutlist>
+   
+   <tip xml:id="tip.snapper.snapshot-boot.custom_descr">
+    <title>
+     Setting a Custom Description for Boot Loader Snapshot Entries
+    </title>
+    <para>
+     It is possible to replace the default string in the description field of
+     a snapshot with a custom string. This is for example useful if an
+     automatically created description is not sufficient, or a user provided
+     description is too long. To set a custom string
+     <replaceable>STRING</replaceable> for snapshot <replaceable>NUMBER</replaceable>, use the following command:
+    </para>
+    <screen>snapper modify --userdata "bootloader=<replaceable>STRING</replaceable>" <replaceable>NUMBER</replaceable></screen>
+   </tip>
+   
+  </sect2>
+  
+  <sect2 xml:id="sec.snapper.snapshot-boot.limits">
    <title>Limitations</title>
    <para>
     A <emphasis>complete</emphasis> system rollback, restoring the complete
     system to exactly the same state as it was in when a snapshot was taken,
     is not possible.
    </para>
-   <sect3 xml:id="sec.snapper.limits.excludes">
+   <sect3 xml:id="sec.snapper.limits.snapshot-boot.excludes">
     <title>Directories Excluded from Snapshots</title>
     <para>
      Root file system snapshots do not contain all directories. See
@@ -1124,7 +1246,7 @@ c..... /var/lib/rpm/Sigmd5</screen>
      </varlistentry>
     </variablelist>
    </sect3>
-   <sect3 xml:id="sec.snapper.limits.grub">
+   <sect3 xml:id="sec.snapper.limits.snapshot-boot.grub">
     <title>No Rollback of Boot Loader Data</title>
     <para>
      A rollback of the boot loader is not possible, since all
@@ -1949,6 +2071,14 @@ TIMELINE_MIN_AGE="1800"</screen>
     snapshot, run <command>snapper delete</command>
     <replaceable>NUMBER</replaceable>.
    </para>
+   <para>
+    When deleting snapshots with Snapper, the freed space will be claimed by a
+    Btrfs process running in the background. Thus the visibility and the
+    availability of free space is delayed.  In case you need to have the space
+    freed by deleting a snapshot available immediately, use the option
+    <option>--sync</option> with the delete command.
+   </para>
+
    <tip>
     <title>Deleting Snapshot Pairs</title>
     <para>
@@ -1957,6 +2087,7 @@ TIMELINE_MIN_AGE="1800"</screen>
      versa).
     </para>
    </tip>
+
    <variablelist>
     <varlistentry>
      <term><command>snapper delete 65</command>
@@ -1978,19 +2109,25 @@ TIMELINE_MIN_AGE="1800"</screen>
       </para>
      </listitem>
     </varlistentry>
+    <varlistentry>
+     <term><command>snapper</command><option>--sync</option> 23</term>
+     <listitem>
+      <para>
+       Deletes snapshot 23 for the default (<literal>root</literal>)
+       configuration and makes the freed space available immediately.
+      </para>
+     </listitem>
+    </varlistentry>
    </variablelist>
    <tip>
-    <title>Delete unreferenced snapshot</title>
+    <title>Delete unreferenced snapshots</title>
     <para>
-     Sometimes the btrfs snapshot is present but not the xml file from
-     <command>snapper</command> with the metadata. So for
-     <command>snapper</command> the snapshot does not exist. You need to
-     first delete the btrfs subvolume to be able to delete the
-     <replaceable>SNAPSHOT_NUMBER</replaceable> directory:
+     Sometimes the btrfs snapshot is present but the XML file containing the
+     metadata for Snapper is missing. In this case the snapshot is not visible
+     for Snapper and needs to be deleted manually:
     </para>
-<screen>btrfs subvolume delete /.snapshots/<replaceable>SNAPSHOTNUMBER</replaceable>/snapshot
-    rm -rf /.snapshots/SNAPSHOTNUMBER
-    </screen>
+    <screen>btrfs subvolume delete /.snapshots/<replaceable>SNAPSHOTNUMBER</replaceable>/snapshot
+rm -rf /.snapshots/SNAPSHOTNUMBER</screen>
    </tip>
    <tip>
     <title>Old Snapshots Occupy More Disk Space</title>
