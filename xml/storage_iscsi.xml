@@ -37,7 +37,7 @@
  <note>
   <title>LIO</title>
   <para>
-   LIO (linux-iscsi.org) is the standard open-source multiprotocol SCSI
+   LIO (<link xlink:href="http://linux-iscsi.org"/>) is the standard open-source multiprotocol SCSI
    target for Linux. LIO replaced the STGT (SCSI Target) framework as the
    standard unified storage target in Linux with Linux kernel version 2.6.38
    and later. In &productname; 12 the iSCSI LIO Target Server replaces
@@ -92,7 +92,7 @@
   </important>
 
   <para>
-   To install the iSCSI LIO Target Server, run the following command in a
+   To install the iSCSI LIO Target Server,SI LIO Target Server, run the following command in a
    terminal console:
   </para>
 
@@ -1255,6 +1255,241 @@ node.session.iscsi.ImmediateData = Yes
    installation process.
   </para>
  </sect1>
+  
+ <sect1 xml:id="sec.iscsi.unmap">
+   <title>Checking iSCSI UNMAP Support</title>
+   <remark>toms 2015-09-18: FATE#316345</remark>
+   <para>The UNMAP command is used by SCSI to support <link
+     xlink:href="http://en.wikipedia.org/wiki/Thin_provisioning">Thin Provisioning</link>.
+     It is described in the <link 
+       xlink:href="http://www.t10.org/cgi-bin/ac.pl?t=f&amp;f=sbc3r29.pdf">SBC-3 document, revision 29</link>.</para>
+    <para>The UNMAP command allows a SCSI target to present a virtual
+      disk interface, where each front-end virtual disk block may or may
+      not be mapped to a real physical disk block. (This also works for
+      tape, but that does not matter here.)</para>
+    <para>Using this methodology, a target can for example present a 1
+      TByte disk, but it may start out with only 10 GByte of real
+      storage. The first time the system writes to any block on the
+      front-end of this disk, a real back-end disk block is allocated and
+      then written to. The disk intelligence keeps track of which
+      front-end blocks are connected to back-end blocks (i.e. are
+      already allocated).</para>
+    <para>In such a case, the disk is usually created with each and
+      every block being marked as <quote>deallocated</quote>, for
+      example, not being mapped to a real physical block.</para>
+   <para>As each disk block is used, it is marked as being <quote>allocated</quote>.</para>
+    <para>There are two ways to deallocate a block once it has been
+      used. The first way is the <command>SCSI WRITE_SAME</command>
+      command, and the second is the SCSI UNMAP command.</para>
+    <para>This section focuses on testing the SCSI UNMAP command. It
+      might also be beneficial to test the WRITE_SAME command.</para>
+
+   <sect2>
+     <title>Requirements</title>
+     <para>You need:</para>
+     <itemizedlist>
+       <listitem>
+          <para>an iSCSI target (the TUT, target under test), running on
+            a Linux host</para>
+       </listitem>
+       <listitem>
+         <para>The open-iscsi initiator installed on that host</para>
+       </listitem>
+       <listitem>
+         <para>the sg3 tools</para>
+       </listitem>
+     </itemizedlist>
+   </sect2>
+   
+   <sect2>
+     <title>Target Setup</title>
+     <para>In order to work with UNMAP, do the following as target setup:</para>
+     <procedure>
+       <step>
+         <para>Install the <package>tgt</package> package:</para>
+         <screen>&prompt.root;<command>zypper</command> in tgt</screen>
+       </step>
+       <step>
+          <para>Change the configuration file
+              <filename>/etc/tgt/targets.conf</filename> to:</para>
+         <screen>default-driver iscsi
+ignore-errors yes
+include /etc/tgt/conf.d/*.conf</screen>
+       </step>
+       <step>
+          <para>Create the file <filename>/etc/tgt/test.conf</filename>
+            with the following content:</para>
+         <screen>&lt;target iqn.2001-04.net.gonzoleeman:test.disk.laptop.002>
+    backing-store /alt2/big_disc_file.tgt
+    vendor_id LeeMan
+    thin_provisioning 1
+&lt;/target></screen>
+          <para>Note the <literal>thin_provisioning</literal> line which
+            is required to enable support for the UNAMP command.</para>
+          <remark>lee 2015-09-18: Also NOTE that this file is on an ext4
+            filesystem. I am not sure if this matters.</remark>
+       </step>
+       <step>
+         <para>Set up the back-end file <filename>/alt/big_disc_file.tgt</filename>
+         with the <command>tgtimg</command> command:</para>
+         <screen>&prompt.root;<command>tgtimg</command> --op new --device-type disk --type disk \
+       --size 1G --file /alt2/big_disc_file.tgt</screen>
+       </step>
+       <step>
+         <para>Start the back-end target daemon:</para>
+         <screen>&prompt.root;<command>rcrgtd</command> start</screen>
+       </step>
+       <step>
+         <para>Make sure there were no error message on the command line or in
+         <filename>/var/log/messages</filename>.
+           <remark>toms 2015-09-18: Does it really write to /var/log/messages or
+           is systemd used?</remark>
+         </para>
+       </step>
+     </procedure>
+   </sect2>
+   
+   <sect2>
+     <title>Initiator Setup</title>
+     <para>In order to work with UNMAP, do the following as initiator setup:</para>
+     <procedure>
+       <step>
+         <para>Install the latest <package>open-iscsi</package> package:</para>
+         <screen>&prompt.root;<command>zypper</command> in open-iscsi</screen>
+       </step>
+       <step>
+         <para>Use &systemd; to start all the relevant services:</para>
+         <screen>&prompt.root;<command>systemctl</command> start iscsid.socket
+&prompt.root;<command>systemctl</command> start iscsid.service
+&prompt.root;<command>systemctl</command> start iscsi.service</screen>
+       </step>
+       <step>
+         <para>Verify if the <package>sg3</package> package is installed.</para>
+       </step>
+     </procedure>
+   </sect2>
+   
+   <sect2>
+     <title>Connecting Initiator to Target</title>
+     <para></para>
+     <screen>&prompt.root;<command>iscsiadm</command> -m discovery -t st -p 192.168.20.2 -I default -l
+...
+192.168.20.2:3260,1 iqn.2001-04.net.gonzoleeman:test.disk.laptop.002
+Logging in to [iface: default, target: iqn.2001-04.net.gonzoleeman:test.disk.laptop.002, portal: 192.168.20.2,3260] (multiple)
+Login to [iface: default, target: iqn.2001-04.net.gonzoleeman:test.disk.laptop.002, portal: 192.168.20.2,3260] successful.
+&prompt.root;<command>ls</command> /dev/sd?
+/dev/sda  /dev/sdb  /dev/sdc</screen>
+      <para>Assuming, <filename>/dev/sdc</filename> was added, verify it
+        with <command>sg_inq</command>:</para>
+     <screen>&prompt.root;<command>sg_inq</command> /dev/sdc
+standard INQUIRY:
+  PQual=0  Device_type=0  RMB=0  version=0x05  [SPC-3]
+  [AERC=0]  [TrmTsk=1]  NormACA=0  HiSUP=0  Resp_data_format=2
+  SCCS=0  ACC=0  TPGS=0  3PC=0  Protect=0  [BQue=0]
+  EncServ=0  MultiP=0  [MChngr=0]  [ACKREQQ=0]  Addr16=0
+  [RelAdr=0]  WBus16=0  Sync=0  Linked=0  [TranDis=0]  CmdQue=1
+  [SPI: Clocking=0x0  QAS=0  IUS=0]
+    length=66 (0x42)   Peripheral device type: disk
+ Vendor identification: LeeMan
+ Product identification: VIRTUAL-DISK
+ Product revision level: 0001
+ Unit serial number:                               beaf11</screen>
+   </sect2>
+   
+   <sect2>
+     <title>Testing the SCSI UNMAP Command</title>
+      <para>In order to test the UNMAP command, the following steps are
+        necessary:</para>
+     <procedure>
+       <step>
+          <para><xref linkend="sec.iscsi.unmap.verify"
+              xrefstyle="select:title nopage"/>, using <command>sq_vpd</command></para>
+       </step>
+       <step>
+         <para><xref linkend="sec.iscsi.unmap.writeblock"
+           xrefstyle="select:title nopage"/>, using <command>dd</command></para>
+       </step>
+       <step>
+         <para><xref linkend="sec.iscsi.unmap.verifyblockmapped"
+           xrefstyle="select:title nopage"/>, using <command>sq_get_lba_status</command>
+         </para>
+       </step>
+       <step>
+         <para><xref linkend="sec.iscsi.unmap.unmapblock"
+           xrefstyle="select:title nopage"/>, using <command>sg_unmap</command></para>
+       </step>
+       <step>
+         <para><xref linkend="sec.iscsi.unmap.verifyunmap"
+           xrefstyle="select:title nopage"/>, using <command>sg_get_lba_status</command></para>
+       </step>
+     </procedure>
+     
+     <sect3 xml:id="sec.iscsi.unmap.verify">
+       <title>Verify that UNMAP is supported</title>
+       <para>Verify that the UNMAP is supported with <command>sg_vpd</command>:</para>
+       <screen>&prompt.root;<command>sg_vpd</command> -p 0xb2 /dev/sdc
+Logical block provisioning VPD page (SBC):
+  Unmap command supported (LBPU): 1
+  Write same (16) with unmap bit supported (LBWS): 1
+  Write same (10) with unmap bit supported (LBWS10): 1
+  Logical block provisioning read zeros (LBPRZ): 1
+  Anchored LBAs supported (ANC_SUP): 0
+  Threshold exponent: 0
+  Descriptor present (DP): 0
+  Provisioning type: 2</screen>
+       <para>Notice that <literal>Unmap command supported</literal> is "1".</para>
+        <para>Some SCSI targets do not even display this page, in which
+          case you might see:</para>
+       <screen>&prompt.root;<command>sg_vpd</command> -p 0xb2 /dev/sdc
+VPD page=0xb2
+fetching VPD page failed</screen>
+     </sect3>
+     
+     <sect3 xml:id="sec.iscsi.unmap.writeblock">
+       <title>Write to a Block</title>
+       <para>Write to a block to make sure it is mapped:</para>
+       <screen>&prompt.root;<command>dd</command> if=/dev/zero of=/dev/sdc seek=1024 count=8
+8+0 records in
+8+0 records out
+4096 bytes (4.1 kB) copied, 0.000830997 s, 4.9 MB/s</screen>
+        <para>This writes 4k (8192 512-byte blocks) bytes of zeros to
+          our thin-provisioned iSCSI target to an offset of 524288 byte
+          (1024 512-byte blocks).</para>
+     </sect3>
+     
+     <sect3 xml:id="sec.iscsi.unmap.verifyblockmapped">
+       <title>Verify the Block is Mapped</title>
+       <para>Verify that blocks got allocated (mapped):</para>
+       <screen>&prompt.root;<command>sg_get_lba_status</command> -l 1024 /dev/sdc
+descriptor LBA: 0x0000000000000400  blocks: 16776192  mapped</screen>
+        <para>Note that the number of blocks that actually gets mapped
+          or unmapped at a time is up to the target. In this case, it
+          looks like our target allocated about 16 MBytes.</para>
+     </sect3>
+     
+     <sect3 xml:id="sec.iscsi.unmap.unmapblock">
+       <title>Unmap the Block</title>
+       <para>Unmap the block with:</para>
+       <screen>&prompt.root;<command>sg_unmap</command> -v -l 1024 -n 8 /dev/sdc 
+    unmap cdb: 42 00 00 00 00 00 00 00 18 00</screen>
+     </sect3>
+     
+     <sect3 xml:id="sec.iscsi.unmap.verifyunmap">
+       <title>Verify that UNMAP Works</title>
+       <para>Finally, check again to see if the block has been unmapped:</para>
+       <screen>&prompt.root;<command>sg_get_lba_status</command> -l 1024 /dev/sdc
+descriptor LBA: 0x0000000000000400  blocks: 8  deallocated</screen>
+       <para>This shows that our target passes.</para>
+        <para>Notice that our target just deallocated the 8 blocks we
+          specified. If we check eight blocks further (not needed for the
+          test, but interesting), we see that much of the
+          earlier-allocated chunk is still there:</para>
+       <screen>&prompt.root;<command>sg_get_lba_status</command> -l 1032 /dev/sdc
+descriptor LBA: 0x0000000000000408  blocks: 16776184  mapped</screen>
+     </sect3>
+   </sect2>
+ </sect1> 
+ 
  <sect1 xml:id="sec.iscsi.trouble">
   <title>Troubleshooting iSCSI</title>
 
