@@ -150,13 +150,10 @@
    preserved.
   </para>
   <para>
-   To reserve the area, append the following option to the boot command line
-   of the production kernel:
-  </para>
-<screen><option>crashkernel</option>=<replaceable>SIZE</replaceable></screen>
-  <para>
-   To find out the necessary size, follow the instructions in
-   <xref linkend="cha.tuning.kdump.basic.manual"/>.
+   To reserve the area, append the option <option>crashkernel</option>
+   to the boot command line of the production kernel.
+   To determine the necessary values for <option>crashkernel</option>, follow
+   the instructions in <xref linkend="sec.tuning.kexec.crashkernel"/>.
   </para>
   <para>
    Note that this is not a parameter of the capture
@@ -196,6 +193,262 @@
    <command>kexec</command> <option>-p</option> <option>-u</option> command.
   </para>
  </sect1>
+
+ <sect1 xml:id="sec.tuning.kexec.crashkernel">
+  <title>Calculating <option>crashkernel</option> Allocation Size</title>
+
+  <para>
+   To use &kexec; with a capture kernel and to use &kdump; in any way, RAM needs
+   to be allocated for the capture kernel.
+   The allocation size depends on the expected hardware configuration of
+   the computer, therefore you need to specify it.
+  </para>
+  <para>
+   The allocation size also depends on the hardware architecture of your
+   computer.
+   Make sure to follow the procedure intended for your system architecture.
+  </para>
+
+  <procedure>
+   <title>Allocation Size on &x86-64;</title>
+   <step>
+    <para>
+     To find out the basis value for the computer, run the following in a
+     terminal:
+    </para>
+    <screen>&prompt.root;<command>kdumptool</command> calibrate</screen>
+    <para>
+     This command returns a list of values.
+     All values are given in megabytes.
+    </para>
+   </step>
+   <step>
+    <para>
+     Write down the values of <literal>Low</literal> and
+     <literal>High</literal>.
+    </para>
+    <note>
+     <title>
+      Significance of <literal>Low</literal> and <literal>High</literal> Values
+     </title>
+     <para>
+      On &x86-64; computers, the <literal>High</literal> value stands
+      for the memory reservation for all available memory.
+      The <literal>Low</literal> value stands for the memory reservation
+      in the DMA32 zone, that is, all the memory up to the 4 GB mark.
+      <remark>
+       Petr Tesarik says in bsc#948565 that High means "all memory".
+       This is not completely true in SLE 12 SP1 RC1, but fixed for
+       SLE 12 SP1 RC2. - sknorr, 2015-10-05
+      </remark>
+     </para>
+     <para>
+      <remark>The following is confusing, but probably true
+      ( https://bugzilla.suse.com/show_bug.cgi?id=948565#c6 ).
+      - sknorr, 2015-10-05
+      </remark>
+      If the computer has less than 4 GB of RAM, the
+      <literal>High</literal> memory reservation is allocated and the
+      <literal>Low</literal> memory reservation is ignored.
+      If the computer has more than 4 GB of RAM, the <literal>Low</literal>
+      memory reservation is allocated additionally.
+     </para>
+    </note>
+   </step>
+   <step>
+    <para>
+      Adapt the <literal>High</literal> value from the previous step for
+      the number of LUN kernel paths (paths to storage devices) attached to the
+      computer.
+      A sensible value in Megabytes can be calculated using this formula:
+     </para>
+<screen>SIZE_HIGH = <replaceable>RECOMMENDATION</replaceable> + (<replaceable>LUNs</replaceable> / 2)</screen>
+     <para>
+      The following parameters are used in this formula:
+     </para>
+     <itemizedlist>
+      <listitem>
+       <formalpara>
+        <title>SIZE_HIGH</title>
+        <para>
+         The resulting value for <literal>High</literal>.
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>RECOMMENDATION</title>
+        <para>
+         The value recommended by <command>kdumptool calibrate</command>
+         for <literal>High</literal>.
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>LUNs</title>
+        <para>
+         The maximum number of LUN kernel paths that you expect to ever create
+         on the computer.
+         Exclude multipath devices from this number, as these are
+         ignored.
+        </para>
+       </formalpara>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      If the drivers for your device make many reservations in the DMA32 zone,
+      the <literal>Low</literal> value also needs to be adjusted.
+      However, there is no simple formula to calculate these.
+      Finding the right size can therefore be a process of trial and error.
+     </para>
+     <para>
+      For the beginning, use the <literal>Low</literal> value recommended by
+      <command>kdump calibrate</command>.
+     </para>
+    </step>
+    <step>
+     <para>
+      The values now need to be set in the correct location.
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>If you are working on the command line</term>
+       <listitem>
+        <para>
+         Append the following kernel option to your boot loader
+         configuration:
+        </para>
+<screen>crashkernel=<replaceable>SIZE_HIGH</replaceable>,high crashkernel=<replaceable>SIZE_LOW</replaceable>,low</screen>
+        <para>
+         Replace the placeholders <replaceable>SIZE_HIGH</replaceable> and
+         <replaceable>SIZE_LOW</replaceable> with the appropriate value from the
+         previous steps and append the letter <literal>M</literal>
+         (for megabytes).
+        </para>
+        <para>
+         As an example, the following is valid:
+        </para>
+<screen>crashkernel=<replaceable>36M</replaceable>,high crashkernel=<replaceable>72M</replaceable>,low</screen>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>If you are working in &yast;</term>
+       <listitem>
+        <para>
+         Set <guimenu>Kdump Low Memory</guimenu> to the determined
+         <literal>Low</literal> value.
+        </para>
+        <para>
+         Set <guimenu>Kdump High Memory</guimenu> to the determined
+         <literal>High</literal> value.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </step>
+  </procedure>
+
+  <procedure>
+   <title>Allocation Size on &power; and &zseries;</title>
+   <step>
+    <para>
+     To find out the basis value for the computer, run the following in a
+     terminal:
+    </para>
+    <screen>&prompt.root;<command>kdumptool</command> calibrate</screen>
+    <para>
+     This command returns a list of values.
+     All values are given in megabytes.
+    </para>
+   </step>
+   <step>
+    <para>
+     Write down the value of <literal>Low</literal>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Adapt the <literal>Low</literal> value from the previous step for
+     the number of LUN kernel paths (paths to storage devices) attached to the
+     computer.
+     A sensible value in Megabytes can be calculated using this formula:
+    </para>
+<screen>SIZE_LOW = <replaceable>RECOMMENDATION</replaceable> + (<replaceable>LUNs</replaceable> / 2)</screen>
+    <para>
+     The following parameters are used in this formula:
+    </para>
+    <itemizedlist>
+     <listitem>
+      <formalpara>
+       <title>SIZE_LOW</title>
+       <para>
+        The resulting value for <literal>Low</literal>.
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>RECOMMENDATION</title>
+       <para>
+        The value recommended by <command>kdumptool calibrate</command>
+        for <literal>Low</literal>.
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>LUNs</title>
+       <para>
+        The maximum number of LUN kernel paths that you expect to ever create
+        on the computer.
+        Exclude multipath devices from this number, as these are
+        ignored.
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+   <para>
+     The values now need to be set in the correct location.
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>If you are working on the command line</term>
+      <listitem>
+       <para>
+        Append the following kernel option to your boot loader
+        configuration:
+       </para>
+<screen>crashkernel=<replaceable>SIZE_LOW</replaceable></screen>
+       <para>
+        Replace the placeholder<replaceable>SIZE_LOW</replaceable> with the
+        appropriate value from the previous step and append the letter
+        <literal>M</literal> (for megabytes).
+       </para>
+       <para>
+        As an example, the following is valid:
+       </para>
+<screen>crashkernel=<replaceable>108M</replaceable></screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>If you are working in &yast;</term>
+      <listitem>
+       <para>
+        Set <guimenu>Kdump Memory</guimenu> to the determined
+        <literal>Low</literal> value.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </step>
+  </procedure>
+ </sect1>
+
  <sect1 xml:id="cha.tuning.kexec.basic_usage">
   <title>Basic &kexec; Usage</title>
 
@@ -348,74 +601,9 @@
    <procedure>
     <step>
      <para>
-      &kdump; needs a certain amount of memory to be able to run. The exact
-      amount needed is system-specific and can be found out with the following:
-     </para>
-     <screen>&prompt.root;<command>kdumptool</command> calibrate</screen>
-     <para>
-      This command returns a list of a number of values.
-      All values are given in megabytes.
-     </para>
-     <para>
-      If you are using an &amd64;/&intel64; computer, write down the values for
-      <literal>Low</literal> and <literal>High</literal>.
-      In all other cases, write down the value for <literal>Low</literal> only.
-     </para>
-     <note>
-      <title>
-       Significance of <literal>Low</literal> and <literal>High</literal> Values
-      </title>
-      <para>
-       On &amd64;/&intel64; computers, the <literal>High</literal> value stands
-       for the memory reservation for all available memory.
-       The <literal>Low</literal> value stands for the memory reservation
-       in the DMA32 zone, that is, all the memory up to the 4 GB mark.
-       <remark>
-        Petr Tesarik says in bsc#948565 that High means "all memory".
-        This is not completely true in SLE 12 SP1 RC1, but fixed for
-        SLE 12 SP1 RC2. - sknorr, 2015-10-05
-       </remark>
-      </para>
-      <para>
-       <remark>The following is confusing, but probably true
-       ( https://bugzilla.suse.com/show_bug.cgi?id=948565#c6 ).
-       - sknorr, 2015-10-05
-       </remark>
-       If the computer has less than 4 GB of RAM, the
-       <literal>High</literal> memory reservation is allocated and the
-       <literal>Low</literal> memory reservation is ignored.
-       If the computer has more than 4 GB of RAM, the <literal>Low</literal>
-       memory reservation is allocated additionally.
-      </para>
-      <para>
-       On &power; and &zseries; computers, only the <literal>Low</literal>
-       memory reservation is allocated.
-      </para>
-     </note>
-    </step>
-    <step>
-     <para>
-      Append the following kernel option to your boot loader
-      configuration:
-     </para>
-     <itemizedlist>
-      <listitem>
-       <para>
-        On &amd64;/&intel64;:
-       </para>
-<screen>crashkernel=<replaceable>SIZE_HIGH</replaceable>,high crashkernel=<replaceable>SIZE_LOW</replaceable>,low</screen>
-      </listitem>
-      <listitem>
-       <para>
-        On &power; and &zseries;:
-       </para>
-<screen>crashkernel=<replaceable>SIZE_LOW</replaceable></screen>
-      </listitem>
-     </itemizedlist>
-     <para>
-      Replace the placeholders <replaceable>SIZE_HIGH</replaceable> and
-      <replaceable>SIZE_LOW</replaceable> with the appropriate value from the
-      previous step and append the letter <literal>M</literal> (for megabytes).
+      Determine the amount of memory needed for &kdump; by following the
+      instructions in <xref linkend="sec.tuning.kexec.crashkernel"/>.
+      Make sure to set the kernel parameter <option>crashkernel</option>.
      </para>
     </step>
     <step>
@@ -531,19 +719,22 @@
    <para>
     The values for <guimenu>&kdump; Memory</guimenu> are automatically generated
     the first time you open the window.
-    They usually do not need to be changed.
+    However, that does not mean that they are always sufficient.
+    To set the right values, follow the instructions in
+    <xref linkend="sec.tuning.kexec.crashkernel"/>.
    </para>
    <important>
-    <title>After RAM Changes, <guimenu>&kdump; Memory</guimenu> Values Can Be Wrong</title>
+    <title>
+     After Hardware Changes, Set <guimenu>&kdump; Memory</guimenu> Values Again
+    </title>
     <para>
      If you have set up &kdump; on a computer and later decide to change the
-     amount of RAM available to it, &yast; will continue to display
-     the outdated memory values.
+     amount of RAM or hard disks available to it, &yast; will continue to
+     display and use outdated memory values.
     </para>
     <para>
-     To work around this, determine the necessary memory using
-     <command>kdumptool calibrate</command> as described in
-     <xref linkend="cha.tuning.kdump.basic.manual"/>.
+     To work around this, determine the necessary memory again, as described in
+     <xref linkend="sec.tuning.kexec.crashkernel"/>.
      Then set it manually in &yast;.
     </para>
    </important>
