@@ -8,12 +8,12 @@
 <chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.qemu.running">
  <title>Running Virtual Machines with qemu-system-ARCH</title>
  <info>
-      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
-        <dm:bugtracker>
-          </dm:bugtracker>
-      </dm:docmanager>
-    </info>
-    <para>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker>
+   </dm:bugtracker>
+  </dm:docmanager>
+ </info>
+ <para>
   Once you have a virtual disk image ready (for more information on disk
   images, see <xref linkend="cha.qemu.guest_inst.qemu-img"/>), it is time to
   start the related virtual machine.
@@ -1073,58 +1073,158 @@ Bus 001 Device 002: ID 12d1:1406 Huawei Technologies Co., Ltd. E1750
     </note>
    </sect3>
   </sect2>
-
-  <sect2 xml:id="kvm.pciback" condition="kvm4x86">
-   <title>&pciback;</title>
+  
+  <sect2 xml:id="kvm.vfio">
+   <title>VFIO: Secure Direct Access to Devices</title>
    <para>
-    &pciback; is a technique to give your &vmguest; exclusive access
-    to a PCI device.
+    Directly assigning a PCI device to a &vmguest; (PCI pass-through)
+    avoids performance issues caused by avoiding any emulation in
+    performance critical paths. VFIO replaces the traditional &kvm;
+    &pciback; device assignment. Prerequisite for this feature is a &vmhost;
+    configuration described in <xref linkend="ann.vt.io.require"/>.
    </para>
-   <note>
-    <title>Prereqisites</title>
-    <para>
-     To make use of &pciback;, your motherboard chipset, BIOS, and CPU
-     must have support for <xref linkend="gloss.vt.acronym.iommu"/> (AMD) or
-     <xref linkend="gloss.vt.acronym.vtd"/> (Intel) virtualization
-     technology. To make sure that your computer supports this feature, ask
-     your supplier specifically to deliver a system that supports
-     &pciback;.
-    </para>
-    <para>
-     Assigning graphics cards is not supported by &suse;.
-    </para>
-   </note>
-   <note>
-    <title>Consider Using libvirt for Setting Up &pciback;</title>
-    <para>
-     There are some factors affecting successful &pciback; that are best
-     handled programmatically. If you encounter problems, consider instead
-     relying on libvirt to manage guests that use &pciback; devices.
-     Refer to <xref linkend="sec.libvirt.config.pci.virsh"/> or
-     <xref linkend="sec.libvirt.config.pci"/> for details.
-    </para>
-   </note>
+   <para>
+    To be able to assigne a PCI device via VFIO to a &vmguest;, you need to
+    find out which IOMMU Group it belongs to. The <xref
+    linkend="gloss.vt.acronym.iommu"/> (input/output memory management unit
+    that connects a direct memory access-capable I/O bus to the main memory)
+    API supports the notion of groups. A group is a set of devices that can be
+    isolated from all other devices in the system.  Groups are therefore the
+    unit of ownership used by <xref linkend="vt.io.vfio"/>.
+   </para>
    <procedure>
-    <title>Configuring &pciback;</title>
-    <step>
-     <para>
-      Check whether <xref linkend="gloss.vt.acronym.iommu"/> is actively
-      enabled and recognized on the host. Run <command>sudo dmesg | grep -e
-      DMAR -e IOMMU</command> on Intel machines, or <command>sudo dmesg |
-      grep AMD-Vi</command> on AMD machines. If you get no output, edit your
-      boot loader configuration and add <literal>intel_iommu=on</literal>
-      (Intel machines) or <literal>iommu=pt iommu=1</literal> (AMD
-      machines). Then reboot the host machine. Also make sure that
-      <xref linkend="gloss.vt.acronym.iommu"/>
-      (<xref linkend="gloss.vt.acronym.vtd"/>) has been enabled in the
-      BIOS/firmware.
-     </para>
-    </step>
+    <title>Assigning a PCI Device to a &vmguest; via VFIO</title>
     <step>
      <para>
       Identify the host PCI device to assign to the guest.
      </para>
-<screen>&exampleuser;@vmhost:~&gt; sudo lspci -nn
+     <screen>&prompt.user;sudo lspci -nn
+[...]
+00:10.0 Ethernet controller [0200]: Intel Corporation 82576 \
+Virtual Function [8086:10ca] (rev 01)
+[...]</screen>
+     <para>
+      Note down the device ID (<literal>00:10.0</literal> in this case) and
+      the vendor ID (<literal>8086:10ca</literal>).
+     </para>
+    </step>
+    <step>
+     <para>
+      Find the IOMMU group of this device:
+     </para>
+     <screen>&prompt.user;sudo readlink /sys/bus/pci/devices/0000\:00\:10.0/iommu_group
+../../../kernel/iommu_groups/20</screen>
+     <para>
+      The IOMMU group for this device is <literal>20</literal>.Now you can
+      check the devices belonging to the same IOMMU group:
+    </para>
+<screen>ls -l /sys/bus/pci/devices/0000:01:10.0/iommu_group/devices/0000:01:10.0
+[...] 0000:00:1e.0 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0
+[...] 0000:01:10.0 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0/0000:01:10.0
+[...] 0000:01:10.1 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0/0000:01:10.1</screen>
+    </step>
+     <step>
+      <para>
+       Unbind the device from the device driver:
+      </para>
+      <screen>sudo echo "0000:01:10.0" &gt; /sys/bus/pci/devices/0000\:01\:10.0/driver/unbind</screen>
+     </step>
+    <step>
+     <para>
+      Bind the device to the vfio-pci driver using the vendor ID frpm step 1:
+     </para>
+     <screen>sudo echo "8086 153a" &gt; /sys/bus/pci/drivers/vfio-pci/new_id</screen>
+     <para>
+      A new device
+      <filename>/dev/vfio/<replaceable>IOMMU_GROUP</replaceable></filename>
+      will be created as a result, <filename>/dev/vfio/20</filename> in this
+      case.
+     </para>
+    </step>
+    <step>
+     <para>
+      Change the ownership of the newly created device:
+     </para>
+     <screen>chown qemu.qemu /dev/vfio/<replaceable>DEVICE</replaceable></screen>
+     </step>
+    <step>
+     <para>
+      Now run the &vmguest; with the PCI device assigned.
+     </para>
+     <screen>qemu-system-<replaceable>ARCH</replaceable> [...] -device
+     vfio-pci,host=00:10.0,id=<replaceable>ID</replaceable></screen>
+    </step>
+   </procedure>
+
+   <important>
+    <title>No Hotplugging</title>
+    <para>
+     As of &productname; &productnumber; hotplugging of PCI devices passed to
+     a &vmguest; via VFIO is not supported.
+    </para>
+   </important>
+
+<!-- fs 2015-10-09: not yet supported    
+   <para>
+    &productname; also supports PCI device hotplugging to a &vmguest;. To
+    achieve this, you need to switch to a &qemu; monitor (see
+    <xref linkend="cha.qemu.monitor"/> for more information) and issue the
+    following commands:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      hot-add:
+     </para>
+<screen>device_add vfio-pci,host=00:10.0,id=<replaceable>ID</replaceable></screen>
+    </listitem>
+    <listitem>
+     <para>
+      hot-remove:
+     </para>
+<screen>device_del <replaceable>ID</replaceable></screen>
+    </listitem>
+   </itemizedlist>    
+-->
+    <para>
+     You can find more detailed information on the
+     <xref linkend="vt.io.vfio"/> driver in the
+     <filename>/usr/src/linux/Documentation/vfio.txt</filename> file
+     (package <systemitem>kernel-source</systemitem> has to be installed).
+    </para>
+    <para>
+     You can find a useful (but slightly outdated) presentation at <link
+     xlink:href="http://www.linux-kvm.org/wiki/images/b/b4/2012-forum-VFIO.pdf"/>.
+    </para>
+  </sect2>
+
+  <sect2 xml:id="kvm.pciback" condition="kvm4x86">
+   <title>&pciback; (Deprecated)</title>
+   <para>
+    &pciback; is a technique to give your &vmguest; exclusive access to a
+    &vmhost; PCI device. Prerequisite for this feature is a &vmhost;
+    configuration described in <xref linkend="ann.vt.io.require"/>. Assigning
+    graphics cards is not supported by &suse;.
+   </para>
+
+   <important>
+    <title>&pciback; is deprecated</title>
+    <para>
+     &kvm; &pciback; has been replaced by VFIO (see <xref
+     linkend="vt.io.vfio"/> for more information). Although it is still
+     supported by &suse;, it is recommended to use VFIO for assigning PCI
+     devices as described in <xref linkend="kvm.vfio"/>.
+     vt.io.vfio
+    </para>
+   </important>
+
+   <procedure>
+    <title>Configuring &pciback; (Deprecated)</title>
+    <step>
+     <para>
+      Identify the host PCI device to assign to the guest.
+     </para>
+<screen>&prompt.user;sudo lspci -nn
 [...] 00:1b.0 Audio device [0403]: Intel Corporation 82801H (ICH8 Family) \
 HD Audio Controller [8086:284b] (rev 02) [...]</screen>
      <para>
@@ -1137,10 +1237,10 @@ HD Audio Controller [8086:284b] (rev 02) [...]</screen>
       Unbind the device from host Kernel driver and bind it to the PCI stub
       driver.
      </para>
-<screen>&exampleuser;@vmhost:~&gt; sudo modprobe pci_stub
-&exampleuser;@vmhost:~&gt; sudo echo "8086 284b" &gt; /sys/bus/pci/drivers/pci-stub/new_id
-&exampleuser;@vmhost:~&gt; sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/devices/0000:00:1b.0/driver/unbind
-&exampleuser;@vmhost:~&gt; sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/drivers/pci-stub/bind</screen>
+<screen>sudo modprobe pci_stub
+sudo echo "8086 284b" &gt; /sys/bus/pci/drivers/pci-stub/new_id
+sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/devices/0000:00:1b.0/driver/unbind
+sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/drivers/pci-stub/bind</screen>
     </step>
     <step>
      <para>
@@ -1177,147 +1277,8 @@ HD Audio Controller [8086:284b] (rev 02) [...]</screen>
    </itemizedlist>
   </sect2>
 
-  <sect2 xml:id="kvm.vfio">
-   <title>VFIO: Secure Direct Access to Devices</title>
-   <para>
-    <xref linkend="vt.io.vfio"/> stands for <emphasis>Virtual Function
-    I/O</emphasis> and is a new user-level driver framework for Linux. It is
-    meant to replace the traditional PCI device assignment. The
-    <xref linkend="vt.io.vfio"/> driver exposes direct device access to
-    userspace in a secure memory (<xref linkend="gloss.vt.acronym.iommu"/>)
-    protected environment.
-   </para>
-   <para>
-    Compared to &kvm; PCI device assignment, <xref linkend="vt.io.vfio"/>
-    interface has the following advantages:
-   </para>
-   <itemizedlist mark="bullet" spacing="normal">
-    <listitem>
-     <para>
-      Resource access is compatible with secure boot.
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      Device is isolated and its memory access protected.
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      Offers user space device driver with more flexible device ownership
-      model.
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      Is independent of &kvm; technology, and not bound to x86
-      architecture only.
-     </para>
-    </listitem>
-   </itemizedlist>
-   <sect3 xml:id="kvm.vfio.groups">
-    <title>IOMMU Groups</title>
-    <para>
-     The <xref linkend="gloss.vt.acronym.iommu"/> (input/output memory
-     management unit that connects a direct memory access-capable I/O bus to
-     the main memory) API supports the notion of groups. A group is a set of
-     devices that can be isolated from all other devices in the system.
-     Groups are therefore the unit of ownership used by
-     <xref linkend="vt.io.vfio"/>.
-    </para>
-    <para>
-     To find the <xref linkend="gloss.vt.acronym.iommu"/> group for your PCI
-     device, you first need to identify it. Use <command>hwinfo</command> or
-     <command>lspci</command> to find its bus ID. Suppose you want to find
-     an <xref linkend="gloss.vt.acronym.iommu"/> group for the following
-     device:
-    </para>
-<screen>01:10.0 Ethernet controller: Intel Corporation 82576 Virtual Function (rev 01)</screen>
-    <para>
-     Run the following to find the group:
-    </para>
-<screen># readlink /sys/bus/pci/devices/0000:01:10.0/iommu_group
-../../../../kernel/iommu_groups/15</screen>
-    <para>
-     The <xref linkend="gloss.vt.acronym.iommu"/> group number is 15. Now
-     you can check the devices belonging to the same
-     <xref linkend="gloss.vt.acronym.iommu"/> group:
-    </para>
-<screen>ls -l /sys/bus/pci/devices/0000:01:10.0/iommu_group/devices/0000:01:10.0
-[...] 0000:00:1e.0 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0
-[...] 0000:01:10.0 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0/0000:01:10.0
-[...] 0000:01:10.1 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0/0000:01:10.1</screen>
-   </sect3>
-   <sect3 xml:id="kvm.vfio.assign">
-    <title>Device Assignment</title>
-    <para>
-     To assign a device to <xref linkend="vt.io.vfio"/> driver, follow these
-     steps:
-    </para>
-    <procedure>
-     <step>
-      <para>
-       Unbind the device from the device driver:
-      </para>
-<screen># echo 0000:01:10.0 | sudo tee \
-/sys/bus/pci/devices/0000:01:10.0/driver/unbind</screen>
-     </step>
-     <step>
-      <para>
-       Find the vendor and device ID of the PCI device you want to assign to
-       <xref linkend="vt.io.vfio"/>:
-      </para>
-<screen># lspci -n -s 01:10.0
-01:10.0 0200: 8086:10ca (rev 01)</screen>
-     </step>
-     <step>
-      <para>
-       Load the <literal>vfio-pci</literal> driver:
-      </para>
-<screen># modprobe vfio-pci</screen>
-     </step>
-     <step>
-      <para>
-       Now bind the device to the <literal>vfio-pci</literal> driver:
-      </para>
-<screen># echo 8086 10ca | sudo tee \
-/sys/bus/pci/drivers/vfio-pci/new_id</screen>
-     </step>
-     <step>
-      <para>
-       After the assignment is done, check the vfio device belongs to
-       <xref linkend="gloss.vt.acronym.iommu"/> group 15:
-      </para>
-<screen># ls /dev/vfio
-15 vfio</screen>
-     </step>
-    </procedure>
-   </sect3>
-   <sect3 xml:id="kvm.vfio.start">
-    <title>Starting <command>qemu-system-ARCH</command> with <literal>vfio-pci</literal></title>
-    <para>
-     After you assigned the PCI device to the <literal>vfio-pci</literal>
-     driver, you can include it in the <command>qemu-system-ARCH</command>
-     command line:
-    </para>
-<screen># sudo qemu-system-ARCH [...] -device vfio-pci,host=01:10.0,id=net0</screen>
-   </sect3>
-   <sect3 xml:id="kvm.vfio.more">
-    <title>For More Information</title>
-    <para>
-     You can find more detailed information on the
-     <xref linkend="vt.io.vfio"/> driver in the
-     <filename>/usr/src/linux/Documentation/vfio.txt</filename> file
-     (package <systemitem>kernel-source</systemitem> has to be installed).
-    </para>
-    <para>
-     You can find a useful (but slightly outdated) presentation at
-     <link xlink:href="http://www.linux-kvm.org/wiki/images/b/b4/2012-forum-VFIO.pdf"/>.
-    </para>
-   </sect3>
-  </sect2>
-
   <sect2 xml:id="cha.qemu.running.devices.char">
+
    <title>Character Devices</title>
    <para>
     Use <literal>-chardev</literal> to create a new character device. The
