@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.tuning.ptp">
+ <title>&ptp;</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+  </dm:docmanager>
+ </info>
+ <para>
+  For network environments, it is vital to keep the computer and other
+  devices' clocks synchronized and accurate. There are several solutions to
+  achieve this, for example the widely used &ntp; (NTP) described in
+  <xref linkend="cha.netz.xntp"/>.
+ </para>
+ <para>
+  The &ptp; (PTP) is a protocol capable of sub-microsecond accuracy, which
+  is better than what NTP achieves. PTP support is divided between the
+  kernel and user space. The kernel in &productname; includes support for
+  PTP clocks, which are provided by network drivers.
+ </para>
+ <sect1 xml:id="tuning.ptp.intro">
+  <title>Introduction to PTP</title>
+
+  <para>
+   The clocks managed by PTP follow a master-slave hierarchy. The slaves are
+   synchronized to their masters. The hierarchy is updated by the
+   <emphasis>best master clock</emphasis> (BMC) algorithm, which runs on
+   every clock. The clock with only one port can be either master or slave.
+   Such a clock is called an <emphasis>ordinary clock</emphasis> (OC). A
+   clock with multiple ports can be master on one port and slave on another.
+   Such a clock is called a <emphasis>boundary clock</emphasis> (BC). The
+   top-level master is called the <emphasis>grandmaster clock</emphasis>.
+   The grandmaster clock can be synchronized with a Global Positioning
+   System (GPS). This way disparate networks can be synchronized with a
+   high-degree of accuracy.
+  </para>
+
+  <para>
+   The hardware support is the main advantage of PTP. It is supported by
+   various network switches and network interface controllers (NIC). While
+   it it possible to use non-PTP enabled hardware within the network, having
+   network components between all PTP clocks PTP hardware enabled achieves
+   the best possible accuracy.
+  </para>
+
+  <sect2 xml:id="tuning.ptp.linuxptp">
+   <title>PTP Linux Implementation</title>
+   <para>
+    On &sls;, the implementation of PTP is provided by the
+    <systemitem>linuxptp</systemitem> package. Install it with
+    <command>zypper install linuxptp</command>. It includes the
+    <command>ptp4l</command> and <command>phc2sys</command> programs for
+    clock synchronization. <command>ptp4l</command> implements the PTP
+    boundary clock and ordinary clock. When hardware time stamping is
+    enabled, <command>ptp4l</command> synchronizes the PTP hardware clock to
+    the master clock. With software time stamping, it synchronizes the
+    system clock to the master clock. <command>phc2sys</command> is needed
+    only with hardware time stamping to synchronize the system clock to the
+    PTP hardware clock on the network interface card (NIC).
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="tuning.ptp.using">
+  <title>Using PTP</title>
+
+  <para></para>
+
+  <sect2 xml:id="tuning.ptp.driver_support">
+   <title>Network Driver and Hardware Support</title>
+   <para>
+    PTP requires that the used kernel network driver supports either
+    software or hardware time stamping. Moreover, the NIC must support time
+    stamping in the physical hardware. You can verify the driver and NIC
+    time stamping capabilities with <command>ethtool</command>:
+   </para>
+<screen>ethtool -T eth0
+Time stamping parameters for eth0:
+Capabilities:
+hardware-transmit     (SOF_TIMESTAMPING_TX_HARDWARE)
+        software-transmit     (SOF_TIMESTAMPING_TX_SOFTWARE)
+        hardware-receive      (SOF_TIMESTAMPING_RX_HARDWARE)
+        software-receive      (SOF_TIMESTAMPING_RX_SOFTWARE)
+        software-system-clock (SOF_TIMESTAMPING_SOFTWARE)
+        hardware-raw-clock    (SOF_TIMESTAMPING_RAW_HARDWARE)
+PTP Hardware Clock: 0
+Hardware Transmit Timestamp Modes:
+        off                   (HWTSTAMP_TX_OFF)
+        on                    (HWTSTAMP_TX_ON)
+Hardware Receive Filter Modes:
+        none                  (HWTSTAMP_FILTER_NONE)
+        all                   (HWTSTAMP_FILTER_ALL)</screen>
+   <para>
+    Software time stamping requires the following parameters:
+   </para>
+<screen>SOF_TIMESTAMPING_SOFTWARE
+SOF_TIMESTAMPING_TX_SOFTWARE
+SOF_TIMESTAMPING_RX_SOFTWARE</screen>
+   <para>
+    Hardware time stamping requires the following parameters:
+   </para>
+<screen>SOF_TIMESTAMPING_RAW_HARDWARE
+SOF_TIMESTAMPING_TX_HARDWARE
+SOF_TIMESTAMPING_RX_HARDWARE</screen>
+  </sect2>
+
+  <sect2 xml:id="tuning.ptp.ptp41">
+   <title>Using <command>ptp4l</command></title>
+   <para>
+    <command>ptp4l</command> uses hardware time stamping by default. As
+    &rootuser;, you need to specify the network interface capable of
+    hardware time stamping with the <option>-i</option> option. The
+    <option>-m</option> tells <command>ptp4l</command> to print its output
+    to standard output instead of the system's logging facility:
+   </para>
+<screen>ptp4l -m -i eth0
+selected eth0 as PTP clock
+port 1: INITIALIZING to LISTENING on INITIALIZE
+port 0: INITIALIZING to LISTENING on INITIALIZE
+port 1: new foreign master 00a152.fffe.0b334d-1
+selected best master clock 00a152.fffe.0b334d
+port 1: LISTENING to UNCALIBRATED on RS_SLAVE
+master offset -25937 s0 freq +0 path delay       12340
+master offset -27887 s0 freq +0 path delay       14232
+master offset -38802 s0 freq +0 path delay       13847
+master offset -36205 s1 freq +0 path delay       10623
+master offset  -6975 s2 freq -30575 path delay   10286
+port 1: UNCALIBRATED to SLAVE on MASTER_CLOCK_SELECTED
+master offset  -4284 s2 freq -30135 path delay    9892</screen>
+   <para>
+    The <literal>master offset</literal> value represents the easured offset
+    from the master (in nanoseconds). The <literal>s0</literal>,
+    <literal>s1</literal>, <literal>s2</literal> indicators show the
+    different states of the clock servo: <literal>s0</literal> is unlocked,
+    <literal>s1</literal> is clock step, and <literal>s2</literal> is
+    locked. If the servo is in the locked state (<literal>s2</literal>), the
+    clock will not be stepped (only slowly adjusted) if the
+    <option>pi_offset_const</option> option is set to a negative value in
+    the configuration file (see <command>man 8 ptp4l</command> for more
+    information). The <literal>freq</literal> value represents the frequency
+    adjustment of the clock (in parts per billion, ppb). The <literal>path
+    delay</literal> value represents the estimated delay of the
+    synchronization messages sent from the master (in nanoseconds). Port 0
+    is a Unix domain socket used for local PTP management. Port1 is the eth0
+    interface. INITIALIZING, LISTENING, UNCALIBRATED and SLAVE are some of
+    port states which change on the INITIALIZE, RS_SLAVE,
+    MASTER_CLOCK_SELECTED events. Changing the port state from UNCALIBRATED
+    to SLAVE indicates successful synchronization with a PTP master clock.
+   </para>
+   <para>
+    You can enable software time stamping with the <option>-S</option>
+    option.
+   </para>
+<screen>ptp4l -m -S -i eth3</screen>
+   <para>
+    You can also run <command>ptp4l</command> as a service:
+   </para>
+<screen>systemctl start ptp4l</screen>
+   <para>
+    In this case, <command>ptp4l</command> reads its options from the
+    <filename>/etc/sysconfig/ptp4l</filename> file. By default, this file
+    tells <command>ptp4l</command> to read the configuration options from
+    <filename>/etc/ptp4l.conf</filename>. For more information on
+    <command>ptp4l</command> options and the configuration file settings,
+    see <command>man 8 ptp4l</command>.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="tuning.ptp.confile">
+   <title><command>ptp4l</command>Configuration File</title>
+   <para>
+    <command>ptp4l</command> can read its configuration from an optional
+    configuration file. As no configuration file is used by default, you
+    need to specify it with <option>-f</option>.
+   </para>
+<screen>ptp4l -f /etc/ptp4l.conf</screen>
+   <para>
+    The configuration file is divided into sections. The global section
+    (indicated as <literal>[global]</literal>) sets the program options,
+    clock options and default port options. Other sections are port
+    specific, and they override the default port options. The name of the
+    section is the name of the configured port ( for example
+    <literal>[eth0]</literal>). An empty port section can be used to replace
+    the command line option.
+   </para>
+<screen>[global]
+verbose               1
+time_stamping         software
+[eth0]</screen>
+   <para>
+    The example configuration file is an equivalent of the following
+    command's options:
+   </para>
+<screen>ptp4l -i eth0 -m -S</screen>
+   <para>
+    For a complete list of <command>ptp4l</command> configuration options,
+    see <command>man 8 ptp4l</command>.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="tuning.ptp.delay_measurement">
+   <title>Delay Measurement</title>
+   <para>
+    <command>ptp4l</command> measures time delay in two different ways:
+    <emphasis>peer-to-peer</emphasis> (P2P) or
+    <emphasis>end-to-end</emphasis> (E2E).
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>P2P</term>
+     <listitem>
+      <para>
+       This method is specified with <option>-P</option>.
+      </para>
+      <para>
+       It reacts to changes in the network environment faster and is more
+       accurate in measuring the delay. It is only used in networks where
+       each port exchanges PTP messages with one other port. P2P needs to be
+       supported by all hardware on the communication path.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>E2E</term>
+     <listitem>
+      <para>
+       This method is specified with <option>-P</option>. This is the
+       default.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Automatic method selection</term>
+     <listitem>
+      <para>
+       This method is specified with <option>-A</option>. The automatic
+       option starts <command>ptp4l</command> in E2E mode, and changes to
+       P2P mode if a peer delay request is received.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <important>
+    <para>
+     All clocks on a single PTP communication path must use the same method
+     to measure the time delay. A warning will be printed if either a peer
+     delay request is received on a port using the E2E mechanism, or an E2E
+     delay request is received on a port using the P2P mechanism.
+    </para>
+   </important>
+  </sect2>
+
+  <sect2 xml:id="tuning.ptp.pmc">
+   <title>PTP Management Client: <command>pmc</command></title>
+   <para>
+    You can use the <command>pmc</command> client to obtain more detailed
+    information about <command>ptp41</command>. It reads from the standard
+    input&mdash;or from the command line&mdash;actions specified by name and
+    management ID. Then it sends the actions over the selected transport,
+    and prints any received replies. There are three actions supported:
+    <command>GET</command> retrieves the specified information,
+    <command>SET</command> updates the specified information, and
+    <command>CMD</command> (or <command>COMMAND</command>) initiates the
+    specified event.
+   </para>
+   <para>
+    By default, the management commands are addressed to all ports. The
+    <command>TARGET</command> command can be used to select a particular
+    clock and port for the subsequent messages. For a complete list of
+    management IDs, run <command>pmc help</command>.
+   </para>
+<screen>pmc -u -b 0 'GET TIME_STATUS_NP'
+sending: GET TIME_STATUS_NP
+        90f2ca.fffe.20d7e9-0 seq 0 RESPONSE MANAGMENT TIME_STATUS_NP
+                master_offset              283
+                ingress_time               1361569379345936841
+                cumulativeScaledRateOffset   +1.000000000
+                scaledLastGmPhaseChange    0
+                gmTimeBaseIndicator        0
+                lastGmPhaseChange          0x0000'0000000000000000.0000
+                gmPresent                  true
+                gmIdentity                 00b058.feef.0b448a</screen>
+   <para>
+    The <option>-b</option> option specifies the boundary hops value in sent
+    messages. Setting it to zero limits the boundary to the local
+    <command>ptp4l</command> instance. Increasing the value will retrieve
+    the messages also from PTP nodes that are further from the local
+    instance. The returned information may include:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>stepsRemoved</term>
+     <listitem>
+      <para>
+       The number of communication nodes to the grandmaster clock.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>offsetFromMaster, master_offset</term>
+     <listitem>
+      <para>
+       The last measured offset of the clock from the master clock
+       (nanoseconds).
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>meanPathDelay</term>
+     <listitem>
+      <para>
+       The estimated delay of the synchronization messages sent from the
+       master clock (nanoseconds).
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>gmPresent</term>
+     <listitem>
+      <para>
+       If <literal>true</literal>, the PTP clock is synchronized to the
+       master clock; the local clock is not the grandmaster clock.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>gmIdentity</term>
+     <listitem>
+      <para>
+       This is the grandmaster's identity.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    For a complete list of <command>pmc</command> command line options, see
+    <command>man 8 pmc</command>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="tuning.ptp.phc2sys">
+  <title>Synchronizing the Clocks with <command>phc2sys</command></title>
+
+  <para>
+   Use <command>phc2sys</command> to synchronize the system clock to the PTP
+   hardware clock (PHC) on the network card. The system clock is considered
+   a <emphasis>slave</emphasis>, while the network card a
+   <emphasis>master</emphasis>. PHC itself is synchronized with
+   <command>ptp4l</command> (see <xref linkend="tuning.ptp.using"/>). Use
+   <option>-s</option> to specify the master clock by device or network
+   interface. Use <option>-w</option> to wait until <command>ptp4l</command>
+   is in a synchronized state.
+  </para>
+
+<screen>phc2sys -s eth0 -w</screen>
+
+  <para>
+   PTP operates in <emphasis>International Atomic Time</emphasis> (TAI),
+   while the system clock uses <emphasis>Coordinated Universal
+   Time</emphasis> (UTC). If you do not specify <option>-w</option> to wait
+   for <command>ptp4l</command> synchronization, you can specify the offset
+   in seconds between TAI and UTC with <option>-O</option>:
+  </para>
+
+<screen>phc2sys -s eth0 -O -35</screen>
+
+  <para>
+   You can run <command>phc2sys</command> as a service as well:
+  </para>
+
+<screen>systemctl start phc2sys</screen>
+
+  <para>
+   In this case, <command>phc2sys</command> reads its options from the
+   <filename>/etc/sysconfig/phc2sys</filename> file. For more information on
+   <command>phc2sys</command> options, see <command>man 8 phc2sys</command>.
+  </para>
+
+  <sect2>
+   <title>Verifying Time Synchronization</title>
+   <para>
+    When PTP time synchronization is working properly and hardware time
+    stamping is used, <command>ptp4l</command> and
+    <command>phc2sys</command> output messages with time offsets and
+    frequency adjustments periodically to the system log.
+   </para>
+   <para>
+    An example of the <command>ptp4l</command> output:
+   </para>
+<screen>ptp4l[351.358]: selected /dev/ptp0 as PTP clock
+ptp4l[352.361]: port 1: INITIALIZING to LISTENING on INITIALIZE
+ptp4l[352.361]: port 0: INITIALIZING to LISTENING on INITIALIZE
+ptp4l[353.210]: port 1: new foreign master 00a069.eefe.0b442d-1
+ptp4l[357.214]: selected best master clock 00a069.eefe.0b662d
+ptp4l[357.214]: port 1: LISTENING to UNCALIBRATED on RS_SLAVE
+ptp4l[359.224]: master offset       3304 s0 freq      +0 path delay      9202
+ptp4l[360.224]: master offset       3708 s1 freq  -28492 path delay      9202
+ptp4l[361.224]: master offset      -3145 s2 freq  -32637 path delay      9202
+ptp4l[361.224]: port 1: UNCALIBRATED to SLAVE on MASTER_CLOCK_SELECTED
+ptp4l[362.223]: master offset       -145 s2 freq  -30580 path delay      9202
+ptp4l[363.223]: master offset       1043 s2 freq  -28436 path delay      8972
+[...]
+ptp4l[371.235]: master offset        285 s2 freq  -28511 path delay      9199
+ptp4l[372.235]: master offset        -78 s2 freq  -28788 path delay      9204</screen>
+   <para>
+    An example of the <command>phc2sys</command> output:
+   </para>
+<screen>phc2sys[616.617]: Waiting for ptp4l...
+phc2sys[628.628]: phc offset     66341 s0 freq      +0 delay   2729
+phc2sys[629.628]: phc offset     64668 s1 freq  -37690 delay   2726
+[...]
+phc2sys[646.630]: phc offset      -333 s2 freq  -37426 delay   2747
+phc2sys[646.630]: phc offset       194 s2 freq  -36999 delay   2749</screen>
+   <para>
+    <command>ptp4l</command> normally writes messages very frequently. You
+    can reduce the frequency with the <literal>summary_interval</literal>
+    directive. For example, to reduce the output to every 1024 seconds, add
+    the following line to the <filename>/etc/ptp4l.conf</filename> file:
+   </para>
+<screen>summary_interval 10</screen>
+   <para>
+    You can also reduce the frequency of the <command>phc2sys</command>
+    command's updates with the <option>-u
+    <replaceable>summary-updates</replaceable></option> option.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="tuning.ptp.ntp">
+  <title>PTP and NTP</title>
+
+  <para>
+   NTP and PTP time synchronization tools can coexist, synchronizing time
+   from one to another in both directions.
+  </para>
+
+  <sect2 xml:id="tuning.ptp.ntp2ptp">
+   <title>NTP to PTP Synchronization</title>
+   <para>
+    When <systemitem>ntpd</systemitem> is used to synchronize the local
+    system clock, you can configure the <command>ptp4l</command> to be the
+    grandmaster clock distributing the time from the local system clock via
+    PTP. Include the <option>priority1</option> option in
+    <filename>/etc/ptp4l.conf</filename>:
+   </para>
+<screen>[global]
+priority1 127
+[eth0]</screen>
+   <para>
+    Then run <command>ptp4l</command>:
+   </para>
+<screen>ptp4l -f /etc/ptp4l.conf</screen>
+   <para>
+    When hardware time stamping is used, you need to synchronize the PTP
+    hardware clock to the system clock with <command>phc2sys</command>:
+   </para>
+<screen>phc2sys -c eth0 -s CLOCK_REALTIME -w</screen>
+  </sect2>
+
+  <sect2 xml:id="tuning.ptp.ptp2ntp">
+   <title>PTP to NTP Synchronization</title>
+   <para>
+    You can configure <systemitem>ntpd</systemitem> to distribute the time
+    from the system clock synchronized by <command>ptp4l</command> or
+    <command>phc2sys</command> by using the <emphasis>local</emphasis>
+    reference clock driver. Moreover, you need to stop
+    <systemitem>ntpd</systemitem> from adjusting the system clock&mdash;do
+    not specify any remote NTP servers in
+    <filename>/etc/ntp.conf</filename>:
+   </para>
+<screen>server   127.127.1.0
+fudge    127.127.1.0 stratum 0</screen>
+   <note>
+    <title>NTP and DHCP</title>
+    <para>
+     When the DHCP client command <command>dhclient</command> receives a
+     list of NTP servers, it adds them to NTP configuration by default. To
+     prevent this behavior, set
+    </para>
+<screen>NETCONFIG_NTP_POLICY=""</screen>
+    <para>
+     in the <filename>/etc/sysconfig/network/config</filename> file.
+    </para>
+   </note>
+  </sect2>
+ </sect1>
+</chapter>
