@@ -438,50 +438,53 @@
     or at points of data integrity (<quote>sync points</quote>) when it
     needs to be written back to disk.
    </para>
-   <important>
-    <title>Difference in Timing of I/O Writes in &sle; 12</title>
-    <para>
-     The system is required to limit what percentage of the systems memory
-     contains file-backed data that needs writing to disk. This guarantees
-     that the system can always allocate the necessary data structures to
-     complete I/O. The maximum amount of memory that may be dirty and
-     requires writing at any given time is controlled by vm.dirty_ratio
-     (<filename>/proc/sys/vm/dirty_ratio</filename>). The defaults are:
-    </para>
+  </sect2>
+
+  <sect2 xml:id="cha.tuning.memory.vm.writetiming">
+   <title>Timing Differences of I/O Writes between &sle; 12 and &sle; 11</title>
+   <para>
+    The system is required to limit what percentage of the system's memory
+    contains file-backed data that needs writing to disk. This guarantees
+    that the system can always allocate the necessary data structures to
+    complete I/O. The maximum amount of memory that may be dirty and
+    requires writing at any given time is controlled by
+    <literal>vm.dirty_ratio</literal>
+    (<filename>/proc/sys/vm/dirty_ratio</filename>). The defaults are:
+   </para>
 <screen>SLE-11-SP3:     vm.dirty_ratio = 40
 SLE-12:         vm.dirty_ratio = 20</screen>
-    <para>
-     The primary advantage of using the lower ratio in &sle; 12 is that
-     page reclamation and allocation in low memory situations completes
-     faster as there is a higher probability that old clean pages will be
-     quickly found and discarded. The secondary advantage is that if all
-     data on the system must be synchronized then the time to complete the
-     operation on &sle; 12 will be lower than &sle; 11 SP3 by default.
-     Most workloads will not notice this change as data is synchronized with
-     <literal>fsync()</literal> by the application or data is not dirtied
-     quickly enough to hit the limits.
-    </para>
-    <para>
-     There are exceptions and if your application is affected by this, it
-     will manifest as an unexpected stall during writes. To prove it is
-     affected by dirty data rate limiting then monitor
-     <literal>/proc/<replaceable>PID_OF_APPLICATION</replaceable>/stack</literal>
-     and it will be observed that the application spends significant time in
-     <literal>balance_dirty_pages_ratelimited</literal>. If this is observed
-     and it is a problem, then increase the value of
-     <literal>vm.dirty_ratio</literal> to 40 to restore the &sle; 11 SP3
-     behavior.
-    </para>
-    <para>
-     It is important to note that the overall I/O throughput is the same
-     regardless of the setting. The only difference is the timing of when
-     the I/O is queued.
-    </para>
-    <para>
-     This is an example of using <command>dd</command> to asynchronously
-     write 30% of memory to disk which would happen to be affected by the
-     change in <literal>vm.dirty_ratio</literal>:
-    </para>
+   <para>
+    The primary advantage of using the lower ratio in &sle; 12 is that
+    page reclamation and allocation in low memory situations completes
+    faster as there is a higher probability that old clean pages will be
+    quickly found and discarded. The secondary advantage is that if all
+    data on the system must be synchronized, then the time to complete the
+    operation on &sle; 12 will be lower than &sle; 11 SP3 by default.
+    Most workloads will not notice this change as data is synchronized with
+    <literal>fsync()</literal> by the application or data is not dirtied
+    quickly enough to hit the limits.
+   </para>
+   <para>
+    There are exceptions and if your application is affected by this, it
+    will manifest as an unexpected stall during writes. To prove it is
+    affected by dirty data rate limiting then monitor
+    <literal>/proc/<replaceable>PID_OF_APPLICATION</replaceable>/stack</literal>
+    and it will be observed that the application spends significant time in
+    <literal>balance_dirty_pages_ratelimited</literal>. If this is observed
+    and it is a problem, then increase the value of
+    <literal>vm.dirty_ratio</literal> to 40 to restore the &sle; 11 SP3
+    behavior.
+   </para>
+   <para>
+    It is important to note that the overall I/O throughput is the same
+    regardless of the setting. The only difference is the timing of when
+    the I/O is queued.
+   </para>
+   <para>
+    This is an example of using <command>dd</command> to asynchronously
+    write 30% of memory to disk which would happen to be affected by the
+    change in <literal>vm.dirty_ratio</literal>:
+   </para>
 <screen>&prompt.root;MEMTOTAL_MBYTES=`free -m | grep Mem: | awk '{print $2}'`
 &prompt.root;sysctl vm.dirty_ratio=40
 &prompt.root;dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100))
@@ -489,29 +492,28 @@ SLE-12:         vm.dirty_ratio = 20</screen>
 &prompt.root;sysctl vm.dirty_ratio=20
 dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100))
 2507145216 bytes (2.5 GB) copied, 10.1593 s, 247 MB/s</screen>
-    <para>
-     Note that the parameter affects the time it takes for the command to
-     complete and the apparent write speed of the device. With
-     <literal>dirty_ratio=40</literal>, more of the data is cached and
-     written to disk in the background by the kernel. It is very important
-     to note that the speed of I/O is identical in both cases. To
-     demonstrate, this is the result when <command>dd</command> synchronizes
-     the data before exiting:
-    </para>
+   <para>
+    Note that the parameter affects the time it takes for the command to
+    complete and the apparent write speed of the device. With
+    <literal>dirty_ratio=40</literal>, more of the data is cached and
+    written to disk in the background by the kernel. It is very important
+    to note that the speed of I/O is identical in both cases. To
+    demonstrate, this is the result when <command>dd</command> synchronizes
+    the data before exiting:
+   </para>
 <screen>&prompt.root;sysctl vm.dirty_ratio=40
 &prompt.root;dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100)) conv=fdatasync
 2507145216 bytes (2.5 GB) copied, 21.0663 s, 119 MB/s
 &prompt.root;sysctl vm.dirty_ratio=20
 &prompt.root;dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100)) conv=fdatasync
 2507145216 bytes (2.5 GB) copied, 21.7286 s, 115 MB/s</screen>
-    <para>
-     Note that <literal>dirty_ratio</literal> had almost no impact here and
-     is within the natural variability of a command. Hence,
-     <literal>dirty_ratio</literal> does not directly impact I/O performance
-     but it may affect the apparent performance of a workload that writes
-     data asynchronously without synchronizing.
-    </para>
-   </important>
+   <para>
+    Note that <literal>dirty_ratio</literal> had almost no impact here and
+    is within the natural variability of a command. Hence,
+    <literal>dirty_ratio</literal> does not directly impact I/O performance
+    but it may affect the apparent performance of a workload that writes
+    data asynchronously without synchronizing.
+   </para>
   </sect2>
 
   <sect2 xml:id="cha.tuning.memory.vm.readahead">
