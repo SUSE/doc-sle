@@ -13,53 +13,481 @@
   </dm:docmanager>
  </info>
  <para>
-  This section documents how to set up and use &productname; &productnumber; as a &qemu;-&kvm; based
-  virtual machine host.
+  This section documents how to set up and use &productname; &productnumber;
+  as a &qemu;-&kvm; based virtual machine host.
  </para>
  <tip>
   <title>Resources</title>
   <para>
-   In general, the virtual guest system needs the same hardware resources as &sls; installed on
-   a physical machine. The more guests you plan to run on the host system, the more hardware resources&mdash;CPU,
-   disk, memory, and network&mdash;you need to add.
+   In general, the virtual guest system needs the same hardware resources as
+   &sls; installed on a physical machine. The more guests you plan to run on
+   the host system, the more hardware resources&mdash;CPU, disk, memory, and
+   network&mdash;you need to add.
   </para>
  </tip>
- <sect1 xml:id="kvm.host">
-  <title>Required Software</title>
+ <sect1 xml:id="kvm.host.cpu">
+  <title>CPU Support for Virtualization</title>
+
   <para>
-   The &kvm; host requires several packages to be installed. To install all necessary packages,
-   do the following:
+   In order to run &kvm;, your CPU must support virtualization, and
+   virtualization needs to be enabled in BIOS. The file
+   <filename>/proc/cpuinfo</filename> includes information about your CPU
+   features.
   </para>
+
+  <para>
+   To find out whether your system supports virtualization, see
+   <xref linkend="sec.kvm.requires.hardware"/>.
+  </para>
+ </sect1>
+ <sect1 xml:id="kvm.host.soft">
+  <title>Required Software</title>
+
+  <para>
+   The &kvm; host requires several packages to be installed. To install all
+   necessary packages, do the following:
+  </para>
+
   <procedure>
    <step>
     <para>
-   Run <menuchoice><guimenu>&yast;</guimenu><guimenu>Software
-     Management</guimenu>
-    <guimenu>View</guimenu><guimenu>Patterns</guimenu></menuchoice> and check
-   the <guimenu>KVM Virtualization Host and Tools</guimenu>.
-    </para>
-   </step>
-   <step>
-    <para>
-     Confirm with  <guimenu>Accept</guimenu>, and <guimenu>Continue</guimenu> in the <guimenu>Changed Packages</guimenu> window.
+     Run <menuchoice><guimenu>&yast;</guimenu><guimenu>
+     Virtualization</guimenu><guimenu>Install Hypervisor and
+     Tools</guimenu></menuchoice>.
     </para>
     <figure>
-     <title>Installing the &kvm; Host Pattern</title>
+     <title>Installing the &kvm; Hypervisor and Tools</title>
      <mediaobject>
       <imageobject role="fo">
-       <imagedata fileref="yast_sw_kvm_pattern.png" width="75%" format="PNG"/>
+       <imagedata fileref="yast2_hypervisors.png" width="75%" format="PNG"/>
       </imageobject>
       <imageobject role="html">
-       <imagedata fileref="yast_sw_kvm_pattern.png" width="75%" format="PNG"/>
+       <imagedata fileref="yast2_hypervisors.png" width="75%" format="PNG"/>
       </imageobject>
      </mediaobject>
     </figure>
    </step>
    <step>
     <para>
-     
+     Select <guimenu>KVM server</guimenu> and preferably also <guimenu>KVM
+     tools</guimenu>, and connfirm with <guimenu>Accept</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     During the installation process, you can optionally let &yast; create a
+     <guimenu>Network Bridge</guimenu> for you automatically. If you do not
+     plan to dedicate an additional physical network card to your virtual
+     guests, network bridge is a standard way to connect the guest machines
+     to the network.
+    </para>
+    <figure>
+     <title>Network Bridge</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_netbridge.png" width="75%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_netbridge.png" width="75%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+   <step>
+    <para>
+     After all the required packages are installed (and new network setup
+     activated), try to load the &kvm; kernel module relevant for your CPU
+     type&mdash;<systemitem>kvm-intel</systemitem> or
+     <systemitem>kvm-amd</systemitem>:
+    </para>
+<screen>&prompt.root;modprobe kvm-intel</screen>
+    <para>
+     Check if the module is loaded into memory:
+    </para>
+<screen>&prompt.user;lsmod | grep kvm
+kvm_intel              64835  6 
+kvm                   411041  1 kvm_intel</screen>
+    <para>
+     Now the &kvm; host is ready for serving &kvm; &vmguest;s. For more
+     information, see <xref linkend="cha.qemu.running"/>.
     </para>
    </step>
   </procedure>
+ </sect1>
+ <sect1 xml:id="kvm.host.virtio">
+  <title>&kvm; Host-Specific Features</title>
+
+  <para>
+   You can improve the performance of &kvm;-based &vmguest;s by letting them
+   fully utilize specific features of the &vmhost;'s hardware
+   (<emphasis>paravirtualization</emphasis>). This section introduces
+   techniques to make the guests access the physical host's hardware
+   directly&mdash;without the emulation layer&mdash;to make the most use of
+   it.
+  </para>
+
+  <sect2 xml:id="kvm.qemu.vnet">
+   <title>Accelerated Networking with <systemitem>vhost-net</systemitem></title>
+   <para>
+    The <systemitem>vhost-net</systemitem> module is used to accelerate
+    &kvm;'s paravirtualized network drivers. It provides better latency and
+    greater throughput for network.
+   </para>
+   <para>
+    To use the module, verify that the host's running Kernel has
+    <literal>CONFIG_VHOST_NET</literal> turned on or enabled as a module:
+   </para>
+<screen>grep CONFIG_VHOST_NET /boot/config-`uname -r`</screen>
+   <para>
+    Also verify that the guest's running Kernel has
+    <literal>CONFIG_PCI_MSI</literal> enabled:
+   </para>
+<screen>grep CONFIG_PCI_MSI /boot/config-`uname -r`</screen>
+   <para>
+    If both conditions are met, use the <literal>vhost-net</literal> driver
+    by starting the guest with the following example command line:
+   </para>
+<screen>qemu-system-x86_64 [...] -netdev tap,id=guest0,vhost=on,script=no
+-net nic,model=virtio,netdev=guest0,macaddr=00:16:35:AF:94:4B</screen>
+   <para>
+    Note that <literal>guest0</literal> is an identification string of the
+    vhost-driven device.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="kvm.qemu.multiqueue">
+   <title>Scaling Network Performance with Multiqueue virtio-net</title>
+   <para>
+    As the number of virtual CPUs increases in &vmguest;s, &qemu; offers a
+    way of improving the network performance using
+    <emphasis>multiqueue</emphasis>. Multiqueue virtio-net scales the
+    network performance by allowing &vmguest; virtual CPUs to transfer
+    packets in parallel. Multiqueue support is required on both &vmhost; and
+    &vmguest; side.
+   </para>
+   <tip>
+    <title>Performance Benefit</title>
+    <para>
+     The Multiqueue virtio-net solution is most beneficial in the following
+     cases:
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       Network traffic packets are large.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       &vmguest; has more connections active at the same time, mainly
+       between the guest systems, or between the guest and the host, or
+       between the guest and an external system.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       The number of active queues is equal to the number of virtual CPUs in
+       the &vmguest;.
+      </para>
+     </listitem>
+    </itemizedlist>
+   </tip>
+   <note>
+    <para>
+     While multiqueue virtio-net increases the total network throughput, it
+     increases CPU consumption as it uses of the virtual CPU's power.
+    </para>
+   </note>
+   <procedure xml:id="kvm.qemu.mq.enable">
+    <title>How to Enable Multiqueue virtio-net</title>
+    <para>
+     The following procedure lists important steps to enable the multiqueue
+     feature with <command>qemu-system-ARCH</command>. It assumes that a tap
+     network device with multiqueue capability (supported since kernel
+     version 3.8) is set up on the &vmhost;.
+    </para>
+    <step>
+     <para>
+      In <command>qemu-system-ARCH</command>, enable multiqueue for the tap
+      device:
+     </para>
+<screen>-netdev tap,vhost=on,queues=<replaceable>N</replaceable></screen>
+     <para>
+      where <literal>N</literal> stands for the number of queue pairs.
+     </para>
+    </step>
+    <step>
+     <para>
+      In <command>qemu-system-ARCH</command>, enable multiqueue and specify
+      MSI-X (Message Signaled Interrupt) vectors for the virtio-net-pci
+      device:
+     </para>
+<screen>-device virtio-net-pci,mq=on,vectors=<replaceable>2*N+2</replaceable></screen>
+     <para>
+      where the formula for the number of MSI-X vectors results from: N
+      vectors for TX (transmit) queues, N for RX (receive) queues, one for
+      configuration purposes, and one for possible VQ (vector quantization)
+      control.
+     </para>
+    </step>
+    <step>
+     <para>
+      In &vmguest;, enable multiqueue on the relevant network interface
+      (<literal>eth0</literal> in this example):
+     </para>
+<screen>ethtool -L eth0 combined 2*N</screen>
+    </step>
+   </procedure>
+   <para>
+    The resulting <command>qemu-system-ARCH</command> command line will look
+    similar to the following example:
+   </para>
+<screen>qemu-system-x86_64 [...] -netdev tap,id=guest0,queues=4,vhost=on \
+-device virtio-net-pci,netdev=guest0,mq=on,vectors=10</screen>
+   <para>
+    Note that the <literal>id</literal> of the network device
+    (<literal>guest0</literal> ) needs to be identical for both options.
+   </para>
+   <para>
+    Inside the running &vmguest;, specify the following command as
+    &rootuser;:
+   </para>
+<screen>ethtool -L eth0 combined 8</screen>
+   <para>
+    Now the guest system networking uses the multiqueue support from the
+    <command>qemu-system-ARCH</command> hypervisor.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="kvm.vfio">
+   <title>VFIO: Secure Direct Access to Devices</title>
+   <para>
+    Directly assigning a PCI device to a &vmguest; (PCI pass-through) avoids
+    performance issues caused by avoiding any emulation in performance
+    critical paths. VFIO replaces the traditional &kvm; &pciback; device
+    assignment. Prerequisite for this feature is a &vmhost; configuration
+    described in <xref linkend="ann.vt.io.require"/>.
+   </para>
+   <para>
+    To be able to assign a PCI device via VFIO to a &vmguest;, you need to
+    find out which IOMMU Group it belongs to. The
+    <xref
+    linkend="gloss.vt.acronym.iommu"/> (input/output memory
+    management unit that connects a direct memory access-capable I/O bus to
+    the main memory) API supports the notion of groups. A group is a set of
+    devices that can be isolated from all other devices in the system.
+    Groups are therefore the unit of ownership used by
+    <xref linkend="vt.io.vfio"/>.
+   </para>
+   <procedure>
+    <title>Assigning a PCI Device to a &vmguest; via VFIO</title>
+    <step>
+     <para>
+      Identify the host PCI device to assign to the guest.
+     </para>
+<screen>&prompt.user;sudo lspci -nn
+[...]
+00:10.0 Ethernet controller [0200]: Intel Corporation 82576 \
+Virtual Function [8086:10ca] (rev 01)
+[...]</screen>
+     <para>
+      Note down the device ID (<literal>00:10.0</literal> in this case) and
+      the vendor ID (<literal>8086:10ca</literal>).
+     </para>
+    </step>
+    <step>
+     <para>
+      Find the IOMMU group of this device:
+     </para>
+<screen>&prompt.user;sudo readlink /sys/bus/pci/devices/0000\:00\:10.0/iommu_group
+../../../kernel/iommu_groups/20</screen>
+     <para>
+      The IOMMU group for this device is <literal>20</literal>.Now you can
+      check the devices belonging to the same IOMMU group:
+     </para>
+<screen>ls -l /sys/bus/pci/devices/0000:01:10.0/iommu_group/devices/0000:01:10.0
+[...] 0000:00:1e.0 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0
+[...] 0000:01:10.0 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0/0000:01:10.0
+[...] 0000:01:10.1 -&gt; ../../../../devices/pci0000:00/0000:00:1e.0/0000:01:10.1</screen>
+    </step>
+    <step>
+     <para>
+      Unbind the device from the device driver:
+     </para>
+<screen>sudo echo "0000:01:10.0" &gt; /sys/bus/pci/devices/0000\:01\:10.0/driver/unbind</screen>
+    </step>
+    <step>
+     <para>
+      Bind the device to the vfio-pci driver using the vendor ID frpm step
+      1:
+     </para>
+<screen>sudo echo "8086 153a" &gt; /sys/bus/pci/drivers/vfio-pci/new_id</screen>
+     <para>
+      A new device
+      <filename>/dev/vfio/<replaceable>IOMMU_GROUP</replaceable></filename>
+      will be created as a result, <filename>/dev/vfio/20</filename> in this
+      case.
+     </para>
+    </step>
+    <step>
+     <para>
+      Change the ownership of the newly created device:
+     </para>
+<screen>chown qemu.qemu /dev/vfio/<replaceable>DEVICE</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      Now run the &vmguest; with the PCI device assigned.
+     </para>
+<screen>qemu-system-<replaceable>ARCH</replaceable> [...] -device
+     vfio-pci,host=00:10.0,id=<replaceable>ID</replaceable></screen>
+    </step>
+   </procedure>
+   <important>
+    <title>No Hotplugging</title>
+    <para>
+     As of &productname; &productnumber; hotplugging of PCI devices passed
+     to a &vmguest; via VFIO is not supported.
+    </para>
+   </important>
+<!-- fs 2015-10-09: not yet supported
+   <para>
+    &productname; also supports PCI device hotplugging to a &vmguest;. To
+    achieve this, you need to switch to a &qemu; monitor (see
+    <xref linkend="cha.qemu.monitor"/> for more information) and issue the
+    following commands:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      hot-add:
+     </para>
+<screen>device_add vfio-pci,host=00:10.0,id=<replaceable>ID</replaceable></screen>
+    </listitem>
+    <listitem>
+     <para>
+      hot-remove:
+     </para>
+<screen>device_del <replaceable>ID</replaceable></screen>
+    </listitem>
+   </itemizedlist>
+-->
+   <para>
+    You can find more detailed information on the
+    <xref linkend="vt.io.vfio"/> driver in the
+    <filename>/usr/src/linux/Documentation/vfio.txt</filename> file (package
+    <systemitem>kernel-source</systemitem> has to be installed).
+   </para>
+  </sect2>
+
+  <sect2 xml:id="kvm.usb.passthru">
+   <title>&usbback;</title>
+   <para>
+    To assign an existing host USB device to a &vmguest;, you need to find
+    out its host bus and device ID.
+   </para>
+<screen>&exampleuser;@vmhost:~&gt; lsusb
+[...]
+Bus 002 Device 005: ID 12d1:1406 Huawei Technologies Co., Ltd. E1750
+[...]</screen>
+   <para>
+    In the above example, we want to assign a USB stick connected to the
+    host's USB bus number 2 with device number 5. Now run the &vmguest; with
+    the following additional options:
+   </para>
+<screen>qemu-system-x86_64 [...] -usb -device usb-host,hostbus=2,hostaddr=5</screen>
+   <para>
+    After the guest is booted, check that the assigned USB device is present
+    on it.
+   </para>
+<screen>&exampleuser;@vmguest:~&gt; lsusb
+[...]
+Bus 001 Device 002: ID 12d1:1406 Huawei Technologies Co., Ltd. E1750
+[...]</screen>
+   <note>
+    <para>
+     The guest operating system must take care of mounting the assigned USB
+     device so that it is accessible for the user.
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="kvm.pciback" condition="kvm4x86">
+   <title>&pciback; (Deprecated)</title>
+   <para>
+    &pciback; is a technique to give your &vmguest; exclusive access to a
+    &vmhost; PCI device. Prerequisite for this feature is a &vmhost;
+    configuration described in <xref linkend="ann.vt.io.require"/>.
+    Assigning graphics cards is not supported by &suse;.
+   </para>
+   <important>
+    <title>&pciback; is deprecated</title>
+    <para>
+     &kvm; &pciback; has been replaced by VFIO (see
+     <xref
+     linkend="vt.io.vfio"/> for more information). Although it is
+     still supported by &suse;, it is recommended to use VFIO for assigning
+     PCI devices as described in <xref linkend="kvm.vfio"/>. vt.io.vfio
+    </para>
+   </important>
+   <procedure>
+    <title>Configuring &pciback; (Deprecated)</title>
+    <step>
+     <para>
+      Identify the host PCI device to assign to the guest.
+     </para>
+<screen>&prompt.user;sudo lspci -nn
+[...] 00:1b.0 Audio device [0403]: Intel Corporation 82801H (ICH8 Family) \
+HD Audio Controller [8086:284b] (rev 02) [...]</screen>
+     <para>
+      Note down the device (<literal>00:1b.0</literal>) and vendor
+      (<literal>8086:284b</literal>) ID.
+     </para>
+    </step>
+    <step>
+     <para>
+      Unbind the device from host Kernel driver and bind it to the PCI stub
+      driver.
+     </para>
+<screen>sudo modprobe pci_stub
+sudo echo "8086 284b" &gt; /sys/bus/pci/drivers/pci-stub/new_id
+sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/devices/0000:00:1b.0/driver/unbind
+sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/drivers/pci-stub/bind</screen>
+    </step>
+    <step>
+     <para>
+      Now run the &vmguest; with the PCI device assigned.
+     </para>
+<screen>qemu-system-x86_64 [...] -device pci-assign,host=00:1b.0</screen>
+    </step>
+   </procedure>
+   <note>
+    <title>IRQ Sharing</title>
+    <para>
+     If the PCI device shares IRQ with other devices, it cannot be assigned
+     to a &vmguest;.
+    </para>
+   </note>
+   <para>
+    &kvm; also supports PCI device hotplugging to a &vmguest;. To achieve
+    this, you need to switch to a &qemu; monitor (see
+    <xref linkend="cha.qemu.monitor"/> for more information) and issue the
+    following commands:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      hot-add:
+     </para>
+<screen>device_add pci-assign,host=00:1b.0,id=new_pci_device</screen>
+    </listitem>
+    <listitem>
+     <para>
+      hot-remove:
+     </para>
+<screen>device_del new_pci_device</screen>
+    </listitem>
+   </itemizedlist>
+  </sect2>
  </sect1>
 </chapter>
