@@ -126,28 +126,25 @@ kvm                   411041  1 kvm_intel</screen>
    it.
   </para>
 
+  <tip>
+   <para>
+    Examples included in this section assume basic knowledge of the
+    <command>qemu-system-<replaceable>ARCH</replaceable></command> command
+    line options. For more information, see
+    <xref linkend="cha.qemu.running"/>.
+   </para>
+  </tip>
+
   <sect2 xml:id="kvm.qemu.vnet">
    <title>Accelerated Networking with <systemitem>vhost-net</systemitem></title>
    <para>
     The <systemitem>vhost-net</systemitem> module is used to accelerate
     &kvm;'s paravirtualized network drivers. It provides better latency and
-    greater throughput for network.
+    greater throughput for network. Use the <literal>vhost-net</literal>
+    driver by starting the guest with the following example command line:
    </para>
-   <para>
-    To use the module, verify that the host's running Kernel has
-    <literal>CONFIG_VHOST_NET</literal> turned on or enabled as a module:
-   </para>
-<screen>grep CONFIG_VHOST_NET /boot/config-`uname -r`</screen>
-   <para>
-    Also verify that the guest's running Kernel has
-    <literal>CONFIG_PCI_MSI</literal> enabled:
-   </para>
-<screen>grep CONFIG_PCI_MSI /boot/config-`uname -r`</screen>
-   <para>
-    If both conditions are met, use the <literal>vhost-net</literal> driver
-    by starting the guest with the following example command line:
-   </para>
-<screen>qemu-system-x86_64 [...] -netdev tap,id=guest0,vhost=on,script=no
+<screen>qemu-system-x86_64 [...] \
+-netdev tap,id=guest0,vhost=on,script=no \
 -net nic,model=virtio,netdev=guest0,macaddr=00:16:35:AF:94:4B</screen>
    <para>
     Note that <literal>guest0</literal> is an identification string of the
@@ -488,6 +485,189 @@ sudo echo "0000:00:1b.0" &gt; /sys/bus/pci/drivers/pci-stub/bind</screen>
 <screen>device_del new_pci_device</screen>
     </listitem>
    </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="kvm.qemu.virtfs">
+   <title>VirtFS: Sharing Directories between Host and Guests</title>
+   <para>
+    &vmguest;s usually run in a separate computing space&mdash;they are
+    provided their own memory range, dedicated CPUs, and file system space.
+    The ability to share parts of the &vmhost;'s file system makes the
+    virtualization environment more flexible by simplifying mutual data
+    exchange. Network file systems, such as CIFS and NFS, have been the
+    traditional way of sharing directories. But as they are not specifically
+    designed for virtualization purposes, they suffer from major performance
+    and feature issues.
+   </para>
+   <para>
+    &kvm; introduces a new optimized method called
+    <emphasis>VirtFS</emphasis> (sometimes called <quote>file system
+    pass-through</quote>). VirtFS uses a paravirtual file system driver,
+    which avoids converting the guest application file system operations
+    into block device operations, and then again into host file system
+    operations.
+   </para>
+   <para>
+    You typically use VirtFS for the following situations:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      To access a shared directory from several guests, or to provide
+      guest-to-guest file system access.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      To replace the virtual disk as the root file system to which the
+      guest's RAM disk connects during the guest boot process.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      To provide storage services to different customers from a single host
+      file system in a cloud environment.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <sect3 xml:id="kvm.qemu.virtfs.implement">
+    <title>Implementation</title>
+    <para>
+     In &qemu;, the implementation of VirtFS is facilitated by defining two
+     types of devices:
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       <literal>virtio-9p-pci</literal> device which transports protocol
+       messages and data between the host and the guest.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <literal>fsdev</literal> device which defines the export file system
+       properties, such as file system type and security model.
+      </para>
+     </listitem>
+    </itemizedlist>
+    <example xml:id="ex.qemu.virtfs.host">
+     <title>Exporting Host's File System with VirtFS</title>
+<screen>qemu-system-x86_64 [...] \
+-fsdev local,id=exp1<co xml:id="co.virtfs.host.id"/>,path=/tmp/<co xml:id="co.virtfs.host.path"/>,security_model=mapped<co xml:id="co.virtfs.host.sec_model"/> \
+-device virtio-9p-pci,fsdev=exp1<co xml:id="co.virtfs.host.fsdev"/>,mount_tag=v_tmp<co xml:id="co.virtfs.host.mnt_tag"/></screen>
+     <calloutlist>
+      <callout arearefs="co.virtfs.host.id">
+       <para>
+        Identification of the file system to be exported.
+       </para>
+      </callout>
+      <callout arearefs="co.virtfs.host.path">
+       <para>
+        File system path on the host to be exported.
+       </para>
+      </callout>
+      <callout arearefs="co.virtfs.host.sec_model">
+       <para>
+        Security model to be used&mdash;<literal>mapped</literal> keeps the
+        guest file system modes and permissions isolated from the host,
+        while <literal>none</literal> invokes a <quote>pass-through</quote>
+        security model in which permission changes on the guest's files are
+        reflected on the host as well.
+       </para>
+      </callout>
+      <callout arearefs="co.virtfs.host.fsdev">
+       <para>
+        The exported file system ID defined before with <literal>-fsdev
+        id=</literal> .
+       </para>
+      </callout>
+      <callout arearefs="co.virtfs.host.mnt_tag">
+       <para>
+        Mount tag used later on the guest to mount the exported file system.
+       </para>
+      </callout>
+     </calloutlist>
+     <para>
+      Such an exported file system can be mounted on the guest like this
+     </para>
+<screen>sudo mount -t 9p -o trans=virtio v_tmp /mnt</screen>
+     <para>
+      where <literal>v_tmp</literal> is the mount tag defined earlier with
+      <literal>-device mount_tag=</literal> and <literal>/mnt</literal> is
+      the mount point where you want to mount the exported file system.
+     </para>
+    </example>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="kvm.qemu.ksm">
+   <title>KSM: Sharing Memory Pages between Guests</title>
+   <para>
+    Kernel SamePage Merging (<xref linkend="gloss.vt.acronym.ksm"/>) is a
+    Linux Kernel feature that merges identical memory pages from multiple
+    running processes into one memory region. Because &kvm; guests run as
+    processes under Linux, <xref linkend="gloss.vt.acronym.ksm"/> provides
+    the memory overcommit feature to hypervisors for more efficient use of
+    memory. Therefore, if you need to run multiple virtual machines on a
+    host with limited memory, <xref linkend="gloss.vt.acronym.ksm"/> may be
+    helpful to you.
+   </para>
+   <para>
+    For more information on the meaning of the
+    <filename>/sys/kernel/mm/ksm/*</filename> files, see
+    <filename>/usr/src/linux/Documentation/vm/ksm.txt</filename> (package
+    <systemitem>kernel-source</systemitem>).
+   </para>
+   <para>
+    To use <xref linkend="gloss.vt.acronym.ksm"/>, do the following.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      <xref linkend="gloss.vt.acronym.ksm"/> is enabled by default in
+      &productnameshort;. You can see the following files under the
+      <filename>/sys/kernel/mm/ksm</filename> directory:
+     </para>
+<screen>ls -1 /sys/kernel/mm/ksm
+full_scans
+merge_across_nodes
+pages_shared
+pages_sharing
+pages_to_scan
+pages_unshared
+pages_volatile
+run
+sleep_millisecs</screen>
+<!-- 2015-11-03 tbazant: ?!? -> f.c.i.g bug with tag comment .... need to remove screen content....
+    svn version r14426 -->
+    </step>
+    <step>
+     <para>
+      Check if <xref linkend="gloss.vt.acronym.ksm"/> feature is turned on.
+     </para>
+<screen>cat /sys/kernel/mm/ksm/run</screen>
+     <para>
+      If the command returns <literal>0</literal>, turn
+      <xref linkend="gloss.vt.acronym.ksm"/> on with
+     </para>
+<screen>sudo echo 1 > /sys/kernel/mm/ksm/run</screen>
+    </step>
+    <step>
+     <para>
+      Now run several &vmguest;s under &kvm; and inspect the content of
+      files <filename>pages_sharing</filename> and
+      <filename>pages_shared</filename>, for example:
+     </para>
+<screen>while [ 1 ]; do cat /sys/kernel/mm/ksm/pages_shared; sleep 1; done
+13522
+13523
+13519
+13518
+13520
+13520
+13528</screen>
+    </step>
+   </procedure>
   </sect2>
  </sect1>
 </chapter>
