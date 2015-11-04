@@ -39,8 +39,8 @@
   <phrase role="productname">OpenFlow</phrase> is layered onto TCP and is
   designed for software-defined networking.
   <phrase role="productname">OpenFlow</phrase> is implemented in a range of
-  hardware and software, so that a single controller can drive different
-  switches.
+  hardware and software.
+  A single controller can thus drive multiple, very different switches.
  </para>
 
  <sect2 xml:id="sec.ovs.advantage">
@@ -314,7 +314,7 @@
 <screen>STARTMODE='auto'<co xml:id="ovs.ifcfg.mode"/>
 BOOTPROTO='dhcp'<co xml:id="ovs.ifcfg.protocol"/>
 OVS_BRIDGE='yes'<co xml:id="ovs.ifcfg.bridge"/>
-OVS_BRIDGE_PORT_DEVICE_2='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.port"/></screen>
+OVS_BRIDGE_PORT_DEVICE_1='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.port"/></screen>
     <calloutlist>
      <callout arearefs="ovs.ifcfg.mode">
       <para>
@@ -337,13 +337,18 @@ OVS_BRIDGE_PORT_DEVICE_2='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.
        To add more devices, append additional lines for each of them to the
        file:
       </para>
-<screen>OVS_BRIDGE_PORT_DEVICE_<replaceable>RUNNING_NUMBER</replaceable>='<replaceable>DEVICE</replaceable>'</screen>
+<screen>OVS_BRIDGE_PORT_DEVICE_<replaceable>SUFFIX</replaceable>='<replaceable>DEVICE</replaceable>'</screen>
+      <para>
+        The <replaceable>SUFFIX</replaceable> can be any alphanumeric string.
+        However, to avoid overwriting a previous definition, make sure the
+        <replaceable>SUFFIX</replaceable> of each device is unique.
+       </para>
      </callout>
     </calloutlist>
     <para>
-     Save it in the directory <filename>/etc/sysconfig/network</filename> under
-     the name <filename>ifcfg-br0</filename>.
-     Instead of <literal>br0</literal>, you can use any name you want.
+     Save the file in the directory <filename>/etc/sysconfig/network</filename>
+     under the name <filename>ifcfg-br0</filename>.
+     Instead of <replaceable>br0</replaceable>, you can use any name you want.
      However, the file name needs to begin with <literal>ifcfg-</literal>.
     </para>
     <para>
@@ -359,49 +364,78 @@ OVS_BRIDGE_PORT_DEVICE_2='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.
       <remark>"Start" is weird - sknorr, 2015-10-26</remark>
     </para>
 <screen>&prompt.root;<command>wicked</command> ifup <replaceable>br0</replaceable></screen>
+    <para>
+     Wicked should now output the name of your device and next to it the state
+     <literal>up</literal>.
+    </para>
    </step>
   </procedure>
  </sect2>
 
  <sect2 xml:id="sec.ovs.kvm">
-  <title>Directly Using &ovs; with &kvm;</title>
+  <title>Using &ovs; Directly with &kvm;</title>
   <para>
    After having created the bridge as described above, you can use &ovs; to
    manage the network access of virtual machines created with &kvm;/&qemu;.
-   To start a virtual machine, use, for example:
   </para>
-<screen>&prompt.root;<command>qemu-system-x86_64</command><co xml:id="co.ovs.qemu"/> \
+
+  <procedure>
+   <step>
+    <para>
+     Create a pair of network interface scripts.
+     The <filename>ifup</filename> script should contain the following:
+    </para>
+<screen>#!/bin/bash
+wicked ifup br0
+ovs-vsctl add-port <replaceable>br0</replaceable> <replaceable>tap0</replaceable></screen>
+    <para>
+     Note that the second line is only necessary to ensure the interface is
+     indeed up.
+    </para>
+    <para>
+     The <filename>ifdown</filename> script should contain the following:
+    </para>
+<screen>#!/bin/bash
+ovs-vsctl del-port <replaceable>br0</replaceable> <replaceable>tap0</replaceable></screen>
+    <para>
+     Save these scripts as, for example, <filename>/etc/ovs-br0-ifup.sh</filename>
+     and <filename>/etc/ovs-br0-ifdown.sh</filename>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Make sure the scripts can be executed:
+    </para>
+<screen>&prompt.root;<command>chmod</command> +x <replaceable>/etc/ovs-br0-ifup.sh</replaceable> <replaceable>/etc/ovs-br0-ifup.sh</replaceable></screen>
+   </step>
+   <step>
+    <para>
+     To start a virtual machine, use, for example:
+    </para>
+<screen>&prompt.root;<command>qemu-kvm</command>\
 -drive file=<replaceable>/PATH/TO/DISK-IMAGE</replaceable><co xml:id="co.ovs.pathimage"/> \
--m 512 -machine accel=kvm -cpu kvm64\
--netdev tap,id=<replaceable>ovs</replaceable>,ifname=<replaceable>br0</replaceable>,script=,downscript=<co xml:id="co.ovs.tapdevice"/>\
--net macaddr=00:11:22:EE:EE:EE</screen>
-  <remark>
-   Not particularly sure this really does everything I want...
-   - sknorr, 2015-10-26
-  </remark>
-  <calloutlist>
-   <callout arearefs="co.ovs.qemu">
+-m 512 -net nic,vlan=0,macaddr=00:11:22:EE:EE:EE \
+-net tap,ifname=<replaceable>tap0</replaceable>,script=<replaceable>/etc/ovs-br0-ifup.sh</replaceable>,\
+downscript=<replaceable>/etc/ovs-br0-ifdown.sh</replaceable><co xml:id="co.ovs.tapdevice"/></screen>
+    <calloutlist>
+     <callout arearefs="co.ovs.pathimage">
+      <para>
+       The path to the &qemu; disk image you want to start.
+      </para>
+     </callout>
+     <callout arearefs="co.ovs.tapdevice">
+      <para>
+       Create a tap device with the bridge (<literal>br0</literal>) created in
+       <xref linkend="sec.ovs.bridge"/>.
+      </para>
+     </callout>
+    </calloutlist>
     <para>
-     Note that the name of the &qemu; executable can be different depending on the
-     system architecture of your computer: <command>qemu-system-ARCH</command>.
+     For further information on the usage of &kvm;/&qemu;, see
+     <xref linkend="part.virt.qemu"/>.
     </para>
-   </callout>
-   <callout arearefs="co.ovs.pathimage">
-    <para>
-     The path to the &qemu; disk image you want to start.
-    </para>
-   </callout>
-   <callout arearefs="co.ovs.tapdevice">
-    <para>
-     Create a tap device with the bridge (<literal>br0</literal>) created in
-     <xref linkend="sec.ovs.bridge"/>.
-    </para>
-   </callout>
-  </calloutlist>
-  <para>
-   For further information on the usage of &kvm;/&qemu;, see
-   <xref linkend="part.virt.qemu"/>.
-  </para>
+   </step>
+  </procedure>
  </sect2>
 
   <sect2 xml:id="sec.ovs.libvirt">
@@ -433,13 +467,15 @@ OVS_BRIDGE_PORT_DEVICE_2='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.
      like this:
     </para>
 <screen>&lt;interface type='bridge'&gt;
+  &lt;mac address='00:11:22:EE:EE:EE'/&gt;
   &lt;source bridge='ovsbr'/&gt;
   &lt;virtualport type='openvswitch'/&gt;
+  &lt;address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/&gt;
 &lt;/interface&gt;</screen>
    </step>
    <step>
     <para>
-     You can now start the virtual machine as usual.
+     You can now start or restart the virtual machine as usual.
     </para>
    </step>
   </procedure>
