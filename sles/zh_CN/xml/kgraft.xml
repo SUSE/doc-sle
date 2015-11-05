@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="kgraft.xml" version="5.0" xml:id="cha.kgraft" xml:lang="zh-cn">
+<?suse-quickstart color="suse"?>
+
+
+ <title>使用 kGraft 在线增补内核</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+   </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+      <abstract>
+        <para>
+    本文档介绍 kGraft 在线增补技术的基本原理，并提供 SLE Live Patching 服务的使用准则。
+   </para>
+        <para>
+    kGraft 是一项在线增补技术，使用它可在运行时增补 Linux 内核，而无需停止内核。如此可以最大程度地确保系统运行时间，从而提高系统可用性，这对于任务关键型系统而言非常重要。该技术还允许动态增补内核，支持用户安装关键的安全性更新，不必将它们推迟到安排的停机时间。
+   </para>
+        <para>
+    kGraft 增补程序是一个内核模块，用于替换内核中的全部函数。kGraft 主要提供内核中基础结构，可在运行时将增补的代码与基本内核代码集成。
+   </para>
+        <para>
+    SLE Live Patching 是在常规 SUSE Linux Enterprise Server 维护基础之上提供的服务。通过 SLE Live Patching 分发的 kGraft 是对常规 SLES 维护更新的有益补充。可以使用常用的更新堆栈和过程来部署 SLE Live Patching。
+   </para>
+      </abstract>
+    </info>
+    <sect1>
+  <title>kGraft 的优势</title>
+
+  <para>
+   当需要对紧急情况（已知发生了应该尽快修复的严重漏洞，或者已知的修复程序出现严重的系统稳定性问题）迅速做出响应时，使用 kGraft 的在线内核增补特别有用。该技术不适合用于非时间关键型的已安排更新。
+  </para>
+
+  <para>
+   kGraft 的典型用例包括系统（例如，包含巨量 RAM，且 15 分钟或更长的引导时间并不少见的内存数据库）、需要持续数周或数月且不能重启动的大规模仿真，或者向大量消费者持续提供服务的基础结构构建基块。
+  </para>
+
+  <para>
+   kGraft 的主要优势是它永不要求停止内核，哪怕是短暂停止。
+  </para>
+
+  <para>
+   kGraft 增补程序是 KMP RPM 包中的一个 <filename>.ko</filename> 内核模块。可以在安装或更新 RPM 包时，使用 <command>insmod</command> 命令将它插入内核。kGraft 将替换内核中的全部函数，即使这些函数正在执行。如果需要，可以使用更新的 kGraft 模块替换现有增补程序。
+  </para>
+
+  <para>
+   kGraft 也很精简 - 因为利用了其他标准 Linux 技术，它只包含少量的代码。
+  </para>
+ </sect1>
+ <sect1>
+  <title>kGraft 的底层函数</title>
+
+  <para>
+   kGraft 使用 ftrace 基础结构执行增补。下面介绍了在 x86-64 体系结构上的实施过程。
+  </para>
+
+  <para>
+   为了增补某个内核函数，kGraft 要求该函数的开头有一定的空间，以便插入指向新函数的跳跃点。此空间是在开启函数分析的情况下，在内核编译期间由 GCC 分配的。具体而言，将在内核函数的开头注入一个 5 字节调用指令。引导此类经过检测的内核时，分析调用将替换为 5 字节 NOP（无操作）指令。
+  </para>
+
+  <para>
+   增补开始之后，第一个字节将替换为 INT3（断点）指令。这可以确保 5 字节指令替换的原子性。其他四个字节将替换为新函数的地址。最后，第一个字节将替换为 JMP（长跳跃）操作代码。
+  </para>
+
+  <para>
+   在整个过程中，将使用处理器间不可屏蔽中断 (IPI NMI) 来刷新系统中其他 CPU 的推理解码队列。这样，无需停止内核（哪怕是非常短暂的停止），就能切换到新的函数。IPI NMI 产生的中断可用毫秒为单位测量，并且不被视为服务中断，因为无论在哪种情况下，这些中断都是在内核运行时发生的。
+  </para>
+
+  <para>
+   永远不会增补调用方。被调用方的 NOP 将替换为指向新函数的 JMP。JMP 指令会永久保留。这种工作方式可以处理好函数指针（包括结构中的指针），并且不需要保存任何旧数据就能取消增补。
+  </para>
+
+  <para>
+   但是，这些步骤本身并不足够完善：因为函数将以非原子方式替换，内核某个部分中新修复的函数可能仍会调用其他位置的某个旧函数，反之亦然。如果函数接口的语义在增补程序中发生更改，将会造成混乱。
+  </para>
+
+  <para>
+   因此，在替换所有函数之前，kGraft 使用基于弹簧床、类似于 RCU（读取-复制-更新）的方案，来确保每个用户空间线程、内核线程和内核在全局视图中都保持一致。将对每个内核入口和出口设置一个基于线程的标志。这样，一个旧函数始终会调用另一个旧函数，而一个新函数始终会调用另一个新函数。为所有进程设置“new universe”标志后，增补即告完成，此时，可以去除弹簧床函数，代码可以全速运行，且不会对性能产生影响，不过，每个增补的函数需要经历超长时间的跳转。
+  </para>
+ </sect1>
+ <sect1>
+  <title>安装 kGraft 增补程序</title>
+
+  <para>
+   本节介绍如何激活 SUSE Linux Enterprise Live Patching 扩展以及如何安装 kGraft 增补程序。
+  </para>
+
+  <sect2>
+   <title>激活 SLE Live Patching</title>
+   <para>
+    要在您的系统上激活 SLE Live Patching，请遵循以下步骤：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      如果您的 SLES 系统尚未注册，现在请注册。可以在安装系统期间完成注册，或者以后使用 YaST <guimenu>产品注册</guimenu>模块 (<command>yast2 registration</command>) 执行注册。注册后，单击<guimenu>是</guimenu>查看可用联机更新的列表。
+     </para>
+     <para>
+      如果您的 SLES 系统已注册，但 SLE Live Patching 尚未激活，请打开 YaST <guimenu>产品注册</guimenu>模块 (<command>yast2 registration</command>)，然后单击<guimenu>选择扩展</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在可用扩展列表中选择 <guimenu>SUSE Linux Enterprise Live Patching 12</guimenu>，然后单击<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      确认许可条款并单击<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      输入 SLE Live Patching 注册代码并单击<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      检查<guimenu>安装摘要</guimenu>和选定的<guimenu>模式</guimenu>。应该选择安装 <systemitem>Live Patching</systemitem> 模式。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>接受</guimenu>完成安装。这样就会在您的系统上安装 kGraft 基本组件以及初始在线增补程序。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2>
+   <title>更新系统</title>
+   <procedure>
+    <step>
+     <para>
+      SLE Live Patching 更新通过允许使用标准 SLE 更新堆栈来应用增补程序的形式分发。可以使用 <command>zypper patch</command>、YaST2 联机更新或等效的方法来更新初始在线增补程序。
+     </para>
+    </step>
+    <step>
+     <para>
+      内核将在安装包的过程中自动增补。但是，在所有休眠进程都唤醒并避开前，旧内核函数的调用并不会完全消除。这可以节省大量的时间。尽管如此，使用旧内核函数的休眠进程并不被视为安全问题。不过，在当前的 kGraft 版本中，只有在所有进程跨越内核用户空间边界使用前一增补程序中已增补的函数之后，才可以应用另一个 kGraft 增补程序。
+     </para>
+     <para>
+      要查看全局增补状态，请检查 <filename>/sys/kernel/kgraft/in_progress</filename> 中的标志。值 <literal>1</literal> 表示存在仍需唤醒的休眠进程（增补仍在进行）。值 <literal>0</literal> 表示所有进程都只使用了增补的函数，并且增补已经完成。或者，可以使用 <command>kgr status</command> 命令获取相同的信息。
+     </para>
+     <para>
+      也可以基于每个进程检查标志。针对每个进程单独检查 <filename>/proc/<replaceable>进程编号</replaceable>/kgr_in_progress</filename> 中的数字。同样，值 <literal>1</literal> 表示仍需唤醒的休眠进程。或者，可以使用 <command>kgr blocking</command> 命令输出休眠进程的列表。
+     </para>
+    </step>
+    
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1>
+  <title>去除 kGraft 增补程序</title>
+
+  <para>
+   要去除 kGraft 增补程序，请执行以下过程：
+  </para>
+
+
+
+  <procedure>
+   <step>
+    <para>
+     首先，使用 zypper 去除增补程序本身：
+    </para>
+<screen>
+    zypper rm kgraft-patch-<replaceable>3_12_32-25-default</replaceable>
+   </screen>
+   </step>
+   <step>
+    <para>
+     然后重引导计算机。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1>
+  <title>阻塞的内核执行线程</title>
+
+  <para>
+   需要准备好内核线程才能处理 kGraft。第三方软件不一定能够完全配合 kGraft，并且其内核模块可能会衍生大量的内核执行线程。这些线程会无限期阻止增补过程。作为应急措施，kGraft 允许强行完成增补过程，而不等待所有执行线程跨越安全检查点。这可以通过在 <filename>/sys/kernel/kgraft/in_progress</filename> 中写入 <literal>0</literal> 来实现。在执行此过程之前，请先咨询 SUSE 支持。
+  </para>
+
+
+ </sect1>
+ <sect1>
+  <title><command>kgr</command> 工具</title>
+
+  <para>
+   使用 <command>kgr</command> 工具可以简化一些 kGraft 管理任务。可用的命令为：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>kgr status</command>
+    </term>
+    <listitem>
+     <para>
+      显示 kGraft 增补的总体状态（<literal>ready</literal> 或 <literal>in_progress</literal>）。
+
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr patches</command>
+    </term>
+    <listitem>
+     <para>
+      显示已装载 kGraft 增补程序的列表。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr blocking</command>
+    </term>
+    <listitem>
+     <para>
+      列出阻止 kGraft 完成增补的进程。默认情况下，只会列出 PID。指定 <option>-v</option> 会列显命令行（如果可用）。再指定一个 <option>-v</option> 还会显示堆栈跟踪。
+     </para>
+    </listitem>
+   </varlistentry>
+   
+  </variablelist>
+
+  <para>
+   有关详细信息，请参见 <command>man kgr</command>。
+  </para>
+ </sect1>
+ <sect1>
+  <title>kGraft 技术的应用范围</title>
+
+  <para>
+   kGraft 的工作原理以替换函数为基础。数据结构的改动只能通过 kGraft 间接完成。因此，更改内核数据结构时需要特别小心，如果更改幅度太大，可能需要重引导。此外，kGraft 可能无法处理使用一个编译器来编译旧内核，使用另一个编译器来编译增补程序的情况。
+  </para>
+
+  <para>
+   由于 kGraft 的工作方式，对衍生大量内核线程的第三方模块的支持有限。
+
+  </para>
+ </sect1>
+ <sect1 xml:id="scope_patching">
+  <title>SLE Live Patching 的应用范围</title>
+
+  <para>
+   SLE Live Patching 的应用范围包括 CVSS（通用漏洞评分系统）级别 6 以上漏洞的修复，以及与系统稳定性或数据损坏相关的 Bug 修复。可能无法针对满足上述所有准则的所有修复类型生成在线增补程序。如果出于技术原因而无法生成内核在线增补程序，SUSE 有权不发布修复。有关 CVSS 的详细信息，请参见 <link xlink:href="http://nvd.nist.gov/cvss.cfm/"/>。
+  </para>
+ </sect1>
+ <sect1>
+  <title>使用支持流程与我们交互</title>
+
+  <para>
+   在与 SUSE 支持共同解决技术难题的过程中，您可能会收到一个所谓的程序临时修复 (PTF)。我们可能会针对各种包（包括构成 SLE Live Patching 基础的包）发布 PTF。
+  </para>
+
+  <para>
+   您可以像平时一样安装符合前一节中所述条件的 kGraft PTF，SUSE 将确保无需重引导有问题的系统，并且将来的在线更新可以正常应用。
+  </para>
+
+  <para>
+   针对基础内核发布的 PTF 会中断在线增补过程。首先，安装 PTF 内核意味着需要重引导，因为在运行时无法替换整个内核。其次，需要再次重引导，以便将 PTF 替换为对其发布了在线增补程序的任何常规维护更新。
+  </para>
+
+  <para>
+   可将 SLE Live Patching 中其他包的 PTF 视为享有正常担保的常规 PTF。
+  </para>
+ </sect1>
+</chapter>

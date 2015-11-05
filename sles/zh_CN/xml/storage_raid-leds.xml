@@ -1,0 +1,704 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_raid-leds.xml" version="5.0" xml:id="cha.raid_leds" xml:lang="zh-cn">
+ <title>适用于 MD 软件 RAID 的储存机箱 LED 实用程序</title>
+ <info>
+      <abstract>
+        <para>
+          <remark>Fate#313626 Update Enclosure LED Utilities</remark>储存机箱 LED 监视实用程序 (<command>ledmon</command>) 和 LED 控件 (<command>ledctl</command>) 实用程序属于 Linux 用户空间应用程序，它们使用多种接口和协议来控制储存机箱 LED。主要用途是视觉化显示使用 mdadm 实用程序创建的 Linux MD 软件 RAID 设备的状态。<systemitem class="daemon">ledmon</systemitem> 守护程序会监视驱动器阵列的状态，然后相应更新驱动器 LED 的状态。您可以使用实用程序 ledctl 为指定的设备设置 LED 模式。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+          </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  这些 LED 实用程序使用 SGPIO（通用串行输入/输出）规范（小型 (SFF) 8485）以及 SCSI 机箱服务 (SES) 2 协议控制 LED。它们实施 SGPIO 的 SFF-8489 规范中的国际闪烁模式解释 (IBPI) 模式。IBPI 定义了 SGPIO 标准将如何解释成驱动器以及底板上各插槽的状态，以及底板将如何通过 LED 视觉化显示状态。
+ </para>
+ <para>
+  有些储存机箱并未严格遵循 SFF-8489 规范。机箱处理器可能会接受 IBPI 模式，但不会按照 SFF-8489 规范闪烁 LED，或者处理器可能仅支持部分 IBPI 模式。
+ </para>
+ <para>
+  <command>ledmon</command> 以及 <command>ledctl</command> 实用程序不支持 LED 管理(AHCI) 和 SAF-TE 协议。
+ </para>
+ <para>
+  <systemitem class="daemon">ledmon</systemitem> 和 <command>ledctl</command> 应用程序经验证可以用于 Intel AHCI 控制器以及 Intel SAS 控制器等 Intel 储存控制器。它们还支持使用 PCIe-SSD（固态磁盘）机箱 LED 来控制属于 MD 软件 RAID 卷一部分的 PCIe-SSD 设备的储存机箱状态（正常、故障、正在重建）LED。这些应用程序也可能可以用于其他供应商提供的符合 IBPI 的储存控制器（特别是 SAS/SCSI 控制器）；不过其他供应商的控制器未经过测试。
+ </para>
+ <para>
+  <systemitem class="daemon">ledmon</systemitem> 和 <command>ledctl</command> 都属于 <systemitem class="resource">ledmon</systemitem> 包，该包在默认状态下不予安装。执行 <command>sudo zypper in ledmon</command> 可安装它。
+ </para>
+ <sect1 xml:id="sec.raid_leds.ledmon">
+  <title>储存机箱 LED 监视服务</title>
+
+  <para>
+   <systemitem class="daemon">ledmon</systemitem> 应用程序是一个守护程序进程，它会持续监视 MD 软件 RAID 设备的状态或储存机箱或驱动器机架中块设备的状态。一次只能运行一个该守护程序的实例。<systemitem class="daemon">ledmon</systemitem> 守护程序是 Intel 机箱 LED 实用程序的一部分。
+  </para>
+
+  <para>
+   状态通过与储存阵列机箱或驱动器机架中的每个槽对应的 LED 视觉化显示。应用程序会监视所有软件 RAID 设备并视觉化显示其状态。无法通过该应用程序仅监视选定的软件 RAID 卷。
+  </para>
+
+  <para>
+   <systemitem class="daemon">ledmon</systemitem> 守护程序支持两类 LED 系统：双 LED 系统（活动 LED 和状态 LED）与三 LED 系统（活动 LED、查找 LED 和故障 LED）。此工具在访问 LED 时具有最高优先级。
+  </para>
+
+  <para>
+   若要启动 <systemitem class="daemon">ledmon</systemitem>，请输入
+  </para>
+
+<screen>sudo ledmon [options]</screen>
+
+  <para>
+   其中 [options] 是下列一或多项：
+  </para>
+
+  <variablelist>
+   <title><systemitem class="daemon">ledmon</systemitem> 的选项</title>
+   <varlistentry>
+    <term>-c</term>
+    <term>--confg=path</term>
+    <listitem>
+     <para>
+      配置从 <filename>~/.ledctl</filename> 或 <filename>/etc/ledcfg.conf</filename>（如果存在）中读取。使用此选项来指定替代的配置文件。
+     </para>
+     <para>
+      目前此选项无效，因为尚未实施对配置文件的支持。有关细节，请参见 <command>man 5 ledctl.conf</command>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-l</term>
+    <term>--log=path</term>
+    <listitem>
+     <para>
+      设置本地日志文件的路径。如果指定此用户定义的文件，则将不会使用全局日志文件 <filename>/var/log/ledmon.log</filename>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-t</term>
+    <term>--interval=seconds</term>
+    <listitem>
+     <para>
+      设置 <filename>sysfs</filename> 的扫描间隔时间。该值以秒为单位。最小值为 5 秒。不指定最大值。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>[--quiet|--error|--warning|--info|--debug|--all]</term>
+    <listitem>
+     <para>
+      指定冗长级别。级别选项按从无信息到最详细信息的顺序指定。如果不记录日志，则使用 --quiet 选项。如果要记录所有内容，则使用 --all 选项。如果指定多个冗长选项，则会应用命令中的最后一个选项。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-h</term>
+    <term>--help</term>
+    <listitem>
+     <para>
+      将命令信息打印至控制台，然后退出。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-v</term>
+    <term>--version</term>
+    <listitem>
+     <para>
+      显示 <command>ledmon</command> 的版本以及许可证的相关信息，然后退出。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <note>
+   <title>已知问题</title>
+   <para>
+    <command>ledmon</command> 守护程序无法识别 SFF-8489 规范中的 PFA（故障预警分析）状态。因此无法视觉化显示 PFA 模式。
+   </para>
+  </note>
+ </sect1>
+ <sect1 xml:id="sec.raid_leds.ledctl">
+  <title>储存机箱 LED 控制应用程序</title>
+
+  <para>
+   机箱 LED 应用程序 (<command>ledctl</command>) 是一款用户空间应用程序，用于控制与储存机箱或驱动器机架中每个槽相关联的 LED。<command>ledctl</command> 应用程序是 Intel 机箱 LED 实用程序的组成部分。
+  </para>
+
+  <para>
+   在您发出命令时，指定设备的 LED 将被设置为指定的模式，并且所有其他的 LED 都将关闭。运行此应用程序需要 <systemitem class="username">root</systemitem> 权限。由于 <systemitem class="daemon">ledmon</systemitem> 应用程序在访问 LED 时具有最高优先级，因此如果 <systemitem class="daemon">ledmon</systemitem> 守护程序正在运行，则由 ledctl 设置的某些模式可能不起作用（“查找”模式除外）。
+  </para>
+
+  <para>
+   <command>ledctl</command> 应用程序支持两类 LED 系统：二 LED 系统（活动 LED 和状态 LED）以及三 LED 系统（活动 LED、故障 LED 和查找 LED）。
+  </para>
+
+  <para>
+   若要启动 <command>ledctl</command>，请输入
+  </para>
+
+<screen>sudo [options] <replaceable>pattern_name</replaceable>=list_of_devices</screen>
+
+  <para>
+   其中 [options] 是下列一或多项：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>-c</term>
+    <term>--confg=path</term>
+    <listitem>
+     <para>
+      设置本地配置文件的路径。如果指定此选项，则全局配置文件和用户配置文件都将失效。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-l</term>
+    <term>--log=path</term>
+    <listitem>
+     <para>
+      设置本地日志文件的路径。如果指定此用户定义的文件，则将不会使用全局日志文件 <filename>/var/log/ledmon.log</filename>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>--quiet</term>
+    <listitem>
+     <para>
+      关闭所有向 <filename>stdout</filename> 或从 <filename>stderr</filename> 发送的消息。但在本地文件和 <filename>syslog</filename> 功能中仍会记录这些消息。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-h</term>
+    <term>--help</term>
+    <listitem>
+     <para>
+      将命令信息打印至控制台，然后退出。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-v</term>
+    <term>--version</term>
+    <listitem>
+     <para>
+      显示 <command>ledctl</command> 的版本以及许可证的相关信息，然后退出。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 xml:id="sec.raid_leds.ledctl.patterns">
+   <title>模式名称</title>
+   <para>
+    根据 SFF-8489 规范，<command>ledctl</command> 应用程序会接受以下 <guimenu>pattern_name</guimenu> 自变量的名称。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>locate</term>
+     <listitem>
+      <para>
+       打开与指定设备或空槽相关的查找 LED。此状态用于标识槽或驱动器。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>locate_off</term>
+     <listitem>
+      <para>
+       关闭与指定设备或空槽相关的查找 LED。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>normal</term>
+     <listitem>
+      <para>
+       关闭与指定设备相关的状态 LED、故障 LED 以及查找 LED。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>off</term>
+     <listitem>
+      <para>
+       仅关闭与指定设备相关的状态 LED 和故障 LED。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ica</term>
+     <term>degraded</term>
+     <listitem>
+      <para>
+       可视化显示 <literal>In a Critical Array</literal> 模式。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>rebuild</term>
+     <term>rebuild_p</term>
+     <listitem>
+      <para>
+       可视化显示 <literal>Rebuild</literal> 模式。由于兼容性和旧版原因，支持两种重构建状态。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ifa</term>
+     <term>failed_array</term>
+     <listitem>
+      <para>
+       可视化显示 <literal>In a Failed Array</literal> 模式。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>hotspare</term>
+     <listitem>
+      <para>
+       可视化显示 <literal>Hotspare</literal> 模式。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>pfa</term>
+     <listitem>
+      <para>
+       可视化显示 <literal>Predicted Failure Analysis</literal> 模式。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>failure</term>
+     <term>disk_failed</term>
+     <listitem>
+      <para>
+       可视化显示 <literal>Failure</literal> 模式。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_abort</term>
+     <listitem>
+      <para>
+       SES-2 R/R ABORT
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_rebuild</term>
+     <listitem>
+      <para>
+       SES-2 REBUILD/REMAP
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ifa</term>
+     <listitem>
+      <para>
+       SES-2 IN FAILED ARRAY
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ica</term>
+     <listitem>
+      <para>
+       SES-2 IN CRITICAL ARRAY
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_cons_check</term>
+     <listitem>
+      <para>
+       SES-2 CONS CHECK
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_hotspare</term>
+     <listitem>
+      <para>
+       SES-2 HOTSPARE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_rsvd_dev</term>
+     <listitem>
+      <para>
+       SES-2 RSVD DEVICE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ok</term>
+     <listitem>
+      <para>
+       SES-2 OK
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ident</term>
+     <listitem>
+      <para>
+       SES-2 IDENT
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_rm</term>
+     <listitem>
+      <para>
+       SES-2 REMOVE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_insert</term>
+     <listitem>
+      <para>
+       SES-2 INSERT
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_missing</term>
+     <listitem>
+      <para>
+       SES-2 MISSING
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_dnr</term>
+     <listitem>
+      <para>
+       SES-2 DO NOT REMOVE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_active</term>
+     <listitem>
+      <para>
+       SES-2 ACTIVE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_enable_bb</term>
+     <listitem>
+      <para>
+       SES-2 ENABLE BYP B
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_enable_ba</term>
+     <listitem>
+      <para>
+       SES-2 ENABLE BYP A
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_devoff</term>
+     <listitem>
+      <para>
+       SES-2 DEVICE OFF
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_fault</term>
+     <listitem>
+      <para>
+       SES-2 FAULT
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    将非 SES-2 模式发送至机箱中的设备时，该模式会自动转换为上面所示的 SCSI 机箱服务 (SES) 2 模式。
+   </para>
+   <table>
+    <title>非 SES-2 模式与 SES-2 模式之间的转换</title>
+    <tgroup cols="2">
+     <colspec colnum="1" colname="1" colwidth="5001*"/>
+     <colspec colnum="2" colname="2" colwidth="5001*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         非 SES-2 模式
+        </para>
+       </entry>
+       <entry>
+        <para>
+         SES-2 模式
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         locate
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ident
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         locate_off
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ident
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         normal
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ok
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         off
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ok
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         ica
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ica
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         degraded
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ica
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         rebuild
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_rebuild
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         rebuild_p
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_rebuild
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         ifa
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ifa
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         failed_array
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ifa
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         hotspare
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_hotspare
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         pfa
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_rsvd_dev
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         failure
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_fault
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         disk_failed
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_fault
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_leds.ledctl.devices">
+   <title>设备列表</title>
+   <para>
+    在您发出 <command>ledctl</command> 命令时，指定设备的 LED 将被设置为指定的模式，并且所有其他的 LED 都将关闭。设备列表可采用以下两种格式中的一种提供：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      以逗号分隔且无空格的设备列表
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      以空格分隔且用花括号括住的设备列表
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    如果在同一个命令中指定多个模式，则每一个模式的设备列表可以使用相同格式也可以使用不同格式。有关显示两种列表格式的示例，请参见<xref linkend="sec.raid_leds.ledctl.examples" xrefstyle="SectTitleOnPage"/>。
+   </para>
+   <para>
+    设备就是指向 <filename>/dev</filename> 目录或 <filename>/sys/block</filename> 目录中文件的路径。该路径可以标识块设备、MD 软件 RAID 设备或容器设备。对于软件 RAID 设备或容器设备，会为所有关联的块设备设置所报告的 LED 状态。
+   </para>
+   <para>
+    list_of_devices 中列出设备的 LED 将被设置为指定模式 pattern_name 并且所有其他 LED 都将关闭。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_leds.ledctl.examples">
+   <title>示例</title>
+   <para>
+    查找单个块设备：
+   </para>
+<screen>sudo ledctl locate=/dev/sda</screen>
+   <para>
+    若要关闭单个块设备的“查找 LED”，请执行以下步骤：
+   </para>
+<screen>sudo ledctl locate_off=/dev/sda</screen>
+   <para>
+    查找 MD 软件 RAID 设备的磁盘，并同时为两个块设备设置重构建模式：
+   </para>
+<screen>sudo ledctl locate=/dev/md127 rebuild={ /sys/block/sd[a-b] }</screen>
+   <para>
+    关闭指定设备的“状态 LED”和“故障 LED”：
+   </para>
+<screen>sudo ledctl off={ /dev/sda /dev/sdb }</screen>
+   <para>
+    若要找到三个块设备，请运行以下命令之一（两个命令的作用相同）：
+   </para>
+<screen>sudo ledctl locate=/dev/sda,/dev/sdb,/dev/sdc
+sudo ledctl locate={ /dev/sda /dev/sdb /dev/sdc }</screen>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid_leds.info">
+  <title>其他信息</title>
+
+  <para>
+   有关 LED 模式以及监视工具的详细信息，请参见以下资源：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="http://sourceforge.net/projects/ledmon/">Sourceforge.net 上的 LEDMON 开源项目</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="ftp://ftp.seagate.com/sff/SFF-8485.PDF">SGPIO 规范 SFF-8485</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="ftp://ftp.seagate.com/sff/SFF-8489.PDF">IBPI 规范 SFF-8489</link>
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

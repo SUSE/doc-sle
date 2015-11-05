@@ -1,0 +1,548 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_mdadm-resize.xml" version="5.0" xml:id="cha.raid_resize" xml:lang="zh-cn">
+ <title>使用 mdadm 调整软件 RAID 阵列的大小</title>
+ <info>
+      <abstract>
+        <para>
+    本章描述如何使用多设备管理 (<command>mdadm(8)</command>) 工具增加或减小软件 RAID 1、4、5 或 6 设备的大小。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+          </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  调整现有软件 RAID 设备的大小涉及增加或降低每个组件分区提供的空间。在 RAID 上驻留的文件系统也必须能够调整大小，以充分利用设备上可用空间的更改。在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 中，文件系统重设置大小实用程序可用于 Btrfs、Ext2、Ext3、Ext4、ReiserFS 和 XFS 文件系统（仅限增加大小）。有关更多信息，请参考<xref linkend="cha.resize_fs"/>。
+ </para>
+ <para>
+  <command>mdadm</command> 工具仅支持调整软件 RAID 级别 1、4、5 和 6 的大小。这些 RAID 级别提供磁盘容错，这样在调整大小时，可以一次卸下一个组件分区。基本上来说，可以对 RAID 分区执行热调整大小，但是这样做时，必须额外注意您的数据。
+ </para>
+ <warning>
+  <title>重设置大小之前请备份数据</title>
+  <para>
+   调整任何分区或文件系统的大小涉及可能会导致数据丢失的风险。为了避免数据丢失，请确保在开始任何调整大小任务之前备份您的数据。
+  </para>
+ </warning>
+ <para>
+  调整 RAID 大小涉及以下任务。执行这些任务的顺序取决于是增加还是减少大小。
+ </para>
+ <table>
+  <title>调整 RAID 大小中涉及的任务</title>
+  <tgroup cols="4">
+   <colspec colnum="1" colname="1" colwidth="2500*"/>
+   <colspec colnum="2" colname="2" colwidth="5001*"/>
+   <colspec colnum="3" colname="3" colwidth="1250*"/>
+   <colspec colnum="4" colname="4" colwidth="1250*"/>
+   <thead>
+    <row>
+     <entry>
+      <para>
+       任务
+      </para>
+     </entry>
+     <entry>
+      <para>
+       描述
+      </para>
+     </entry>
+     <entry>
+      <para>
+       增加大小的顺序
+      </para>
+     </entry>
+     <entry>
+      <para>
+       减小大小的顺序
+      </para>
+     </entry>
+    </row>
+   </thead>
+   <tbody>
+    <row>
+     <entry>
+      <para>
+       调整每个组件分区的大小。
+      </para>
+      <para/>
+     </entry>
+     <entry>
+      <para>
+       增加或减小每个组件分区的活动大小。一次仅可删除一个组件分区，修改其大小，然后将其返回到 RAID。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       1
+      </para>
+     </entry>
+     <entry>
+      <para>
+       2
+      </para>
+     </entry>
+    </row>
+    <row>
+     <entry>
+      <para>
+       调整软件 RAID 本身的大小。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       RAID 不会自动知道您对底层组件分区大小进行的增加或减小操作。您必须向其告知新的大小。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       2
+      </para>
+     </entry>
+     <entry>
+      <para>
+       3
+      </para>
+     </entry>
+    </row>
+    <row>
+     <entry>
+      <para>
+       调整文件系统的大小。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       必须调整驻留在 RAID 上的文件系统的大小。此操作只适用于提供了用于重设置大小工具的文件系统。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       3
+      </para>
+     </entry>
+     <entry>
+      <para>
+       1
+      </para>
+     </entry>
+    </row>
+   </tbody>
+  </tgroup>
+ </table>
+ <para>
+  下列各部分中的程序使用在下表中所示的设备名称。确保使用您自己的设备名称修改这些名称。
+ </para>
+ <table>
+  <title>增加组件分区的大小的情形</title>
+  <tgroup cols="2">
+   <colspec colnum="1" colname="1" colwidth="5001*"/>
+   <colspec colnum="2" colname="2" colwidth="5001*"/>
+   <thead>
+    <row>
+     <entry>
+      <para>
+       RAID 设备
+      </para>
+     </entry>
+     <entry>
+      <para>
+       组件分区
+      </para>
+     </entry>
+    </row>
+   </thead>
+   <tbody>
+    <row>
+     <entry>
+      <para>
+       <filename>/dev/md0</filename>
+      </para>
+     </entry>
+     <entry>
+      <para>
+       <filename>/dev/sda1</filename>
+      </para>
+      <para>
+       <filename>/dev/sdb1</filename>
+      </para>
+      <para>
+       <filename>/dev/sdc1</filename>
+      </para>
+     </entry>
+    </row>
+   </tbody>
+  </tgroup>
+ </table>
+ <sect1 xml:id="sec.raid_resize.incr">
+  <title>增加软件 RAID 的大小</title>
+
+  <para>
+   增大软件 RAID 的大小涉及按给定顺序执行下列任务：增加所有组成 RAID 的所有分区的大小，增加 RAID 本身的大小，最后增加文件系统的大小。
+  </para>
+
+  <warning>
+   <title>潜在数据遗失</title>
+   <para>
+    如果 RAID 没有磁盘容错，或只是不一致，则在删除其任何分区的情况下，将会导致数据丢失。删除分区时要非常小心，并确保有可用的数据备份。
+   </para>
+  </warning>
+
+  <sect2 xml:id="sec.raid_resize.incr.partitions">
+   <title>增加组件分区的大小</title>
+   <para>
+    应用本节中的过程以增加 RAID 1、4、5 或 6 的大小。对于 RAID 中的每个组件分区，从 RAID 中删除该分区，修改其大小，将其返回到 RAID，然后等待 RAID 稳定下来以继续。删除一个分区时，RAID 会以降级模式运行，没有磁盘容错或降低磁盘容错。即使对于可以容忍多个并行磁盘故障的 RAID，也不要一次删除多个组件分区。若要增加 RAID 组件分区的大小，请执行下列步骤：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，确保 RAID 阵列一致并同步
+     </para>
+<screen>cat /proc/mdstat</screen>
+     <para>
+      如果根据此命令的输出，RAID 阵列仍然正在同步，则必须等到同步完成，才能继续。
+     </para>
+    </step>
+    <step>
+     <para>
+      从 RAID 阵列中删除一个组件分区。例如，要删除 <filename>/dev/sda1</filename>，请输入
+     </para>
+<screen>sudo mdadm /dev/md0 --fail /dev/sda1 --remove /dev/sda1</screen>
+     <para>
+      为了操作成功，必须指定容错和去除操作。
+     </para>
+    </step>
+    <step>
+     <para>
+      执行下列操作之一，增加在上一步中去除的分区的大小：
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        使用磁盘分区程序（例如 YaST 分区程序）或命令行工具 parted 增加分区的大小。该选项是通常的选项。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        将分区驻留的磁盘替换为高容量设备。仅当系统不访问原始磁盘上的任何其他文件系统时，该选项才可用。当将替换设备添加回 RAID 时，同步数据需要的时间长得多，因为原始设备上的所有数据都必须重构建。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      将该分区重新添加到 RAID 阵列。例如，要添加 <filename>/dev/sda1</filename>，请输入
+     </para>
+<screen>sudo mdadm -a /dev/md0 /dev/sda1</screen>
+     <para>
+      等到 RAID 同步并一致，然后再继续下一个分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      对阵列中的每个剩余组件设备重复执行这些步骤。确保按照正确的组件分区修改命令。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果得到一个消息，告知您内核不能重读 RAID 的分区表，则必须在调整所有分区大小后重引导计算机，以强制更新分区表。
+     </para>
+    </step>
+    <step>
+     <para>
+      继续<xref linkend="sec.raid_resize.incr.raid" xrefstyle="SectTitleOnPage"/>。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.incr.raid">
+   <title>增加 RAID 阵列的大小</title>
+   <para>
+    调整 RAID 中的每个组件分区之后（请参见<xref linkend="sec.raid_resize.incr.partitions" xrefstyle="SectTitleOnPage"/>），RAID 阵列配置将继续使用原始阵列大小，直到您强制其了解新的可用空间。您可以为 RAID 指定大小或使用最大可用空间。
+   </para>
+   <para>
+    本节中的过程对 RAID 设备使用设备名 <filename>/dev/md0</filename>。确保使用您自己的设备名称修改名称。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，确保 RAID 阵列一致并同步
+     </para>
+<screen>cat /proc/mdstat</screen>
+     <para>
+      如果根据此命令的输出，RAID 阵列仍然正在同步，则必须等到同步完成，才能继续。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，检查阵列了解到的阵列大小和设备大小
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Dev Size"</screen>
+    </step>
+    <step>
+     <para>
+      执行以下操作之一：
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        通过输入以下命令，将阵列大小增加到最大可用大小
+       </para>
+<screen>sudo mdadm --grow /dev/md0 -z max</screen>
+      </listitem>
+     </itemizedlist>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        通过输入以下命令，将阵列大小增加到最大可用大小
+       </para>
+<screen>sudo mdadm --grow /dev/md0 -z max --assume-clean</screen>
+       <para>
+        阵列会利用添加到设备中的任何空间，但不会同步此空间。建议对 RAID 1 使用此命令，因为该级别不需要同步。如果添加到成员设备中的空间已预先置零，则对其他 RAID 级别可能也有用。
+       </para>
+      </listitem>
+     </itemizedlist>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        通过输入以下命令，将阵列大小增加到指定值
+       </para>
+<screen>sudo mdadm --grow /dev/md0 -z <replaceable>size</replaceable></screen>
+       <para>
+        将<replaceable>大小</replaceable>替换为表示所需大小（KB，每 KB 等于 1024 字节）的整数值。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，重新检查阵列了解到的阵列大小和设备大小
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Dev Size"</screen>
+    </step>
+    <step>
+     <para>
+      执行以下操作之一：
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        如果已成功调整阵列大小，请继续<xref linkend="sec.raid_resize.incr.fs" xrefstyle="SectTitleOnPage"/>。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        如果未能和预期一样调整阵列大小，则请重引导，然后重试该过程。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.incr.fs">
+   <title>增加文件系统的大小</title>
+   <para>
+    增加阵列大小之后（请参见<xref linkend="sec.raid_resize.incr.raid" xrefstyle="SectTitleOnPage"/>），您就准备好调整文件系统大小了。
+   </para>
+   <para>
+    您可以将文件系统的大小增加到最大可用空间或指定精确大小。为文件系统指定精确大小时，请确保新大小满足以下条件：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      新大小必须大于现有数据的大小；否则会发生数据丢失。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      新大小必须等于或小于当前 RAID 大小，因为文件系统大小不能超出可用空间。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    有关详细，请参见<xref linkend="cha.resize_fs"/>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid_resize.decr">
+  <title>减小软件 RAID 的大小</title>
+
+  <para>
+   减少软件 RAID 的大小涉及按顺序完成下列任务：减少文件系统的大小，减少所有组成分区 RAID 的大小，最后减少 RAID 本身的的大小。
+  </para>
+
+  <warning>
+   <title>潜在数据遗失</title>
+   <para>
+    如果 RAID 没有磁盘容错，或只是不一致，则在删除其任何分区的情况下，将会导致数据丢失。删除分区时要非常小心，并确保有可用的数据备份。
+   </para>
+  </warning>
+
+  <important>
+   <title>XFS</title>
+   <para>
+    XFS 格式文件系统的大小无法减少，因为 XFS 不支持此功能。因此，不能减少使用 XFS 文件系统的 RAID 的大小。
+   </para>
+  </important>
+
+  <sect2 xml:id="sec.raid_resize.decr.fs">
+   <title>减小文件系统的大小</title>
+   <para>
+    当减小 RAID 设备上的文件系统的大小时，请确保新的大小满足以下条件：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      新大小必须大于现有数据的大小；否则会发生数据丢失。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      新大小必须等于或小于当前 RAID 大小，因为文件系统大小不能超出可用空间。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    有关详细，请参见<xref linkend="cha.resize_fs"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.decr.raid">
+   <title>减小 RAID 阵列的大小</title>
+   <para>
+    调整文件系统的大小（请参见<xref linkend="sec.raid_resize.decr.fs" xrefstyle="SectTitleOnPage"/>）之后，RAID 阵列配置会继续使用其原始阵列大小，直到您强制它减少可用空间。使用 <command>mdadm --grow</command> 模式强制 RAID 使用较小的段大小。为此，您必须使用 -z 选项指定 RAID 中的每个设备上可使用的空间量（单位为 KB）。此大小必须是大块大小的倍数，且必须为将要写入设备的 RAID 超块预留大约 128KB 的空间。
+   </para>
+   <para>
+    本节中的过程对 RAID 设备使用设备名 <filename>/dev/md0</filename>。确保使用您自己的设备名称修改这些命令。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，检查阵列了解到的阵列大小和设备大小
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Dev Size"</screen>
+    </step>
+    <step>
+     <para>
+      输入以下命令将阵列的设备大小减少至指定值
+     </para>
+<screen>sudo mdadm --grow /dev/md0 -z <replaceable>size</replaceable></screen>
+     <para>
+      将<replaceable>大小</replaceable>替换为所需大小的整数值（单位为 KB）。（1 KB 是 1024 字节。）
+     </para>
+     <para>
+      例如，以下命令将每个 RAID 设备的段大小设置为大约 40 GB，其中大块大小为 64 KB。还包含为 RAID 超块预留的 128 KB。
+     </para>
+<screen>sudo mdadm --grow /dev/md2 -z 41943168</screen>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，重新检查阵列了解到的阵列大小和设备大小
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Device Size"</screen>
+    </step>
+    <step>
+     <para>
+      执行以下操作之一：
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        如果已成功调整阵列大小，请继续<xref linkend="sec.raid_resize.decr.partitions" xrefstyle="SectTitleOnPage"/>。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        如果未能和预期一样调整阵列大小，则请重引导，然后重试该过程。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.decr.partitions">
+   <title>减小组件分区的大小</title>
+   <para>
+    减小 RAID 中每个设备使用的段的大小之后（请参见<xref linkend="sec.raid_resize.decr.raid" xrefstyle="SectTitleOnPage"/>），RAID 将不会使用每个组件分区的剩余空间。您可以让分区保持其当前大小，以为 RAID 将来的增长留出空间，或者也可以回收这些当前未使用的空间。
+   </para>
+   <para>
+    要回收空间，请逐个减少组件分区。对于每个组件分区执行以下步骤：从 RAID 中删除它，减小其分区大小，将该分区装回到 RAID，然后等到 RAID 稳定。要允许元数据，则应指定比您在<xref linkend="sec.raid_resize.decr.raid" xrefstyle="SectTitleOnPage"/>中为 RAID 指定的大小略大的大小值。
+   </para>
+   <para>
+    删除一个分区时，RAID 会以降级模式运行，没有磁盘容错或降低磁盘容错。即使对于可以容忍多个并行磁盘故障的 RAID，也不要一次删除多个组件分区。若要减小 RAID 组件分区的大小，请执行下列步骤：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过输入以下命令，确保 RAID 阵列一致并同步
+     </para>
+<screen>cat /proc/mdstat</screen>
+     <para>
+      如果根据此命令的输出，RAID 阵列仍然正在同步，则必须等到同步完成，才能继续。
+     </para>
+    </step>
+    <step>
+     <para>
+      从 RAID 阵列中删除一个组件分区。例如，要删除 <filename>/dev/sda1</filename>，请输入
+     </para>
+<screen>sudo mdadm /dev/md0 --fail /dev/sda1 --remove /dev/sda1</screen>
+     <para>
+      为了操作成功，必须指定容错和去除操作。
+     </para>
+    </step>
+    <step>
+     <para>
+      减小在上一步中去除的分区的大小，让其值略大于为段设置的大小。该大小应是大块大小的倍数，并为 RAID 超块预留 128 KB 的空间。使用磁盘分区程序（例如 YaST 分区程序）或命令行工具 parted 减少分区的大小。
+     </para>
+    </step>
+    <step>
+     <para>
+      将该分区重新添加到 RAID 阵列。例如，要添加 <filename>/dev/sda1</filename>，请输入
+     </para>
+<screen>sudo mdadm -a /dev/md0 /dev/sda1</screen>
+     <para>
+      等到 RAID 同步并一致，然后再继续下一个分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      对阵列中的每个剩余组件设备重复执行这些步骤。确保按照正确的组件分区修改命令。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果得到一个消息，告知您内核无法重读 RAID 的分区表，则您必须在重新调整其所有组件分区大小后重引导计算机。
+     </para>
+    </step>
+    <step>
+     <para>
+      （可选）扩展 RAID 和文件系统的大小，以使用现在较小组件分区中的最大空间量，并在此后增加文件系统的大小。有关指导，请参见<xref linkend="sec.raid_resize.incr.raid"/>。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+</chapter>

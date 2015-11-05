@@ -1,0 +1,1371 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_lvm.xml" version="5.0" xml:id="cha.lvm" xml:lang="zh-cn">
+
+ <title>LVM 配置</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  本章简要介绍逻辑卷管理器 (LVM) 的原理及其基本功能，这些功能使 LVM 在许多情况下都很有用。YaST LVM 配置可以通过 YaST 专家分区程序完成。此分区工具用于编辑和删除现有分区并创建用于 LVM 的新分区。
+ </para>
+ <warning>
+  <title>风险</title>
+  <para>
+   使用 LVM 可能会增加一些风险，例如数据丢失。这些风险还包括应用程序崩溃、电源故障及有问题的命令。在实施 LVM 或重配置卷前，请保存数据。决不要在没有备份的情况下工作。
+  </para>
+ </warning>
+ <sect1 xml:id="sec.lvm.explained">
+  <title>了解逻辑卷管理器</title>
+
+  <para>
+   LVM 支持在多个物理卷（硬盘、分区、LUN）之间弹性分配硬盘空间。开发逻辑卷管理器是因为可能只有在安装期间初始分区完成后才需要更改硬盘空间的分段。因为在运行的系统中修改分区比较困难，LVM 提供了内存空间的虚拟池（卷组或 VG），如果需要，可以从中生成逻辑卷 (LV)。操作系统访问这些逻辑卷而不是物理分区。卷组可以跨多个磁盘，这样多个磁盘或部分磁盘可以构成一个 VG。LVM 以这种方式提供了一种对物理磁盘空间的抽象，从而能够以比物理分区更方便、更安全的方式更改硬盘空间的分段。
+  </para>
+
+  <para>
+   <xref linkend="fig.lvm.explain" xrefstyle="FigureXRef"/>比较物理分区（左）和 lvm 分段（右）。在左侧，将一个磁盘分成 3 个物理分区 (PART)，每个分区指派了一个安装点 (MP)，以便操作系统可以访问它们。在右侧，有两个磁盘，一个磁盘分为 2 个物理分区，另一个磁盘分为 3 个物理分区。定义了两个 LVM 卷组（VG1 和 VG2）。VG 1 包含 DISK 1 中的两个分区和 DISK 2 中的一个分区。VG 2 包含 DISK 2 中的其余两个分区。
+  </para>
+
+  <figure xml:id="fig.lvm.explain">
+   <title>物理分区与 LVM</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="lvm.svg" width="80%" format="SVG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="lvm.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   在 LVM 中，合并到卷组的物理磁盘分区称为物理卷 (PV)。在<xref linkend="fig.lvm.explain" xrefstyle="FigureXRef"/>的卷组中，定义了四个逻辑卷（LV 1 至 LV 4），操作系统可以通过关联的安装点 (MP) 来使用这些逻辑卷。不同逻辑卷之间的边界不一定是任何分区边界。请参见本示例中 LV 1 和 LV 2 之间的边界。
+  </para>
+
+  <para>
+   LVM 功能：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     可以将多块硬盘或多个分区合并为一个较大的逻辑卷。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     如果配置合适，当可用空间用完后，可以扩大 LV（例如 <filename>/usr</filename>）。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     通过使用 LVM，可以在正在运行的系统中添加硬盘或 LV。但这需要能执行此类操作的可热插拔的硬件。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     可激活<emphasis>分段方式</emphasis>，此方式将通过若干物理卷来分发逻辑卷的数据流。如果这些物理卷位于不同的磁盘上，则可提高读写性能（类似于 RAID 0）。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     使用快照功能可以在正在运行的系统中执行一致的备份（尤其适合服务器）。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   通过这些功能，使用 LVM 还对频繁使用的家用 PC 或小型服务器有用。如果您的数据储存量（如数据库、音乐存档或用户目录）不断增长，则 LVM 尤其有用。它支持您使用大于物理硬盘的文件系统。LVM 的另一个优点是最多可以添加 256 个 LV。但是，请记住，使用 LVM 与使用传统的分区截然不同。
+  </para>
+
+
+
+  <para>
+   您可以使用 YaST 分区程序管理新的或现有的 LVM 储存对象。有关配置 LVM 的指示及详细信息，请参见官方的 <link xlink:href="http://tldp.org/HOWTO/LVM-HOWTO/"><citetitle>LVM HOWTO</citetitle></link>。
+  </para>
+
+  <important>
+   <title>在现有 LVM 配置上添加多路径支持</title>
+   <para>
+    如果在配置 LVM 后添加多路径支持，则必须按照<xref linkend="sec.multipath.lvm" xrefstyle="SectTitleOnPage"/>中所述修改 <filename>/etc/lvm/lvm.conf</filename> 文件，以便仅扫描 <filename>/dev/disk/by-id</filename> 目录中的多路径设备名称，然后再重引导服务器。
+   </para>
+  </important>
+ </sect1>
+ <sect1 xml:id="sec.lvm.vg">
+  <title>创建卷组</title>
+
+  <para>
+   LVM 卷组 (VG) 会将 Linux LVM 分区组织到一个逻辑空间池中。您可以从组的可用空间中划分出逻辑卷。组中的 Linux LVM 分区可以在相同或不同磁盘上。您可以添加分区或整个磁盘来扩大组的大小。如果您要使用整个磁盘，则该磁盘不得包含任何分区。如果使用分区，则它们不得装入。在将分区添加到 VG 时，YaST 会自动将它们的分区类型更改为 <literal>0x8E Linux LVM</literal>。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     起动 YaST 并打开<guimenu>分区程序</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     如果您需要重新配置现有分区设置，请执行下面操作。有关细节，请参见<xref linkend="sec.yast2.i_y2_part_expert"/>。如果您只想使用已存在的未使用磁盘或分区，请跳过此步骤。
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       要使用已包含分区的整个硬盘，请删除该磁盘上的所有分区。
+      </para>
+     </step>
+     <step>
+      <para>
+       要使用当前已装入的分区，请将其卸载。
+      </para>
+     </step>
+     <step>
+      <para>
+       要使用硬盘上未分区的可用空间，请在该磁盘上创建一个新的主要分区或逻辑分区。将其类型设置为 <literal>0x8E Linux LVM</literal>。不要进行格式化或将其装入。
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     在左侧面板中，选择<guimenu>卷管理</guimenu>。
+    </para>
+    <para>
+     右侧面板中即会打开现有卷组的列表。
+    </para>
+   </step>
+   <step>
+    <para>
+     在“卷管理”页面左下方，单击<menuchoice><guimenu>添加</guimenu><guimenu>卷组</guimenu></menuchoice>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm4_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm4_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     按如下所示定义卷组︰
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       指定<guimenu>卷组名称</guimenu>。
+      </para>
+      <para>
+       如果在安装时创建卷组，建议对将包含 SUSE Linux Enterprise Server 文件系统的卷组采用名称 <literal>system</literal>。<phrase role="productname"><phrase os="sles"/></phrase>
+      </para>
+     </step>
+     <step>
+      <para>
+       指定<guimenu>物理区域大小</guimenu>。
+      </para>
+      <para>
+       <guimenu>物理区域大小</guimenu>定义卷组中物理块的大小。卷组中的所有磁盘空间都是按此大小的区块来处理的。值可以是 1 KB 到 16 GB（2 的幂数形式）。通常将此值设置为 4 MB。
+      </para>
+      <para>
+       在 LVM1 中，4 MB 物理区域允许的最大 LV 大小为 256 GB，因为它仅支持每个 LV 最多 65534 个区域。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上使用的 LVM2 不会限制物理区域的数量。区域数过多不影响逻辑卷的 I/O 性能，但会减慢 LVM 工具的速度。
+      </para>
+      <important>
+       <title>物理区域大小</title>
+       <para>
+        单个 VG 中不应混合有不同的物理区域大小。区域在初始设置后不应修改。
+       </para>
+      </important>
+     </step>
+     <step>
+      <para>
+       在<guimenu>可用物理卷</guimenu>列表中，选择要成为此卷组一部分的 Linux LVM 分区，然后单击<guimenu>添加</guimenu>将它们移动到<guimenu>所选物理卷</guimenu>列表。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>完成</guimenu>。
+      </para>
+      <para>
+       新组将出现在<guimenu>卷组</guimenu>列表中。
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     在“卷管理”页上，单击<guimenu>下一步</guimenu>，验证是否列出了新卷组，然后单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     要检查哪些物理设备属于卷组的一部分，可随时在运行的系统中打开 YaST 分区程序，然后单击<menuchoice><guimenu>卷管理</guimenu><guimenu>编辑</guimenu><guimenu>物理设备</guimenu></menuchoice>。单击<guimenu>中止</guimenu>离开此屏幕。
+    </para>
+    <figure xml:id="fig.yast2.lvm.physical_volumes">
+     <title>名为 DATA 的卷组中的物理卷</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm5_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm5_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.lv">
+  <title>创建逻辑卷</title>
+
+  <para>
+   逻辑卷提供一个空间池，此空间池与硬盘提供的空间池类似。要让此空间可用，您需要定义物理卷。物理卷类似于一个普通分区 — 您可以进行格式化并将其装入。
+  </para>
+
+  <para>
+   使用 YaST 分区程序从现有卷组创建逻辑卷。请为每个卷组至少指派一个逻辑卷。您可以根据需要创建新的逻辑卷，直到卷组中的所有可用空间都用完为止。可以选择性地精简配置一个 LVM 逻辑卷，以便创建大小超出可用空间的逻辑卷（有关详细信息，请参见<xref linkend="sec.lvm.lv.thin"/>）。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <formalpara>
+     <title>普通卷</title>
+     <para>
+      （默认）系统会立即分配卷的空间。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>瘦池</title>
+     <para>
+      逻辑卷是预留供瘦卷使用的空间池。瘦卷可以按需从瘦池分配它们所需的空间。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>瘦卷</title>
+     <para>
+      该卷会被创建为稀疏卷。瘦卷会按需从瘦池分配所需的空间。
+     </para>
+    </formalpara>
+   </listitem>
+  </itemizedlist>
+
+  <procedure xml:id="pro.lvm.lv">
+   <title>设置逻辑卷</title>
+   <step>
+    <para>
+     起动 YaST 并打开<guimenu>分区程序</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左侧面板中，选择<guimenu>卷管理</guimenu>。右侧面板中即会打开现有卷组的列表。
+    </para>
+   </step>
+   <step>
+    <para>
+     选择要在其中创建卷的卷组，然后选择<menuchoice><guimenu>添加</guimenu><guimenu>逻辑卷</guimenu></menuchoice>。
+    </para>
+   </step>
+   <step>
+    <para>
+     提供卷的<guimenu>名称</guimenu>，然后选择<guimenu>普通卷</guimenu>（有关设置精简配置卷的相关信息，请参见<xref linkend="sec.lvm.lv.thin"/>）。单击<guimenu>下一步</guimenu>继续。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm9_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm9_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     指定卷的大小和是否使用多个分段。
+    </para>
+    <para>
+     使用带区卷时，将在多个物理卷之间分配数据。如果这些物理卷驻留在不同的硬盘上，则通常会提高读写性能（与 RAID 0 类似）。可用带区卷的最大数量为物理卷的数量。默认值 (<literal>1</literal>) 表示不使用多个带区卷。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm10_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm10_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     选择卷的<guimenu>角色</guimenu>。您在此处所做选择只会影响将要打开的对话框的默认值。这些值可在下一个步骤中更改。如果不确定，请选择<guimenu>原始卷（未格式化）</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm11_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm11_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     在<guimenu>格式化选项</guimenu>下，选择<guimenu>格式化分区</guimenu>，然后选择<guimenu>文件系统</guimenu>。<guimenu>选项</guimenu>菜单的内容取决于文件系统。通常不需要更改默认值。
+    </para>
+    <para>
+     在<guimenu>装入选项</guimenu>下，选择<guimenu>装入分区</guimenu>，然后选择安装点。单击 <guimenu>Fstab 选项</guimenu>，为卷添加特殊装入选项。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>下一步</guimenu>，验证是否列出了所做的更改，然后单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 xml:id="sec.lvm.lv.thin">
+   <title>精简配置的逻辑卷</title>
+   <para>
+    LVM 逻辑卷可选择进行精简配置。精简配置可让您创建大小超出可用空间的逻辑卷。您创建包含未使用空间（预留供任意数目的瘦卷使用）的瘦池。瘦卷会被创建为稀疏卷，并会根据需要从瘦池分配空间。瘦池可以根据需要动态扩大，以实现储存空间的高效分配。精简配置的卷还支持快照（可以使用 Snapper 进行管理）— 有关详细信息，请参见<xref linkend="cha.snapper"/>。
+   </para>
+   <para>
+    要设置精简配置的逻辑卷，请按<xref linkend="pro.lvm.lv"/>中所述步骤操作。选择卷类型时，不要选择<guimenu>普通卷</guimenu>，而要选择<guimenu>瘦卷</guimenu>或<guimenu>瘦池</guimenu>。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><guimenu>瘦池</guimenu>
+     </term>
+     <listitem>
+      <para>
+       逻辑卷是预留供瘦卷使用的空间池。瘦卷可以按需从瘦池分配它们所需的空间。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><guimenu>瘦卷</guimenu>
+     </term>
+     <listitem>
+      <para>
+       该卷会被创建为稀疏卷。瘦卷会按需从瘦池分配所需的空间。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <important>
+    <title>群集中瘦配置的卷</title>
+    <para>
+     要使用群集中的精简配置卷，使用它的瘦池和瘦卷必须在单个群集资源中管理。如此可使瘦卷和瘦池始终在同一个节点上以独占方式装入。
+    </para>
+   </important>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec.lvm.vg_resize">
+  <title>调整现有卷组的大小</title>
+
+  <para>
+   在运行的系统中卷组提供的空间可随时扩大，而不需要添加更多物理卷导致服务中断。这可让您将逻辑卷添加到组中，或如<xref linkend="sec.lvm.lv_resize"/>中所述扩大现有卷的大小。
+  </para>
+
+  <para>
+   还可以通过删除物理卷来缩小卷组的大小。YaST 只允许删除当前未使用的物理卷。要了解哪些物理卷当前正在使用，请运行下列命令。<literal>PE Ranges</literal> 列中列出的分区（物理卷）即是使用中的分区︰
+  </para>
+
+<screen><prompt>tux &gt; </prompt>sudo pvs -o vg_name,lv_name,pv_name,seg_pe_ranges
+root's password:
+  VG   LV    PV         PE Ranges       
+             /dev/sda1                  
+  DATA DEVEL /dev/sda5  /dev/sda5:0-3839
+  DATA       /dev/sda5                  
+  DATA LOCAL /dev/sda6  /dev/sda6:0-2559
+  DATA       /dev/sda7                  
+  DATA       /dev/sdb1                  
+  DATA       /dev/sdc1</screen>
+
+  <procedure>
+   <step>
+    <para>
+     起动 YaST 并打开<guimenu>分区程序</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左侧面板中，选择<guimenu>卷管理</guimenu>。右侧面板中即会打开现有卷组的列表。
+    </para>
+   </step>
+   <step>
+    <para>
+     选择要更改的卷组，然后单击<guimenu>调整大小</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm8_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm8_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     执行以下步骤之一：
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>添加：</title>
+       <para>
+        要扩展卷组大小，请将一个或多个物理卷（LVM 分区）从<guimenu>可用物理卷</guimenu>列表移动到<guimenu>所选物理卷</guimenu>列表。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>去除：</title>
+       <para>
+        要缩小卷组的大小，可将一个或多个物理卷（LVM 分区）从<guimenu>所选物理卷</guimenu>列表移到<guimenu>可用物理卷</guimenu>列表。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>下一步</guimenu>，验证是否列出了所做的更改，然后单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.lv_resize">
+  <title>调整逻辑卷的大小</title>
+
+  <para>
+   如果卷组中有未使用的可用空间，则您可以增大逻辑卷以提供更多可用空间。您还可以将卷的大小减少为其他逻辑卷可使用的卷组的可用空间。
+  </para>
+
+  <note>
+   <title><quote>联机</quote>调整大小</title>
+   <para>
+    减少卷的大小时，YaST 会同时自动调整其文件系统的大小。当前已装入的卷是否可以<quote>联机</quote>（即保持已装入状态）调整大小取决于其文件系统。Btrfs、XFS、Ext3 和 ReiserFS 支持联机增大文件系统。
+   </para>
+   <para>
+    仅 Btrfs 支持联机缩小文件系统。要缩小 XFS、Ext2/3/4 和 ReiserFS 卷，您需要将它们卸载。无法缩小以 XFS 格式化的卷，因为 XFS 不支持文件系统缩小。
+   </para>
+  </note>
+
+  <procedure>
+   <step>
+    <para>
+     起动 YaST 并打开<guimenu>分区程序</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左侧面板中，选择<guimenu>卷管理</guimenu>。右侧面板中即会打开现有卷组的列表。
+    </para>
+   </step>
+   <step>
+    <para>
+     选择要更改的逻辑卷，然后单击<guimenu>调整大小</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm12_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm12_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     使用下列选项之一设置所需大小︰
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>最大大小</title>
+       <para>
+        扩大逻辑卷的大小以使用卷组中的所有剩余空间。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>最小大小</title>
+       <para>
+        将逻辑卷的大小减少到数据和文件系统元数据所占用的大小。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>自定义大小</title>
+       <para>
+        指定卷的新大小。此值必须介于上面列出的最小值和最大值之间。使用 K、M、G、T 表示 KB、MB、GB 和 TB（例如 <literal>20G</literal>）。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>确定</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>下一步</guimenu>，校验是否列出了更改，然后单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1>
+  <title>删除卷组或逻辑卷</title>
+
+  <warning>
+   <title>数据丢失</title>
+   <para>
+    删除卷组会清空其每个成员分区中的所有数据。删除逻辑卷会损坏该卷上储存的所有数据。
+   </para>
+  </warning>
+
+  <procedure>
+   <step>
+    <para>
+     起动 YaST 并打开<guimenu>分区程序</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左侧面板中，选择<guimenu>卷管理</guimenu>。右侧面板中即会打开现有卷组的列表。
+    </para>
+   </step>
+   <step>
+    <para>
+     选择要删除的卷组或逻辑卷，然后单击<guimenu>删除</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     根据您的选择，系统会显示警告对话框。单击<guimenu>是</guimenu>以确认对话框。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>下一步</guimenu>，校验是否列出了删除的卷组（用红色字体表示删除），然后单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.cli">
+  <title>使用 LVM 命令</title>
+
+  <para>
+   有关使用 LVM 命令的信息，请参见下表中所述的命令的手册页。所有命令都需要拥有 <systemitem class="username">root</systemitem> 权限才能执行。请使用 <command>sudo</command> <replaceable>命令</replaceable>（建议），或者以 <systemitem class="username">root</systemitem> 身份直接执行这些命令。
+  </para>
+
+  <table xml:id="tab.lvm.cli">
+   <title>LVM 命令</title>
+   <tgroup cols="2">
+    <colspec colnum="1" colname="1" colwidth="65*"/>
+    <colspec colnum="2" colname="2" colwidth="35*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        命令
+       </para>
+      </entry>
+      <entry>
+       <para>
+        说明
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+<screen>pvcreate <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        初始化设备（例如 <filename>/dev/sdb</filename>）以作为物理卷供 LVLM 使用。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>pvdisplay <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        显示 LVM 物理卷的相关信息，例如当前它是否正在逻辑卷中使用。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgcreate -c y <replaceable>vg_name</replaceable> <replaceable>dev1</replaceable> [<replaceable>dev2</replaceable>...]
+</screen>
+      </entry>
+      <entry>
+       <para>
+        使用一个或多个指定的设备创建群集卷组。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgchange -a [ey|n] <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        激活 (<literal>-a ey</literal>) 或停用 (<literal>-a n</literal>) 卷组及其逻辑卷的输入/输出。
+       </para>
+       <important>
+        <title>激活群集中的卷。</title>
+        <para>
+         确保使用 <literal>ey</literal> 选项来以独占方式激活群集节点上的卷组。此选项默认在装载脚本中使用。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgremove <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        删除卷组。请在使用此命令之前删除逻辑卷，然后停用卷组。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgdisplay <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        显示指定卷组的相关信息。
+       </para>
+       <para>
+        要了解卷组的物理区域总大小，请输入
+       </para>
+<screen>vgdisplay <replaceable>vg_name</replaceable> | grep "Total PE"</screen>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -L <replaceable>size</replaceable> -n <replaceable>lv_name</replaceable> <replaceable>vg_name</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        创建具有指定大小的逻辑卷。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -L <replaceable>size</replaceable> --thinpool <replaceable>pool_name</replaceable> <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        从卷组 <replaceable>vg_name</replaceable> 创建名为 <literal>myPool</literal>的指定大小的瘦池。
+       </para>
+       <para>
+        以下示例会从卷组 <literal>LOCAL</literal> 创建大小为 5 GB 的瘦池︰<command>lvcreate -L 5G --thinpool myPool LOCAL</command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -T
+	<replaceable>vg_name</replaceable>/<replaceable>pool_name</replaceable> -V <replaceable>size</replaceable> \
+-n <replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        在池 <replaceable>pool_name</replaceable> 中创建瘦逻辑卷。以下示例会从卷组 <literal>LOCAL</literal> 上的池 <literal>myPool</literal> 创建名为 <literal>myThin 1</literal> 的 1GB 瘦卷︰<command>lvcreate -T LOCAL/myPool -V 1G -n myThin1</command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -T <replaceable>vg_name</replaceable>/<replaceable>pool_name</replaceable> -V <replaceable>size</replaceable> -L <replaceable>size</replaceable> \
+-n <replaceable>LV_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        还可以通过一条命令同时创建瘦池和瘦逻辑卷︰<command>lvcreate -T LOCAL/myPool -V 1G -L 5G -n myThin1</command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -s [-L <replaceable>size</replaceable>] -n <replaceable>snap_volume</replaceable> \
+<replaceable>source_volume_path</replaceable> <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        创建指定逻辑卷的快照卷。如果未包含大小选项（<option>-L</option> 或 <option>--size</option>），则快照会被创建为瘦快照。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvremove /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        删除逻辑卷。
+       </para>
+       <para>
+        使用此命令之前，请先使用 <command>umount</command> 命令卸下逻辑卷以将其关闭。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvremove <replaceable>snap_volume_path</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        删除快照卷。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvconvert --merge <replaceable>snap_volume_path</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        将逻辑卷还原为快照的版本。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgextend <replaceable>vg_name</replaceable> <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        将指定的设备（物理卷）添加到现有卷组。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgreduce <replaceable>vg_name</replaceable> <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        从现有卷组中删除指定的物理卷。
+       </para>
+       <important>
+        <para>
+         确保物理卷当前未被逻辑卷使用。如果正在使用中，则必须使用 <command>pvmove</command> 命令将数据移至另一个物理卷。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvextend -L <replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        扩大指定逻辑卷的大小。随后，您还必须相应地扩大文件系统以充分利用新扩充的空间。有关详细信息，请参见<xref linkend="cha.resize_fs"/>。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvreduce -L <replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        减少指定逻辑卷的大小。
+       </para>
+       <important>
+        <para>
+         在缩小卷之前，请确保先减少文件系统的大小，否则可能会丢失数据。有关详细信息，请参见<xref linkend="cha.resize_fs"/>。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvrename /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable> \
+/dev/<replaceable>vg_name</replaceable>/<replaceable>new_lv_name</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        重命名现有 LVM 逻辑卷。此操作不会更改卷组名。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.lvm.cli.resize">
+   <title>用命令调整逻辑卷大小</title>
+   <para>
+    <command>lvresize</command>、<command>lvextend</command> 和 <command>lvreduce</command> 命令用于调整逻辑卷大小。有关语法和选项信息，请参见每个命令的手册页。要扩展 LV，VG 上必须有足够的可用未分配空间。
+   </para>
+   <para>
+    建议使用 YaST 分区程序来增大或缩小逻辑卷。使用 YaST 时，卷中文件系统的大小也会相应进行自动调整。
+   </para>
+   <para>
+    LV 可以在使用中状态下进行手动增大或缩小，但是其上的文件系统无法随之调整。扩展或收缩 LV 不会自动修改卷中文件系统的大小。随后必须使用其他命令增大文件系统。有关调整文件系统大小的信息，请参见<xref linkend="cha.resize_fs" xrefstyle="ChapTitleOnPage"/>。
+   </para>
+   <para>
+    手动调整 LV 大小时，请确保使用正确的顺序︰
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      如果扩展逻辑卷，则必须在试图增大文件系统之前扩展逻辑卷。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果缩小逻辑卷，则必须在试图缩小逻辑卷之前缩小文件系统。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    扩展逻辑卷的大小：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果逻辑卷包含 Ext2 或 Ext4 文件系统，则不支持联机增大，请将其卸下。如果它包含为虚拟机（例如 Xen VM）托管的文件系统，请先关闭该 VM。
+     </para>
+    </step>
+    <step>
+     <para>
+      在终端控制台提示时，输入以下命令以增加逻辑卷大小：
+     </para>
+<screen>sudo lvextend -L +<replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+     <para>
+      对于<replaceable>大小</replaceable>，请指定要添加到逻辑卷的空间量，如 10GB。以逻辑卷的 Linux 路径替换 <filename>/dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></filename>，例如 <filename>/dev/LOCAL/DATA</filename>。例如：
+     </para>
+<screen>sudo lvextend -L +10GB /dev/vg1/v1<replaceable/></screen>
+    </step>
+    <step>
+     <para>
+      调整文件系统的大小。有关详细信息，请参见<xref linkend="cha.resize_fs"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果卸下了文件系统，请将其重新装入。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    例如，将带有（已装入并激活）Btrfs 的 LV 扩大 10GB：
+   </para>
+<screen>sudo lvextend −L +10G /dev/LOCAL/DATA
+sudo btrfs filesystem resize +10G /dev/LOCAL/DATA</screen>
+   <para>
+    要缩小逻辑卷的大小，请执行以下操作：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果逻辑卷不包含 Btrfs 文件系统，请将其卸下。如果它包含为虚拟机（例如 Xen VM）托管的文件系统，请先关闭该 VM。请注意，带有 XFS 文件系统的卷不能减少大小。
+     </para>
+    </step>
+    <step>
+     <para>
+      调整文件系统的大小。有关详细信息，请参见<xref linkend="cha.resize_fs"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在终端控制台提示符中，输入下列命令以将逻辑卷的大小缩小为文件系统的大小︰
+     </para>
+<screen>sudo lvreduce /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      如果卸下了文件系统，请将其重新装入。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    例如，将带有 Btrfs 的 LV 缩减 5GB：
+   </para>
+<screen>sudo btrfs filesystem resize -size 5G /dev/LOCAL/DATA
+sudo lvreduce /dev/LOCAL/DATA</screen>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.cli.lvmetad">
+   <title>通过 <systemitem class="daemon">lvmetad</systemitem> 动态汇总 LVM 元数据</title>
+   <para>
+    大部分 LVM 命令都需要准确查看储存在系统的磁盘设备上的 LVM 元数据。对于当前的 LVM 设计，如果此信息不可用，则 LVM 必须扫描系统中的所有物理磁盘设备。在具有大量磁盘的系统中，这需要相当多的 I/O 操作。如果磁盘无法响应，LVM 命令可能是在等待磁盘时发生超时。
+   </para>
+   <para>
+    通过 <systemitem class="daemon">lvmetad</systemitem> 动态汇总 LVM 元数据可解决此问题。<systemitem class="daemon">lvmetad</systemitem> 守护程序通过在每次设备状态更改时动态汇总元数据信息，来减少此扫描的需要。这些事件通过 udev 规则向 <systemitem class="daemon">lvmetad</systemitem> 发出信号。如果守护程序未运行，则 LVM 会如常执行扫描。
+   </para>
+   <para>
+    在默认情况下禁用该功能。要启用它，请执行下列步骤：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      停止 <systemitem class="daemon">lvmetad</systemitem> 守护程序︰
+     </para>
+<screen>sudo systemctl stop lvm2-lvmetad</screen>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/lvm/lvm.conf</filename> 并将 <literal>use_lvmetad</literal> 设置为 <literal>1</literal>︰
+     </para>
+<screen>use_lvmetad = 1</screen>
+    </step>
+    <step>
+     <para>
+      重启动 <systemitem class="daemon">lvmetad</systemitem> 守护程序︰
+     </para>
+<screen>sudo systemctl start lvm2-lvmetad</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.lvm.tagging">
+  <title>标记 LVM2 储存对象</title>
+
+  <para>
+   标记是无序的关键字或指派给储存对象元数据的术语。使用标记功能可以采用您认为有用的方式将无序的标记列表附加到 LVM 储存对象元数据，从而对储存对象集合进行分类。
+  </para>
+
+  <sect2 xml:id="sec.lvm.tagging.using">
+   <title>使用 LVM2 标记</title>
+   <para>
+    标记 LVM2 储存对象后，可以在命令中使用标记来完成以下任务：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      根据有或无特定标记选择要处理的 LVM 对象。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用配置文件中的标记，控制在服务器上激活哪些卷组和逻辑卷。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      通过在命令中指定标记，覆盖全局配置中的设置。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    可以使用标记代替接受以下项的任何命令行 LVM 对象参考：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      对象列表
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      单个对象，只要标记扩展到单个对象
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    目前，在任何位置都不支持将对象名称替换为标记。扩展自变量后，列表中的重复自变量将通过删除重复自变量而保留每个自变量的第一个实例来解决。
+   </para>
+   <para>
+    只要是自变量类型可能不明确的位置，都必须在标记前面加上商业性 (@) 字符，比如 <literal>@mytag</literal>。在其他位置是否使用 <quote>@</quote> 前缀是可选的。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.requirements">
+   <title>创建 LVM2 标记的要求</title>
+   <para>
+    对 LVM 使用标记时，请注意以下要求：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>支持的字符</term>
+     <listitem>
+      <para>
+       LVM 标记单词可以包含 ASCII 大写字符 A 到 Z、小写字符 a 到 z、数字 0 到 9、下划线 (_)、加号 (+)、连字符 (-) 和句点 (.)。单词不能以连字符开头。最大长度为 128 个字符。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>支持的储存对象</term>
+     <listitem>
+      <para>
+       可以标记 LVM2 物理卷、卷组、逻辑卷和逻辑卷分段。PV 标记将储存在其卷组的元数据中。删除卷组时也删除孤立的物理卷中的标记。快照不能标记，但快照源可以标记。
+      </para>
+      <para>
+       LVM1 对象不能标记，因为磁盘格式不支持此功能。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.syntax">
+   <title>命令行标记语法</title>
+   <variablelist>
+    <varlistentry>
+     <term>--addtag <replaceable>tag_info</replaceable>
+     </term>
+     <listitem>
+      <para>
+       将标记添加到（或<emphasis>标记</emphasis>）LVM2 储存对象。示例：
+      </para>
+<screen>sudo vgchange --addtag @db1 vg1</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--deltag <replaceable>tag_info</replaceable>
+     </term>
+     <listitem>
+      <para>
+       删除（或<emphasis>取消标记</emphasis>）LVM2 储存对象中的标记。示例：
+      </para>
+<screen>sudo vgchange --deltag @db1 vg1</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--tag <replaceable>tag_info</replaceable>
+     </term>
+     <listitem>
+      <para>
+       指定用于缩小要激活或停用的卷组列表或逻辑卷的标记。
+      </para>
+      <para>
+       如果卷的标记与提供的标记匹配，则输入以下命令将其激活（示例）：
+      </para>
+<screen>sudo lvchange -ay --tag @db1 vg1/vol2</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.config">
+   <title>配置文件语法</title>
+   <para/>
+   <sect3 xml:id="sec.lvm.tagging.configuration.hostnames_enable">
+    <title>在 <filename>lvm.conf</filename> 文件中启用主机名标记</title>
+    <para>
+     将以下代码添加到 <filename>/etc/lvm/lvm.conf</filename> 文件，以启用在主机的 <filename>/etc/lvm/lvm_&lt;<replaceable>主机名</replaceable>&gt;.conf</filename> 文件中单独定义的主机标记。
+    </para>
+<screen>tags {
+   # Enable hostname tags
+   hosttags = 1
+}</screen>
+    <para>
+     您将激活代码置于主机上的 <filename>/etc/lvm/lvm_&lt;<replaceable>主机名</replaceable>&gt;.conf</filename> 文件中。请参见<xref linkend="sec.lvm.tagging.configuration.activate" xrefstyle="HeadingOnPage"/>。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.hostnames_define">
+    <title>在 lvm.conf 文件中为主机名定义标记</title>
+<screen>tags {
+
+   tag1 { }
+      # Tag does not require a match to be set.
+
+   tag2 {
+      # If no exact match, tag is not set.
+      host_list = [ "hostname1", "hostname2" ]
+   }
+}</screen>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.activate">
+    <title>定义激活</title>
+    <para>
+     您可以修改 <filename>/etc/lvm/lvm.conf</filename> 文件，以根据标记激活 LVM 逻辑卷。
+    </para>
+    <para>
+     在文本编辑器中，将以下代码添加到文件中：
+    </para>
+<screen>  activation {
+      volume_list = [ "vg1/lvol0", "@database" ]
+  }</screen>
+    <para>
+     用您的标记替换 <literal>@database</literal>。使用 <literal>"@*"</literal> 根据主机上设置的任何标记匹配此标记。
+    </para>
+    <para>
+     激活命令根据卷组和逻辑卷的元数据中设置的<replaceable>卷组名称</replaceable>、<replaceable>卷组名称/逻辑卷名称</replaceable> 或 @<replaceable>标记</replaceable>进行匹配。只有元数据标记匹配时，才激活卷组或逻辑卷。默认情况下，如果不匹配则不会激活。
+    </para>
+    <para>
+     如果 <literal>volume_list</literal> 不存在，且主机上已定义任何标记，则只有主机标记与元数据标记匹配时，才会激活卷组或逻辑卷。
+    </para>
+    <para>
+     如果没有 <literal>volume_list</literal> 并且主机上未定义任何标记，则不会激活。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.activate_multi">
+    <title>在多个主机名配置文件中定义激活</title>
+    <para>
+     在 <filename>lvm.conf</filename> 文件中启用主机标记后，可以在主机配置文件（<filename>/etc/lvm/lvm_&lt;<replaceable>主机标记</replaceable>&gt;.conf</filename>）中使用激活代码。例如，一个服务器在 <filename>/etc/lvm/</filename> 文件夹中有两个配置文件：
+    </para>
+    <simplelist>
+     <member><filename>lvm.conf</filename></member> <member><filename>lvm_&lt;<replaceable>主机标记</replaceable>&gt;.conf</filename></member>
+    </simplelist>
+    <para>
+     启动时，会装载 <filename>/etc/lvm/lvm.conf</filename> 文件，并处理该文件中的任何标记设置。如果定义了任何主机标记，则会装载相关 <filename>/etc/lvm/lvm_&lt;<replaceable>host_tag</replaceable>&gt;.conf</filename> 文件。搜索特定配置文件项目时，将会先搜索主机标记文件，然后搜索 <filename>lvm.conf </filename> 文件，并在找到第一个匹配项时停止搜索。在 <filename>lvm_&lt;<replaceable>host_tag</replaceable>&gt;.conf</filename> 文件中，使用与设置标记顺序相反的顺序。这样就可以先搜索最后设置标记的文件。主机标记文件中设置的新标记将会触发额外的配置文件装载。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.activate_cluster">
+   <title>将标记用于群集中的简单激活控制</title>
+   <para>
+    您可以通过在 <filename>/etc/lvm/lvm.conf</filename> 文件中启用 <literal>hostname_tags</literal> 选项来设置简单主机名激活控制。将相同文件用于群集中的每一台计算机上，以便建立全局设置。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      在文本编辑器中，将以下代码添加到 <filename>/etc/lvm/lvm.conf</filename> 文件中：
+     </para>
+<screen>tags {
+   hostname_tags = 1
+}</screen>
+    </step>
+    <step>
+     <para>
+      将文件复制到群集中的所有主机上。
+     </para>
+    </step>
+    <step>
+     <para>
+      从群集中的任何计算机上，将 <literal>db1</literal> 添加到将激活 <filename>vg1/lvol2</filename> 的计算机列表中：
+     </para>
+<screen>sudo lvchange --addtag @db1 vg1/lvol2</screen>
+    </step>
+    <step>
+     <para>
+      在 <filename>db1</filename> 服务器上，输入以下内容以激活它：
+     </para>
+<screen>sudo lvchange -ay vg1/vol2</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.activate_cluster_preferred">
+   <title>使用标记激活群集中首选主机上的卷组</title>
+   <para>
+    本部分中的示例展示了完成以下任务的两种方法：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      仅激活数据库主机 <filename>db1</filename> 和 <filename>db2</filename> 上的卷组 <filename>vg1</filename>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      仅激活文件服务器主机 <filename>fs1</filename> 上的卷组 <filename>vg2</filename>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      最初在文件服务器备份主机 <filename>fsb1</filename> 上不激活任何卷组，但对其进行准备以从文件服务器主机 <filename>fs1</filename> 接管卷组。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <sect3>
+    <title>选项 1：集中化管理和主机间静态配置复制</title>
+    <para>
+     在以下解决方案中，单个配置文件复制到多台主机中。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       将 <literal>@database</literal> 标记添加到卷组 <filename>vg1</filename> 的元数据中。在终端控制台上，输入
+      </para>
+<screen>sudo vgchange --addtag @database vg1</screen>
+     </step>
+     <step>
+      <para>
+       将 <literal>@fileserver</literal> 标记添加到卷组 <filename>vg2</filename> 的元数据中。在终端控制台上，输入
+      </para>
+<screen>sudo vgchange --addtag @fileserver vg2</screen>
+     </step>
+     <step>
+      <para>
+       在文本编辑器中，用以下代码修改 <filename>/etc/lvm/lvm.conf</filename> 文件，以定义 <literal>@database</literal>、<literal>@fileserver</literal> 和 <literal>@fileserverbackup</literal> 标记。
+      </para>
+<screen>tags {
+   database {
+      host_list = [ "db1", "db2" ]
+   }
+   fileserver {
+      host_list = [ "fs1" ]
+   }
+   fileserverbackup {
+      host_list = [ "fsb1" ]
+   }
+}
+
+activation {
+   # Activate only if host has a tag that matches a metadata tag
+   volume_list = [ "@*" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       将修改后的 <filename>/etc/lvm/lvm.conf</filename> 文件复制到四台主机中：<filename>db1</filename>、<filename>db2</filename>、<filename>fs1</filename> 和 <filename>fsb1</filename>。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果文件服务器主机出现故障，则在终端控制台的任何节点上输入以下命令即可在 <filename>fsb1</filename> 上启动 <filename>vg2</filename>：
+      </para>
+<screen>sudo vgchange --addtag @fileserverbackup vg2
+sudo vgchange -ay vg2</screen>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3>
+    <title>选项 2: 本地化管理和配置</title>
+    <para>
+     在以下解决方案中，每台主机在本地保存有关激活哪些类别的卷的信息。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       将 <literal>@database</literal> 标记添加到卷组 <filename>vg1</filename> 的元数据中。在终端控制台上，输入
+      </para>
+<screen>sudo vgchange --addtag @database vg1</screen>
+     </step>
+     <step>
+      <para>
+       将 <literal>@fileserver</literal> 标记添加到卷组 <filename>vg2</filename> 的元数据中。在终端控制台上，输入
+      </para>
+<screen>sudo vgchange --addtag @fileserver vg2</screen>
+     </step>
+     <step>
+      <para>
+       在 <filename>/etc/lvm/lvm.conf</filename> 文件中启用主机标记：
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         在文本编辑器中，用以下代码修改 <filename>/etc/lvm/lvm.conf</filename> 文件，以启用主机标记配置文件。
+        </para>
+<screen>tags {
+   hosttags = 1
+}</screen>
+       </step>
+       <step>
+        <para>
+         将修改后的 <filename>/etc/lvm/lvm.conf</filename> 文件复制到四台主机上：<filename>db1</filename>、<filename>db2</filename>、<filename>fs1</filename> 和 <filename>fsb1</filename>。
+        </para>
+       </step>
+      </substeps>
+     </step>
+     <step>
+      <para>
+       在主机 <filename>db1</filename> 上，创建数据库主机 <filename>db1</filename> 的激活配置文件。在文本编辑器中，创建 <filename>/etc/lvm/lvm_db1.conf</filename> 文件并添加以下代码：
+      </para>
+<screen>activation {
+   volume_list = [ "@database" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       在主机 <filename>db2</filename> 上，创建数据库主机 <filename>db2</filename> 的激活配置文件。在文本编辑器中，创建 <filename>/etc/lvm/lvm_db2.conf</filename> 文件并添加以下代码：
+      </para>
+<screen>activation {
+   volume_list = [ "@database" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       在主机 fs1 上，创建文件服务器主机 <filename>fs1</filename> 的激活配置文件。在文本编辑器中，创建 <filename>/etc/lvm/lvm_fs1.conf</filename> 文件并添加以下代码：
+      </para>
+<screen>activation {
+   volume_list = [ "@fileserver" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       如果文件服务器主机 <filename>fs1</filename> 出现故障，要启动备用文件服务器主机 fsb1 作为文件服务器：
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         在主机 <filename>fsb1</filename> 上，创建主机 <filename>fsb1</filename> 的激活配置文件。在文本编辑器中，创建 <filename>/etc/lvm/lvm_fsb1.conf</filename> 文件并添加以下代码：
+        </para>
+<screen>activation {
+   volume_list = [ "@fileserver" ]
+}</screen>
+       </step>
+       <step>
+        <para>
+         在终端控制台上，输入以下命令之一：
+        </para>
+<screen>sudo vgchange -ay vg2
+sudo vgchange -ay @fileserver</screen>
+       </step>
+      </substeps>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>

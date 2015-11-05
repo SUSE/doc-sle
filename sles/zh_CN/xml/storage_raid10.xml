@@ -1,0 +1,919 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_raid10.xml" version="5.0" xml:id="cha.raid10" xml:lang="zh-cn">
+ <title>创建软件 RAID 10 设备</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+          </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  本章说明如何设置嵌套和复杂 RAID 10 设备。RAID 10 设备包含嵌套 RAID 1（镜像）和 RAID 0（分段）阵列。嵌套 RAID 可以设置为条带化镜像 (RAID 1+0) 或镜像化条带 (RAID 0+1)。复杂 RAID 10 设置支持更高的数据冗余级别，因此镜像与分段兼得，并且拥有更多的数据安全措施。
+ </para>
+ <sect1 xml:id="sec.raid10.nest">
+  <title>使用 <command>mdadm</command> 创建嵌套 RAID 10 设备</title>
+
+  <para>
+   嵌套的 RAID 设备由使用另一个 RAID 阵列（而不是物理磁盘）作为其基本元素的 RAID 阵列组成。此配置的目标是提高 RAID 的性能和容错能力。YaST 不支持设置嵌套 RAID 级别，但可以通过 <command>mdadm</command> 命令行工具实现。
+  </para>
+
+  <para>
+   根据嵌套的顺序，可以设置两个不同的嵌套 RAID。本文使用了下列术语：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <formalpara>
+     <title>RAID 1+0：</title>
+     <para>
+      先构建 RAID 1（镜像）阵列，然后组合形成 RAID 0（条带化）阵列。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>RAID 0+1：</title>
+     <para>
+      先构建 RAID 0（条带化）阵列，然后组合形成 RAID 1（镜像）阵列。
+     </para>
+    </formalpara>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   下表描述嵌套为 1+0 和 0+1 的 RAID 10 的优点和缺点。假定您使用的储存对象驻留在不同的磁盘上，每个都有专用的 I/O 功能。
+  </para>
+
+  <table>
+   <title>嵌套的 RAID 级别</title>
+   <tgroup cols="3">
+    <colspec colnum="1" colname="1" colwidth="20*"/>
+    <colspec colnum="2" colname="2" colwidth="30*"/>
+    <colspec colnum="3" colname="3" colwidth="60*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        RAID 级别
+       </para>
+      </entry>
+      <entry>
+       <para>
+        描述
+       </para>
+      </entry>
+      <entry>
+       <para>
+        性能和容错
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        10 (1+0)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        使用 RAID 1（镜像）阵列构建的 RAID 0（条带化）
+       </para>
+      </entry>
+      <entry>
+       <para>
+        RAID 1+0 提供高级别的 I/O 性能、数据冗余、和磁盘容错。因为 RAID 0 中的每个成员设备都分别镜像，因此可以容忍多个磁盘故障，并且只要失败的磁盘在不同的镜像中，数据仍然可用。
+       </para>
+       <para>
+        您可以选择为每个底层的镜像阵列配置一个备用设备，或配置一个备用设备充当服务于所有镜像的备用组。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        10 (0+1)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        使用 RAID 0（条带化）阵列构建的 RAID 1（镜像）
+       </para>
+      </entry>
+      <entry>
+       <para>
+        RAID 0+1 提供高级别的 I/O 性能和数据冗余，但比 1+0 的容错稍差。如果在镜像的一端多个磁盘失败，则另一个镜像可用。但是，如果在镜像的两端同时丢失磁盘，则所有数据会丢失。
+       </para>
+       <para>
+        这种解决方案比 1+0 解决方案磁盘容错差，但是如果需要在不同的站点执行维护或维护镜像，则可以使镜像的整个一端脱机，并仍可以有完全正常的储存设备。同时，如果丢失两个站点之间的连接，每个站点会彼此独立地运行。如果条带化镜像分段，则不是这种情况，因为这些镜像在较低级别进行管理。
+       </para>
+       <para>
+        如果一个设备失败，该端的镜像则会失败，因为 RAID 1 不容错。创建新的 RAID 0 以替换失败的一端，然后重新同步这两个镜像。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.raid10.nest.10">
+   <title>使用 mdadm 创建嵌套的 RAID 10 (1+0)</title>
+   <para>
+    嵌套的 RAID 1+0 的构建方法是，创建两个或更多 RAID 1（镜像），然后使用它们作为 RAID 0 中的组件设备。
+   </para>
+   <important>
+    <para>
+     如果需要管理到这些设备的多个连接，则在配置这些 RAID 设备之前，必须配置多路径 I/O。有关信息，请参见<xref linkend="cha.multipath" xrefstyle="ChapTitleOnPage"/>。
+    </para>
+   </important>
+   <para>
+    本节中的过程使用下表中显示的设备名。确保使用您自己的设备名称修改这些设备名称。
+   </para>
+   <table>
+    <title>通过嵌套创建 RAID 10 (1+0) 的情形</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="3334*"/>
+     <colspec colnum="2" colname="2" colwidth="3334*"/>
+     <colspec colnum="3" colname="3" colwidth="3334*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         原始设备
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 1（镜像）
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 1+0（条带化镜像）
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdb1</filename></member> <member><filename>/dev/sdc1</filename></member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md0</filename>
+        </para>
+       </entry>
+       <entry morerows="1">
+        <para/>
+        <para>
+         <filename>/dev/md2</filename>
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdd1</filename></member> <member><filename>/dev/sde1</filename></member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md1</filename>
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果需要，使用 parted 等磁盘分区程序创建四个大小相同的 0xFD Linux RAID 分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      创建两个软件 RAID 1 设备，为每个 RAID 设备使用两个不同的设备。在命令提示符处，输入以下两个命令：
+     </para>
+<screen>sudo mdadm --create /dev/md0 --run --level=1 --raid-devices=2 /dev/sdb1 /dev/sdc1
+sudo mdadm --create /dev/md1 --run --level=1 --raid-devices=2 /dev/sdd1 /dev/sde1</screen>
+    </step>
+    <step>
+     <para>
+      创建嵌套的 RAID 1+0 设备。在命令提示符处，使用您在上一步中创建的软件 RAID 1 设备输入以下命令：
+     </para>
+<screen>sudo mdadm --create /dev/md2 --run --level=0 --chunk=64 \
+--raid-devices=2 /dev/md0 /dev/md1</screen>
+     <para>
+      默认大块大小为 64 KB。
+     </para>
+    </step>
+    <step>
+     <para>
+      在 RAID 1+0 设备 <filename>/dev/md2</filename> 上创建文件系统，例如 XFS 文件系统：
+     </para>
+<screen>sudo mkfs.xfs /dev/md2</screen>
+     <para>
+      如果要使用其他文件系统，请修改该命令。
+     </para>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/mdadm.conf</filename> 文件，如果它不存在，则创建该文件（例如通过运行 <command>sudo vi /etc/mdadm.conf</command>）。添加下列行（如果该文件存在，则第一行很可能也已经存在）。
+     </para>
+<screen>DEVICE containers partitions
+ARRAY /dev/md0 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md1 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md2 UUID=<replaceable>UUID</replaceable></screen>
+     <para>
+      每个设备的 UUID 可以使用以下命令检索：
+     </para>
+<screen>sudo mdadm -D /dev/<replaceable>DEVICE</replaceable> | grep UUID</screen>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/fstab</filename> 文件以添加 RAID 1+0 设备 <filename>/dev/md2</filename> 的项。下列示例显示了采用 XFS 文件系统并以 <filename>/data</filename> 做为安装点的 RAID 设备的项。
+     </para>
+<screen>/dev/md2 /data xfs defaults 1 2</screen>
+    </step>
+    <step>
+     <para>
+      装入 RAID 设备：
+     </para>
+<screen>sudo mount /data</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.nest.01">
+   <title>使用 mdadm 创建嵌套的 RAID 10 (0+1)</title>
+   <para>
+    嵌套的 RAID 0+1 的构建方法是，创建两个到四个 RAID 0（分段）设备，然后将它们镜像为 RAID 1 中的组件设备。
+   </para>
+   <important>
+    <para>
+     如果需要管理到这些设备的多个连接，则在配置这些 RAID 设备之前，必须配置多路径 I/O。有关信息，请参见<xref linkend="cha.multipath" xrefstyle="ChapTitleOnPage"/>。
+    </para>
+   </important>
+   <para>
+    在此配置中，不能为底层的 RAID 0 设备指定备用设备，因为 RAID 0 不能容忍设备丢失。如果在镜像的一端一个设备失败，则必须创建一个替换 RAID 0 设备，然后将其添加到镜像。
+   </para>
+   <para>
+    本节中的过程使用下表中显示的设备名。确保使用您自己的设备名称修改这些设备名称。
+   </para>
+   <table>
+    <title>通过嵌套创建 RAID 10 (0+1) 的情形</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="3334*"/>
+     <colspec colnum="2" colname="2" colwidth="3334*"/>
+     <colspec colnum="3" colname="3" colwidth="3334*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         原始设备
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 0（条带化）
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 0+1（镜像条带化）
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdb1</filename></member> <member><filename>/dev/sdc1</filename></member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md0</filename>
+        </para>
+       </entry>
+       <entry morerows="1">
+        <para/>
+        <para>
+         <filename>/dev/md2</filename>
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdd1</filename></member> <member><filename>/dev/sde1</filename></member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md1</filename>
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果需要，使用 parted 等磁盘分区程序创建四个大小相同的 0xFD Linux RAID 分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      创建两个软件 RAID 0 设备，为每个 RAID 0 设备使用两个不同的设备。在命令提示符处，输入以下两个命令：
+     </para>
+<screen>sudo mdadm --create /dev/md0 --run --level=0 --chunk=64 \
+--raid-devices=2 /dev/sdb1 /dev/sdc1
+sudo mdadm --create /dev/md1 --run --level=0 --chunk=64 \
+--raid-devices=2 /dev/sdd1 /dev/sde1</screen>
+     <para>
+      默认大块大小为 64 KB。
+     </para>
+    </step>
+    <step>
+     <para>
+      创建嵌套的 RAID 0+1 设备。在命令提示符处，使用您在上一步中创建的软件 RAID 0 设备输入以下命令：
+     </para>
+<screen>sudo mdadm --create /dev/md2 --run --level=1 --raid-devices=2 /dev/md0 /dev/md1</screen>
+    </step>
+    <step>
+     <para>
+      在 RAID 1+0 设备 <filename>/dev/md2</filename> 上创建文件系统，例如 XFS 文件系统：
+     </para>
+<screen>sudo mkfs.xfs /dev/md2</screen>
+     <para>
+      如果要使用其他文件系统，请修改该命令。
+     </para>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/mdadm.conf</filename> 文件，如果它不存在，则创建该文件（例如通过运行 <command>sudo vi /etc/mdadm.conf</command>）。添加下列行（如果该文件存在，第一行很可能也已经存在）。
+     </para>
+<screen>DEVICE containers partitions
+ARRAY /dev/md0 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md1 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md2 UUID=<replaceable>UUID</replaceable></screen>
+     <para>
+      每个设备的 UUID 可以使用以下命令检索：
+     </para>
+<screen>sudo mdadm -D /dev/<replaceable>DEVICE</replaceable> | grep UUID</screen>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/fstab</filename> 文件以添加 RAID 1+0 设备 <filename>/dev/md2</filename> 的项。下列示例显示了采用 XFS 文件系统并以 <filename>/data</filename> 做为安装点的 RAID 设备的项。
+     </para>
+<screen>/dev/md2 /data xfs defaults 1 2</screen>
+    </step>
+    <step>
+     <para>
+      装入 RAID 设备：
+     </para>
+<screen>sudo mount /data</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid10.complex">
+  <title>创建复杂 RAID 10</title>
+
+  <para>
+   YaST（以及带 <option>--level=10</option> 选项的 <command>mdadm</command>）可创建单一复杂软件 RAID 10，它结合了 RAID 0（分段）与 RAID 1（镜像）的功能。所有数据块的多个副本遵循一个分段准则在多个驱动器上排列。组件设备应大小相同。
+  </para>
+
+  <para>
+   复杂 RAID 10 与嵌套 RAID 10 (1+0) 的目的类似，但在以下方面不同：
+  </para>
+
+  <table>
+   <title>复杂 RAID 10 与嵌套 RAID 10</title>
+   <tgroup cols="3">
+    <colspec colnum="1" colname="1" colwidth="3334*"/>
+    <colspec colnum="2" colname="2" colwidth="3334*"/>
+    <colspec colnum="3" colname="3" colwidth="3334*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        功能
+       </para>
+      </entry>
+      <entry>
+       <para>
+        复杂 RAID 10
+       </para>
+      </entry>
+      <entry>
+       <para>
+        嵌套 RAID 10 (1+0)
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        设备数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        允许组件设备数为奇数或偶数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        要求组件设备数为偶数
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        组件设备
+       </para>
+      </entry>
+      <entry>
+       <para>
+        作为单个 RAID 设备管理
+       </para>
+      </entry>
+      <entry>
+       <para>
+        作为嵌套 RAID 设备管理
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        分段
+       </para>
+      </entry>
+      <entry>
+       <para>
+        在组件设备的近布局或远布局中发生分段。
+       </para>
+       <para>
+        远布局提供根据驱动器数（而不是 RAID 1 对数）缩放的串行读吞吐量。
+       </para>
+      </entry>
+      <entry>
+       <para>
+        在组件设备之间连续发生分段
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        数据的多个副本
+       </para>
+      </entry>
+      <entry>
+       <para>
+        两个或更多副本，最多为阵列中的设备数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        每个镜像段上的副本
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        热备用设备
+       </para>
+      </entry>
+      <entry>
+       <para>
+        单个备用设备可以服务于所有组件设备
+       </para>
+      </entry>
+      <entry>
+       <para>
+        为每个底层的镜像阵列配置一个备用设备，或配置一个备用设备充当服务于所有镜像的备用组。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.raid10.complex.replicas">
+   <title>复杂 RAID 10 中的设备和复本数</title>
+   <para>
+    配置复杂 RAID 10 阵列时，必须指定需要的每个数据块的复本数。默认复本数是 2，但该值可以是 2 到阵列中设备数之间的任何数字。
+   </para>
+   <para>
+    必须至少使用指定的复本数的组件设备。但是，RAID 10 阵列中的组件设备数不必是每个数据块的复本数的倍数。有效储存大小是设备数除以复本数。
+   </para>
+   <para>
+    例如，如果为使用 5 个组件设备创建的阵列指定 2 个复本，则每个块的副本储存在两个不同的设备上。所有数据的一个副本的有效储存大小是 5/2 或 2.5 乘以组件设备的大小。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.complex.layout">
+   <title>布局</title>
+   <para>
+    复杂 RAID 10 设置支持 3 种不同的布局，这些布局定义了在磁盘上排列数据块的方式。可用布局有近（默认值）、远和偏移。它们的性能特性各不相同，因此您必须选择适合自己工作负载的布局。
+   </para>
+   <sect3 xml:id="sec.raid10.complex.layout.near">
+    <title>近布局</title>
+    <para>
+     使用近布局，数据块的副本会在不同的组件设备上彼此邻近地条带化。即，一个数据块的多个副本在不同设备中的偏移类似。近布局是 RAID 10 的默认布局。例如，如果使用奇数个组件设备以及数据的两个副本，则一些副本可能在设备的一个大块中。
+    </para>
+    <para>
+     在半数的驱动器上，复杂 RAID 10 的近布局在读写性能上与 RAID 0 类似。
+    </para>
+    <para>
+     具有偶数个磁盘和两个复本的近布局：
+    </para>
+<screen>sda1 sdb1 sdc1 sde1
+  0    0    1    1
+  2    2    3    3
+  4    4    5    5
+  6    6    7    7
+  8    8    9    9</screen>
+    <para>
+     具有奇数个磁盘和两个复本的近布局：
+    </para>
+<screen>sda1 sdb1 sdc1 sde1 sdf1
+  0    0    1    1    2
+  2    3    3    4    4
+  5    5    6    6    7
+  7    8    8    9    9
+  10   10   11   11   12</screen>
+   </sect3>
+   <sect3 xml:id="sec.raid10.complex.layout.far">
+    <title>远布局</title>
+    <para>
+     远布局在所有驱动器的前面部分条带化数据，然后在所有驱动器的后面部分条带化数据的另一份副本，以确保块的所有副本在不同的驱动器上。第二个值集合在组件驱动器的中间开始。
+    </para>
+    <para>
+     使用远布局，复杂 RAID 10 的读取性能类似于所有驱动器上的 RAID 0，但写入速度比 RAID 0 慢得多，因为前者需要更多地搜寻驱动器头。适用于读密集性操作，例如只读文件服务器。
+    </para>
+    <para>
+     RAID 10 的写入速度类似于其他镜像 RAID 类型（例如使用近布局的 RAID 1 和 RAID 10），因为该文件系统的电梯式操作会以最佳方式而不是原始写入方式调度写入。使用远布局的 RAID 10 最适合镜像写入应用程序。
+    </para>
+    <para>
+     具有偶数个磁盘和两个复本的远布局：
+    </para>
+<screen>sda1 sdb1 sdc1 sde1
+  0    1    2    3
+  4    5    6    7       
+  . . .
+  3    0    1    2
+  7    4    5    6</screen>
+    <para role="intro">
+     具有奇数个磁盘和两个复本的远布局：
+    </para>
+<screen>sda1 sdb1 sdc1 sde1 sdf1
+  0    1    2    3    4
+  5    6    7    8    9
+  . . .
+  4    0    1    2    3
+  9    5    6    7    8</screen>
+   </sect3>
+   <sect3 xml:id="sec.raid10.complex.layout.offset">
+    <title>偏移布局</title>
+    <para>
+     偏移布局会复制分段，从而使指定大块的多个副本在连续的驱动器上以连续偏移进行布局。事实上，会复制每个分段且副本会按每个设备进行偏移。如果使用适当较大的大块大小且不超过写入的寻道大小，则此方式会赋予远布局类似的读特征。
+    </para>
+    <para>
+     具有偶数个磁盘和两个复本的偏移布局：
+    </para>
+<screen>sda1 sdb1 sdc1 sde1
+  0    1    2    3
+  3    0    1    2       
+  4    5    6    7
+  7    4    5    6
+  8    9   10   11
+ 11    8    9   10</screen>
+    <para>
+     具有奇数个磁盘和两个复本的偏移布局：
+    </para>
+<screen>sda1 sdb1 sdc1 sde1 sdf1
+  0    1    2    3    4
+  4    0    1    2    3
+  5    6    7    8    9
+  9    5    6    7    8
+ 10   11   12   13   14
+ 14   10   11   12   13</screen>
+   </sect3>
+   <sect3 xml:id="sec.raid10.complex.layout.parameter">
+    <title>使用 YaST 和 mdadm 指定复本数和布局</title>
+    <para>
+     复本数和布局在 YaST 中或使用 mdadm 的 <option>--layout</option> 参数指定为<guimenu>奇偶校验算法</guimenu>。接受的值如下：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>n<replaceable>N</replaceable></literal>
+      </term>
+      <listitem>
+       <para>
+        对近布局指定 <literal>n</literal>，并用复本数替换 <replaceable>N</replaceable>。<literal>n2</literal> 是默认值，在未设置布局和复本数时使用。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>f<replaceable>N</replaceable></literal>
+      </term>
+      <listitem>
+       <para>
+        对远布局指定 <literal>f</literal>，并用复本数替换 <replaceable>N</replaceable>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>o<replaceable>N</replaceable></literal>
+      </term>
+      <listitem>
+       <para>
+        对偏移布局指定 <literal>o</literal>，并用复本数替换 <replaceable>N</replaceable>。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <note>
+     <title>复本数</title>
+     <para>
+      YaST 自动为<guimenu>奇偶校验算法</guimenu>参数的所有可能的值提供了选择。
+     </para>
+    </note>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.complex.yast">
+   <title>使用 YaST 分区程序创建复杂 RAID 10</title>
+   <procedure>
+    <step>
+     <para>
+      起动 YaST 并打开分区程序。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果需要，请创建应该与 RAID 配置搭配使用的分区。请勿将它们格式化，并将分区类型设置为 <guimenu>0xFD Linux RAID</guimenu>。使用现有分区时，不需要更改它们的分区类型 — YaST 会自动更改。有关详细信息，请参见<xref linkend="sec.yast2.i_y2_part_expert"/>。
+     </para>
+     <para>
+      对于 RAID 10，至少需要四个分区。强烈建议您使用储存在不同硬盘上的分区，以降低当其中一个损坏时遗失数据的风险。建议仅使用大小相同的分区，因为每个段仅可将相同的空间量作为最小大小的分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      在左侧面板中，选择 <guimenu>RAID</guimenu>。
+     </para>
+     <para>
+      右侧面板中即会打开现有 RAID 配置的列表。
+     </para>
+    </step>
+    <step>
+     <para>
+      在 RAID 页面的左下方，单击 <guimenu>添加 RAID</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在 <guimenu>RAID 类型</guimenu>下，选择 <guimenu>RAID 10（镜像和分段）</guimenu>。
+     </para>
+     <para>
+      您可以选择性地为 RAID 指派一个 <guimenu>RAID 名称</guimenu>。它会变成有效的格式：<filename>/dev/md/<replaceable>名称</replaceable></filename>。有关详细信息，请参见 <xref linkend="sec.raid.yast.names"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在<guimenu>可用设备</guimenu>列表中选择所需的 分区，然后单击<guimenu>添加</guimenu>，将其移到<guimenu>所选设备</guimenu>列表中。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="raid10_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="raid10_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      （可选）单击<guimenu>分类</guimenu>，指定各磁盘在 RAID 阵列中的首选顺序。
+     </para>
+     <para>
+      对于容易受到磁盘添加顺序影响的 RAID 类型（例如 RAID 10），您可以指定以何种顺序使用设备。这将确保一半的阵列在一个磁盘子系统上，另一半阵列在另一个磁盘子系统上。例如，如果一个磁盘子系统出现故障，则系统仍可以通过第二个磁盘子系统继续运行。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        依次选择每个磁盘，并单击其中一个 <guimenu>X 类</guimenu>按钮，其中 X 表示要指派给磁盘的字母。可用的类有 A、B、C、D 和 E，但在很多情况下只需要较少的类（例如仅需要 A 和 B）。以此方式指派所有可用的 RAID 磁盘。
+       </para>
+       <para>
+        可以按 <keycap function="control"/> 或 <keycap function="shift"/> 键选择多个设备。也可以右键单击所选设备并从环境菜单中选择合适的类。
+       </para>
+      </step>
+      <step>
+       <para>
+        选择以下其中一个排序选项指定设备的顺序：
+       </para>
+       <formalpara>
+        <title><guimenu>排序</guimenu>：</title>
+        <para>
+         将所有 A 类设备排序在所有 B 类设备之前，并以此类推。例如：<literal>AABBCC</literal>。
+        </para>
+       </formalpara>
+       <formalpara>
+        <title><guimenu>交错</guimenu>：</title>
+        <para>
+         按照先是 A 类的第一个设备，然后是 B 类的第一个设备，以此类推直到排完所有指派了后面类的设备。再然后是 A 类的第二个设备，B 类的第二个设备，以此类推。没有类的所有设备将排在设备列表的末尾。例如：<literal>ABCABC</literal>。
+        </para>
+       </formalpara>
+       <formalpara>
+        <title>模式文件：</title>
+        <para>
+         选择一个包含多行的现有文件，其中的每一行都是一个正则表达式以及一个类名称 (<literal>"sda.* A"</literal>)。所有与该正则表达式匹配的设备都将被指派给该行指定的类。正则表达式会依次与内核名称 (<filename>/dev/sda1</filename>)、udev 路径名称 (<filename>/dev/disk/by-path/pci-0000:00:1f.2-scsi-0:0:0:0-part1</filename>) 和 udev ID (<filename>dev/disk/by-id/ata-ST3500418AS_9VMN8X8L-part1</filename>) 进行比对。如果设备名称与多个正则表达式匹配，则会使用首个匹配项来决定类。
+        </para>
+       </formalpara>
+      </step>
+      <step>
+       <para>
+        在对话框的底部，单击<guimenu>确定</guimenu>，以确认顺序。
+       </para>
+       <informalfigure>
+        <mediaobject>
+         <imageobject role="fo">
+          <imagedata fileref="raid10_classify_a.png" width="80%" format="PNG"/>
+         </imageobject>
+         <imageobject role="html">
+          <imagedata fileref="raid10_classify_a.png" width="100%" format="PNG"/>
+         </imageobject>
+        </mediaobject>
+       </informalfigure>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在 <guimenu>RAID 选项</guimenu>下，指定<guimenu>大块大小</guimenu>和<guimenu>奇偶校验算法</guimenu>，然后单击<guimenu>下一步</guimenu>。
+     </para>
+     <para>
+      对于 RAID 10，奇偶校验选项包括 n（近）、f（远）和 o（偏移）。数字表示所需的每个数据块的复本数。默认值为 2。有关信息，请参阅<xref linkend="sec.raid10.complex.layout" xrefstyle="SectTitleOnPage"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      将文件系统和装入选项添加至 RAID 设备，然后单击<guimenu>完成</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      确认要进行的更改，然后单击<guimenu>完成</guimenu>以创建 RAID。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.complex.yast.mdadm">
+   <title>使用 mdadm 创建复杂 RAID 10</title>
+   <para>
+    本节中的过程使用下表中显示的设备名。确保使用您自己的设备名称修改这些设备名称。
+   </para>
+   <table>
+    <title>使用 mdadm 创建 RAID 10 的情况</title>
+    <tgroup cols="2">
+     <colspec colnum="1" colname="1" colwidth="50*"/>
+     <colspec colnum="2" colname="2" colwidth="50*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         原始设备
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 10
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <filename>/dev/sdf1</filename>
+        </para>
+        <para>
+         <filename>/dev/sdg1</filename>
+        </para>
+        <para>
+         <filename>/dev/sdh1</filename>
+        </para>
+        <para>
+         <filename>/dev/sdi1</filename>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md3</filename>
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <procedure>
+    <step>
+     <para>
+      打开一个终端控制台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果需要，使用 parted 等磁盘分区程序创建至少四个大小相同的 0xFD Linux RAID 分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      输入以下命令创建 RAID 10。
+     </para>
+<screen>mdadm --create /dev/md3 --run --level=10 --chunk=32 --raid-devices=4 \
+/dev/sdf1 /dev/sdg1 /dev/sdh1 /dev/sdi1</screen>
+     <para>
+      请务必根据您的设置调整 <option>--raid-devices</option> 的值和分区列表。
+     </para>
+     <para>
+      该命令会创建采用近布局并有两个复本的阵列。若要更改这两个值中的任何一个值，请使用 <option>--layout</option>，如<xref linkend="sec.raid10.complex.layout.parameter"/>所述。
+     </para>
+    </step>
+    <step>
+     <para>
+      在 RAID 10 设备 <filename>/dev/md3</filename> 上创建文件系统，例如 XFS 文件系统：
+     </para>
+<screen>sudo mkfs.xfs /dev/md3</screen>
+     <para>
+      如果要使用其他文件系统，请修改该命令。
+     </para>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/mdadm.conf</filename> 文件，如果它不存在，则创建该文件（例如通过运行 <command>sudo vi /etc/mdadm.conf</command>）。添加下列行（如果该文件存在，第一行很可能也已经存在）。
+     </para>
+<screen>DEVICE containers partitions
+ARRAY /dev/md3 UUID=<replaceable>UUID</replaceable></screen>
+     <para>
+      设备的 UUID 可以使用以下命令检索：
+     </para>
+<screen>sudo mdadm -D /dev/md3 | grep UUID</screen>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/fstab</filename> 文件以添加 RAID 10 设备 <filename>/dev/md3</filename> 的项目。下列示例显示了采用 XFS 文件系统并以 <filename>/data</filename> 做为安装点的 RAID 设备的项。
+     </para>
+<screen>/dev/md3 /data xfs defaults 1 2</screen>
+    </step>
+    <step>
+     <para>
+      装入 RAID 设备：
+     </para>
+<screen>sudo mount /data</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+</chapter>
