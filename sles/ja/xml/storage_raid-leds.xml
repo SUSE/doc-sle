@@ -1,0 +1,704 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_raid-leds.xml" version="5.0" xml:id="cha.raid_leds" xml:lang="ja">
+ <title>MDソフトウェアRAID用のストレージエンクロージャLEDユーティリティ</title>
+ <info>
+      <abstract>
+        <para>
+          <remark>Fate#313626 Update Enclosure LED Utilities</remark>ストレージエンクロージャLEDモニタリングユーティリティ(<command>ledmon</command>)およびLEDコントロール(<command>ledctl</command>)ユーティリティは、多様なインタフェースおよびプロトコルを使用してストレージエンクロージャLEDを制御する、Linuxのユーザスペースアプリケーションです。その主たる用途は、mdadmユーティリティで作成されたLinux MDソフトウェアのRAIDデバイスの状態を視覚化することです。<systemitem class="daemon">ledmon</systemitem>デーモンがドライブアレイの状態を監視し、ドライブLEDの状態を更新します。ledctlを使用して、指定したデバイスに対するLEDパターンを設定できます。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+          </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  これらのLEDユーティリティでは、SGPIO (Serial General Purpose Input/Output)仕様(Small Form Factor (SFF) 8485)およびSCSI Enclosure Services (SES) 2プロトコルを使用して、LEDを制御します。SGPIO用のSFF-8489仕様のInternational Blinking Pattern Interpretation (IBPI)パターンを実装します。IBPIは、SGPIO規格がバックプレーン上のドライブやスロットの状態としてどのように解釈されるか、またバックプレーンがLEDでどのように状態を視覚化すべきかを定義します。
+ </para>
+ <para>
+  一部のストレージエンクロージャでは、SFF-8489仕様に厳格に準拠していないものがあります。エンクロージャプロセッサがIBPIパターンを受け入れていても、LEDの点滅はSFF-8489仕様に従っていない、あるいはプロセッサが限られた数のIBPIパターンしかサポートしていない場合があります。
+ </para>
+ <para>
+  LED管理(AHCI)およびSAF-TEプロトコルは、<command>ledmon</command>および<command>ledctl</command>ユーティリティではサポートされていません。
+ </para>
+ <para>
+  <systemitem class="daemon">ledmon</systemitem>および<command>ledctl</command>アプリケーションは、インテルAHCIコントローラやインテルSASコントローラなどの、インテルのストレージコントローラで機能することが検証されています。MDソフトウェアのRAIDボリュームの一部であるPCIe-SSDデバイスの、ストレージエンクロージャ状態(OK、Fail、Rebuilding)用LEDを制御するための、PCIe-SSD (ソリッドステートディスク)エンクロージャLEDもサポートされています。これらのアプリケーションは、他のベンダのIBPI準拠のストレージコントローラ(特にSAS/SCSIコントローラ)でも機能するはずですが、他のベンダのコントローラはテストされていません。
+ </para>
+ <para>
+  <systemitem class="daemon">ledmon</systemitem>および<command>ledctl</command>は<systemitem class="resource">ledmon</systemitem>パッケージに付属しています。このパッケージはデフォルトではインストールされません。インストールするには、<command>sudo zypper in ledmon</command>を実行します。
+ </para>
+ <sect1 xml:id="sec.raid_leds.ledmon">
+  <title>ストレージエンクロージャLED監視サービス</title>
+
+  <para>
+   <systemitem class="daemon">ledmon</systemitem>アプリケーションは、MDソフトウェアRAIDデバイスの状態またはストレージエンクロージャまたはドライブベイ内のブロックデバイスの状態をコンスタントに監視する、デーモンプロセスです。一度に実行しているデーモンのインスタンスは、1つのみである必要があります。<systemitem class="daemon">ledmon</systemitem>デーモンは、インテルのエンクロージャLEDユーティリティの一部です。
+  </para>
+
+  <para>
+   状態は、ストレージアレイエンクロージャまたはドライブベイ内の、各スロットに関連付けられたLED上で視覚化されます。このアプリケーションは、すべてのソフトウェアRAIDデバイスを監視し、その状態を視覚化します。選択したソフトウェアRAIDボリュームのみを監視する方法は、備わっていません。
+  </para>
+
+  <para>
+   <systemitem class="daemon">ledmon</systemitem>デーモンでは、2種類のLEDシステム、すなわち、2 LEDシステム(Activity LEDとStatus LED)と、3 LEDシステム(Activity LED、Locate LED、およびFail LED)をサポートしています。このツールには、LEDへのアクセスの際に最高の優先度が与えられています。
+  </para>
+
+  <para>
+   <systemitem class="daemon">ledmon</systemitem>を起動するには、次のように入力します。
+  </para>
+
+<screen>sudo ledmon [options]</screen>
+
+  <para>
+   "options"は次の1つ以上です。
+  </para>
+
+  <variablelist>
+   <title><systemitem class="daemon">ledmon</systemitem>のオプション</title>
+   <varlistentry>
+    <term>-c</term>
+    <term>--confg=path</term>
+    <listitem>
+     <para>
+      設定は<filename>~/.ledctl</filename>または<filename>/etc/ledcfg.conf</filename> (存在する場合)から読み込まれます。このオプションは、別の設定ファイルを指定する場合に使用します。
+     </para>
+     <para>
+      現時点では、複数の設定ファイルのサポートはまだ実装されていないため、このオプションは有効ではありません。詳細については、<command>man 5 ledctl.conf</command>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-l</term>
+    <term>--log=path</term>
+    <listitem>
+     <para>
+      ローカルのログファイルへのパスを設定します。このユーザ定義ファイルを指定すると、グローバルログファイル<filename>/var/log/ledmon.log</filename>は使用されません。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-t</term>
+    <term>--interval=seconds</term>
+    <listitem>
+     <para>
+      <filename>sysfs</filename>のスキャン間の時間間隔を設定します。値は秒単位です。最小値は5秒です。最大値の指定はありません。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>"--quiet|--error|--warning|--info|--debug|--all"</term>
+    <listitem>
+     <para>
+      詳細レベルを指定します。このレベルオプションは、情報なしから、ほとんどの情報までの順番で指定されます。ロギングを行わない場合は、--quietオプションを使用します。すべてをログする場合は、--allオプションを使用します。2つ以上の詳細オプションを指定した場合は、コマンド内の最後のオプションが適用されます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-h</term>
+    <term>--help</term>
+    <listitem>
+     <para>
+      コマンド情報をコンソールに印刷して、終了します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-v</term>
+    <term>--version</term>
+    <listitem>
+     <para>
+      <command>ledmon</command>のバージョンとライセンスに関する情報を表示して、終了します。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <note>
+   <title>既知の問題</title>
+   <para>
+    <command>ledmon</command>デーモンは、SFF-8489仕様のPFA (Predicted Failure Analysis)状態は認識しません。したがって、PFAパターンは視覚化されません。
+   </para>
+  </note>
+ </sect1>
+ <sect1 xml:id="sec.raid_leds.ledctl">
+  <title>ストレージエンクロージャLED制御アプリケーション</title>
+
+  <para>
+   エンクロージャLEDアプリケーション(<command>ledctl</command>)は、ストレージエンクロージャまたはドライブベイの各スロットに関連付けられたLEDを制御する、ユーザスペースアプリケーションです。<command>ledctl</command>アプリケーションは、インテルのエンクロージャLEDユーティリティの一部です。
+  </para>
+
+  <para>
+   このコマンドを発行すると、指定したデバイスのLEDが指定したパターンに設定され、それ以外のLEDはすべてオフになります。   このアプリケーションは<systemitem class="username">root</systemitem>特権で実行する必要があります。<systemitem class="daemon">ledmon</systemitem>アプリケーションはLEDへのアクセスに際して最高の優先度を持っているため、<systemitem class="daemon">ledmon</systemitem>デーモンを実行中の場合は、ledctlで設定した一部のパターンが有効にならないことがあります(Locateパターン以外)。
+  </para>
+
+  <para>
+   <command>ledctl</command>アプリケーションでは、2種類のLEDシステム、すなわち、2LEDシステム(Activity LEDとStatus LED)と、3LEDシステム(Activity LED、Locate LED、およびFail LED)をサポートしています。
+  </para>
+
+  <para>
+   <command>ledctl</command>を起動するには、次のように入力します。
+  </para>
+
+<screen>sudo [options] <replaceable>pattern_name</replaceable>=list_of_devices</screen>
+
+  <para>
+   "options"は次の1つ以上です。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>-c</term>
+    <term>--confg=path</term>
+    <listitem>
+     <para>
+      ローカルの環境設定ファイルへのパスを設定します。このオプションを指定すると、グローバルの環境設定ファイルとユーザの環境設定ファイルは、無効になります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-l</term>
+    <term>--log=path</term>
+    <listitem>
+     <para>
+      ローカルのログファイルへのパスを設定します。このユーザ定義ファイルを指定すると、グローバルログファイル<filename>/var/log/ledmon.log</filename>は使用されません。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>--quiet</term>
+    <listitem>
+     <para>
+      <filename>stdout</filename>または<filename>stderr</filename>に送信されるすべてのメッセージをオフにします。メッセージは、ローカルファイルおよび<filename>syslog</filename>ファシリティには引き続きログされます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-h</term>
+    <term>--help</term>
+    <listitem>
+     <para>
+      コマンド情報をコンソールに印刷して、終了します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>-v</term>
+    <term>--version</term>
+    <listitem>
+     <para>
+      <command>ledctl</command>のバージョンとライセンスに関する情報を表示して、終了します。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 xml:id="sec.raid_leds.ledctl.patterns">
+   <title>パターン名</title>
+   <para>
+    <command>ledctl</command>アプリケーションでは、SFF-8489仕様に従い、<guimenu>pattern_name</guimenu>引数に次の名前を使用できます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>locate</term>
+     <listitem>
+      <para>
+       指定したデバイスまたはからのスロットに関連付けられたLocate LEDを点灯します。この状態は、スロットまたはドライブの識別に使用されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>locate_off</term>
+     <listitem>
+      <para>
+       指定したデバイスまたはからのスロットに関連付けられたLocate LEDを消灯します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>normal</term>
+     <listitem>
+      <para>
+       指定したデバイスに関連付けられたStatus LED、Failure LED、およびLocate LEDを消灯します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>off</term>
+     <listitem>
+      <para>
+       指定したデバイスに関連付けられたStatus LEDとFailure LEDのみを消灯します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ica</term>
+     <term>degraded</term>
+     <listitem>
+      <para>
+       <literal>In a Critical Array</literal>パターンを視覚化します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>rebuild</term>
+     <term>rebuild_p</term>
+     <listitem>
+      <para>
+       <literal>Rebuild</literal>パターンを視覚化します。互換性とレガシーの理由から、両方のrebuild状態をサポートしています。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ifa</term>
+     <term>failed_array</term>
+     <listitem>
+      <para>
+       <literal>In a Failed Array</literal>パターンを視覚化します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>hotspare</term>
+     <listitem>
+      <para>
+       <literal>Hotspare</literal>パターンを視覚化します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>pfa</term>
+     <listitem>
+      <para>
+       <literal>Predicted Failure Analysis</literal>パターンを視覚化します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>failure</term>
+     <term>disk_failed</term>
+     <listitem>
+      <para>
+       <literal>Failure</literal>パターンを視覚化します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_abort</term>
+     <listitem>
+      <para>
+       SES-2 R/R ABORT
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_rebuild</term>
+     <listitem>
+      <para>
+       SES-2 REBUILD/REMAP
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ifa</term>
+     <listitem>
+      <para>
+       SES-2 IN FAILED ARRAY
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ica</term>
+     <listitem>
+      <para>
+       SES-2 IN CRITICAL ARRAY
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_cons_check</term>
+     <listitem>
+      <para>
+       SES-2 CONS CHECK
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_hotspare</term>
+     <listitem>
+      <para>
+       SES-2 HOTSPARE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_rsvd_dev</term>
+     <listitem>
+      <para>
+       SES-2 RSVD DEVICE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ok</term>
+     <listitem>
+      <para>
+       SES-2 OK
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_ident</term>
+     <listitem>
+      <para>
+       SES-2 IDENT
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_rm</term>
+     <listitem>
+      <para>
+       SES-2 REMOVE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_insert</term>
+     <listitem>
+      <para>
+       SES-2 INSERT
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_missing</term>
+     <listitem>
+      <para>
+       SES-2 MISSING
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_dnr</term>
+     <listitem>
+      <para>
+       SES-2 DO NOT REMOVE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_active</term>
+     <listitem>
+      <para>
+       SES-2 ACTIVE
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_enable_bb</term>
+     <listitem>
+      <para>
+       SES-2 ENABLE BYP B
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_enable_ba</term>
+     <listitem>
+      <para>
+       SES-2 ENABLE BYP A
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_devoff</term>
+     <listitem>
+      <para>
+       SES-2 DEVICE OFF
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ses_fault</term>
+     <listitem>
+      <para>
+       SES-2 FAULT
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    非SES-2のパターンがエンクロージャ内のデバイスに送信されると、そのパターンは、上に示すように、SCSI Enclosure Services (SES) 2のパターンに自動的に変換されます。
+   </para>
+   <table>
+    <title>非SES-2パターンとSES-2パターン間での変換</title>
+    <tgroup cols="2">
+     <colspec colnum="1" colname="1" colwidth="5001*"/>
+     <colspec colnum="2" colname="2" colwidth="5001*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         非SES-2のパターン
+        </para>
+       </entry>
+       <entry>
+        <para>
+         SES-2のパターン
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         locate
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ident
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         locate_off
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ident
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         normal
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ok
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         off
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ok
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         ica
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ica
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         degraded
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ica
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         rebuild
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_rebuild
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         rebuild_p
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_rebuild
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         ifa
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ifa
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         failed_array
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_ifa
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         hotspare
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_hotspare
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         pfa
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_rsvd_dev
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         failure
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_fault
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         disk_failed
+        </para>
+       </entry>
+       <entry>
+        <para>
+         ses_fault
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_leds.ledctl.devices">
+   <title>デバイスのリスト</title>
+   <para>
+    <command>ledctl</command>コマンドを発行すると、指定したデバイスのLEDが指定したパターンに設定され、それ以外のLEDはすべてオフになります。   デバイスのリストは、次の2つの形式のいずれかで提供できます。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      スペースなしのカンマで区切られたデバイスのリスト
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      デバイスがスペースで区切られた波括弧内のリスト
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    同じコマンド内で複数のパターンを指定すると、各パターンに対するデバイスリストで、同一または異なるフォーマットを使用できます。2つのリスト形式を示す例は、<xref linkend="sec.raid_leds.ledctl.examples" xrefstyle="SectTitleOnPage"/>を参照してください。
+   </para>
+   <para>
+    デバイスは、<filename>/dev</filename>ディレクトリまたは<filename>/sys/block</filename>ディレクトリ内のファイルへのパスです。パスにより、ブロックデバイス、MDソフトウェアRAIDデバイス、またはコンテナデバイスを識別できます。ソフトウェアRAIDデバイスまたはコンテナデバイスの場合、報告されたLEDの状態は、 関連付けられたブロックデバイスのすべてに対して設定されます。
+   </para>
+   <para>
+    list_of_devicesにリストされているデバイスのLEDは、特定のパターンのpattern_nameに設定され、それ以外のすべてのLEDは消灯されます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_leds.ledctl.examples">
+   <title>例</title>
+   <para>
+    単一のブロックデバイスを見つけるには
+   </para>
+<screen>sudo ledctl locate=/dev/sda</screen>
+   <para>
+    単一のブロックデバイスのLocate LEDを消灯するには
+   </para>
+<screen>sudo ledctl locate_off=/dev/sda</screen>
+   <para>
+    MDソフトウェアRAIDデバイスのディスクを見つけて、そのブロックデバイスの2つに同時にrebuildパターンを設定するには
+   </para>
+<screen>sudo ledctl locate=/dev/md127 rebuild={ /sys/block/sd[a-b] }</screen>
+   <para>
+    指定したデバイスに対するStatus LEDとFailure LEDを消灯するには
+   </para>
+<screen>sudo ledctl off={ /dev/sda /dev/sdb }</screen>
+   <para>
+    3つのブロックデバイスを見つけるには、次のいずれかのコマンドを実行します(どちらのコマンドでも同じです)。
+   </para>
+<screen>sudo ledctl locate=/dev/sda,/dev/sdb,/dev/sdc
+sudo ledctl locate={ /dev/sda /dev/sdb /dev/sdc }</screen>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid_leds.info">
+  <title>追加情報</title>
+
+  <para>
+   LEDのパターンおよび監視ツールに関する詳細は、次のリソースを参照してください。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="http://sourceforge.net/projects/ledmon/">Sourceforge.net上のLEDMONオープンソースプロジェクト</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="ftp://ftp.seagate.com/sff/SFF-8485.PDF">SGPIO仕様SFF-8485</link>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="ftp://ftp.seagate.com/sff/SFF-8489.PDF">IBPI仕様SFF-8489</link>
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>
