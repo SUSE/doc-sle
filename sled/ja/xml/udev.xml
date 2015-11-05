@@ -1,0 +1,768 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="udev.xml" version="5.0" xml:id="cha.udev">
+ <title><systemitem class="service">udevによる動的カーネルデバイス管理</systemitem></title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  カーネルは、実行中のシステムのほぼすべてのデバイスを追加または削除できます。デバイス状態の変更(デバイスが接続されているか、または取り外されたか)をユーザスペースに反映させる必要があります。デバイスは、接続後、検出されるとすぐに設定されなければなりません。特定のデバイスのユーザは、このデバイスの認識された状態が変更された場合は通知される必要があります。<systemitem class="service"/>udevは、<filename>/dev</filename>ディレクトリのデバイスノートファイルおよびシンボリックリンクを動的に維持するために必要なインフラストラクチャを提供します。<systemitem class="service">udev規則は、外部ツールをカーネルデバイスイベント処理に接続する方法を提供します。</systemitem>これにより、カーネルデバイス処理の一部として実行する特定のスクリプトを追加するなど、<systemitem class="service">udev</systemitem>デバイス処理をカスタマイズしたり、デバイス処理中に評価する追加データを要求およびインポートしたりできます。
+ </para>
+ <sect1 xml:id="sec.udev.devdir">
+  <title>/dev<filename>ディレクトリ</filename></title>
+
+  <para>
+   /dev<filename>ディレクトリ内のデバイスノードを使用して、対応するカーネルデバイスにアクセスできます。</filename><systemitem class="service">udev</systemitem>により、 <filename>/dev </filename>ディレクトリにカーネルの現在の状態が反映されます。カーネルデバイスは、それぞれ1つの対応するデバイスファイルを持ちます。デバイスがシステムから取り外されると、そのデバイスノードは削除されます。
+  </para>
+
+  <para>
+   <filename>/dev</filename>ディレクトリのコンテンツは一時的なファイルシステム内で管理され、すべてのファイルはシステムの起動時にレンダリングされます。意図的に、手動で作成または変更されたファイルはリブート時に復元されません。対応するカーネルデバイスの状態にかかわらず、<filename>/dev</filename>ディレクトリ内に常駐する静的ファイルおよびディレクトリは、systemd-tmpfilesで作成できます。環境設定ファイルは、<filename>/usr/lib/tmpfiles.d/</filename>および<filename>/etc/tmpfiles.d/</filename>にあります。詳細については、<systemitem>systemd-tmpfiles(8)</systemitem>のマニュアルページを参照してください。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.kernel">
+  <title>カーネルの<systemitem class="service">uevent</systemitem>と<systemitem class="service">udev</systemitem></title>
+
+  <para>
+   必要なデバイス情報は、<systemitem class="filesystem">sysfs</systemitem>ファイルシステムによってエクスポートされます。カーネルが検出および初期化するすべてのデバイスについて、そのデバイス名を含んだディレクトリが作成されます。このディレクトリには、デバイス固有のプロパティのある属性ファイルが含まれます。
+  </para>
+
+  <para>
+   デバイスが追加または削除されるたびに、カーネルはueventを送信して、<systemitem class="service">udev</systemitem>に変更を通知します。<systemitem class="service">udev</systemitem>デーモンは、起動時に１回、 <filename>/etc/udev/rules.d/*.rules </filename>ファイルから提示されたすべてのルールを読み込んで解析し、メモリ内に保存します。ルールファイルを変更、追加、または削除した場合、<command>udevadm control reload_rules</command>コマンドを実行することで、このデーモンは、メモリ内のすべてのルールを再ロードできます。<systemitem class="service">udev</systemitem>のルールとそれらの構文の詳細については、<xref linkend="sec.udev.rules"/>を参照してください。
+  </para>
+
+  <para>
+   受信したすべてイベントは、提供されている一連のルールに照らして照合されます。ルールによって、イベント環境キーを追加または変更したり、作成するデバイスノードに特定の名前を要求したり、ノードを指すシンボリックリンクを追加したり、またはデバイスノードの作成後に実行するプログラムを追加したりできます。ドライバのコア<systemitem class="service">uevent</systemitem>は、カーネルのネットリンクソケットから受信されます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.drivers">
+  <title>ドライバ、カーネルモジュールおよびデバイス</title>
+
+  <para>
+   カーネルバスドライバは、デバイスを検出します。検出されたデバイスごとに、カーネルは内部デバイス構造を作成し、ドライバコアは、ueventを<systemitem class="service">udev</systemitem>デーモンに送信します。バスデバイスは、デバイスの種類を示す特別な形式のIDを識別します。通常、これらのIDは、ベンダー、製品IDおよびサブシステム固有の値で構成されています。各バスには、これらのIDに対して<envar>MODALIAS</envar>という独自のスキームを持ちます。カーネルは、デバイス情報を読み取り、この情報から<envar>MODALIAS</envar> ID文字列を作成し、イベントとともに文字列を送信します。USBマウスの場合、次のようになります。
+  </para>
+
+<screen>MODALIAS=usb:v046DpC03Ed2000dc00dsc00dp00ic03isc01ip02</screen>
+
+  <para>
+   各デバイスドライバは、既知の処理可能デバイスのエイリアスのリストを持ちます。このリストは、カーネルモジュールファイル自体にも含まれています。depmodプログラムは、IDリストを読み取り、現在使用可能なすべてのモジュールについて、カーネルの<filename>/lib/modules</filename>ディレクトリ内に<filename>modules.alias</filename>を作成します。このインフラストラクチャにより、<command>MODALIAS</command>キーを持つイベントごとに<literal>modprobe</literal>を呼び出すだけで簡単にモジュールをロードできます。modprobe $MODALIAS<command>が呼び出されると、そのデバイスに付けられたデバイスエイリアスとモジュールによって提示されるエイリアスとが一致します。</command>一致したエントリが見つかると、そのモジュールがロードされます。これはすべて<systemitem class="service">udev</systemitem>によって自動的にトリガされます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.boot">
+  <title>ブートおよび初期デバイスセットアップ</title>
+
+  <para>
+   <systemitem class="service">udev</systemitem>デーモンが実行される前のブートプロセスで発生するすべてのデバイスイベントは失われます。これは、これらのイベントを処理するインフラストラクチャがルートファイルシステムに常駐し、その時点で使用できないからです。その消失の埋め合せに、カーネルは、sysfsファイルシステム内の各デバイスのデバイスディレクトリに<filename>uevent</filename>ファイルを生成します。<systemitem class="filesystem"/>そのファイルに<literal>add</literal>と書き込むことにより、カーネルは、ブート時に消失したものと同じイベントを再送します。<filename>/sys</filename>内のすべての<filename>uevent</filename>ファイルを含む単純なループにより、すべてのイベントが再びデバイスノードを作成し、デバイスセットアップを実行します。
+  </para>
+
+  <para>
+   たとえば、ブート時に存在するUSBマウスは、ドライバがその時点で使用できないため、初期のブートロジックでは初期化されない場合があります。デバイス検出イベントは、消失し、そのデバイスのカーネルモジュールは検出されません。接続されている可能性のあるデバイスを手動で検索する代わりに、ルートファイルシステムが使用可能になった後で、<systemitem class="service">udev</systemitem>がカーネルにすべてのデバイスイベントを要求します。これにより、USBマウスデバイスのイベントが再び実行されます。これで、マウントされたrootファイルシステム上のカーネルモジュールが検出され、USBマウスを初期化できます。
+  </para>
+
+  <para>
+   ユーザスペースでは、実行時のデバイスのcoldplugシーケンスとデバイス検出との間に明らかな違いはありません。どちらの場合も、同じルールを使用して一致検出が行われ、設定された同じプログラムが実行されます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.debug">
+  <title>実行中の<systemitem class="service">udev</systemitem>デーモンの監視</title>
+
+  <para>
+   <command>udevadm monitor</command>プログラムを使用すると、ドライバのコアイベントとudevイベントプロセスのタイミングをビジュアル化できます。<systemitem class="service"/>
+  </para>
+
+<screen>UEVENT[1185238505.276660] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UDEV  [1185238505.279198] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UEVENT[1185238505.279527] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UDEV  [1185238505.285573] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UEVENT[1185238505.298878] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UDEV  [1185238505.305026] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UEVENT[1185238505.305442] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)
+UEVENT[1185238505.306440] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.325384] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.342257] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)</screen>
+
+  <para>
+   <literal>UEVENT</literal>行は、カーネルがnetlinkで送信したイベントを示します。<literal>UDEV</literal>行は、完了したudevイベントハンドラを示します。<systemitem class="service"/>タイミングは、マイクロ秒で出力されます。<literal>UEVENT</literal>および<literal>UDEV</literal>間の時間は、udevがこのイベントの処理に要した時間、またはudevデーモンがこのイベントと関連する実行中のイベントとの同期の実行に遅れた時間です。<systemitem class="service"/><systemitem class="service"/>たとえば、パーティションイベントは、メインディスクイベントがハードウェアに問い合わせたデータに依存する可能性があるため、ハードディスクパーティションのイベントは常に、メインデバイスイベントが完了するのを待ちます。
+  </para>
+
+  <para>
+   <command>udevadm monitor --env</command>は、完全なイベント環境を表示します。
+  </para>
+
+<screen>ACTION=add
+DEVPATH=/devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10
+SUBSYSTEM=input
+SEQNUM=1181
+NAME="Logitech USB-PS/2 Optical Mouse"
+PHYS="usb-0000:00:1d.2-1/input0"
+UNIQ=""
+EV=7
+KEY=70000 0 0 0 0
+REL=103
+MODALIAS=input:b0003v046DpC03Ee0110-e0,1,2,k110,111,112,r0,1,8,amlsfw</screen>
+
+  <para>
+   <systemitem class="service">udevは、syslogにもメッセージを送信します。</systemitem>どのメッセージをsyslogに送信するかを左右するデフォルトのsyslog優先度は、<systemitem class="service">udev</systemitem>設定ファイル <filename>/etc/udev/udev.conf </filename>で指定されています。実行中のデーモンのログ優先度は、<command>udevadm control log_priority=</command><replaceable>level/number</replaceable>で変更できます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.rules">
+  <title><systemitem class="service">udev</systemitem>ルールによるカーネルデバイスイベント処理への影響</title>
+
+  <para>
+   <systemitem class="service">udev</systemitem>ルールは、カーネルがイベント自体に追加する任意のプロパティや、カーネルが<filename>sysfs</filename>にエクスポートする任意の情報と一致することができます。また、この規則で、外部プログラムからの追加情報を要求することもできます。各イベントは、指定されたすべての規則と一致します。すべての規則は、<filename>/etc/udev/rules.d</filename>ディレクトリにあります。
+  </para>
+
+  <para>
+   規則ファイル内の各行には、少なくとも1つのキー値ペアが含まれています。これらは、一致と割り当てキーという2種類のキーです。すべての一致キーが各値と一致する場合、その規則が適用され、割り当てキーに指定された値が割り当てられます。一致するルールがある場合、デバイスノードの名前を指定、ノードを指すシンボリックリンクを追加、またはイベント処理の一部として指定されたプログラムを実行できます。一致するルールがない場合、デフォルトのデバイスノード名を使用して、デバイスノードが作成されます。ルールの構文とデータの一致またはインポート用に提供されているキーの詳細については、<systemitem class="service">udev</systemitem>のマニュアルページで説明されています。以下に示すルール例では、<systemitem class="service">udev</systemitem>ルール構文の基本を紹介します。これらのルール例は、すべて、<filename>/etc/udev/rules.d/50-udev-default.rules</filename>の下にある<systemitem class="service">udev</systemitem>デフォルトルールセットに含まれています。
+  </para>
+
+  <example xml:id="ex.rules">
+   <title><systemitem class="service">udev</systemitem>ルールの例</title>
+<screen># console
+KERNEL=="console", MODE="0600", OPTIONS="last_rule"
+
+# serial devices
+KERNEL=="ttyUSB*", ATTRS{product}=="[Pp]alm*Handheld*", SYMLINK+="pilot"
+
+# printer
+SUBSYSTEM=="usb", KERNEL=="lp*", NAME="usb/%k", SYMLINK+="usb%k", GROUP="lp"
+
+# kernel firmware loader
+SUBSYSTEM=="firmware", ACTION=="add", RUN+="firmware.sh"</screen>
+  </example>
+
+  <para>
+   <systemitem>console</systemitem>ルールは、3つのキーで構成されています。その内訳は、一致キーが1つ(<literal>KERNEL</literal>)、割り当てキーが2つ(<literal>MODE</literal>、<literal>OPTIONS</literal>)です。<literal>KERNEL</literal>一致ルールは<literal>console</literal>タイプのアイテムをデバイスリストから検索します。正確な一致だけが有効であり、このルールの実行をトリガします。<literal>MODE</literal>キーは、特別パーミッションをデバイスノードに割り当てます。この例では、読み取り/書き込みパーミッションをこのデバイスの所有者にのみ割り当てます。<literal>OPTIONS</literal>キーは、この規則をこのタイプのデバイスに適用される最後の規則にします。以降の規則は、この特定デバイスタイプとマッチしても、どのような結果も生じません。
+  </para>
+
+  <para>
+   <systemitem>serial devices</systemitem>ルールは、<filename>50-udev-default.rules</filename>には存在しなくなりましたが、依然その知識は重要です。この規則は、2つの一致キー(<literal>KERNEL</literal>、<literal>ATTRS</literal>)および1つの割り当てキー(<literal>SYMLINK</literal>)で構成されます。<literal>KERNEL</literal>キーは、<literal>ttyUSB</literal>タイプのすべてのデバイスを検索します。このキーで<literal>*</literal>ワイルドカードを使用すると、これらのデバイスのいくつかとマッチします。2つ目の一致キー<literal>ATTRS</literal>は、<literal>ttyUSB</literal>デバイスの<literal>sysfs</literal>にある<filename>product</filename>属性ファイルに一定の文字列が含まれているかどうかをチェックします。割り当てキー(<literal>SYMLINK</literal>)は、<filename>/dev/pilot</filename>の下に、このデバイスへのシンボリックリンクを追加します。このキーで演算子(<literal>+=</literal>)を使用すると、前/後の規則が他のシンボリックリンクを追加した場合でも、udevはこの操作を追加実行します。<systemitem class="service"/>この規則は、2つの一致キーを含むので、両方の条件が満たされる場合のみ適用されます。
+  </para>
+
+  <para>
+   <systemitem>printer</systemitem>ルールは、USBプリンタを対象とし、2つの一致キー(<literal>SUBSYSTEM</literal>、<literal>KERNEL</literal>)を含みます。規則全体を適用するには、これらのキーを両方とも適用する必要があります。3つの割り当てキーは、このデバイスタイプの名前付け(<literal>NAME</literal>)、シンボリックデバイスリンクの作成、(<literal>SYMLINK</literal>)、およびこのデバイスタイプのグループメンバーシップ(<literal>GROUP</literal>)を処理します。<literal>KERNEL</literal>キーで<literal>*</literal>ワイルドカードを使用すると、いくつかの<literal>lp</literal>プリンタデバイスとマッチします。<literal>NAME</literal>および<literal>SYMLINK</literal>の両キーで置き換えを使用すると、これらの文字列を内部デバイス名で拡張できます。たとえば、最初の<literal>lp</literal> USBプリンタへのシンボリックリンクは<filename>/dev/usblp0</filename>になります。
+  </para>
+
+  <para>
+   <systemitem>kernel firmware loader</systemitem>ルールでは、ランタイム時の外部ヘルパースクリプトで、udevが追加ファームウェアをロードします。<systemitem class="service"/><literal>SUBSYSTEM</literal>一致キーは、<literal>firmware</literal>サブシステムを検索します。<literal>ACTION</literal>キーは、<literal>firmware</literal>サブシステムに属するデバイスが追加されているかどうかをチェックします。<literal>RUN+=</literal>キーは、<literal>firmware.sh</literal>スクリプトの実行をトリガして、ファームウェアを見つけます。
+  </para>
+
+  <para>
+   すべての規則に共通する一般的特性は次のとおりです。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     各規則は、カンマで区切られた1つ以上のキー値ペアで構成されます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     キーの動作は、演算子で決定されます。<systemitem class="service">udevルールは、いくつかの異なる演算子をサポートします。</systemitem>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     指定する各値は、引用符で囲む必要があります。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     規則ファイルの各行が1つの規則に相当します。規則が1行を超える場合は、shell構文のように、<literal>\</literal>を使用して異なる行を結合してください。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service">udev</systemitem>ルールは、shell型のパターンをサポートします。このパターンは、<literal>*</literal>、<literal>?</literal>、および<literal>[]</literal>の各パターンとマッチします。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service">udevルールは、置換をサポートします。</systemitem>
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 xml:id="sec.udev.rules.ops">
+   <title><systemitem class="service">udev</systemitem>ルールでの演算子の使用</title>
+   <para>
+    キーを作成する場合は、作成するキーのタイプによって、いくつかの異なる演算子から選択できます。一致キーは、通常、検索値に一致するか、明示的に一致しない値を見つけるために使用されます。一致キーは、次の演算子のいずれかを含みます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>==</literal>
+     </term>
+     <listitem>
+      <para>
+       等価の比較。キーに検索パターンが含まれている場合は、そのパターンと一致するすべての結果が有効です。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>!=</literal>
+     </term>
+     <listitem>
+      <para>
+       非等価の比較。キーに検索パターンが含まれている場合は、そのパターンと一致するすべての結果が有効です。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    割り当てキーでは、次のどの演算子でも使用できます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>=</literal>
+     </term>
+     <listitem>
+      <para>
+       値をキーに割り当てます。すでに値のリストで構成されているキーはリセットされ、指定した1つの値だけが割り当てられます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>+=</literal>
+     </term>
+     <listitem>
+      <para>
+       エントリのリストを含むキーに値を追加します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>:=</literal>
+     </term>
+     <listitem>
+      <para>
+       最終値を割り当てます。以降の規則による変更は許可されません。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.subst">
+   <title><systemitem class="service">udev</systemitem>ルールでの置換の使用</title>
+   <para>
+    <systemitem class="service">udevルールは、プレースホルダと置換の使用をサポートします。</systemitem>それらは、他のスクリプトでの使用と同様な方法で使用します。<systemitem class="service">udev</systemitem>ルールでは、次の置換を使用できます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>%r</literal>、<literal>$root</literal>
+     </term>
+     <listitem>
+      <para>
+       デフォルトのデバイスディレクトリ<filename>/dev</filename>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%p</literal>、<literal>$devpath</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>DEVPATH</envar>の値。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%k</literal>、<literal>$kernel</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>KERNEL</envar>の値または内部デバイス名。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%n</literal>、<literal>$number</literal>
+     </term>
+     <listitem>
+      <para>
+       デバイス番号。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%N</literal>、<literal>$tempnode</literal>
+     </term>
+     <listitem>
+      <para>
+       デバイスファイルの一時名。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%M</literal>、<literal>$major</literal>
+     </term>
+     <listitem>
+      <para>
+       デバイスのメジャー番号。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%m</literal>、<literal>$minor</literal>
+     </term>
+     <listitem>
+      <para>
+       デバイスのマイナー番号。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%s{<replaceable>attribute</replaceable>}</literal>、<literal>$attr{<replaceable>attribute</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       <filename>sysfs</filename>属性の値(<replaceable>attribute</replaceable>で指定)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%E{<replaceable>variable</replaceable>}</literal>、<literal>$attr{<replaceable>variable</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       環境変数の値(<replaceable>variable</replaceable>で指定)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%c</literal>、<literal>$result</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>PROGRAM</envar>の出力。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%%</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>%</literal>文字。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>$$</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>$</literal>文字。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.match">
+   <title><systemitem class="service">udev</systemitem>一致キーの使用</title>
+   <para>
+    一致キーは、<systemitem class="service">udev</systemitem>ルールの適用前に満たす必要のある条件を記述します。次の一致キーが使用可能です。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>ACTION</literal>
+     </term>
+     <listitem>
+      <para>
+       イベント動作の名前。たとえば、<literal>add</literal>または<literal>remove</literal>(デバイスの追加または削除の場合)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DEVPATH</literal>
+     </term>
+     <listitem>
+      <para>
+       イベントデバイスのデバイスパス。たとえば、<literal>DEVPATH=/bus/pci/drivers/ipw3945</literal>(ipw3945ドライバに関連するすべてのイベントを検索する場合)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNEL</literal>
+     </term>
+     <listitem>
+      <para>
+       イベントデバイスの内部(カーネル)名。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEM</literal>
+     </term>
+     <listitem>
+      <para>
+       イベントデバイスのサブシステム。たとえば、<literal>SUBSYSTEM=usb</literal>(USBデバイスに関連するすべてのイベント用)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>filename</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="filesystem">イベントデバイスのsysfs属性。</systemitem><filename>vendor</filename>属性ファイル名に含まれた文字列とマッチするには、たとえば、<literal>ATTR{vendor}=="On[sS]tream"</literal>を使用できます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNELS</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="service">udev</systemitem>にデバイスパスを上方に検索させ、一致するデバイス名を見つけます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEMS</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="service">udev</systemitem>にデバイスパスを上方に検索させ、一致するデバイスサブシステム名を見つけます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DRIVERS</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="service">udev</systemitem>にデバイスパスを上方に検索させ、一致するデバイスドライバ名を見つけます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTRS{<replaceable>filename</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="service">udev</systemitem>にデバイスパスを上方に検索させ、一致する<systemitem class="filesystem">sysfs</systemitem>属性値を持つデバイスを見つけます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>key</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       環境変数の値。たとえば、<literal>ENV{ID_BUS}="ieee1394</literal>でFireWire bus IDに関連するすべてのイベントを検索します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>PROGRAM</literal>
+     </term>
+     <listitem>
+      <para>
+       <systemitem class="service">udev</systemitem>に外部プログラムを実行させます。成功の場合は、プログラムが終了コードとしてゼロを返します。プログラムの出力はSTDOUTに送られ、<literal>RESULT</literal>キーで使用できます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RESULT</literal>
+     </term>
+     <listitem>
+      <para>
+       最後の<literal>PROGRAM</literal>呼び出しの出力文字列とマッチします。このキーは、<literal>PROGRAM</literal>キーと同じ規則に含めるか、それ以降のキーに含めてください。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.assign">
+   <title><systemitem class="service">udev</systemitem>割り当てキーの使用</title>
+   <para>
+    上記で説明した一致キーに対し、割り当てキーでは満たすべき条件を記述しません。値、名前、アクションを<systemitem class="service">udev</systemitem>が保守するデバイスノードに割り当てます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>NAME</literal>
+     </term>
+     <listitem>
+      <para>
+       作成するデバイスノードの名前。いったんルールでノード名が設定されると、このノードの<literal>NAME</literal>キーを持つ他のルールはすべて無視されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SYMLINK</literal>
+     </term>
+     <listitem>
+      <para>
+       作成するノードに関連するシンボリックリンクの名前。複数の一致ルールで、デバイスノードとともに作成するシンボリックリンクを追加できます。1つのルール内で、スペース文字でシンボリックリンク名を区切ることで、1つのノードに複数のシンボリックリンクを指定することもできます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OWNER、GROUP、MODE</literal>
+     </term>
+     <listitem>
+      <para>
+       新しいデバイスノードのパーミッションここで指定する値は、すでにコンパイルされている値を上書きします。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>key</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       イベントデバイスの<systemitem class="filesystem">sysfs</systemitem>属性に書き込む値を指定します。<literal>==</literal>演算子を使用すると、このキーは、sysfs属性の値とのマッチングにも使用されます。<systemitem class="filesystem"/>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>key</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       環境への変数のエクスポートを<systemitem class="service">udev</systemitem>に指示します。<literal>==</literal>演算子を指定すると、このキーは、環境変数とのマッチングにも使用されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RUN</literal>
+     </term>
+     <listitem>
+      <para>
+       このデバイスに対して実行されるプログラムのリストにプログラムを追加するように、<systemitem class="service">udev</systemitem>に指示します。このデバイスのイベントをブロックしないようにするため、これは非常に短いタスクに限定してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>LABEL</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>GOTO</literal>のジャンプ先にするラベルを追加します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>GOTO</literal>
+     </term>
+     <listitem>
+      <para>
+       いくつかのルールをスキップし、<literal>GOTO</literal>キーで参照されるラベルを含むルールから続行するように、<systemitem class="service">udev</systemitem>に指示します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>IMPORT{<replaceable>type</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       変数をイベント環境(外部プログラムの出力など)にロードします。<systemitem class="service">udevは、いくつかの異なるタイプの変数をインポートします。</systemitem>タイプが指定されていない場合、<systemitem class="service">udev</systemitem>は、ファイルパーミションの実行可能ビットに基づいてタイプを決定しようとします。
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>program</literal><systemitem class="service"> - 外部プログラムを実行し、その出力をインポートします。</systemitem>
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>file</literal><systemitem class="service"> - テキストファイルをインポートします。</systemitem>
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>parent</literal><systemitem class="service"> - 親デバイスから保存されたキーをインポートします。</systemitem>
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>WAIT_FOR_SYSFS</literal>
+     </term>
+     <listitem>
+      <para>
+       一定のデバイスに指定された<systemitem class="filesystem">sysfs</systemitem>ファイルが作成されるまで、<systemitem class="service">udev</systemitem>を待機させます。たとえば、<literal>WAIT_FOR_SYSFS="ioerr_cnt"</literal>では、<filename>ioerr_cnt</filename>ファイルが作成されるまで、<systemitem class="service">udev</systemitem>を待機させます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>オプション</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>OPTION</literal>キーには、次の可能な値があります。
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>last_rule</literal><systemitem class="service"> - 以降のすべての規則を無視します。</systemitem>
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_device</literal><systemitem class="service"> - このイベントを完全に無視します。</systemitem>
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_remove</literal><systemitem class="service"> - このデバイスの以降のすべての削除イベントを無視します。</systemitem>
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>all_partitions</literal><systemitem class="service"> - ブロックデバイス上のすべての使用可能なパーティションにデバイスノードを作成します。</systemitem>
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.udev.persdev">
+  <title>永続的なデバイス名の使用</title>
+
+  <para>
+   動的デバイスディレクトリおよび<systemitem class="service">udev</systemitem>ルールインフラストラクチャによって、認識順序やデバイスの接続手段にかかわらず、すべてのディスクデバイスに一定の名前を指定できるようになりました。カーネルが作成する適切なブロックデバイスはすべて、特定のバス、ドライブタイプまたはファイルシステムに関する特別な知識を備えたツールによって診断されます。動的カーネルによって指定されるデバイスノード名とともに、<systemitem class="service">udev</systemitem>は、デバイスをポイントする永続的なシンボリックリンクのクラスを維持します。
+  </para>
+
+<screen>/dev/disk
+|-- by-id
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B -&gt; ../../sda
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part1 -&gt; ../../sda1
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part6 -&gt; ../../sda6
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part7 -&gt; ../../sda7
+|   |-- usb-Generic_STORAGE_DEVICE_02773 -&gt; ../../sdd
+|   `-- usb-Generic_STORAGE_DEVICE_02773-part1 -&gt; ../../sdd1
+|-- by-label
+|   |-- Photos -&gt; ../../sdd1
+|   |-- SUSE10 -&gt; ../../sda7
+|   `-- devel -&gt; ../../sda6
+|-- by-path
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0 -&gt; ../../sda
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part1 -&gt; ../../sda1
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part6 -&gt; ../../sda6
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part7 -&gt; ../../sda7
+|   |-- pci-0000:00:1f.2-scsi-1:0:0:0 -&gt; ../../sr0
+|   |-- usb-02773:0:0:2 -&gt; ../../sdd
+|   |-- usb-02773:0:0:2-part1 -&gt; ../../sdd1
+`-- by-uuid
+    |-- 159a47a4-e6e6-40be-a757-a629991479ae -&gt; ../../sda7
+    |-- 3e999973-00c9-4917-9442-b7633bd95b9e -&gt; ../../sda6
+    `-- 4210-8F8C -&gt; ../../sdd1</screen>
+ </sect1>
+ <sect1 xml:id="sec.udev.files">
+  <title><systemitem class="service">udev</systemitem>で使用するファイル</title>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/sys/*</filename>
+    </term>
+    <listitem>
+     <para>
+      Linuxカーネルによって提供される仮想ファイルシステム。現在知られているデバイスをすべてエクスポートします。この情報は、<systemitem class="service">udev</systemitem>が使用して<filename>/dev</filename>内にデバイスノードを作成します。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/dev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      動的に作成されたデバイスノード、およびsystemd-tmpfilesで作成された静的コンテンツ。詳細については、<systemitem>systemd-tmpfiles(8)</systemitem>のマニュアルページを参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   以下のファイルおよびディレクトリには、<systemitem class="service">udev</systemitem>インフラストラクチャの重要な要素が含まれています。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/etc/udev/udev.conf</filename>
+    </term>
+    <listitem>
+     <para>
+      メイン<systemitem class="service">udev</systemitem>設定ファイル
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/udev/rules.d/*</filename>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">規則と一致するudevイベント.</systemitem>
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/tmpfiles.d/</filename>および<filename>/etc/tmpfiles.d/</filename>
+    </term>
+    <listitem>
+     <para>
+      静的<filename>/dev</filename>コンテンツを管理します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/udev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">udev</systemitem>ルールから呼び出されるヘルパープログラム
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.udev.moreinfo">
+  <title>詳細情報</title>
+
+  <para>
+   <systemitem class="service">udev</systemitem>インフラストラクチャの詳細については、以下のマニュアルページを参照してください。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><systemitem class="service">udev</systemitem>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">udev</systemitem>、キー、ルールなどの重要な設定課題に関する一般情報
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>udevadm</command>
+    </term>
+    <listitem>
+     <para>
+      <command>udevadm</command>は、<systemitem class="service">udev</systemitem>のランタイム動作を制御し、カーネルイベントを要求し、イベントキューを管理し、簡単なデバッグメカニズムを提供します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem class="daemon">udevd</systemitem>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="daemon">udev</systemitem>イベント管理デーモンに関する情報
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+</chapter>
