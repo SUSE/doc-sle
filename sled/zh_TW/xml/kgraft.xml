@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="kgraft.xml" version="5.0" xml:id="cha.kgraft" xml:lang="zh-tw">
+<?suse-quickstart color="suse"?>
+
+
+ <title>使用 kGraft 即時修補核心</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+   </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+      <abstract>
+        <para>
+    本文件介紹 kGraft 即時修補技術的基本原理，並提供 SLE Live Patching 服務的使用指導方針。
+   </para>
+        <para>
+    kGraft 是一項即時修補技術，使用它無需停止核心，就能在執行時期修補 Linux 核心。它可以最大程度地增大系統執行時間，從而提高系統可用性，這對於關鍵任務系統而言非常重要。該項技術還允許動態修補核心，鼓勵使用者安裝關鍵的安全性更新，不必將其推遲到排程的停機時間。
+   </para>
+        <para>
+    kGraft 修補程式是一個核心模組，旨在取代核心中的整個函數。kGraft 主要提供核心內基礎結構，用於在執行時期將修補的代碼與基本核心代碼相整合。
+   </para>
+        <para>
+    SLE Live Patching 是在定期 SUSE Linux Enterprise Server 維護基礎之上提供的服務。透過 SLE Live Patching 配送的 kGraft 補充了定期 SLES 維護更新。可以使用常用的更新堆疊和程序來部署 SLE Live Patching。
+   </para>
+      </abstract>
+    </info>
+    <sect1>
+  <title>kGraft 的優勢</title>
+
+  <para>
+   若要對緊急情況迅速做出回應 (已知發生了應該儘快修復的嚴重弱點，或者已知的修復程式出現嚴重的系統穩定性問題)，使用 kGraft 的即時核心修補特別有用。該技術不適合用於非時間關鍵型的已排程更新。
+  </para>
+
+  <para>
+   kGraft 的典型使用案例包括系統 (例如，包含巨量 RAM，且開機時間偶爾需要 15 分鐘或更長的記憶體資料庫)、需要持續數周或數月且不能重新啟動的大規模擬真，或者向大量消費者持續提供服務的基礎結構建置組塊。
+  </para>
+
+  <para>
+   kGraft 的主要優勢是它永不要求停止核心，哪怕是短暫停止。
+  </para>
+
+  <para>
+   kGraft 修補程式是 KMP RPM 套件中的一個 <filename>.ko</filename> 核心模組。可以在安裝或更新 RPM 套件時，使用 <command>insmod</command> 指令將該模組插入核心。kGraft 會取代核心中的整個函數，即使這些函數正在執行。如果需要，可以使用更新的 kGraft 模組取代現有修補程式。
+  </para>
+
+  <para>
+   kGraft 也很精簡 - 因為利用了其他標準 Linux 技術，它只包含少量的程式碼。
+  </para>
+ </sect1>
+ <sect1>
+  <title>kGraft 的低層級功能</title>
+
+  <para>
+   kGraft 使用 ftrace 基礎結構執行修補。下面介紹了在 x86-64 架構上的實作。
+  </para>
+
+  <para>
+   為了修補某個核心函數，kGraft 要求該函數的開頭有一定的空間，以便插入指向新函數的跳躍點。此空間是在開啟函數評估的情況下，於核心編譯期間由 GCC 配置的。具體而言，將在核心函數的開頭注入一個 5 位元組呼叫指令。將此類經過檢測的核心開機時，評估呼叫將由 5 位元組 NOP (無操作) 指令取代。
+  </para>
+
+  <para>
+   修補開始之後，第一個位元組將由 INT3 (斷點) 指令取代。這可以確定 5 位元組指令取代動作的不可部分完成性。其他四個位元組將由新函數的位址取代。最後，第一個位元組將由 JMP (長跳躍) OpCode 取代。
+  </para>
+
+  <para>
+   在整個過程中，將會使用處理器間不可遮罩岔斷 (IPI NMI) 來衝洗系統中其他 CPU 的理論式解碼佇列。這樣，無需停止核心 (哪怕是短暫性的停止)，就能切換到新的函數。IPI NMI 產生的岔斷可以毫秒為單位測量，並且不被視為服務岔斷，因為無論在哪種情況下，這些岔斷都是在核心執行時發生的。
+  </para>
+
+  <para>
+   永遠不會修補呼叫者。被呼叫者的 NOP 將由指向新函數的 JMP 取代。JMP 指令會永久保留。這種運作方式可以處理好函數指標 (包括結構中的指標)，並且不需要儲存任何舊資料就能取消修補。
+  </para>
+
+  <para>
+   但是，這些步驟本身並不足夠妥善：因為函數的取代可能會完成一部分，核心某個部分中修復的新函數可能仍會呼叫其他位置的某個舊函數，反之亦然。如果函數介面的語意在修補程式中發生變更，將會因應性地造成混亂。
+  </para>
+
+  <para>
+   因此，在取代所有函數之前，kGraft 使用以彈性機制為基礎，類似於 RCU (讀取-複製-更新) 的方案，來確定每個使用者空間線串、核心線串和核心岔斷保持一致的全域檢視。將在每個核心入口和出口中，為每個線串設定一個旗標。這樣，一個舊函數總是會呼叫另一個舊函數，而一個新函數總是會呼叫另一個新函數。為所有程序設定「new universe」旗標之後，修補即告完成，此時，可以移除彈性機制，程式碼可以全速執行，且不會對效能產生影響，不過，每個修補的函數需要經歷超長時間的跳轉。
+  </para>
+ </sect1>
+ <sect1>
+  <title>安裝 kGraft 修補程式</title>
+
+  <para>
+   本節介紹如何啟用 SUSE Linux Enterprise Live Patching 延伸，以及如何安裝 kGraft 修補程式。
+  </para>
+
+  <sect2>
+   <title>啟用 SLE Live Patching</title>
+   <para>
+    若要在您的系統上啟用 SLE Live Patching，請遵循以下步驟：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      如果您的 SLES 系統尚未註冊，現在請註冊。可以在安裝系統期間完成註冊，或者以後再使用 YaST <guimenu>產品註冊</guimenu>模組 (<command>yast2 registration</command>) 執行註冊。註冊後，按一下<guimenu>是</guimenu>查看可用線上更新的清單。
+     </para>
+     <para>
+      如果您的 SLES 系統已註冊，但 SLE Live Patching 尚未啟用，請開啟 YaST <guimenu>產品註冊</guimenu>模組 (<command>yast2 registration</command>)，然後按一下<guimenu>選取延伸</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在可用延伸清單中選取 <guimenu>SUSE Linux Enterprise Live Patching 12</guimenu>，然後按<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      確認授權條款並按<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      輸入 SLE Live Patching 註冊代碼並按<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      檢查<guimenu>安裝摘要</guimenu>和所選的<guimenu>模式</guimenu>。應該選取安裝模式 <systemitem>Live Patching</systemitem>。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>接受</guimenu>完成安裝。如此就會在您的系統上安裝 kGraft 基本元件，以及初始的即時修補程式。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2>
+   <title>正在更新系統</title>
+   <procedure>
+    <step>
+     <para>
+      SLE Live Patching 更新的配送形式允許使用標準 SLE 更新堆疊來套用修補程式。可以使用 <command>zypper patch</command>、YaST2 線上更新或同等的方法來更新初始即時修補程式。
+     </para>
+    </step>
+    <step>
+     <para>
+      核心將在安裝套件的過程中自動修補。但是，只有在喚醒並取出所有休眠程序之後，才能完全消除舊核心函數的呼叫。這樣可以節省大量的時間。儘管如此，我們並不認為使用舊核心函數的休眠程序存在安全性問題。不過，在目前版本的 kGraft 中，只有在所有程序跨核心使用者空間邊界使用前一修補程式中已修補的函數之後，才可以套用另一個 kGraft 修補程式。
+     </para>
+     <para>
+      若要查看全域修補狀態，請檢查 <filename>/sys/kernel/kgraft/in_progress</filename> 中的旗標。值 <literal>1</literal> 表示存在仍需喚醒的休眠程序 (修補仍在進行中)。值 <literal>0</literal> 表示所有程序都只使用了修補的函數，並且修補已經完成。或者，可以使用 <command>kgr status</command> 指令取得相同的資訊。
+     </para>
+     <para>
+      也可以根據每個程序檢查旗標。針對每個程序分別檢查 <filename>/proc/<replaceable>process_number</replaceable>/kgr_in_progress</filename> 中的數字。同樣，值 <literal>1</literal> 表示仍需喚醒的休眠程序。或者，可以使用 <command>kgr blocking</command> 指令輸出休眠程序的清單。
+     </para>
+    </step>
+
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1>
+  <title>移除 kGraft 修補程式</title>
+
+  <para>
+   若要移除 kGraft 修補程式，請使用以下程序：
+  </para>
+
+
+
+  <procedure>
+   <step>
+    <para>
+     首先使用 zypper 移除修補程式本身：
+    </para>
+<screen>
+    zypper rm kgraft-patch-<replaceable>3_12_32-25-default</replaceable>
+   </screen>
+   </step>
+   <step>
+    <para>
+     然後重新開機。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1>
+  <title>阻塞的核心執行線串</title>
+
+  <para>
+   需要準備好核心線串才能處理 kGraft。協力廠商軟體不一定能夠完全配合 kGraft，並且其核心模組可能會衍生大量的核心執行線串。這些線串會無限期阻擋修補程序。做為應急措施，kGraft 允許強行完成修補程序，而無需等待所有執行線串跨越安全檢查點。若要實現此目的，可以在 <filename>/sys/kernel/kgraft/in_progress</filename> 中寫入 <literal>0</literal>。在執行此程序之前，請先諮詢 SUSE 支援。
+  </para>
+
+
+ </sect1>
+ <sect1>
+  <title><command>kgr</command> 工具</title>
+
+  <para>
+   使用 <command>kgr</command> 工具可以簡化許多 kGraft 管理任務。可用的指令為：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>kgr status</command>
+    </term>
+    <listitem>
+     <para>
+      顯示 kGraft 修補的總體狀態 (<literal>ready</literal> 或 <literal>in_progress</literal>)。
+
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr patches</command>
+    </term>
+    <listitem>
+     <para>
+      顯示已載入 kGraft 修補程式的清單。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr blocking</command>
+    </term>
+    <listitem>
+     <para>
+      列出阻止完成 kGraft 修補的程序。預設只會列出 PID。指定 <option>-v</option> 可以列顯指令行 (如果可用)。再次指定 <option>-v</option> 還會顯示堆疊追蹤。
+     </para>
+    </listitem>
+   </varlistentry>
+
+  </variablelist>
+
+  <para>
+   如需詳細資訊，請參閱 <command>man kgr</command>。
+  </para>
+ </sect1>
+ <sect1>
+  <title>kGraft 技術的應用範圍</title>
+
+  <para>
+   取代函數是 kGraft 的運作基礎。資料結構的變更只能透過 kGraft 間接完成。因此，變更核心資料結構時需要特別小心，如果變更幅度太大，可能需要重新開機。此外，kGraft 無法處理使用一個編譯器來編譯舊核心，同時使用另一個編譯器來編譯修補程式的情況。
+  </para>
+
+  <para>
+   由於 kGraft 的運作方式，對衍生大量核心線串之協力廠商模組的支援有限。
+
+  </para>
+ </sect1>
+ <sect1 xml:id="scope_patching">
+  <title>SLE Live Patching 的應用範圍</title>
+
+  <para>
+   SLE Live Patching 的應用範圍包括 CVSS (通用弱點評分系統) 層級 6 以上弱點的修復，以及與系統穩定性和資料損毀相關的錯誤修復。無法針對滿足上述所有準則的所有修復類型產生即時修補程式。如果出於技術原因而無法產生核心即時修補程式，SUSE 有權不發佈修復。如需 CVSS 的詳細資訊，請參閱 <link xlink:href="http://nvd.nist.gov/cvss.cfm/"/>。
+  </para>
+ </sect1>
+ <sect1>
+  <title>使用支援流程與我們互動</title>
+
+  <para>
+   在與 SUSE 技術部門合作解決技術難題的過程中，您可能會收到一個所謂的程式暫時修復 (PTF)。我們可能會針對各種套件 (包括構成 SLE Live Patching 基礎的套件) 發佈 PTF。
+  </para>
+
+  <para>
+   您可以像往常一樣安裝符合前一節中所述條件的 kGraft PTF，SUSE 確定無需將有問題的系統重新開機，並且將來的即時更新可以正常套用。
+  </para>
+
+  <para>
+   針對基礎核心發佈的 PTF 會中斷即時修補程序。首先，安裝 PTF 核心意味著需要重新開機，因為在執行時期無法取代整個核心。其次，需要再次重新開機，以便將 PTF 取代為對其發佈了即時修補程式的任何定期維護更新。
+  </para>
+
+  <para>
+   可將 SLE Live Patching 中其他套件的 PTF 視為享有正常擔保的一般 PTF。
+  </para>
+ </sect1>
+</chapter>
