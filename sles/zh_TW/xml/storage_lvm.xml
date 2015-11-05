@@ -1,0 +1,1371 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_lvm.xml" version="5.0" xml:id="cha.lvm" xml:lang="zh-tw">
+
+ <title>LVM 組態</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  本章概述了邏輯磁碟區管理員 (LVM) 背後的原則，以及可適合多種狀況下使用的基本功能。YaST LVM 組態可透過 YaST 進階磁碟分割程式來完成。這個磁碟分割工具讓您編輯和刪除現有磁碟分割，以及建立應該與 LVM 一起使用的新磁碟分割。
+ </para>
+ <warning>
+  <title>風險</title>
+  <para>
+   使用 LVM 可能會增加風險，如遺失資料。這些危險也包括應用程式當機、電源中斷和錯誤指令。執行 LVM 或重新設定磁碟區前，請儲存您的資料。決不要在沒有備份的情形下工作。
+  </para>
+ </warning>
+ <sect1 xml:id="sec.lvm.explained">
+  <title>瞭解邏輯磁碟區管理員</title>
+
+  <para>
+   LVM 支援在多個實體磁碟區 (硬碟、分割區、LUN) 之間彈性地分配硬碟空間。在安裝過程中，僅當完成首次磁碟分割時需要變更硬碟空間的分割，由此開發了此工具。因為要修改正在執行之系統上的分割區很困難，LVM 提供了記憶體空間的虛擬集區 (磁碟區群組，或 VG)，需要時，可從虛擬集區建立邏輯磁碟區 (LV)。作業系統可以存取這些 LV，而不是存取實體分割區。磁碟區群組可以延伸至一個以上的磁碟，因此數個磁碟或是數個磁碟的某些部份可能會構成單一的 VG。借此，LVM 提供了一種從實體磁碟空間進行擷取的方法，允許使用比實體磁碟重新分割更為簡單和安全的方式來變更分割。
+  </para>
+
+  <para>
+   <xref linkend="fig.lvm.explain" xrefstyle="FigureXRef"/>比較實體分割 (左邊) 與 LVM 分割 (右邊)。在左邊，單一個磁碟已分割為三個實體分割區 (PART)，每一個都會指定掛接點 (MP)，讓作業系統存取它們。在右邊，已經個別將兩個磁碟分割成兩個及三個實體分割區。已經定義兩個 LVM 磁碟區群組 (VG1 與 VG2)。VG 1 包含 DISK 1 的兩個磁碟區以及 DISK 2 的一個磁碟區。VG 2 包含 DISK 2 其餘的兩個磁碟區。
+  </para>
+
+  <figure xml:id="fig.lvm.explain">
+   <title>實體分割與 LVM</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="lvm.svg" width="80%" format="SVG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="lvm.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   在 LVM 中，併入一個磁碟區群組中的實體磁碟分割區稱為實體磁碟區 (PV)。在<xref linkend="fig.lvm.explain" xrefstyle="FigureXRef"/>中的磁碟區群組中，已經定義 4 個邏輯磁碟區 (LV 1 至 LV 4)，作業系統可以透過關聯的掛接點 (MP) 來使用這些邏輯磁碟區。在不同的邏輯磁碟區之間的邊緣，不需要對齊任何分割區的邊緣。請參閱此範例中 LV 1 與 LV 2 之間的邊緣。
+  </para>
+
+  <para>
+   LVM 功能：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     數個硬碟或分割區可以在大的邏輯磁碟區結合成一個。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     如果組態適用，當可用空間耗盡時，可以擴大 LV (如 <filename>/usr</filename>)。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     使用 LVM，就可以在執行的系統中新增硬碟或 LV。然而，這種作法需要能執行此動作的熱交換式硬體。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     可以啟動<emphasis>分割模式</emphasis>，將邏輯磁碟區的資料流分散至數個實體磁碟區。如果這些實體磁碟區位於不同的磁碟上，這可以改善讀寫效能，就像 RAID 0 一樣。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     快照功能能夠讓執行系統中的備份 (特別是伺服器) 成為一致。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   使用 LVM 的這些功能，對於使用頻繁的家用個人電腦或小型伺服器而言，在效能上可以看到改善。如果您在資料庫、音樂歸檔或使用者目錄中的資料會一直累積，LVM 就是非常適用的工具。可允許比實體硬碟還大的檔案系統。LVM 的另一個好處是最大可以增加到 256 個 LV。不過，請記住使用 LVM 與使用傳統分割區是不同的。
+  </para>
+
+
+
+  <para>
+   您可以使用 YaST 磁碟分割程式來管理新的或現有的 LVM 儲存物件。如需設定 LVM 的指示及詳細資訊，請參閱官方網站的 <link xlink:href="http://tldp.org/HOWTO/LVM-HOWTO/"><citetitle>LVM HOWTO</citetitle></link>。
+  </para>
+
+  <important>
+   <title>在現有 LVM 組態上新增多重路徑支援</title>
+   <para>
+    如果在設定 LVM 之後新增多重路徑支援，您必須修改 <filename>/etc/lvm/lvm.conf</filename> 檔案，以便僅掃描 <filename>/dev/disk/by-id</filename> 目錄中的多重路徑裝置名稱 (如<xref linkend="sec.multipath.lvm" xrefstyle="SectTitleOnPage"/> 中所述)，然後將伺服器重新開機。
+   </para>
+  </important>
+ </sect1>
+ <sect1 xml:id="sec.lvm.vg">
+  <title>建立磁碟區群組</title>
+
+  <para>
+   一個 LVM 磁碟區群組 (VG) 可將多個 Linux LVM 分割區組合到一個邏輯空間池中。您可以從群組的可用空間中切出邏輯磁碟區。群組中的 Linux LVM 分割區可以位於相同磁碟也可以位於不同的磁碟上。您可以新增分割區或整個磁碟來擴充群組的大小。如果您要使用整個磁碟，磁碟就不能包含任何分割區。若要使用分割區，則一定不能將它們掛接。YaST 在將分割區新增至 VG 時，會自動將它們的分割區類型變更為 <literal>0x8E Linux LVM</literal>。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     啟動 YaST 並開啟<guimenu>磁碟分割程式</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     如果您需要重新設定現有分割設定，請依如下步驟操作。如需詳細資訊，請參閱<xref linkend="sec.yast2.i_y2_part_expert"/>。如果您只是想利用已存在但未用到的磁碟或分割區，請跳過此步驟。
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       若要使用已包含分割區的整個硬碟，請刪除該磁碟上的所有分割區。
+      </para>
+     </step>
+     <step>
+      <para>
+       若要使用目前已掛接的分割區，請將其卸載。
+      </para>
+     </step>
+     <step>
+      <para>
+       若要使用硬碟上未分割的可用空間，請在磁碟上建立一個新的主要或邏輯分割區。將其類型設定為 <literal>0x8E Linux LVM</literal>。不要將其格式化或掛接。
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     在左側面板中，選取<guimenu>磁碟區管理</guimenu>。
+    </para>
+    <para>
+     右側面板中即會開啟一份現有磁碟區群組清單。
+    </para>
+   </step>
+   <step>
+    <para>
+     在「磁碟區管理」頁面左下方，按一下<menuchoice><guimenu>新增</guimenu> <guimenu>磁碟區群組</guimenu></menuchoice>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm4_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm4_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     按如下所示定義磁碟區群組︰
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       指定<guimenu>磁碟區群組名稱</guimenu>。
+      </para>
+      <para>
+       如果您要在安裝時建立磁碟區群組，建議為將包含 SUSE Linux Enterprise Server 系統檔案的磁碟區群組指定 <literal>system</literal> 名稱。<phrase role="productname"><phrase os="sles"/></phrase>
+      </para>
+     </step>
+     <step>
+      <para>
+       指定<guimenu>實體範圍大小</guimenu>。
+      </para>
+      <para>
+       <guimenu>實體範圍大小</guimenu>定義磁碟區群組中實體區塊的大小。在卷冊群組中的所有磁碟空間都會以此大小的區塊來處理。值可以是 1 KB 到 16 GB 範圍內 2 的次方。此值通常設定為 4 MB。
+      </para>
+      <para>
+       在 LVM1 中，4 MB 實體範圍允許的最大 LV 大小是 256 GB，因為該 LVM 最多支援每個 LV 有 65534 個範圍。在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上使用的 LVM2 不會限制實體範圍數量。範圍數量龐大不會影響邏輯磁碟區的 I/O 效能，但會降低 LVM 工具的速度。
+      </para>
+      <important>
+       <title>實體範圍大小</title>
+       <para>
+        在單個 VG 中不應混合使用不同的實體範圍大小。在進行初始設定後，就不應當再修改範圍。
+       </para>
+      </important>
+     </step>
+     <step>
+      <para>
+       在<guimenu>可用實體磁碟區</guimenu>清單中，選取要用來組成此磁碟區群組的 Linux LVM 分割區，然後按一下<guimenu>新增</guimenu>以將它們移至<guimenu>選定實體磁碟區</guimenu>清單。
+      </para>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>完成</guimenu>。
+      </para>
+      <para>
+       新群組便會出現在<guimenu>磁碟區群組</guimenu>清單中。
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     在「磁碟區管理」頁面中按<guimenu>下一步</guimenu>，確認新的磁碟區群組有列出，然後按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     若要檢查哪些實體裝置屬於磁碟區群組，請於任一時間在執行中系統內開啟 YaST 磁碟分割程式，然後按一下<menuchoice><guimenu>磁碟區管理</guimenu> <guimenu>編輯</guimenu> <guimenu>實體裝置</guimenu></menuchoice>。按一下<guimenu>中止</guimenu>離開此螢幕。
+    </para>
+    <figure xml:id="fig.yast2.lvm.physical_volumes">
+     <title>名為 DATA 的磁碟區群組中的實體磁碟區</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm5_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm5_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.lv">
+  <title>建立邏輯磁碟區</title>
+
+  <para>
+   邏輯磁碟區會提供一個與硬碟提供的空間池相似的空間池。若要讓此空間可用，您需要定義實體磁碟區。實體磁碟區類似於一般分割區，您可以將其格式化和掛接。
+  </para>
+
+  <para>
+   使用 YaST 磁碟分割程式可從現有磁碟區群組建立邏輯磁碟區。至少指定一個邏輯磁碟區給每個磁碟區群組。可以視需要建立新的邏輯磁碟區，直到磁碟區群組中的所有可用空間都用完為止。可以選擇性地簡易佈建一個 LVM 邏輯磁碟區，以便建立大小超出可用空間的邏輯磁碟區 (如需詳細資訊，請參閱<xref linkend="sec.lvm.lv.thin"/>)。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <formalpara>
+     <title>一般磁碟區</title>
+     <para>
+      (預設) 系統會立即配置磁碟區的空間。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>簡易池</title>
+     <para>
+      邏輯磁碟區是保留給簡易磁碟區使用的空間池。簡易磁碟區可以視需要從簡易池中配置它們所需的空間。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>簡易磁碟區</title>
+     <para>
+      建立為疏鬆磁碟區的磁碟區。該磁碟區會視需要從簡易池配置所需的空間。
+     </para>
+    </formalpara>
+   </listitem>
+  </itemizedlist>
+
+  <procedure xml:id="pro.lvm.lv">
+   <title>設定邏輯磁碟區</title>
+   <step>
+    <para>
+     啟動 YaST 並開啟<guimenu>磁碟分割程式</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左側面板中，選取<guimenu>磁碟區管理</guimenu>。右側面板中即會開啟一份現有磁碟區群組清單。
+    </para>
+   </step>
+   <step>
+    <para>
+     選取要在其中建立磁碟區的磁碟區群組，然後選擇<menuchoice><guimenu>新增</guimenu> <guimenu>邏輯磁碟區</guimenu></menuchoice>。
+    </para>
+   </step>
+   <step>
+    <para>
+     提供磁碟區的<guimenu>名稱</guimenu>，然後選擇<guimenu>一般磁碟區</guimenu> (如需設定簡易佈建磁碟區的資訊，請參閱<xref linkend="sec.lvm.lv.thin"/>)。按<guimenu>下一步</guimenu>繼續。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm9_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm9_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     指定磁碟區的大小以及是否使用多個等量磁區。
+    </para>
+    <para>
+     如果使用分割的磁碟區，資料將在多個實體磁碟區之間分配。如果這些實體磁碟區是在不同的硬碟上，通常可以改善讀寫效能 (像 RAID 0 一樣)。可用等量磁碟區的最大數量就是實體磁碟區的數量。預設值 <literal>1</literal> 表示不使用多個等量磁碟區。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm10_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm10_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     選擇磁碟區的<guimenu>角色</guimenu>。您在此處所做的選擇只會影響即將開啟之對話方塊的預設值。它們可以在下一步中變更。如果不確定，請選擇<guimenu>原始磁碟區 (未格式化)</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm11_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm11_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     在<guimenu>格式化選項</guimenu>下，選取<guimenu>格式化分割區</guimenu>，然後選取<guimenu>檔案系統</guimenu>。<guimenu>選項</guimenu>功能表的內容視檔案系統而定。一般不需要變更預設值。
+    </para>
+    <para>
+     在<guimenu>掛接選項</guimenu>下，選取<guimenu>掛接分割區</guimenu>，然後選取掛接點。按一下<guimenu>Fstab 選項</guimenu>可為磁碟區新增特殊掛接選項。
+    </para>
+   </step>
+   <step>
+    <para>
+     按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     按<guimenu>下一步</guimenu>，確認變更有列出，然後按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 xml:id="sec.lvm.lv.thin">
+   <title>簡易佈建的邏輯磁碟區</title>
+   <para>
+    您可以選擇性地對 LVM 邏輯磁碟區進行簡易佈建。簡易佈建可讓您建立預訂大小超過可用空間的邏輯磁碟區。您可以建立一個簡易池，來包含保留的供任意數量簡易磁碟區使用的未使用空間。簡易磁碟區將建立為疏鬆磁碟區，並且會視需要從簡易池配置空間。簡易池可以在需要時動態擴充，以具成本效益的方式來配置儲存空間。簡易佈建磁碟區還支援快照 (可以使用 Snapper 進行管理)，如需詳細資訊，請參閱<xref linkend="cha.snapper"/>。
+   </para>
+   <para>
+    若要設定簡易佈建的邏輯磁碟區，請依<xref linkend="pro.lvm.lv"/>所述操作。在選擇磁碟區類型時，請不要選擇<guimenu>一般磁碟區</guimenu>，而應選擇<guimenu>簡易磁碟區</guimenu>或<guimenu>簡易池</guimenu>。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>簡易池
+     </term>
+     <listitem>
+      <para>
+       邏輯磁碟區是保留給簡易磁碟區使用的空間池。簡易磁碟區可以視需要從簡易池中配置它們所需的空間。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>簡易磁碟區
+     </term>
+     <listitem>
+      <para>
+       建立為疏鬆磁碟區的磁碟區。該磁碟區會視需要從簡易池配置所需的空間。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <important>
+    <title>叢集中簡易佈建的磁碟區</title>
+    <para>
+     若要在叢集中使用簡易佈建磁碟區，使用它的簡易池和簡易磁碟區必須在單個叢集資源中管理。如此，簡易磁碟區和簡易池便可永遠獨佔地掛接在同一個節點上。
+    </para>
+   </important>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec.lvm.vg_resize">
+  <title>調整現有磁碟區群組的大小</title>
+
+  <para>
+   您可以於任何時間在執行中系統內新增更多實體磁碟區，使磁碟區群組提供的空間加以擴充，而無需中斷服務。這一特性允許您將邏輯磁碟區新增至群組或擴充現有磁碟區的大小，如<xref linkend="sec.lvm.lv_resize"/>所述。
+  </para>
+
+  <para>
+   您還可以透過移除實體磁碟區來縮小磁碟區群組的大小。YaST 只允許移除目前未使用的實體磁碟區。若要瞭解哪些實體磁碟區目前在使用中，請執行以下指令。<literal>PE Ranges</literal> 欄中列出的分割區 (實體磁碟區) 是使用中的分割區 (實體磁碟區)︰
+  </para>
+
+<screen><prompt>tux &gt; </prompt>sudo pvs -o vg_name,lv_name,pv_name,seg_pe_ranges
+root's password:
+  VG   LV    PV         PE Ranges
+             /dev/sda1
+  DATA DEVEL /dev/sda5  /dev/sda5:0-3839
+  DATA       /dev/sda5
+  DATA LOCAL /dev/sda6  /dev/sda6:0-2559
+  DATA       /dev/sda7
+  DATA       /dev/sdb1
+  DATA       /dev/sdc1</screen>
+
+  <procedure>
+   <step>
+    <para>
+     啟動 YaST 並開啟<guimenu>磁碟分割程式</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左側面板中，選取<guimenu>磁碟區管理</guimenu>。右側面板中即會開啟一份現有磁碟區群組清單。
+    </para>
+   </step>
+   <step>
+    <para>
+     選取要變更的磁碟區群組，然後按一下<guimenu>調整大小</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm8_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm8_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     請執行下列其中一個步驟︰
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>新增︰</title>
+       <para>
+        透過將一或多個實體磁碟區 (LVM 分割區) 從<guimenu>可用實體磁碟區</guimenu>清單移至<guimenu>選定實體磁碟區</guimenu>清單，可以擴大磁碟區群組的大小。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>移除︰</title>
+       <para>
+        透過將一或多個實體磁碟區 (LVM 分割區) 從<guimenu>選定實體磁碟區</guimenu>清單移至<guimenu>可用實體磁碟區</guimenu>清單，可以縮小磁碟區群組的大小。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     按<guimenu>下一步</guimenu>，確認變更有列出，然後按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.lv_resize">
+  <title>調整邏輯磁碟區的大小</title>
+
+  <para>
+   如果磁碟區群組中有未使用的可用空間可供使用，您可以增大邏輯磁碟區以提供更多可用空間。您還可以縮小某個磁碟區的大小，以便釋放磁碟區群組中可供其他邏輯磁碟區使用的空間。
+  </para>
+
+  <note>
+   <title><quote>線上</quote>調整大小</title>
+   <para>
+    YaST 在縮小磁碟區的大小時，還會自動調整其檔案系統的大小。目前掛接的磁碟區是否可以<quote>線上</quote> (即處於掛接狀態時) 調整大小，取決於其檔案系統。Btrfs、XFS、Ext3 和 ReiserFS 支援線上增大檔案系統。
+   </para>
+   <para>
+    只有 Btrfs 支援線上縮小檔案系統。若要縮小 XFS、Ext2/3/4 和 ReiserFS 磁碟區，您需要將它們卸載。採用 XFS 格式的磁碟區無法縮小，因為 XFS 不支援縮小檔案系統。
+   </para>
+  </note>
+
+  <procedure>
+   <step>
+    <para>
+     啟動 YaST 並開啟<guimenu>磁碟分割程式</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左側面板中，選取<guimenu>磁碟區管理</guimenu>。右側面板中即會開啟一份現有磁碟區群組清單。
+    </para>
+   </step>
+   <step>
+    <para>
+     選取要變更的邏輯磁碟區，然後按一下<guimenu>調整大小</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm12_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm12_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     使用下列選項之一設定所需大小︰
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>最大大小</title>
+       <para>
+        將邏輯磁碟區的大小擴充為使用磁碟區群組中剩餘的所有空間。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>最小大小</title>
+       <para>
+        將邏輯磁碟區的大小縮小為資料和檔案系統中繼資料佔用的大小。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>自定大小</title>
+       <para>
+        為磁碟區的大小指定新值。值必須介於上面列出的最小值與最大值之間。請使用 K、M、G、T 分別表示 KB、MB、GB 和 TB (例如 <literal>20G</literal>)。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     按一下<guimenu>確定</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     按<guimenu>下一步</guimenu>，確認變更有列出，然後按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1>
+  <title>刪除磁碟區群組或邏輯磁碟區</title>
+
+  <warning>
+   <title>資料損失</title>
+   <para>
+    刪除磁碟區群組會損毀其每個成員分割區中的所有資料。刪除邏輯磁碟區會損毀儲存在磁碟區中的所有資料。
+   </para>
+  </warning>
+
+  <procedure>
+   <step>
+    <para>
+     啟動 YaST 並開啟<guimenu>磁碟分割程式</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左側面板中，選取<guimenu>磁碟區管理</guimenu>。右側面板中即會開啟一份現有磁碟區群組清單。
+    </para>
+   </step>
+   <step>
+    <para>
+     選取要移除的磁碟區群組或邏輯磁碟區，然後按一下<guimenu>刪除</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     根據您的選擇，系統會顯示警告對話方塊。請按一下<guimenu>是</guimenu>進行確認。
+    </para>
+   </step>
+   <step>
+    <para>
+     按<guimenu>下一步</guimenu>，確認刪除的磁碟區群組 (刪除項目以紅色字型顯示) 有列出，然後按一下<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.cli">
+  <title>使用 LVM 指令</title>
+
+  <para>
+   如需使用 LVM 指令的資訊，請參閱下表中所述指令的 man 頁面。執行所有指令都需要有 <systemitem class="username">root</systemitem> 權限。使用 <command>sudo </command><replaceable>指令</replaceable> (建議)，或者直接以 <systemitem class="username">root</systemitem> 身分執行。
+  </para>
+
+  <table xml:id="tab.lvm.cli">
+   <title>LVM 指令</title>
+   <tgroup cols="2">
+    <colspec colnum="1" colname="1" colwidth="65*"/>
+    <colspec colnum="2" colname="2" colwidth="35*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        指令
+       </para>
+      </entry>
+      <entry>
+       <para>
+        描述
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+<screen>pvcreate <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        啟始化裝置 (例如 <filename>/dev/sdb</filename>)，以使 LVLM 將其做為實體磁碟區使用。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>pvdisplay <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        顯示 LVM 實體磁碟區的相關資訊，例如邏輯磁碟區中目前是否正在使用該磁碟區。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgcreate -c y <replaceable>vg_name</replaceable> <replaceable>dev1</replaceable> [<replaceable>dev2</replaceable>...]
+</screen>
+      </entry>
+      <entry>
+       <para>
+        使用一或多個指定的裝置建立叢集磁碟區群組。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgchange -a [ey|n] <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        為輸入/輸出啟動 (<literal>-a ey</literal>) 或取消啟動 (<literal>-a n</literal>) 磁碟區群組及其邏輯磁碟區。
+       </para>
+       <important>
+        <title>啟動叢集中的磁碟區。</title>
+        <para>
+         請務必使用 <literal>ey</literal> 選項在叢集節點上獨佔啟動磁碟區群組。此選項預設用於載入程序檔中。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgremove <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        移除磁碟區群組。使用此指令之前，移除邏輯磁碟區，然後取消啟動磁碟區群組。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgdisplay <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        顯示指定磁碟區群組的相關資訊。
+       </para>
+       <para>
+        若要查看磁碟區群組的總體實體範圍，請輸入
+       </para>
+<screen>vgdisplay <replaceable>vg_name</replaceable> | grep "Total PE"</screen>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -L <replaceable>size</replaceable> -n <replaceable>lv_name</replaceable> <replaceable>vg_name</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        建立具有指定大小的邏輯磁碟區。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -L <replaceable>size</replaceable> --thinpool <replaceable>pool_name</replaceable> <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        從磁碟區群組 <replaceable>vg_name</replaceable> 建立具有指定大小的簡易池 <literal>myPool</literal>。
+       </para>
+       <para>
+        下面的範例會從磁碟區群組 <literal>LOCAL</literal> 建立大小為 5 GB 的簡易池︰<command>lvcreate -L 5G --thinpool myPool LOCAL</command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -T
+	<replaceable>vg_name</replaceable>/<replaceable>pool_name</replaceable> -V <replaceable>size</replaceable> \
+-n <replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        在 <replaceable>pool_name</replaceable> 池中建立簡易邏輯磁碟區。下面的範例會從磁碟區群組 <literal>LOCAL</literal> 上的 <literal>myPool</literal> 池建立 1GB 簡易磁碟區 <literal>myThin1</literal>︰<command>lvcreate -T LOCAL/myPool -V 1G -n myThin1</command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -T <replaceable>vg_name</replaceable>/<replaceable>pool_name</replaceable> -V <replaceable>size</replaceable> -L <replaceable>size</replaceable> \
+-n <replaceable>LV_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        您也可以在一條指令中建立簡易池和簡易邏輯磁碟區︰<command>lvcreate -T LOCAL/myPool -V 1G -L 5G -n myThin1</command>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -s [-L <replaceable>size</replaceable>] -n <replaceable>snap_volume</replaceable> \
+<replaceable>source_volume_path</replaceable> <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        建立指定邏輯磁碟區的快照磁碟區。如果未包括大小選項 (<option>-L</option> 或 <option>--size</option>)，則系統會將快照建立為簡易快照。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvremove /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        移除邏輯磁碟區。
+       </para>
+       <para>
+        使用此指令之前，請執行 <command>umount</command> 指令卸下邏輯磁碟區以將其關閉。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvremove <replaceable>snap_volume_path</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        移除快照磁碟區。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvconvert --merge <replaceable>snap_volume_path</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        將邏輯磁碟區回復為快照的版本。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgextend <replaceable>vg_name</replaceable> <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        將指定的裝置 (實體磁碟區) 新增至現有磁碟區群組。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgreduce <replaceable>vg_name</replaceable> <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        從現有磁碟區群組中移除指定的實體磁碟區。
+       </para>
+       <important>
+        <para>
+         確保實體磁碟區目前未由任何邏輯磁碟區使用。如果在使用中，您必須使用 <command>pvmove</command> 指令將資料移至另一個實體磁碟區。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvextend -L <replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        擴充指定邏輯磁碟區的大小。此後，您還必須擴充檔案系統以利用最新可用的空間。如需詳細資料，請參閱<xref linkend="cha.resize_fs"/>。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvreduce -L <replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        縮小指定邏輯磁碟區的大小。
+       </para>
+       <important>
+        <para>
+         在縮小磁碟區之前，請務必先縮小檔案系統的大小，否則會有遺失資料的風險。如需詳細資料，請參閱<xref linkend="cha.resize_fs"/>。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvrename /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable> \
+/dev/<replaceable>vg_name</replaceable>/<replaceable>new_lv_name</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        重新命名現有 LVM 邏輯磁碟區，這不會變更磁碟區群組名稱。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.lvm.cli.resize">
+   <title>使用指令調整邏輯磁碟區的大小</title>
+   <para>
+    <command>lvresize</command>、<command>lvextend</command> 與 <command>lvreduce</command> 指令可用於調整邏輯磁碟區的大小。如需這些指令的語法及選項資訊，請參閱相應指令的 man 頁面。若要擴充 LV，VG 上必須有足夠多的未配置空間。
+   </para>
+   <para>
+    建議您使用 YaST 磁碟分割程式來增大或縮小邏輯磁碟區。使用 YaST 時，磁碟區中檔案系統的大小也會自動調整。
+   </para>
+   <para>
+    您雖然可以在 LV 處於使用中狀態時手動對其進行擴充或縮小，但若其上包含檔案系統，則無法如此操作。擴充或縮減 LV 不會自動修改磁碟區中檔案系統的大小。調整大小後必須使用另一個指令來增大檔案系統。如需調整檔案系統大小的相關資訊，請參閱<xref linkend="cha.resize_fs" xrefstyle="ChapTitleOnPage"/>。
+   </para>
+   <para>
+    手動調整 LV 大小時，請務必確保使用正確的順序︰
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      若要擴充 LV，則必須先擴充 LV 然後再嘗試增大檔案系統。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      若要縮減 LV，則必須先縮減檔案系統然後再嘗試縮減 LV。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    若要擴充邏輯磁碟區的大小：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      開啟終端機主控台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果邏輯磁碟區包含 Ext2 或 Ext4 檔案系統，則不支援線上增大，請將其卸下。如果它包含為虛擬機器 (例如 Xen VM) 代管的檔案系統，請先關閉該 VM。
+     </para>
+    </step>
+    <step>
+     <para>
+      在終端機主控台提示符處，輸入以下指令以增加邏輯磁碟區的大小︰
+     </para>
+<screen>sudo lvextend -L +<replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+     <para>
+      對於 <replaceable>size</replaceable>，請指定您要新增到邏輯磁碟區的空間容量，例如 10GB。以邏輯磁碟區的 Linux 路徑取代 <filename>/dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></filename>，例如 <filename>/dev/LOCAL/DATA</filename>。例如：
+     </para>
+<screen>sudo lvextend -L +10GB /dev/vg1/v1<replaceable/></screen>
+    </step>
+    <step>
+     <para>
+      調整檔案系統的大小。如需詳細資料，請參閱<xref linkend="cha.resize_fs"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果您已卸下了檔案系統，請重新掛接。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    例如，將包含 (已裝載並啟用) Btrfs 的 LV 擴充 10 GB：
+   </para>
+<screen>sudo lvextend −L +10G /dev/LOCAL/DATA
+sudo btrfs filesystem resize +10G /dev/LOCAL/DATA</screen>
+   <para>
+    若要縮小邏輯磁碟區的大小：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      開啟終端機主控台。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果邏輯磁碟區不包含 Btrfs 檔案系統，請將其卸下。如果它包含為虛擬機器 (例如 Xen VM) 代管的檔案系統，請先關閉該 VM。請注意，包含 XFS 檔案系統之磁碟區的大小無法縮小。
+     </para>
+    </step>
+    <step>
+     <para>
+      調整檔案系統的大小。如需詳細資料，請參閱<xref linkend="cha.resize_fs"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在終端機主控台提示符處，輸入以下指令將邏輯磁碟區的大小縮小為檔案系統的大小︰
+     </para>
+<screen>sudo lvreduce /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      如果您已卸下了檔案系統，請重新掛接。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    例如，若要將包含 Btrfs 的 LV 縮減 5 GB：
+   </para>
+<screen>sudo btrfs filesystem resize -size 5G /dev/LOCAL/DATA
+sudo lvreduce /dev/LOCAL/DATA</screen>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.cli.lvmetad">
+   <title>透過 <systemitem class="daemon">lvmetad</systemitem> 動態彙總 LVM 中繼資料</title>
+   <para>
+    大多數 LVM 指令都需要針對儲存在系統中各磁碟裝置上的 LVM 中繼資料的準確檢視。依據目前的 LVM 設計，如果此資訊不可用，LVM 必須掃描系統中的所有實體磁碟裝置。在擁有大量磁碟的系統中，這需要執行非常多的 I/O 操作。如果某個磁碟無法回應，LVM 指令就可能會因等待磁碟回應而逾時。
+   </para>
+   <para>
+    透過 <systemitem class="daemon">lvmetad</systemitem> 動態彙總 LVM 中繼資料，便可解決此問題。<systemitem class="daemon">lvmetad</systemitem> 精靈的用途是，每次在裝置的狀態變更時動態彙總中繼資料資訊，從而消除此掃描的需要。這些事件透過 udev 規則向 <systemitem class="daemon">lvmetad</systemitem> 發出訊號。如果精靈未在執行中，則 LVM 會照常執行掃描。
+   </para>
+   <para>
+    預設此功能是停用的。若要啟用它，請執行下列步驟：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      開啟終端機主控台。
+     </para>
+    </step>
+    <step>
+     <para>
+      停止 <systemitem class="daemon">lvmetad</systemitem> 精靈︰
+     </para>
+<screen>sudo systemctl stop lvm2-lvmetad</screen>
+    </step>
+    <step>
+     <para>
+      編輯 <filename>/etc/lvm/lvm.conf</filename>，將 <literal>use_lvmetad</literal> 設定為 <literal>1</literal>︰
+     </para>
+<screen>use_lvmetad = 1</screen>
+    </step>
+    <step>
+     <para>
+      重新啟動 <systemitem class="daemon">lvmetad</systemitem> 精靈︰
+     </para>
+<screen>sudo systemctl start lvm2-lvmetad</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.lvm.tagging">
+  <title>標記 LVM2 儲存物件</title>
+
+  <para>
+   標記是指定給儲存物件中繼資料的無序關鍵字或詞彙。透過使用標記，您可以為 LVM 儲存物件的中繼資料附加無序的標記清單，用實用的方式對物件集合進行分類。
+  </para>
+
+  <sect2 xml:id="sec.lvm.tagging.using">
+   <title>使用 LVM2 標記</title>
+   <para>
+    標記 LVM2 儲存物件之後，便可以在指令中使用標記來完成下列任務：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      選取要根據是否存在特定標記來處理的 LVM 物件。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      在組態檔案中使用標記，可控制在伺服器上啟動哪些磁碟區群組和邏輯磁碟區。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      透過在指令中指定標記，覆寫全域組態檔案中的設定。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    可以使用標記來代替接受下列各項的任何指令行 LVM 物件參考：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      物件清單
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      單一物件，只要標記展開為單一物件
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    在所有位置都尚不支援用標記取代物件名稱。引數展開之後，對於清單中重複的引數，系統會移除重複的引數並保留每個引數的第一個例項。
+   </para>
+   <para>
+    每當遇到可能不明確的引數類型時，都必須使用 at 符號 (@) 字元為標記加上字首，例如 <literal>@mytag</literal>。其他情況下，是否使用 <quote>@</quote> 隨您選擇。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.requirements">
+   <title>建立 LVM2 標記的要求</title>
+   <para>
+    將標記與 LVM 搭配使用時，請考慮下列要求：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>受支援的字元</term>
+     <listitem>
+      <para>
+       LVM 標記單字可以包含 ASCII 大寫字元 A 到 Z、小寫字元 a 到 z、數字 0 到 9、底線 (_)、加號 (+)、連字號 (-) 及句點 (.)。單字不能以連字號開頭。最大長度為 128 個字元。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>受支援的儲存物件</term>
+     <listitem>
+      <para>
+       您可以標記 LVM2 實體磁碟區、磁碟區群組、邏輯磁碟區和邏輯磁碟區區段。PV 標記儲存在其磁碟區群組的中繼資料中。刪除磁碟區群組也會刪除未同步實體磁碟區中的標記。您雖然不能標記快照，但可以標記它們的來源。
+      </para>
+      <para>
+       無法對 LVM1 物件加標記，因為磁碟格式不支援。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.syntax">
+   <title>指令行標記語法</title>
+   <variablelist>
+    <varlistentry>
+     <term>--addtag <replaceable>標記資訊</replaceable>
+     </term>
+     <listitem>
+      <para>
+       將標記新增至 LVM2 儲存物件 (或對其<emphasis>加標記</emphasis>)。範例：
+      </para>
+<screen>sudo vgchange --addtag @db1 vg1</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--deltag <replaceable>標記資訊</replaceable>
+     </term>
+     <listitem>
+      <para>
+       移除 LVM2 儲存物件的標記 (或對其<emphasis>取消標記</emphasis>)。範例：
+      </para>
+<screen>sudo vgchange --deltag @db1 vg1</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--tag <replaceable>標記資訊</replaceable>
+     </term>
+     <listitem>
+      <para>
+       指定標記，用來縮小要啟動或取消啟動之磁碟區群組或邏輯磁碟區的清單。
+      </para>
+      <para>
+       如果磁碟區具有與提供的標記相符的標記，輸入以下指令可將其啟動 (範例)：
+      </para>
+<screen>sudo lvchange -ay --tag @db1 vg1/vol2</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.config">
+   <title>組態檔案語法</title>
+   <para/>
+   <sect3 xml:id="sec.lvm.tagging.configuration.hostnames_enable">
+    <title>啟用主機名稱  <filename>lvm.conf</filename> 檔案中的主機名稱標記</title>
+    <para>
+     將以下代碼新增至 <filename>/etc/lvm/lvm.conf</filename> 檔案，以啟用主機上 <filename>/etc/lvm/lvm_&lt;<replaceable>主機名稱</replaceable>&gt;.conf</filename> 檔案中分別定義的主機標記。
+    </para>
+<screen>tags {
+   # Enable hostname tags
+   hosttags = 1
+}</screen>
+    <para>
+     您需要將啟用代碼放在主機上的 <filename>/etc/lvm/lvm_&lt;<replaceable>主機名稱</replaceable>&gt;.conf</filename> 檔案中。請參閱<xref linkend="sec.lvm.tagging.configuration.activate" xrefstyle="HeadingOnPage"/>。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.hostnames_define">
+    <title>為 lvm.conf 檔案中的主機名稱定義標記</title>
+<screen>tags {
+
+   tag1 { }
+      # Tag does not require a match to be set.
+
+   tag2 {
+      # If no exact match, tag is not set.
+      host_list = [ "hostname1", "hostname2" ]
+   }
+}</screen>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.activate">
+    <title>定義啟動行為</title>
+    <para>
+     您可以修改 <filename>/etc/lvm/lvm.conf</filename> 檔案，根據標記啟動 LVM 邏輯磁碟區。
+    </para>
+    <para>
+     在文字編輯器中，將以下代碼新增至該檔案：
+    </para>
+<screen>  activation {
+      volume_list = [ "vg1/lvol0", "@database" ]
+  }</screen>
+    <para>
+     以您的標記取代 <literal>@database</literal>。使用 <literal>"@*"</literal> 可使標記與主機上設定的任何標記相符。
+    </para>
+    <para>
+     啟動指令會比對磁碟區群組與邏輯磁碟區的中繼資料中設定的 <replaceable>vgname</replaceable>、<replaceable>vgname/lvname</replaceable> 或 @<replaceable>tag</replaceable>。當中繼資料標記相符時，磁碟區群組或邏輯磁碟區才會啟動。如果沒有相符標記，預設不會啟動任何項目。
+    </para>
+    <para>
+     如果沒有 <literal>volume_list</literal> 並且主機上定義了標記，則僅當主機標記與中繼資料標記相符時，磁碟區群組或邏輯磁碟區才會啟動。
+    </para>
+    <para>
+     如果沒有 <literal>volume_list</literal> 並且主機上未定義任何標記，則不會啟動磁碟區。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.activate_multi">
+    <title>在多個主機名稱組態檔案中定義啟動行為</title>
+    <para>
+     如果 <filename>lvm.conf</filename> 檔案中啟用了主機標記，您便可在主機的組態檔案 (<filename>/etc/lvm/lvm_&lt;<replaceable>主機標記</replaceable>&gt;.conf</filename>) 中使用啟動代碼。例如，<filename>/etc/lvm/</filename> 資料夾中包含某個伺服器的兩個組態檔案：
+    </para>
+    <simplelist>
+     <member><filename>lvm.conf</filename></member> <member><filename>lvm_&lt;<replaceable>主機標記</replaceable>&gt;.conf</filename></member>
+    </simplelist>
+    <para>
+     伺服器啟動時，會載入 <filename>/etc/lvm/lvm.conf</filename> 檔案，並處理該檔案中的任何標記設定。如果定義了任何主機標記，則會載入相關的 <filename>/etc/lvm/lvm_&lt;<replaceable>主機標記</replaceable>&gt;.conf</filename> 檔案。當它搜尋特定組態檔案項目時，將會先搜尋主機標記檔案，然後再搜尋 <filename>lvm.conf </filename> 檔案，並在找到第一個相符項時停止搜尋。在 <filename>lvm_&lt;<replaceable>主機標記</replaceable>&gt;.conf</filename> 檔案中，它會使用與標記設定順序相反的順序。如此會先搜尋最後設定之標記的檔案。在主機標記檔案中設定的新標記將觸發其他組態檔案的載入。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.activate_cluster">
+   <title>將標記用於叢集中的簡單啟動控制</title>
+   <para>
+    在 <literal>/etc/lvm/lvm.conf</literal> 檔案中啟用 <filename>hostname_tags</filename> 選項，可以設定簡單的主機名稱啟動控制。在叢集中的每台機器上使用相同的檔案，使之成為全域設定。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      在文字編輯器中，將以下代碼新增至 <filename>/etc/lvm/lvm.conf</filename> 檔案：
+     </para>
+<screen>tags {
+   hostname_tags = 1
+}</screen>
+    </step>
+    <step>
+     <para>
+      將該檔案複製到叢集中的所有主機上。
+     </para>
+    </step>
+    <step>
+     <para>
+      在叢集的任何機器中，將 <literal>db1</literal> 新增至啟動 <filename>vg1/lvol2</filename> 的機器清單：
+     </para>
+<screen>sudo lvchange --addtag @db1 vg1/lvol2</screen>
+    </step>
+    <step>
+     <para>
+      在 <filename>db1</filename> 伺服器上，輸入以下指令以將其啟動：
+     </para>
+<screen>sudo lvchange -ay vg1/vol2</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.activate_cluster_preferred">
+   <title>使用標記啟動叢集中的偏好主機</title>
+   <para>
+    本節中的範例示範如何透過兩種方法實現下列目的：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      僅在資料庫主機 <filename>db1</filename> 與 <filename>db2</filename> 上啟動磁碟區群組 <filename>vg1</filename>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      僅在檔案伺服器主機 <filename>fs1</filename> 上啟動磁碟區群組 <filename>vg2</filename>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      起初，在檔案伺服器備份主機 <filename>fsb1</filename> 上不啟動任何項目，但是讓它準備好接管檔案伺服器主機 <filename>fs1</filename> 的工作。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <sect3>
+    <title>選項 1：在主機之間複製的集中式管理與靜態組態</title>
+    <para>
+     下面的解決方案會在多個主機之間複製單一組態檔案。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       將 <literal>@database</literal> 標記新增至磁碟區群組 <filename>vg1</filename> 的中繼資料。在終端機主控台中，輸入
+      </para>
+<screen>sudo vgchange --addtag @database vg1</screen>
+     </step>
+     <step>
+      <para>
+       將 <literal>@fileserver</literal> 標記新增至磁碟區群組 <filename>vg2</filename> 的中繼資料。在終端機主控台中，輸入
+      </para>
+<screen>sudo vgchange --addtag @fileserver vg2</screen>
+     </step>
+     <step>
+      <para>
+       在文字編輯器中，使用以下代碼修改 <filename> /etc/lvm/lvm.conf</filename> 檔案，以定義 <literal>@database</literal>、<literal>@fileserver</literal> 與 <literal>@fileserverbackup</literal> 標記。
+      </para>
+<screen>tags {
+   database {
+      host_list = [ "db1", "db2" ]
+   }
+   fileserver {
+      host_list = [ "fs1" ]
+   }
+   fileserverbackup {
+      host_list = [ "fsb1" ]
+   }
+}
+
+activation {
+   # Activate only if host has a tag that matches a metadata tag
+   volume_list = [ "@*" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       將修改後的 <filename>/etc/lvm/lvm.conf</filename> 檔案複製到四部主機：<filename>db1</filename>、<filename>db2</filename>、<filename>fs1</filename> 與 <filename>fsb1</filename>。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果檔案伺服器主機停機，您可在任何節點上的終端機主控台中輸入以下指令，來啟動 <filename>fsb1</filename> 上的 <filename>vg2</filename>：
+      </para>
+<screen>sudo vgchange --addtag @fileserverbackup vg2
+sudo vgchange -ay vg2</screen>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3>
+    <title>選項 2：本地化的管理與組態</title>
+    <para>
+     在下面的解決方案中，每部主機都在本地保留要啟動哪些磁碟區類別的相關資訊。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       將 <literal>@database</literal> 標記新增至磁碟區群組 <filename>vg1</filename> 的中繼資料。在終端機主控台中，輸入
+      </para>
+<screen>sudo vgchange --addtag @database vg1</screen>
+     </step>
+     <step>
+      <para>
+       將 <literal>@fileserver</literal> 標記新增至磁碟區群組 <filename>vg2</filename> 的中繼資料。在終端機主控台中，輸入
+      </para>
+<screen>sudo vgchange --addtag @fileserver vg2</screen>
+     </step>
+     <step>
+      <para>
+       啟用 <filename>/etc/lvm/lvm.conf</filename> 檔案中的主機標記：
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         在文字編輯器中，使用以下代碼修改 <filename>/etc/lvm/lvm.conf</filename> 檔案，以啟用主機標記組態檔案。
+        </para>
+<screen>tags {
+   hosttags = 1
+}</screen>
+       </step>
+       <step>
+        <para>
+         將修改後的 <filename>/etc/lvm/lvm.conf</filename> 檔案複製到四部主機：<filename>db1</filename>、<filename>db2</filename>、<filename>fs1</filename> 與 <filename>fsb1</filename>。
+        </para>
+       </step>
+      </substeps>
+     </step>
+     <step>
+      <para>
+       在主機 <filename>db1</filename> 上，建立資料庫主機 <filename>db1</filename> 的啟動組態檔案。在文字編輯器中，建立 <filename>/etc/lvm/lvm_db1.conf</filename> 檔案並新增以下代碼：
+      </para>
+<screen>activation {
+   volume_list = [ "@database" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       在主機 <filename>db2</filename> 上，建立資料庫主機 <filename>db2</filename> 的啟動組態檔案。在文字編輯器中，建立 <filename>/etc/lvm/lvm_db2.conf</filename> 檔案並新增以下代碼：
+      </para>
+<screen>activation {
+   volume_list = [ "@database" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       在主機 fs1 上，建立檔案伺服器主機 <filename>fs1</filename> 的啟動組態檔案。在文字編輯器中，建立 <filename>/etc/lvm/lvm_fs1.conf</filename> 檔案並新增以下代碼：
+      </para>
+<screen>activation {
+   volume_list = [ "@fileserver" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       如果檔案伺服器主機 <filename>fs1</filename> 停機，要將備用檔案伺服器主機 fsb1 做為檔案伺服器啟動：
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         在主機 <filename>fsb1</filename> 上，建立主機 <filename>fsb1</filename> 的啟動組態檔案。在文字編輯器中，建立 <filename>/etc/lvm/lvm_fsb1.conf</filename> 檔案並新增以下代碼：
+        </para>
+<screen>activation {
+   volume_list = [ "@fileserver" ]
+}</screen>
+       </step>
+       <step>
+        <para>
+         在終端機主控台中，輸入下列其中一個指令：
+        </para>
+<screen>sudo vgchange -ay vg2
+sudo vgchange -ay @fileserver</screen>
+       </step>
+      </substeps>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>
