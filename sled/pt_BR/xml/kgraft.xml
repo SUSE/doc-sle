@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="kgraft.xml" version="5.0" xml:id="cha.kgraft" xml:lang="pt-br">
+<?suse-quickstart color="suse"?>
+
+
+ <title>Correção ativa do kernel usando o kGraft</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+   </dm:bugtracker>
+        <dm:translation>yes (sim)</dm:translation>
+      </dm:docmanager>
+      <abstract>
+        <para>
+    Este documento descreve os princípios básicos da tecnologia de correção ativa do kGraft e apresenta diretrizes de uso do serviço SLE Live Patching.
+   </para>
+        <para>
+    O kGraft é uma tecnologia de correção ativa para correção em tempo de execução do kernel do Linux, sem interromper o kernel. Esse procedimento maximiza o tempo ativo do sistema e, consequentemente, sua disponibilidade, o que é essencial para sistemas de extrema importância. Ao permitir a correção dinâmica do kernel, a tecnologia também incentiva os usuários a instalarem atualizações de segurança sem aumentar o tempo de espera programado deles.
+   </para>
+        <para>
+    O patch do kGraft é um módulo do kernel criado para substituir funções inteiras no kernel. O kGraft basicamente oferece uma infraestrutura no kernel para integração do código corrigido com o código base do kernel em tempo de execução.
+   </para>
+        <para>
+    O SLE Live Patching é outro serviço oferecido além da manutenção regular do SUSE Linux Enterprise Server. Os patches do kGraft distribuídos pelo SLE Live Patching complementam as atualizações de manutenção regular do SLES. É possível usar a pilha e os procedimentos de atualização comuns para implantação do SLE Live Patching.
+   </para>
+      </abstract>
+    </info>
+    <sect1>
+  <title>Vantagens do kGraft</title>
+
+  <para>
+   A correção ativa do kernel pelo kGraft é útil principalmente para respostas rápidas em casos de emergência (quando há vulnerabilidades graves conhecidas que devam ser corrigidas o quanto antes ou quando há problemas sérios de estabilidade do sistema com uma correção conhecida). Ela não é usada para atualizações programadas quando não há urgência.
+  </para>
+
+  <para>
+   Os casos mais frequentes de uso do kGraft incluem sistemas, como bancos de dados de memória, com enormes quantidades de RAM (quando tempos de inicialização de 15 minutos ou mais são muito comuns), grandes simulações que levam semanas ou meses sem poderem ser reiniciadas ou blocos estruturais de infraestrutura que fornecem serviço contínuo a um grande número de consumidores.
+  </para>
+
+  <para>
+   A principal vantagem do kGraft é que ele nunca exige interrupção do kernel, nem mesmo por um curto período de tempo.
+  </para>
+
+  <para>
+   O patch do kGraft é um módulo do kernel <filename>.ko</filename> em um pacote RPM do KMP. Ele é inserido no kernel por meio do comando <command>insmod</command> quando o pacote RPM é instalado ou atualizado. O kGraft substitui funções inteiras no kernel, mesmo se estiverem em execução. Um módulo atualizado do kGraft poderá substituir um patch existente, se necessário.
+  </para>
+
+  <para>
+   O kGraft também é compacto, ele inclui apenas uma pequena quantidade de código, pois aproveita outras tecnologias padrão do Linux.
+  </para>
+ </sect1>
+ <sect1>
+  <title>Função de nível inferior do kGraft</title>
+
+  <para>
+   O kGraft usa a infraestrutura do ftrace para realizar a correção. Veja a seguir a descrição da implementação na arquitetura x86-64.
+  </para>
+
+  <para>
+   Para corrigir uma função do kernel, o kGraft precisa de algum espaço no começo da função para inserir um salto para a nova função. Esse espaço é alocado pelo GCC durante a compilação do kernel, com a criação de perfil da função ativada. Em particular, uma instrução de chamada de 5 bytes é inserida no começo das funções do kernel. Durante a inicialização desse kernel de originação de dados de registro, as chamadas de criação de perfil são substituídas pelas instruções NOP (nenhuma operação) de 5 bytes.
+  </para>
+
+  <para>
+   Após o início da correção, o primeiro byte será substituído pela instrução INT3 (ponto de interrupção). Isso garante a atomicidade da substituição da instrução de 5 bytes. Os outros quatro bytes são substituídos pelo endereço da nova função. Por fim, o primeiro byte é substituído pelo código da operação JMP (salto longo).
+  </para>
+
+  <para>
+   As interrupções não mascaráveis do interprocessador (IPI NMI) são usadas durante todo o processo para descarregar filas de decodificações especulativas de outras CPUs no sistema. Dessa forma, é possível alternar para a nova função sem ter que interromper o kernel, nem mesmo por um período bem curto. As interrupções por IPI NMIs podem ser medidas em microssegundos e não são consideradas interrupções de serviço, já que ocorrem enquanto o kernel é executado em qualquer caso.
+  </para>
+
+  <para>
+   Os chamadores nunca são corrigidos. Em vez disso, as NOPs do receptor são substituídas por um JMP para a nova função. As instruções JMP sempre permanecem. Esse procedimento se encarrega dos ponteiros de função, inclusive em estruturas, e não requer gravação de dados antigos para a possibilidade de reversão da correção.
+  </para>
+
+  <para>
+   Porém, essas etapas sozinhas não são suficientes: como as funções são substituídas de maneira não atômica, uma nova função corrigida em uma parte do kernel ainda pode chamar uma função antiga em algum outro lugar, ou vice-versa. Se a semântica da função encontrar alguma mudança no patch, será um caos.
+  </para>
+
+  <para>
+   Portanto, até todas as funções serem substituídas, o kGraft usará uma abordagem baseada em trampolins e semelhante a RCU (ler-copiar-atualizar) para garantir uma visão consistente do mundo a cada thread no espaço do usuário, thread do kernel e interrupção do kernel. Um flag por thread é definido em cada entrada e saída do kernel. Dessa forma, uma função antiga sempre chama outra função antiga, e uma nova função sempre chama outra nova. Depois que todos os processos tiverem o flag de "novo universo" definido, a correção será concluída, os trampolins poderão ser removidos e o código poderá operar em velocidade máxima sem afetar o desempenho, exceto pelo salto extra longo para cada função corrigida.
+  </para>
+ </sect1>
+ <sect1>
+  <title>Instalando patches do kGraft</title>
+
+  <para>
+   Esta seção descreve a ativação da extensão SUSE Linux Enterprise Live Patching e a instalação de patches do kGraft.
+  </para>
+
+  <sect2>
+   <title>Ativação do SLE Live Patching</title>
+   <para>
+    Para ativar o SLE Live Patching no sistema, siga estas etapas:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Se o seu sistema SLES ainda não foi registrado, registre-o. É possível fazer o registro durante a instalação do sistema ou posteriormente, usando o módulo <guimenu>Registro de Produto</guimenu> do YaST (<command>yast2 registration</command>). Após o registro, clique em <guimenu>Sim</guimenu> para ver a lista de atualizações online disponíveis.
+     </para>
+     <para>
+      Se o seu sistema SLES já foi registrado, mas o SLE Live Patching ainda não foi ativado, abra o módulo <guimenu>Registro de Produto</guimenu> do YaST (<command>yast2 registration</command>) e clique em <guimenu>Selecionar Extensões</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Selecione <guimenu>SUSE Linux Enterprise Live Patching 12</guimenu> na lista de extensões disponíveis e clique em <guimenu>Avançar</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Confirme os termos da licença e clique em <guimenu>Avançar</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Digite o código de registro do SLE Live Patching e clique em <guimenu>Avançar</guimenu>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Confira o <guimenu>Resumo da Instalação</guimenu> e os <guimenu>Padrões</guimenu> selecionados. O <systemitem>Live Patching</systemitem> padrão deve ser selecionado para instalação.
+     </para>
+    </step>
+    <step>
+     <para>
+      Clique em <guimenu>Aceitar</guimenu> para concluir a instalação. Esse procedimento instala os componentes base do kGraft no sistema juntamente com o patch ativo inicial.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2>
+   <title>Atualizando o sistema</title>
+   <procedure>
+    <step>
+     <para>
+      As atualizações do SLE Live Patching são distribuídas em um formato que permite o uso da pilha de atualização padrão do SLE para aplicação de patch. E possível atualizar o patch ativo inicial usando o <command>zypper patch</command>, o YaST2 Online Update ou um método equivalente.
+     </para>
+    </step>
+    <step>
+     <para>
+      O kernel é automaticamente corrigido durante a instalação do pacote. Porém, as invocações das funções antigas do kernel não são completamente eliminadas antes do acionamento e da eliminação de todos os processos adormecidos. Isso pode levar um tempo bastante considerável. Apesar disso, os processos adormecidos que usam funções antigas do kernel não são considerados um problema de segurança. Entretanto, na versão atual do kGraft, só será possível aplicar outro patch do kGraft depois que todos os processos ultrapassarem o limite do espaço do usuário do kernel para usar as funções corrigidas do patch anterior.
+     </para>
+     <para>
+      Para ver o status global da correção, observe o flag em <filename>/sys/kernel/kgraft/in_progress</filename>. O valor <literal>1</literal> significa que há processos adormecidos que ainda precisam ser acionados (a correção ainda está em andamento). O valor <literal>0</literal> significa que todos os processos estão usando exclusivamente as funções corrigidas, e que a correção já foi concluída. Se preferir, use o comando <command>kgr status</command> para obter as mesmas informações.
+     </para>
+     <para>
+      É possível observar o flag também para cada processo. Confira o número em <filename>/proc/<replaceable>número_do_processo</replaceable>/kgr_in_progress</filename> separadamente para cada processo. Novamente, o valor <literal>1</literal> significa processos adormecidos que ainda precisam ser acionados. Se preferir, use o comando <command>kgr blocking</command> para gerar a lista de processos adormecidos.
+     </para>
+    </step>
+    
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1>
+  <title>Removendo um patch do kGraft</title>
+
+  <para>
+   Para remover um patch do kGraft, siga este procedimento:
+  </para>
+
+
+
+  <procedure>
+   <step>
+    <para>
+     Primeiramente, remova o próprio patch usando o zypper:
+    </para>
+<screen>
+    zypper rm kgraft-patch-<replaceable>3_12_32-25-default</replaceable>
+   </screen>
+   </step>
+   <step>
+    <para>
+     Em seguida, reinicialize a máquina.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1>
+  <title>Threads de execução do kernel travados</title>
+
+  <para>
+   É necessário preparar os threads do kernel para uso com o kGraft. Os softwares de terceiros talvez não estejam totalmente preparados para adoção do kGraft, e seus módulos do kernel podem gerar threads de execução do kernel. Esses threads bloqueiam o processo de correção indefinidamente. Como medida de emergência, o kGraft oferece a possibilidade de forçar o encerramento do processo de correção sem ter que esperar todos os threads de execução cruzarem o ponto de verificação de segurança. Para isso, grave <literal>0</literal> em <filename>/sys/kernel/kgraft/in_progress</filename>. Contate o Suporte do SUSE antes de executar esse procedimento.
+  </para>
+
+
+ </sect1>
+ <sect1>
+  <title>Ferramenta <command>kgr</command></title>
+
+  <para>
+   É possível simplificar várias tarefas de gerenciamento do kGraft com a ferramenta <command>kgr</command>. Os comandos disponíveis são:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>kgr status</command>
+    </term>
+    <listitem>
+     <para>
+      Exibe o status geral da correção do kGraft (<literal>ready</literal> ou <literal>in_progress</literal>).
+
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr patches</command>
+    </term>
+    <listitem>
+     <para>
+      Exibe a lista de patches carregados do kGraft.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr blocking</command>
+    </term>
+    <listitem>
+     <para>
+      Lista os processos que impedem o término da correção do kGraft. Por padrão, apenas os PIDs são listados. A especificação de <option>-v</option> imprimirá as linhas de comando, se disponíveis. Uma outra opção <option>-v</option> também exibe rastreamentos de pilha.
+     </para>
+    </listitem>
+   </varlistentry>
+   
+  </variablelist>
+
+  <para>
+   Para obter informações detalhadas, consulte <command>man kgr</command>.
+  </para>
+ </sect1>
+ <sect1>
+  <title>Escopo da tecnologia do kGraft</title>
+
+  <para>
+   O kGraft baseia-se em substituir funções. É possível realizar a alteração da estrutura de dados apenas indiretamente com o kGraft. Como resultado, as mudanças na estrutura de dados do kernel exigem cuidado especial e, se a mudança for muito extensa, talvez seja necessária a reinicialização. O kGraft talvez não possa também lidar com situações em que um compilador é usado para compilar o kernel antigo, e outro compilador é usado para compilar o patch.
+  </para>
+
+  <para>
+   Por causa da maneira como o kGraft funciona, o suporte a módulos de terceiros que geram threads no kernel é limitado.
+
+  </para>
+ </sect1>
+ <sect1 xml:id="scope_patching">
+  <title>Escopo do SLE Live Patching</title>
+
+  <para>
+   As correções de vulnerabilidades de nível 6+ para o CVSS (Common Vulnerability Scoring System) e as correções de bug relacionadas à estabilidade do sistema ou corrupção de dados fazem parte do escopo do SLE Live Patching. Talvez não seja possível produzir um patch ativo para todos os tipos de correções que englobem os critérios acima. O SUSE reserva-se o direito de ignorar as correções nas quais a produção de um patch ativo do kernel seja inviável por questões técnicas. Para obter mais informações sobre o CVSS, consulte <link xlink:href="http://nvd.nist.gov/cvss.cfm/"/>.
+  </para>
+ </sect1>
+ <sect1>
+  <title>Interação com os processos de suporte</title>
+
+  <para>
+   Durante a resolução de uma dificuldade técnica com o Suporte do SUSE, você pode receber a chamada PTF (Program Temporary Fix – Correção Temporária do Programa). As PTFs podem ser emitidas para vários pacotes, incluindo os que constituem a base do SLE Live Patching.
+  </para>
+
+  <para>
+   As PTFs do kGraft que cumprirem as condições descritas na seção anterior poderão ser instaladas como de costume, e o SUSE garantirá que o sistema em questão não tenha que ser reinicializado e que as live updates futuras sejam corretamente aplicadas.
+  </para>
+
+  <para>
+   As PTFs emitidas para o kernel base interrompem o processo de correção ativa. Em primeiro lugar, a instalação do kernel da PTF requer reinicialização, já que o kernel não pode ser substituído integralmente em tempo de execução. Em segundo lugar, uma outra reinicialização é necessária para substituir a PTF por qualquer atualização de manutenção regular para a qual os patches ativos são emitidos.
+  </para>
+
+  <para>
+   As PTFs para outros pacotes no SLE Live Patching podem ser tratadas como PTFs regulares com as garantias comuns.
+  </para>
+ </sect1>
+</chapter>
