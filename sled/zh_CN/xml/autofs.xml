@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="autofs.xml" version="5.0" xml:id="cha.autofs">
+ <title>使用 Autofs 按需装入</title>
+ <info>
+      <abstract>
+        <para>
+          <systemitem>autofs</systemitem> 是一个可根据需要自动装入指定目录的程序。它基于一个内核模块运行以实现高效率，并且可以同时管理本地目录和网络共享。这些自动安装点仅会在被访问时装入，一段时间不活动后即会被卸载。这种按需行为可节省带宽，并实现比 <filename>/etc/fstab</filename> 管理的静态装入更高的性能。虽然 <systemitem>autofs</systemitem> 是控制脚本，但 <command>automount</command> 才是实际执行自动装入的命令（守护程序）。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <indexterm> <primary>AutoFS</primary></indexterm>
+ <sect1 xml:id="sec.autofs.installation">
+  <title>安装</title>
+
+  <para>
+   <systemitem/>SUSE Linux Enterprise Desktop<phrase role="productname"><phrase os="sled"> 上默认未安装 </phrase>autofs</phrase>。要使用它的自动装入功能，请先使用下面的命令安装该程序
+  </para>
+
+<screen>sudo zypper install autofs</screen>
+ </sect1>
+ <sect1 xml:id="sec.autofs.configuration">
+  <title>配置</title>
+
+  <para>
+   您需要使用 <command>vim</command> 等文本编辑器编辑 <systemitem>autofs</systemitem> 的配置文件来手动配置它。配置 <systemitem>autofs</systemitem> 有两个基本步骤 — <emphasis>master</emphasis> 映射文件和特定映射文件。
+  </para>
+
+  <sect2 xml:id="sec.autofs.configuration.master_map">
+   <title>Master 映射文件</title>
+   <para>
+    <systemitem>autofs</systemitem> 的默认 master 配置文件是 <filename>/etc/auto.master</filename>。可通过在 <filename>/etc/sysconfig/autofs</filename> 文件中更改 <option>DEFAULT_MASTER_MAP_NAME</option> 选项的值来更改其位置。以下是 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 中默认 master 映射文件的内容：
+   </para>
+<screen>#
+# Sample auto.master file
+# This is an automounter map and it has the following format
+# key [ -mount-options-separated-by-comma ] location
+# For details of the format look at autofs(5).<co xml:id="co.autofs.manpage"/>
+#
+#/misc  /etc/auto.misc<co xml:id="co.autofs.map"/>
+#/net -hosts
+#
+# Include /etc/auto.master.d/*.autofs<co xml:id="co.autofs.include"/>
+#
+#+dir:/etc/auto.master.d
+#
+# Include central master map if it can be found using
+# nsswitch sources.
+#
+# Note that if there are entries for /net or /misc (as
+# above) in the included master map any keys that are the
+# same will not be seen as the first read key seen takes
+# precedence.
+#
++auto.master<co xml:id="co.autofs.plus"/></screen>
+   <calloutlist>
+    <callout arearefs="co.autofs.manpage">
+     <para>
+      <systemitem>autofs</systemitem> 手册页 (<command>man 5 autofs</command>) 提供了许多有关该自动装入器映射格式的重要信息。
+     </para>
+    </callout>
+    <callout arearefs="co.autofs.map">
+     <para>
+      虽然这些内容默认会被注释掉 (#)，但它依然是简单的自动装入器映射语法示例。
+     </para>
+    </callout>
+    <callout arearefs="co.autofs.include">
+     <para>
+      如果您需要将 master 映射分割成几个文件，请将该行取消注释，并将映射（后缀为 <literal>.autofs</literal>）置于 <filename>/etc/auto.master.d/</filename> 目录中。
+     </para>
+    </callout>
+    <callout arearefs="co.autofs.plus">
+     <para>
+      <literal>+auto.master</literal> 可确保使用 NIS 的那些进程仍可找到它们的 master 映射。
+     </para>
+    </callout>
+   </calloutlist>
+   <para>
+    <filename>auto.master</filename> 中的项有三个字段，语法如下：
+   </para>
+<screen>mount point      map name      options</screen>
+   <variablelist>
+    <varlistentry>
+     <term>mount point</term>
+     <listitem>
+      <para>
+       要在其中装入 <systemitem>autofs</systemitem> 文件系统的基本位置，例如 <literal>/home</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>map name</term>
+     <listitem>
+      <para>
+       装入时所用映射源的名称。有关映射文件的语法，请参见<xref linkend="autofs.mapfiles"/>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>options</term>
+     <listitem>
+      <para>
+       这些选项（如指定）将作为默认值应用于给定映射中的所有项。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <tip>
+    <para>
+     有关选用 <literal>map-type</literal>、<literal>format</literal> 和 <literal>options</literal> 的特定值的更多详细信息，请参见 <guimenu>auto.master</guimenu> 手册页 (<command>man 5 auto.master</command>)。
+    </para>
+   </tip>
+   <para>
+    <filename>auto.master</filename> 中下面的项指示 <systemitem>autofs</systemitem> 查看 <filename>/etc/auto.smb</filename>，并在 <filename>/smb</filename> 目录中创建安装点。
+   </para>
+<screen>/smb   /etc/auto.smb</screen>
+   <sect3 xml:id="autofs.directmount">
+    <title>直接装入</title>
+    <para>
+     直接装入会在相关映射文件内的指定路径创建安装点。这种方式不是在 <filename>auto.master</filename> 中指定安装点，而是用 <literal>/-</literal> 替换安装点字段。例如，下行指示 <systemitem>autofs</systemitem> 在 <filename>auto.smb</filename> 中的指定位置创建安装点：
+    </para>
+<screen>/-        /etc/auto.smb</screen>
+    <tip>
+     <title>不含完整路径的映射</title>
+     <para>
+      如果指定映射文件时未包含其完整本地或网络路径，系统会使用名称服务转换 (NSS) 配置寻找该映射文件。
+     </para>
+<screen>/-        auto.smb</screen>
+    </tip>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="autofs.mapfiles">
+   <title>映射文件</title>
+   <important>
+    <title>其他映射类型</title>
+    <para>
+     虽然<emphasis>文件</emphasis>是使用 <systemitem>autofs</systemitem> 自动装入的最常见的映射类型，但是还有其他一些类型。映射规范可以是命令的输出，也可以是 LDAP 或数据库中查询的结果。有关映射类型的更多详细信息，请参见 <command>man 5 auto.master</command> 手册页。
+    </para>
+   </important>
+   <para>
+    映射文件指定（本地或网络）来源位置，以及在本地装入来源的安装点。映射的一般格式与 master 映射相似。区别在于 <emphasis>options</emphasis> 位于 mount point 与 location 之间，而不是该项的末尾：
+   </para>
+<screen>mount point      options      location</screen>
+   <variablelist>
+    <varlistentry>
+     <term>mount point</term>
+     <listitem>
+      <para>
+       指定将来源位置装入到何处。可以是要添加到 <filename>auto.master</filename> 中指定基本安装点的单个目录名称（所谓的<emphasis>间接</emphasis>装入），也可以是安装点的完整路径（直接装入，请参见<xref linkend="autofs.directmount"/>）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>options</term>
+     <listitem>
+      <para>
+       指定相关项的安装点逗号分隔列表（可选）。如果 <filename>auto.master</filename> 还包含此映射文件的选项，这些选项会附加在后面。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>location</term>
+     <listitem>
+      <para>
+       指定要装入的文件系统来自何处。通常是 NFS 或 SMB 卷，常用表示法是<literal>主机名:路径名称</literal>。如果要装入的文件系统以“/”开头（例如本地 <filename>/dev</filename> 项或 smbfs 共享），需要在前面加一个冒号“:”，例如 <literal>:/dev/sda1</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.autofs.debugging">
+  <title>操作和调试</title>
+
+  <para>
+   本节介绍如何控制 <systemitem>autofs</systemitem> 服务操作，以及如何在调整该自动装入器操作时查看更多调试信息。
+  </para>
+
+  <sect2 xml:id="sec.autofs.debugging.service">
+   <title>控制 <systemitem>autofs</systemitem> 服务</title>
+   <para>
+    <systemitem>autofs</systemitem> 服务的操作由 <systemitem class="daemon">systemd</systemitem> 控制。<systemitem>autofs</systemitem> 的 <command>systemctl</command> 命令的一般语法为
+   </para>
+<screen>sudo systemctl <replaceable>sub-command</replaceable> autofs</screen>
+   <para>
+    其中，<replaceable>sub-command</replaceable> 是下列其中一项：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>enable</term>
+     <listitem>
+      <para>
+       在引导时启动该自动装入器守护程序。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>start</term>
+     <listitem>
+      <para>
+       启动该自动装入器守护程序。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>stop</term>
+     <listitem>
+      <para>
+       停止该自动装入器守护程序。自动安装点将不再可访问。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>status</term>
+     <listitem>
+      <para>
+       打印 <systemitem>autofs</systemitem> 服务的当前状态以及相关日志文件的部分内容。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>restart</term>
+     <listitem>
+      <para>
+       停止然后启动该自动装入器，以便终止所有正在运行的守护程序，然后再启动新的守护程序。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>reload</term>
+     <listitem>
+      <para>
+       检查当前的 <filename>auto.master</filename> 映射，重启动项已更改的守护程序，并为新项启动新守护程序。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.autofs.debugging.problems">
+   <title>调试自动装入器问题</title>
+   <para>
+    如果您在使用 <systemitem>autofs</systemitem> 装入目录时遇到问题，手动运行 <command>automount</command> 守护程序并查看其输出讯息将非常有用：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      停止 <systemitem>autofs</systemitem>。
+     </para>
+<screen>sudo systemctl stop autofs</screen>
+    </step>
+    <step>
+     <para>
+      从一个终端的前台手动运行 <command>automount</command>，生成详细输出。
+     </para>
+<screen>sudo automount -f -v</screen>
+    </step>
+    <step>
+     <para>
+      从另一个终端上尝试通过访问安装点（例如，通过 <command>cd</command> 或 <command>ls</command>）装入自动装入文件系统。
+     </para>
+    </step>
+    <step>
+     <para>
+      从第一个终端上检查 <command>automount</command> 的输出以了解更多信息，例如装入为何失败，或者为何甚至未尝试执行装入。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.autofs.nfs">
+  <title>自动装入 NFS 共享</title>
+
+  <para>
+   下面的过程说明了如何配置 <systemitem>autofs</systemitem> 以自动装入网络上可用的 NFS 共享。该过程要用到前面提到的信息，并假设您熟悉 NFS 导出步骤。有关 NFS 的更多信息，请参见<xref linkend="cha.nfs"/>。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     编辑 master 映射文件 <filename>/etc/auto.master</filename>：
+    </para>
+<screen>sudo vim /etc/auto.master</screen>
+    <para>
+     在 <filename>/etc/auto.master</filename> 末尾为新的 NFS 装入添加一条新项：
+    </para>
+<screen>/nfs      /etc/auto.nfs      --timeout=10</screen>
+    <para>
+     它告诉 <systemitem>autofs</systemitem> 基本安装点是 <filename>/nfs</filename>，NFS 共享在 <filename>/etc/auto.nfs</filename> 映射中指定，并且此映射中的所有共享将在 10 秒不活动后自动卸载。
+    </para>
+   </step>
+   <step>
+    <para>
+     为 NFS 共享创建新的映射文件：
+    </para>
+<screen>sudo vim /etc/auto.nfs</screen>
+    <para>
+     对每个 NFS 共享，<filename>/etc/auto.nfs</filename> 通常都会包含单独的一行。有关其格式，请参见<xref linkend="autofs.mapfiles"/>。添加下行，指出安装点及 NFS 共享网络地址：
+    </para>
+<screen>export      jupiter.com:/home/geeko/doc/export</screen>
+    <para>
+     上面的行表示当收到请求时，系统会将 <literal>jupiter.com</literal> 主机上的 <filename>/home/geeko/doc/export</filename> 目录自动装入到本地主机上的 <filename>/nfs/export</filename> 目录（<filename>/nfs</filename> 取自 <filename>auto.master</filename> 映射）。<filename>/nfs/export</filename> 目录将由 <systemitem>autofs</systemitem> 自动创建。
+    </para>
+   </step>
+   <step>
+    <para>
+     （选择性）如果您先前以静态方式装入了该 NFS 共享，请将 <filename>/etc/fstab</filename> 中的相关行注释掉。该行应类似于：
+    </para>
+<screen>#jupiter.com:/home/geeko/doc/export /nfs/export nfs defaults 0 0</screen>
+   </step>
+   <step>
+    <para>
+     重新装载 <systemitem>autofs</systemitem> 并检查它是否正常工作：
+    </para>
+<screen>sudo systemctl restart autofs</screen>
+<screen># ls -l /nfs/export
+total 20
+drwxr-xr-x  6 1001 users 4096 Oct 25 08:56 ./
+drwxr-xr-x  3 root root     0 Apr  1 09:47 ../
+drwxr-xr-x  5 1001 users 4096 Jan 14  2013 .images/
+drwxr-xr-x 10 1001 users 4096 Aug 16  2013 .profiled/
+drwxr-xr-x  3 1001 users 4096 Aug 30  2013 .tmp/
+drwxr-xr-x  4 1001 users 4096 Oct 25 08:56 SLE-12-manual/</screen>
+    <para>
+     如果您能看到远程共享上的文件列表，则表示 <systemitem>autofs</systemitem> 工作正常。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.autofs.advanced">
+  <title>高级主题</title>
+
+  <para>
+   本节讨论的主题超出了 <systemitem>autofs</systemitem> 基本介绍的范畴 — 自动装入网络上可用的 NFS 共享、在映射文件中使用通配符，以及特定于 CIFS 文件系统的信息。
+  </para>
+
+  <sect2 xml:id="sec.autofs.advanced.net">
+   <title><filename>/net</filename> 安装点</title>
+   <para>
+    如果您使用了许多 NFS 共享，这个助手安装点将非常有用。<filename>/net</filename> 会根据需要自动装入本地网络上的所有 NFS 共享。该项在 <filename>auto.master</filename> 文件中已经存在，因此，您只需将其取消注释，然后重启动 <systemitem>autofs</systemitem> 即可：
+   </para>
+<screen>/net      -hosts</screen>
+<screen>systemctl restart autofs</screen>
+   <para>
+    例如，如果您有名为 <literal>jupiter</literal> 的服务器以及名为 <filename>/export</filename> 的 NFS 共享，您可以在命令行上键入以下命令来装入它：
+   </para>
+<screen># cd /net/jupiter/export</screen>
+   <para>
+    
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.autofs.advanced.wildcards">
+   <title>使用通配符自动装入子目录</title>
+   <para>
+    如果有个目录含有多个子目录，而您需要将这些子目录单个自动装入（一般情况下是包含各个用户主目录的 <filename>/home</filename> 目录），<systemitem>autofs</systemitem> 为您准备了便捷的解决方案。
+   </para>
+   <para>
+    如果这些子目录是主目录，则在 <filename>auto.master</filename> 中添加下行：
+   </para>
+<screen>/home      /etc/auto.home</screen>
+   <para>
+    现在，您需要在 <filename>/etc/auto.home</filename> 文件中添加正确的映射，以便自动装入用户的主目录。一种方法是为每个目录创建单独的项：
+   </para>
+<screen>wilber      jupiter.com:/home/wilber
+penguin      jupiter.com:/home/penguin
+tux      jupiter.com:/home/tux
+[...]</screen>
+   <para>
+    这种方法非常麻烦，因为您需要在 <filename>auto.home</filename> 中管理用户列表。您可以使用星号“*”取代安装点，使用符号“&amp;”取代要装入的目录。
+   </para>
+<screen>*      jupiter:/home/&amp;</screen>
+  </sect2>
+
+  <sect2 xml:id="sec.autofs.advanced.cifs">
+   <title>自动装入 CIFS 文件系统</title>
+   <para>
+    如果想自动装入 SMB/CIFS 共享（有关 SMB/CIFS 协议的更多信息，请参见<xref linkend="cha.samba"/>了解），需要修改映射文件的语法。在 option 字段中添加 <option>-fstype=cifs</option>，并在共享位置前面加上一个冒号“:”。
+   </para>
+<screen>mount point      -fstype=cifs      ://jupiter.com/export</screen>
+  </sect2>
+ </sect1>
+</chapter>

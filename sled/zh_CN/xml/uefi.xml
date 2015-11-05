@@ -1,0 +1,528 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="uefi.xml" version="5.0" xml:id="cha.uefi">
+
+ <title>UEFI（统一可扩展固件接口）</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  UEFI（统一可扩展固件接口）是用于系统硬件自带的固件、系统所有的硬件组件以及操作系统之间的接口。
+ </para>
+ <para>
+  UEFI 在 PC 系统上的应用范围越来越广，因此正在逐渐替代传统的 PC-BIOS。例如，UEFI 能够很好地支持 64 位系统，提供安全的引导（<quote>安全引导</quote>，要求固件为 2.3.1c 或以上版本）。安全引导是其最为重要的特性之一。最后，借助 UEFI，标准固件将能够用于所有 x86 平台。
+ </para>
+ <para>
+  除此之外，UEFI 还具有以下优点：
+ </para>
+ <itemizedlist mark="bullet" spacing="normal">
+  <listitem>
+   <para>
+    从带有 GUID 分区表 (GPT) 的大磁盘（超过 2 TiB）引导。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    独立于 CPU 的架构和驱动程序。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    带有网络功能的灵活的预操作系统环境。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    通过 PC-BIOS 式仿真支持引导老式操作系统的 CSM（兼容支持模块）。
+   </para>
+  </listitem>
+ </itemizedlist>
+ <para>
+  有关详细信息，请参见 <link xlink:href="http://en.wikipedia.org/wiki/Unified_Extensible_Firmware_Interface"/>。以下部分仅针对部分功能在 SUSE Linux Enterprise 中的实施方式而列举一些提示，并不代表 UEFI 的整体概述。
+ </para>
+ <sect1 xml:id="sec.uefi.secboot">
+  <title>安全引导</title>
+
+
+
+  <para>
+   在 UEFI 领域中，要想保障引导程序的安全，需要建立一个信任链。<quote>平台</quote>是信任链的可信根；在使用 SUSE Linux Enterprise 的情况下，可将主板和板载固件视为<quote>平台</quote>。换言之，它是硬件供应商、从硬件供应商流向组件制造商的信任链、OS 供应商等。
+  </para>
+
+  <para>
+   系统通过公共密钥加密法表示信任。硬件供应商将所谓的“平台密钥 (PK)”放入固件中，代表可信根。操作系统供应商与其他方将其密钥与“平台密钥”签署在一起，以此记录他们之间的信任关系。
+  </para>
+
+  <para>
+   最后，除非这些<quote>可信的</quote>密钥之一（即 OS 引导加载程序、位于一些 PCI Express 卡的闪存上或磁盘上的一些驱动程序，或者更新的固件本身）签署了代码，否则要求固件不得执行该代码，从而建立安全保障。
+  </para>
+
+  <para>
+   基本上，如果您想要使用“安全引导”，则需要使用固件信任的密钥对您的 OS 加载程序进行签名，并且需要 OS 加载程序验证其加载的内核是否可信。
+  </para>
+
+  <para>
+
+   可以将密钥交换密钥 (KEK) 添加到 UEFI 密钥数据库中。这样，其他证书只要签署了 PK 的私用部分，即可由您使用。
+
+  </para>
+
+  <sect2 xml:id="sec.uefi.secboot.sle">
+   <title>在 SUSE Linux Enterprise 上实施</title>
+   <para>
+    默认情况下安装微软的密钥交换密钥 (KEK)。
+   </para>
+   <note>
+    <title>需要 GUID 分区表 (GPT)</title>
+    <para>
+     UEFI/x86_64 安装中默认会启用安全引导功能。您可在<guimenu>引导加载程序设置</guimenu>对话框的<guimenu>引导代码选项</guimenu>选项卡中找到<guimenu>启用安全引导支持</guimenu>选项。该选项支持在固件中的安全引导已激活时引导，同时也支持在安全引导已停用时引导。
+    </para>
+    <figure>
+     <title>安全引导支持</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_bootloader_boot_code_efi.png" width="70%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_bootloader_boot_code_efi.png" width="70%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+    <para>
+     “安全引导”特性要求 GUID 分区表 (GPT) 使用主引导记录 (MBR) 替代旧的分区。如果安装期间 YaST 检测到 EFI 模式，则会设法创建 GPT 分区。UEFI 预期会在 FAT 格式的 EFI 系统分区(ESP) 上查找到 EFI 程序。
+    </para>
+   </note>
+
+   <para>
+    支持 UEFI 安全引导基本上要求具有固件认可作为可信密钥的数字签名的引导加载程序。密钥需要预先为固件所信任（无需任何手动干预），才能供 SUSE Linux Enterprise 客户使用。
+   </para>
+   <para>
+    有两种办法可以实现。一种是与硬件供应商合作，让其签署 SUSE 密钥，然后 SUSE 会使用该 SUSE 密钥签署引导加载程序；另一种是通过微软的 Windows 徽标认证计划使引导加载程序获得认证，并使微软认可 SUSE 签名密钥（也就是让加载程序使用他们的 KEK 签名）。至此，SUSE 使引导加载程序获得了 UEFI 签名服务（在此情况下为 Microsoft）的签名。
+   </para>
+
+   <figure xml:id="fig.uefi.secure.boot.mok2">
+    <title>UEFI：安全引导流程</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="uefi-secure-boot-mok2.png" width="50%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="uefi-secure-boot-mok2.png" width="80%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    SUSE 在实施层使用默认将会安装的 <systemitem>shim</systemitem> 加载程序。这是一种可以避免法律纠纷的智能解决方案，能够大幅简化认证和签名步骤。<systemitem>shim</systemitem> 加载程序的任务是加载 ELILO 或 GRUB 2 等引导加载程序并加以验证；进而该引导加载程序将加载仅获得一个 SUSE 密钥签名的内核。SUSE 从全新安装的 SLE11 SP3 开始提供此功能，并要求启用 UEFI 安全引导。
+   </para>
+
+
+
+   <para>
+    可信用户分为以下两类：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      首先是持有密钥的用户。平台密钥 (PK) 几乎允许所有操作。密钥交换密钥 (KEK) 的许可范围与 PK 一致，但不能更改 PK。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      其次是能够以物理方式访问机器的任何用户。具有物理访问权限的用户可以重引导机器并对 UEFI 进行配置。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    UEFI 提供下列两类变量以满足这些用户的需求：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      第一类变量即所谓的<quote>已身份验证的变量</quote>。该变量仅有在变量新值的签名密钥与变量旧值的签名密钥一致时，才可以通过引导程序内部（即所谓的“引导服务环境”）以及运行的 OS 加以更新。而且，您只能向这类变量追加或将其更改为序列号更高的数值。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      第二类变量即所谓的<quote>仅供引导服务使用的变量</quote>。引导进程中运行的任何代码都可以获取这些变量。在结束引导进程并准备启动 OS 的时间间隔内，引导加载程序必须调用 <literal>ExitBootServices</literal> 呼叫。此后将无法获取这些变量，OS 也无法接触到这些变量。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    各类 UEFI 密钥列表属于第一类，因为该类变量除了允许联机更新外，还允许添加密钥、驱动程序、固件指纹以及将其列入黑名单。第二类变量即<quote>仅供引导服务使用的变量</quote>。在既安全又能应用开放源、并因此与 GPLv3 兼容的情况下，该类变量有助于实施安全引导。
+   </para>
+   <para>
+    SUSE 首先启动 <systemitem>shim</systemitem>。这是一个小而简单的 EFI 引导加载程序，最初由 Fedora 开发。它通过两种证书签名，一种是由 SUSE KEK 签名的证书，另一种是由微软签发的证书，具体取决于系统中的 UEFI 密钥数据库中有哪些 KEK 可用。
+   </para>
+   <para>
+    这样一来，<systemitem>shim</systemitem> 即可加载并执行。
+   </para>
+   <para>
+    <systemitem>shim</systemitem> 随后继续验证其想要加载的引导加载程序是否可信。默认情况下，<systemitem>shim</systemitem> 会使用其主体中所嵌入的独立的 SUSE 证书。此外，<systemitem>shim</systemitem> 还允许<quote>登记</quote>其他密钥，用于覆盖默认的 SUSE 密钥。下文将这些密钥称为<quote>机器拥有者密钥</quote>或缩写为 MOK。
+   </para>
+   <para>
+    接下来，引导加载程序会验证内核，然后加以引导。该内核将在模块上执行同样的操作。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.mok">
+   <title>MOK（机器拥有者密钥）</title>
+
+   <para>
+    如果用户（<quote>机器拥有者</quote>）想要更换引导进程的任何组件，则会用到“机器拥有者密钥 (MOK)”。他们可以借助 <systemitem>mokutils</systemitem> 工具对组件签名及管理 MOK。
+   </para>
+   <para>
+    当加载 <systemitem>shim</systemitem> 时，登记进程便会开始重引导计算机并中断引导进程（例如按下某个键）。<systemitem>shim</systemitem> 随后转入登记模式，允许用户使用引导分区上的文件的密钥替换默认的 SUSE 密钥。如果用户选择这样做，则 <systemitem>shim</systemitem> 将计算该文件的哈希，并将计算结果置入<quote>仅供引导服务</quote>的变量中。这样，<systemitem>shim</systemitem> 可以检测到文件除引导服务之外出现的任何更改，从而避免篡改用户核准的 MOK 列表。
+   </para>
+   <para>
+    上述各步都在引导时发生，此时仅执行已经校验的代码。因此，只有控制台上所示的一位用户可以使用机器拥有者的一组密钥。它不可能是远程访问 OS 的恶意程序或骇客，因为骇客或恶意程序只能更改文件，但无法更改存储在<quote>仅供引导服务使用</quote>的变量中的哈希。
+   </para>
+   <para>
+    引导加载程序经 <systemitem>shim</systemitem> 装载并校验后，如果需要校验内核以免校验代码重复，则会回调 <systemitem>shim</systemitem>。为此，<systemitem>Shim</systemitem> 将使用同一份 MOK 列表并通知引导加载程序能否加载内核。
+   </para>
+   <para>
+    这样，您就可以安装自己的内核或引导加载程序。您只需要安装一组新的密钥，并在首次重引导期间以物理方式呈现，从而予以授权。由于 MOK 集是一个密钥列表而非单独一个 MOK，因此您可以让 <systemitem>shim</systemitem> 信任来自若干不同供应商的密钥，从而允许引导加载程序进行双重或多重引导。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.custom">
+   <title>引导自定义内核</title>
+   <para>
+    以下内容基于 <link xlink:href="http://en.opensuse.org/openSUSE:UEFI#Booting_a_custom_kernel"/>。
+   </para>
+   <para>
+    安全引导不会阻止您使用自行编译的内核。您必须使用自己的证书在该内核上签名，并让固件或 MOK 得以识别该证书。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      创建一个自定义的 X.509 密钥以及用于签名的证书：
+     </para>
+<screen>openssl req -new -x509 -newkey rsa:2048 -keyout key.asc \
+  -out cert.pem -nodes -days 666 -subj "/CN=$USER/"</screen>
+     <para>
+
+      有关创建证书的详细信息，请参见 <link xlink:href="http://en.opensuse.org/openSUSE:UEFI_Image_File_Sign_Tools#Create_Your_Own_Certificate"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      将密钥和证书打包成 PKCS#12 结构：
+     </para>
+<screen>openssl pkcs12 -export -inkey key.asc -in cert.pem \
+  -name kernel_cert -out cert.p12</screen>
+    </step>
+    <step>
+     <para>
+      生成用于 <command>pesign</command> 的 NSS 数据库：
+     </para>
+<screen>certutil -d . -N</screen>
+    </step>
+    <step>
+     <para>
+      将 PKCS#12 中包含的密钥和证书导入 NSS 数据库：
+     </para>
+<screen>pk12util -d . -i cert.p12</screen>
+    </step>
+    <step>
+     <para>
+      使用 <command>pesign</command> 将新签名<quote>赋予</quote>内核：
+     </para>
+<screen>pesign -n . -c kernel_cert -i arch/x86/boot/bzImage \
+  -o vmlinuz.signed -s</screen>
+    </step>
+    <step>
+     <para>
+      列出内核映像上的签名：
+     </para>
+<screen>pesign -n . -S -i vmlinuz.signed</screen>
+     <para>
+      此时，您可以照常在 <filename>/boot</filename> 中安装内核。由于内核现有一个自定义的签名，因此需要将用于签名的证书导入 UEFI 固件或 MOK 中。
+     </para>
+    </step>
+    <step>
+     <para>
+      将证书转为 DER 格式，以供导入固件或 MOK：
+     </para>
+<screen>openssl x509 -in cert.pem -outform der -out cert.der</screen>
+    </step>
+    <step>
+     <para>
+      将证书复制到 ESP 以简化访问：
+     </para>
+<screen>sudo cp cert.der /boot/efi/</screen>
+    </step>
+    <step>
+     <para>
+      使用 <command>mokutil</command> 自动启动 MOK 列表。
+     </para>
+     <stepalternatives>
+      <step>
+       <substeps>
+        <step>
+         <para>
+          将证书导入到 MOK 中：
+         </para>
+<screen>mokutil --root-pw --import cert.der</screen>
+         <para>
+          <option>--root-pw</option> 选项可让 <systemitem class="username">root</systemitem> 用户直接使用。
+         </para>
+        </step>
+        <step>
+         <para>
+          检查准备注册的证书列表：
+         </para>
+<screen>mokutil --list-new</screen>
+        </step>
+        <step>
+         <para>
+          重引导系统；<systemitem>shim</systemitem> 应该会起动 MokManager。您需要输入 <systemitem class="username">root</systemitem> 口令以确认将证书导入到 MOK 列表中。
+         </para>
+        </step>
+        <step>
+         <para>
+          检查新导入的密钥以前是否注册过：
+         </para>
+<screen>mokutil --list-enrolled</screen>
+        </step>
+       </substeps>
+      </step>
+      <step>
+       <substeps>
+        <step>
+         <para>
+          此外，若要手动启动 MOK，也可以采用这一过程：
+         </para>
+         <para>
+          重引导
+         </para>
+        </step>
+        <step>
+         <para>
+          在 GRUB 2 菜单中，按“<literal>c</literal>”键。
+         </para>
+        </step>
+        <step>
+         <para>
+          类型：
+         </para>
+<screen>chainloader $efibootdir/MokManager.efi
+boot</screen>
+        </step>
+        <step>
+         <para>
+          选择<guimenu>从磁盘登记密钥</guimenu>。
+         </para>
+        </step>
+        <step>
+         <para>
+          导航至 <filename>cert.der</filename> 文件并按 <keycap function="enter"/>。
+         </para>
+        </step>
+        <step>
+         <para>
+          按照指导登记密钥。正常情况下应按“<literal>0</literal>”，然后按“<literal>y</literal>”予以确认。
+         </para>
+         <para>
+          除此之外，固件菜单也可能提供了多种向“签名数据库”中添加新密钥的方式。
+         </para>
+        </step>
+       </substeps>
+      </step>
+     </stepalternatives>
+    </step>
+   </procedure>
+
+
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.non-inbox">
+   <title>使用非内置驱动程序</title>
+   <para>
+    该产品不支持在启用安全引导的情况下，在安装过程中添加非内置驱动程序（即，不是 SLE 自带的驱动程序）。用于 SolidDriver/PLDP 的签名密钥默认不受信任。
+   </para>
+   <para>
+    您可以通过两种不同的方式，在启用安全引导的情况下于安装期间安装第三方驱动程序。在这两种情况下，都要：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      在安装前，通过固件或系统管理工具将所需密钥添加到固件数据库中。此选项取决于您当前使用的具体硬件。请咨询您的硬件供应商了解详细信息。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用 <link xlink:href="https://drivers.suse.com/"/> 上或硬件供应商提供的可引导驱动程序 ISO，在首次引导时将所需密钥登记到 MOK 列表中。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    要使用可引导驱动程序 ISO 将驱动程序密钥登记到 MOK 列表中，请执行以下步骤：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      将上文所述 ISO 映像刻录到空 CD/DVD 媒体中。
+     </para>
+    </step>
+    <step>
+     <para>
+      使用新的 CD/DVD 媒体开始安装，并准备好标准的 SUSE Linux Enterprise 媒体或网络安装服务器的 URL。
+     </para>
+     <para>
+      如果您要进行网络安装，请在引导命令行上使用 <option>install=</option> 选项输入网络安装源的 URL。
+     </para>
+     <para>
+      如果您是从光学媒体安装，安装程序会先从驱动程序包引导，然后要求插入 SUSE Linux Enterprise 产品的第一张光盘。
+     </para>
+    </step>
+    <step>
+     <para>
+      安装时将会使用包含经过更新的驱动程序的 initrd。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    有关详细信息，请参见<link xlink:href="https://drivers.suse.com/doc/Usage/Secure_Boot_Certificate.html"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.feats">
+
+   <title>功能和限制</title>
+   <para>
+    以安全引导模式引导时，可以使用以下功能：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      安装到 UEFI 默认的引导加载程序位置，这是为了保留或恢复 EFI 引导项而采用的机制。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      通过 UEFI 重引导。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果没有其他可回退到的旧版 BIOS，Xen 超级管理程序将使用 UEFI 引导。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      支持 UEFI IPv6 PXE 引导。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      UEFI 支持视频模式，内核可以从 UEFI 检索视频模式，以使用相同的参数配置 KMS 模式。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      UEFI 支持从 USB 设备引导。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    以安全引导模式引导时，存在以下限制：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      为确保他人无法轻易绕过安全引导，系统在安全引导下运行时会禁用部分内核特性。
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      引导加载程序、内核以及内核模块必须经过签名。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Kexec 和 Kdump 处于禁用状态。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      休眠（挂起到磁盘）处于禁用状态。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      无法访问 <filename>/dev/kmem</filename> 和 <filename>/dev/mem</filename>，连 root 用户也不例外。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      无法访问 I/O 端口，连 root 用户也不例外。所有 X11 图形驱动程序必须使用内核驱动程序。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      无法通过 sysfs 访问 PCI BAR。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      无法使用 ACPI 中的 <literal>custom_method</literal>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      无法使用 asus-wmi 模块的 debugfs。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>acpi_rsdp</literal> 参数对内核没有任何影响。
+     </para>
+    </listitem>
+   </itemizedlist>
+
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.uefi.moreinfo">
+  <title>更多信息</title>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="http://www.uefi.org"/> — UEFI 主页，其中列出了最新的 UEFI 规范。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     由 Olaf Kirch 与 Vojtěch Pavlík 撰写的博文（上述章节内容主要取材于这些博文）：
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       <link xlink:href="http://www.suse.com/blogs/uefi-secure-boot-plan/"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <link xlink:href="http://www.suse.com/blogs/uefi-secure-boot-overview/"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <link xlink:href="http://www.suse.com/blogs/uefi-secure-boot-details/"/>
+      </para>
+     </listitem>
+    </itemizedlist>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://en.opensuse.org/openSUSE:UEFI"/> — UEFI 与 openSUSE。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+
+</chapter>
