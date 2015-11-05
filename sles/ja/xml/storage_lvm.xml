@@ -1,0 +1,1371 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_lvm.xml" version="5.0" xml:id="cha.lvm" xml:lang="ja">
+
+ <title>LVMの設定</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  本項では、LVM(Logical Volume Manager)の原理と多くの状況で役立つ基本機能を簡単に説明します。YaST LVMの設定は、YaST Expert Partitionerからアクセスできます。このパーティショニングツールにより、既存のパーティションを編集、および削除できます。また、LVMで使用する新規パーティションを作成することもできます。
+ </para>
+ <warning>
+  <title>リスク</title>
+  <para>
+   LVMを使用することでデータ損失などの危険性が増加する恐れがあります。この危険性にはアプリケーションのクラッシュ、電源障害、誤ったコマンドなども含まれます。LVMまたはボリュームの再設定を実施する前にデータを保存してください。バックアップなしでは作業を実行しないでください。
+  </para>
+ </warning>
+ <sect1 xml:id="sec.lvm.explained">
+  <title>論理ボリュームマネージャ(LVM)の理解</title>
+
+  <para>
+   LVMは、複数の物理ボリューム(ハードディスク、パーティション、LUN)にハードディスクスペースを柔軟に分散することができます。LVMが開発された理由は、インストール中に初期パーティショニングが終了した後でのみ、ハードディスクスペースのセグメンテーションを変更するニーズが発生する可能性があるためです。稼動中のシステムでパーティションを変更することは困難なので、LVMは必要に応じて論理ボリューム(LV)を作成できるメモリスペースの仮想プール(ボリュームグループ(VG))を提供します。オペレーティングシステムは物理パーティションの代わりにこれらのLVにアクセスします。ボリュームグループは2つ以上のディスクにまたがることができます。したがって、複数のディスクまたはそれらの一部で1つのVGを構成できます。この方法で、LVMは物理ディスクスペースから一種の抽象化を行います。この抽象化により、物理パーティショニングを使用する場合よりはるかに簡単で安全な方法でセグメンテーションを変更できます。
+  </para>
+
+  <para>
+   <xref linkend="fig.lvm.explain" xrefstyle="FigureXRef"/>では物理パーティショニング(左)とLVM区分(右)を比較しています。左側は、1つのディスクが割り当てられたマウントポイント(MP)をもつ3つの物理パーティション(PART)に分かれています。これによりオペレーティングシステムはそれぞれのパーティションにアクセスできます。右側では2つのディスクがそれぞれ3つの物理パーティションに分かれています。2つのLVMボリュームグループ(VG 1およびVG 2)が定義されています。VG 1には、DISK 1からのパーティションが2つ、DISK 2からのパーティションが1つ含まれます。VG 2には、DISK 2からの残りの2パーティションが含まれます。
+  </para>
+
+  <figure xml:id="fig.lvm.explain">
+   <title>物理パーティショニング対LVM</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="lvm.svg" width="80%" format="SVG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="lvm.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   LVMでは、ボリュームグループに組み込まれた物理ディスクをPV (物理ボリューム)と呼びます。<xref linkend="fig.lvm.explain" xrefstyle="FigureXRef"/>のボリュームグループ内には、4つの論理ボリューム(LV 1からLV 4)が定義されています。これらのボリュームは、関連付けられたマウントポイント(MP)を介してオペレーティングシステムに使用されます。別の論理ボリュームとの境界とパーティションの境界を並べることはできません。この例ではLV 1およびLV 2の間に境界があります。
+  </para>
+
+  <para>
+   LVMの機能:
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     複数のハードディスクまたはパーティションを大きな論理ボリュームにまとめることができます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     提供された設定が適切であれば、LV(<filename>/usr</filename>など)は空きスペースがなくなったときに拡張することができます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     LVMを使用することで、実行中のシステムにハードディスクまたはLVを追加できます。ただし、こうしたディスクやLVを追加するには、ホットスワップ可能なハードウェアが必要になります。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     複数の物理ボリューム上に論理ボリュームのデータストリームを割り当てる<emphasis>ストライピングモード</emphasis>を有効にすることもできます。これらの物理ボリュームが別のディスクに存在する場合、RAID 0と同様に読み込みおよび書き込みのパフォーマンスを向上できます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     スナップショット機能は稼動中のシステムで一貫性のある(特にサーバ)バックアップを取得できます。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   これらの機能とともにLVMを使用することは、頻繁に使用されるホームPCや小規模サーバではそれだけでも意義があります。データベース、音楽アーカイブ、またはユーザディレクトリのように増え続けるデータストックがある場合は、LVMが特に役に立ちます。LVMを使用すると、物理ハードディスクより大きなファイルシステムの作成が可能になります。LVMのもう1つの利点は最大256個のLVを追加できることです。ただし、LVMでの作業は従来のパーティションでの作業とは異なることに留意してください。
+  </para>
+
+
+
+  <para>
+   YaSTパーティショナの使用によって、新規および既存のLVMストレージオブジェクトを管理できます。LVMの設定に関する指示や詳細情報については、公式の<link xlink:href="http://tldp.org/HOWTO/LVM-HOWTO/"><citetitle>LVM HOWTO</citetitle></link>を参照してください。
+  </para>
+
+  <important>
+   <title>既存のLVM設定へのマルチパスサポートの追加</title>
+   <para>
+    LVMの構成後にマルチパスのサポートを追加する場合は、<filename>/etc/lvm/lvm.conf</filename>ファイルを修正し、<filename>/dev/disk/by-id</filename>ディレクトリ内のマルチパスデバイス名のみをスキャンするようにして(<xref linkend="sec.multipath.lvm" xrefstyle="SectTitleOnPage"/>に記載するとおり)、 サーバを再起動します。
+   </para>
+  </important>
+ </sect1>
+ <sect1 xml:id="sec.lvm.vg">
+  <title>ボリュームグループの作成</title>
+
+  <para>
+   LVMボリュームグループ(VG)は、Linux LVMパーティションをスペースの論理プールにします。グループ内の使用可能なスペースから論理ボリュームを作成できます。グループ内のLinux LVMパーティションは、同じディスクに存在することも、さまざまなディスクに存在することも可能です。パーティションまたはディスク全体を追加することにより、グループのサイズを拡張できます。ディスク全体を使用する場合、そのディスクにパーティションを含めることはできません。パーティションを使用した場合、それらはマウントされません。YaSTは、パーティションをVGに追加する際に自動的にパーティションタイプを<literal>0x8E Linux LVM</literal>に変更します。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動して<guimenu>パーティショナ</guimenu>を開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     既存のパーティショニングセットアップを再設定する必要がある場合は、次の手順に従います。詳細については、<xref linkend="sec.yast2.i_y2_part_expert"/>を参照してください。未使用のディスクまたはパーティションを使用したいだけの場合、この手順はスキップしてください。
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       既にパーティションが含まれているハードディスク全体を使用するには、そのディスク上にあるパーティションをすべて削除します。
+      </para>
+     </step>
+     <step>
+      <para>
+       現在マウントされているパーティションを使用するには、そのパーティションをアンマウントします。
+      </para>
+     </step>
+     <step>
+      <para>
+       ハードディスク上のパーティション化されていない空き領域を使用するには、そのディスク上に新しいプライマリパーティションまたは論理パーティションを作成します。そのタイプを<literal>0x8E Linux LVM</literal>に設定します。フォーマットまたはマウントは行わないでください。
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     左のパネルで、<guimenu>ボリューム管理</guimenu>を選択します。
+    </para>
+    <para>
+     既存のボリュームグループのリストが右のパネルに表示されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     ［ボリューム管理］ページの左下で、<menuchoice><guimenu>追加</guimenu><guimenu>ボリュームグループ</guimenu></menuchoice>の順にクリックします。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm4_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm4_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     ボリュームグループは次のように定義します。
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       <guimenu>ボリュームグループ名</guimenu>を指定します。
+      </para>
+      <para>
+       インストール時にボリュームグループを作成している場合は、SUSE Linux Enterprise Serverのシステムファイルを含むボリュームグループに対して<literal>system</literal>という名前が示唆されます。<phrase role="productname"><phrase os="sles"/></phrase>
+      </para>
+     </step>
+     <step>
+      <para>
+       <guimenu>PEサイズ</guimenu>を指定します。
+      </para>
+      <para>
+       <guimenu>PEサイズ</guimenu>は、ボリュームグループの物理ブロックのサイズを定義します。ボリュームグループにある全ディスクスペースはこの物理ブロックサイズ内で使用されます。値の範囲は、2の累乗で1KBから16GBまでです。通常、この値は4MBに設定されます。
+      </para>
+      <para>
+       LVM1では、LVごとに65534エクステントまでしかサポートしないので、4MBの物理エクステントで最大LVサイズとして256GBが可能でした。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>で使用されるLVM2では、物理エクステントの数に制限はありません。エクステントが多くても、論理ボリュームに対するI/Oパフォーマンスに影響しませんが、LVMツールの動作が遅くなります。
+      </para>
+      <important>
+       <title>物理エクステントサイズ</title>
+       <para>
+        1つのボリュームグループに異なるサイズの物理エクステントを混在させないでください。初期設定後はエクステントを変更しないでください。
+       </para>
+      </important>
+     </step>
+     <step>
+      <para>
+       <guimenu>利用可能な物理ボリューム</guimenu>リストで、このボリュームグループに含めたいLinux LVMパーティションを選択し、<guimenu>追加</guimenu>をクリックして、それらのパーティションを<guimenu>選択した物理ボリューム</guimenu>リストに移動します。
+      </para>
+     </step>
+     <step>
+      <para>
+       <guimenu>完了</guimenu>をクリックします。
+      </para>
+      <para>
+       <guimenu>ボリュームグループ</guimenu>リストに新しいグループが表示されます。
+      </para>
+     </step>
+    </substeps>
+   </step>
+   <step>
+    <para>
+     ［ボリューム管理］ページで、<guimenu>次へ</guimenu>をクリックし、新しいグループが一覧されることを確認してから、<guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     ボリュームグループを構成している物理デバイスを確認するため、稼働中のシステムでYaSTパーティショナを開き、<menuchoice><guimenu>ボリューム管理</guimenu><guimenu>編集</guimenu><guimenu>Physical Devices (物理デバイス)</guimenu></menuchoice>の順にクリックします。<guimenu>中止する</guimenu>をクリックしてこの画面を閉じます。
+    </para>
+    <figure xml:id="fig.yast2.lvm.physical_volumes">
+     <title>DATAという名前のボリュームグループ内の物理ボリューム</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm5_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm5_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.lv">
+  <title>論理ボリュームの作成</title>
+
+  <para>
+   論理ボリュームは、ハードディスクと同様に領域のプールを提供します。この領域を使用可能な状態にするには、物理ボリュームを定義する必要があります。物理ボリュームは通常のパーティションに似ており、フォーマットやマウントが可能です。
+  </para>
+
+  <para>
+   YaSTパーティショナを使用して、既存のボリュームグループから論理ボリュームを作成します。各ボリュームグループに少なくとも1つの論理ボリュームを割り当ててください。ボリュームグループ内の空き領域を使い果たすまで、必要に応じて新しい論理ボリュームを作成できます。LVM論理ボリュームをオプションでシンプロビジョニングすることによって、使用可能な空き容量を超えるサイズで論理ボリュームを作成できます(詳しくは<xref linkend="sec.lvm.lv.thin"/>を参照)。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <formalpara>
+     <title>通常のボリューム:</title>
+     <para>
+      (デフォルト)ボリュームの領域は直ちに割り当てられます。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>シンプール:</title>
+     <para>
+      この論理ボリュームは、シンボリューム用に予約された領域のプールです。シンボリュームでは、必要な領域をそのプールからオンデマンドで割り当てることができます。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>シンボリューム:</title>
+     <para>
+      ボリュームは疎ボリュームとして作成されます。このボリュームでは、必要な領域はシンプールからオンデマンドで割り当てられます。
+     </para>
+    </formalpara>
+   </listitem>
+  </itemizedlist>
+
+  <procedure xml:id="pro.lvm.lv">
+   <title>論理ボリュームの設定</title>
+   <step>
+    <para>
+     YaSTを起動して<guimenu>パーティショナ</guimenu>を開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     左のパネルで、<guimenu>ボリューム管理</guimenu>を選択します。既存のボリュームグループのリストが右のパネルに表示されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     ボリュームを作成するボリュームグループを選択して、<menuchoice><guimenu>追加</guimenu><guimenu>論理ボリューム</guimenu></menuchoice>の順に選択します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>名前</guimenu>にボリューム名を入力し、<guimenu>通常ボリューム</guimenu>を選択します(シンプロビジョニングボリュームの設定については、<xref linkend="sec.lvm.lv.thin"/>を参照してください)。<guimenu>次へ</guimenu>で続行します。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm9_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm9_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     ボリュームのサイズと、複数ストライプを使用するかどうかを指定します。
+    </para>
+    <para>
+     ストライプボリュームを使用すると、データは複数の物理ボリュームに分散されます。これらの物理ボリュームが別のハードディスクに存在する場合、この性質により、読み込みおよび書込みのパフォーマンスが向上します(RAID 0など)。利用可能な最大ストライプ数は、物理ボリュームの数と同じです。デフォルト(<literal>1</literal>)は、複数のストライプを使用しない設定です。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm10_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm10_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     <guimenu>Role (役割)</guimenu>でボリュームの役割を選択します。ここで選択した内容は、次のダイアログのデフォルト値にのみ影響します。値は次の手順で変更可能です。わからない場合は、<guimenu>Raw Volume (Unformatted) (RAWボリューム(未フォーマット))</guimenu>を選択します。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm11_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm11_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     <guimenu>フォーマットオプション</guimenu>で、<guimenu>パーティションをフォーマットする</guimenu>を選択し、<guimenu>ファイルシステム</guimenu>を選択します。<guimenu>オプション</guimenu>メニューの内容は、ファイルシステムによって異なります。通常は、デフォルト値を変更する必要はありません。
+    </para>
+    <para>
+     <guimenu>マウントのオプション</guimenu>の下で、<guimenu>パーティションをマウントする</guimenu>を選択してから、マウントポイントを選択します。<guimenu>Fstabオプション</guimenu>をクリックして、このボリュームの特別なマウントオプションを追加します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>次へ</guimenu>をクリックし、変更が一覧されることを確認してから、<guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 xml:id="sec.lvm.lv.thin">
+   <title>シンプロビジョニング論理ボリューム</title>
+   <para>
+    LVM論理ボリュームはシンプロビジョニング可能です(オプション)。シンプロビジョニングを使用すると、利用可能な空き領域を超えるサイズの論理ボリュームを作成できます。任意の数のシンボリューム用に予約した未使用領域が含まれるシンプールを作成します。シンボリュームは疎ボリュームとして作成され、必要に応じてシンプールから領域が割り当てられます。ストレージ領域をコスト効果の高い方法で割り当てなければならなくなった場合、シンプールを動的に拡張できます。シンプロビジョニングボリュームは、Snapperで管理可能なスナップショットもサポートします。詳細については、<xref linkend="cha.snapper"/>を参照してください。
+   </para>
+   <para>
+    シンプロビジョニング論理ボリュームを設定するには、<xref linkend="pro.lvm.lv"/>の説明に従って作業を進めます。ボリュームタイプを選択する手順になったら、<guimenu>通常ボリューム</guimenu>を選択せずに、<guimenu>シンボリューム</guimenu>または<guimenu>シンプール</guimenu>を選択します。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><guimenu>シンプール</guimenu>
+     </term>
+     <listitem>
+      <para>
+       この論理ボリュームは、シンボリューム用に予約された領域のプールです。シンボリュームでは、必要な領域をそのプールからオンデマンドで割り当てることができます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><guimenu>シンボリューム</guimenu>
+     </term>
+     <listitem>
+      <para>
+       ボリュームは疎ボリュームとして作成されます。このボリュームでは、必要な領域はシンプールからオンデマンドで割り当てられます。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <important>
+    <title>クラスタにおけるシンプロビジョニングボリューム</title>
+    <para>
+     クラスタでシンプロビジョニングボリュームを使用するには、クラスタを使用するシンプールとシンボリュームを1つのクラスタリソースで管理する必要があります。これにより、シンボリュームとシンプールを常に同じノードに排他的にマウントできます。
+    </para>
+   </important>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec.lvm.vg_resize">
+  <title>既存のボリュームグループのサイズ変更</title>
+
+  <para>
+   ボリュームグループによって提供される領域は、物理ボリュームを追加することによっていつでも拡張できます。これは、システムの稼働中であっても、サービスを中断することなく実行できます。これにより、グループに論理ボリュームを追加したり、既存のボリュームのサイズを拡張したりできます。<xref linkend="sec.lvm.lv_resize"/>を参照してください。
+  </para>
+
+  <para>
+   また、物理ボリュームを削除してボリュームグループのサイズを縮小することもできます。YaSTで削除できる物理ボリュームは、現在未使用の物理ボリュームだけです。現在使用中の物理ボリュームを確認するには、次のコマンドを実行します。<literal>PE Ranges</literal>列に表示されているパーティション(物理ボリューム)が使用中のものです。
+  </para>
+
+<screen><prompt>tux &gt; </prompt>sudo pvs -o vg_name,lv_name,pv_name,seg_pe_ranges
+root's password:
+  VG   LV    PV         PE Ranges       
+             /dev/sda1                  
+  DATA DEVEL /dev/sda5  /dev/sda5:0-3839
+  DATA       /dev/sda5                  
+  DATA LOCAL /dev/sda6  /dev/sda6:0-2559
+  DATA       /dev/sda7                  
+  DATA       /dev/sdb1                  
+  DATA       /dev/sdc1</screen>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動して<guimenu>パーティショナ</guimenu>を開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     左のパネルで、<guimenu>ボリューム管理</guimenu>を選択します。既存のボリュームグループのリストが右のパネルに表示されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     変更するボリュームグループを選択し、<guimenu>サイズ変更</guimenu>をクリックします。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm8_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm8_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     次のいずれかの操作を行います。
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>追加:</title>
+       <para>
+        1つまたは複数の物理ボリューム(LVMパーティション)を<guimenu>利用可能な物理ボリューム</guimenu>リストから<guimenu>選択した物理ボリューム</guimenu>リストに移動することにより、ボリュームグループのサイズを拡張します。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>削除:</title>
+       <para>
+        1つまたは複数の物理ボリューム(LVMパーティション)を<guimenu>選択した物理ボリューム</guimenu>リストから<guimenu>使用可能な物理ボリューム</guimenu>リストに移動することにより、ボリュームグループのサイズを縮小します。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     <guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>次へ</guimenu>をクリックし、変更が一覧されることを確認してから、<guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.lv_resize">
+  <title>論理ボリュームのサイズ変更</title>
+
+  <para>
+   ボリュームグループ内に利用可能な未使用の空き領域がある場合、論理ボリュームを拡張して使用可能な領域を増やすことができます。また、ボリュームのサイズを縮小してボリュームグループの領域を解放し、他の論理ボリュームで使用できるようにすることもできます。
+  </para>
+
+  <note>
+   <title><quote>オンライン</quote>でのサイズ変更</title>
+   <para>
+    ボリュームのサイズを縮小すると、そのファイルシステムのサイズもYaSTによって自動的に縮小されます。現在マウントされているボリュームのサイズを<quote>オンライン</quote>で(つまりマウント中に)変更できるかどうかは、ファイルシステムによって異なります。オンライン拡張をサポートするファイルシステムは、Btrfs、XFS、Ext3、およびReiserFSです。
+   </para>
+   <para>
+    オンライン縮小をサポートするファイルシステムは、Btrfsのみです。XFS、Ext2/3/4、およびReiserFSのボリュームを縮小するには、ボリュームをアンマウントする必要があります。XFSはファイルシステムの縮小をサポートしないため、XFSでフォーマットされたボリュームは一切縮小できません。
+   </para>
+  </note>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動して<guimenu>パーティショナ</guimenu>を開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     左のパネルで、<guimenu>ボリューム管理</guimenu>を選択します。既存のボリュームグループのリストが右のパネルに表示されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     変更する論理ボリュームを選択し、<guimenu>サイズ変更</guimenu>をクリックします。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_lvm12_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_lvm12_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     次のオプションの1つを使用して目的のサイズを設定します。
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>最大サイズ</title>
+       <para>
+        論理ボリュームのサイズを、ボリュームグループの残り領域をすべて使用するよう拡張します。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>最小サイズ</title>
+       <para>
+        論理ボリュームのサイズを、データおよびファイルシステムメタデータによって使用されているサイズまで縮小します。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>［Custom Size (カスタムサイズ)］</title>
+       <para>
+        ボリュームの新しいサイズを指定します。上に表示されている最小値から最大値までの範囲内の値を指定する必要があります。キロバイトにはK、メガバイトにはM、ギガバイトにはG、テラバイトにはTをそれぞれ使用します(たとえば<literal>20G</literal>)。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     <guimenu>OK</guimenu>をクリックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>次へ</guimenu>をクリックし、変更が一覧されることを確認してから、<guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1>
+  <title>ボリュームグループまたは論理ボリュームの削除</title>
+
+  <warning>
+   <title>データ損失</title>
+   <para>
+    ボリュームグループを削除すると、グループの各メンバーパーティションに含まれているデータがすべて破棄されます。論理ボリュームを削除すると、そのボリュームに保存されているデータがすべて破棄されます。
+   </para>
+  </warning>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動して<guimenu>パーティショナ</guimenu>を開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     左のパネルで、<guimenu>ボリューム管理</guimenu>を選択します。既存のボリュームグループのリストが右のパネルに表示されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     削除するボリュームグループまたは論理ボリュームを選択して、<guimenu>Delete (削除)</guimenu>をクリックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     選択した内容に応じて警告ダイアログが表示されます。<guimenu>はい</guimenu>を選択して確認します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>次へ</guimenu>をクリックし、削除したボリュームグループが一覧されることを確認してから(削除は赤いフォントで示されます)、<guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm.cli">
+  <title>LVMコマンドの使用</title>
+
+  <para>
+   LVMコマンドの使用の詳細については、次の表で説明されている各コマンドのマニュアルページを参照してください。すべてのコマンドは<systemitem class="username">root</systemitem>特権で実行する必要があります。<command>sudo </command><replaceable>コマンド</replaceable>を使用するか(推奨)、直接<systemitem class="username">root</systemitem>ユーザとして実行します。
+  </para>
+
+  <table xml:id="tab.lvm.cli">
+   <title>LVMコマンド</title>
+   <tgroup cols="2">
+    <colspec colnum="1" colname="1" colwidth="65*"/>
+    <colspec colnum="2" colname="2" colwidth="35*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        コマンド
+       </para>
+      </entry>
+      <entry>
+       <para>
+        説明
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+<screen>pvcreate <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        LVLMで物理ボリュームとして使用できるようにデバイス(<filename>/dev/sdb</filename>など)を初期化します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>pvdisplay <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        LVM物理ボリュームに関する情報(現在、論理ボリュームで使用中かどうかなど)を表示します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgcreate -c y <replaceable>vg_name</replaceable> <replaceable>dev1</replaceable> [<replaceable>dev2</replaceable>...]
+</screen>
+      </entry>
+      <entry>
+       <para>
+        指定した1つ以上のデバイスでクラスタ化ボリュームグループを作成します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgchange -a [ey|n] <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        ボリュームグループおよびその論理ボリュームを入出力用にアクティブ(<literal>-a ey</literal>)または非アクティブ(<literal>-a n</literal>)にします。
+       </para>
+       <important>
+        <title>クラスタ内のボリュームのアクティブ化</title>
+        <para>
+         クラスタノード上のボリュームグループを排他的にアクティブにするには、<literal>ey</literal>オプションを使用してください。ロードスクリプトではこのオプションがデフォルトで使用されます。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgremove <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        ボリュームグループを削除します。このコマンドを使用する前に、論理ボリュームを削除してボリュームグループを非アクティブにしてください。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgdisplay <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        指定したボリュームグループに関する情報を表示します。
+       </para>
+       <para>
+        ボリュームグループの合計物理エクステントを確認するには、次のように入力します。
+       </para>
+<screen>vgdisplay <replaceable>vg_name</replaceable> | grep "Total PE"</screen>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -L <replaceable>size</replaceable> -n <replaceable>lv_name</replaceable> <replaceable>vg_name</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        指定したサイズの論理ボリュームを作成します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -L <replaceable>size</replaceable> --thinpool <replaceable>pool_name</replaceable> <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        ボリュームグループ<replaceable>vg_name</replaceable>から、指定したサイズのシンプール<literal>myPool</literal>を作成します。
+       </para>
+       <para>
+        たとえば、ボリュームグループ<literal>LOCAL</literal>から5GBのサイズのシンプールを作成するには、「<command>lvcreate -L 5G --thinpool myPool LOCAL</command>」と入力します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -T
+	<replaceable>vg_name</replaceable>/<replaceable>pool_name</replaceable> -V <replaceable>size</replaceable> \
+-n <replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        プール<replaceable>pool_name</replaceable>内にシン論理ボリュームを作成します。たとえば、ボリュームグループ<literal>LOCAL</literal>上のプール<literal>myPool</literal>から1GBのシンボリューム<literal>myThin1</literal>を作成するには、「<command>lvcreate -T LOCAL/myPool -V 1G -n myThin1</command>」と入力します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -T <replaceable>vg_name</replaceable>/<replaceable>pool_name</replaceable> -V <replaceable>size</replaceable> -L <replaceable>size</replaceable> \
+-n <replaceable>LV_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        シンプール作成操作とシン論理ボリューム作成操作を1つのコマンドに結合できます。その場合、「<command>lvcreate -T LOCAL/myPool -V 1G -L 5G -n myThin1</command>」と入力します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvcreate -s [-L <replaceable>size</replaceable>] -n <replaceable>snap_volume</replaceable> \
+<replaceable>source_volume_path</replaceable> <replaceable>vg_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        指定した論理ボリュームに対してスナップショットボリュームを作成します。サイズオプション(<option>-L</option>または<option>--size</option>)を指定しなかった場合、スナップショットはシンスナップショットとして作成されます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvremove /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        論理ボリュームを削除します。
+       </para>
+       <para>
+        このコマンドを使用する前に、<command>umount</command>コマンドで論理ボリュームをマウント解除して閉じてください。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvremove <replaceable>snap_volume_path</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        スナップショットボリュームを削除します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvconvert --merge <replaceable>snap_volume_path</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        論理ボリュームをスナップショットのバージョンに戻します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgextend <replaceable>vg_name</replaceable> <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        指定したデバイス(物理ボリューム)を既存のボリュームグループに追加します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>vgreduce <replaceable>vg_name</replaceable> <replaceable>device</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        指定した物理ボリュームを既存のボリュームグループから削除します。
+       </para>
+       <important>
+        <para>
+         物理ボリュームが論理ボリュームによって使用中でないことを確認してください。使用中の場合は、<command>pvmove</command>コマンドを使用してデータを別の物理ボリュームに移動する必要があります。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvextend -L <replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        指定した論理ボリュームのサイズを拡張します。その後、新たに使用可能になった領域を利用できるようにするため、ファイルシステムを拡張する必要もあります。詳細については、<xref linkend="cha.resize_fs"/>を参照してください。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvreduce -L <replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+      </entry>
+      <entry>
+       <para>
+        指定した論理ボリュームのサイズを縮小します。
+       </para>
+       <important>
+        <para>
+         ボリュームを縮小する前に、まずファイルシステムのサイズを縮小してください。そうしないと、データを失うリスクがあります。詳細については、<xref linkend="cha.resize_fs"/>を参照してください。
+        </para>
+       </important>
+      </entry>
+     </row>
+     <row>
+      <entry>
+<screen>lvrename /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable> \
+/dev/<replaceable>vg_name</replaceable>/<replaceable>new_lv_name</replaceable>
+</screen>
+      </entry>
+      <entry>
+       <para>
+        既存のLVM論理ボリュームの名前を変更します。ボリュームグループの名前は変更されません。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.lvm.cli.resize">
+   <title>コマンドによる論理ボリュームのサイズ変更</title>
+   <para>
+    論理ボリュームのサイズ変更には、コマンド<command>lvresize</command>、<command>lvextend</command>、および<command>lvreduce</command>が使用されます。構文とオプションについては、これらの各コマンドのマニュアルページを参照してください。LVを拡大するには、VG上に十分な未使用スペースがなければなりません。
+   </para>
+   <para>
+    論理ボリュームを拡大または縮小する場合、YaSTパーティショナを使用することをお勧めします。YaSTを使用すると、そのボリュームのファイルシステムのサイズも自動的に調整されます。
+   </para>
+   <para>
+    LVは使用中に手動で拡大または縮小できますが、LV上のファイルシステムについてはこれが不可能な場合があります。LVを拡大、縮小しても、そのボリューム内のファイルシステムのサイズは自動的に変更されません。後でファイルシステムを拡大するには、別のコマンドを使用する必要があります。ファイルシステムのサイズ変更の詳細については、<xref linkend="cha.resize_fs" xrefstyle="ChapTitleOnPage"/>を参照してください。
+   </para>
+   <para>
+    手動でLVのサイズを変更する場合は、次に示すように正しい順序に従ってください。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      LVを拡大する場合は、ファイルシステムを拡大する前にLVを拡大する必要があります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      LVを縮小する場合は、LVを縮小する前にファイルシステムを縮小する必要があります。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    論理ボリュームのサイズを拡張するには:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      論理ボリュームにExt2またはExt4ファイルシステム(オンライン拡張がサポートされていません)が含まれる場合、マウント解除します。仮想マシン(Xen VMなど)用に提供されているファイルシステムが含まれている場合は、最初にVMをシャットダウンします。
+     </para>
+    </step>
+    <step>
+     <para>
+      端末コンソールのプロンプトに対して、次のコマンドを入力し、論理ボリュームのサイズを拡大します。
+     </para>
+<screen>sudo lvextend -L +<replaceable>size</replaceable> /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+     <para>
+      <replaceable>size</replaceable>の場合は、10GBのように、論理ボリュームに追加したい容量を指定してください。<filename>/dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></filename>を、<filename>/dev/LOCAL/DATA</filename>などの論理ボリュームへのLinuxパスに入れ替えます。次に例を示します。
+     </para>
+<screen>sudo lvextend -L +10GB /dev/vg1/v1<replaceable/></screen>
+    </step>
+    <step>
+     <para>
+      ファイルシステムのサイズを調整します。詳細については、<xref linkend="cha.resize_fs"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      ファイルシステムをマウント解除した場合は、再びマウントします。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    たとえば、LVをLV上の(マウント済みでアクティブな) Btrfsで10GB拡張するには:
+   </para>
+<screen>sudo lvextend −L +10G /dev/LOCAL/DATA
+sudo btrfs filesystem resize +10G /dev/LOCAL/DATA</screen>
+   <para>
+    論理ボリュームのサイズを縮小するには:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      論理ボリュームにBtrfsファイルが含まれていない場合は、論理ボリュームをマウント解除します。仮想マシン(Xen VMなど)用に提供されているファイルシステムが含まれている場合は、最初にVMをシャットダウンします。XFSファイルシステムを使用しているボリュームのサイズは縮小できません。
+     </para>
+    </step>
+    <step>
+     <para>
+      ファイルシステムのサイズを調整します。詳細については、<xref linkend="cha.resize_fs"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      端末コンソールのプロンプトに対して、次のコマンドを入力し、論理ボリュームのサイズをファイルシステムのサイズまで縮小します。
+     </para>
+<screen>sudo lvreduce /dev/<replaceable>vg_name</replaceable>/<replaceable>lv_name</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      ファイルシステムをマウント解除した場合は、再びマウントします。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    たとえば、LVをLV上のBtrfsで5GB縮小するには:
+   </para>
+<screen>sudo btrfs filesystem resize -size 5G /dev/LOCAL/DATA
+sudo lvreduce /dev/LOCAL/DATA</screen>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.cli.lvmetad">
+   <title><systemitem class="daemon">lvmetad</systemitem>によるLVMメタデータの動的集約</title>
+   <para>
+    ほとんどのLVMコマンドでは、システムのディスクデバイスに保存されているLVMメタデータを正確に把握しておく必要があります。LVMの現行の設計では、この情報がない場合、LVMはシステムのすべての物理ディスクデバイスをスキャンしなければなりません。多数のディスクで構成されるシステムでは、このために大量のI/O操作が必要になります。ディスクが応答しない場合、そのディスクを待機している間にLVMコマンドがタイムアウトすることがあります。
+   </para>
+   <para>
+    <systemitem class="daemon">lvmetad</systemitem>によるLVMメタデータの動的集約は、この問題に解決策を提供します。<systemitem class="daemon">lvmetad</systemitem>デーモンの目的は、デバイスの状態が変わるたびにメタデータ情報を動的に集約することによって、このスキャンを不要にすることです。これらのイベントはudevルールによって<systemitem class="daemon">lvmetad</systemitem>に送信されます。このデーモンが実行されていない場合、LVMは通常どおりにスキャンを実行します。
+   </para>
+   <para>
+    デフォルトでは、この機能は無効になっています。この機能を有効にするには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      <systemitem class="daemon">lvmetad</systemitem>デーモンを停止します。
+     </para>
+<screen>sudo systemctl stop lvm2-lvmetad</screen>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/lvm/lvm.conf</filename>を編集し、<literal>use_lvmetad</literal>を<literal>1</literal>に設定します。
+     </para>
+<screen>use_lvmetad = 1</screen>
+    </step>
+    <step>
+     <para>
+      <systemitem class="daemon">lvmetad</systemitem>デーモンを再起動します。
+     </para>
+<screen>sudo systemctl start lvm2-lvmetad</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.lvm.tagging">
+  <title>LVM2ストレージオブジェクトのタグ付け</title>
+
+  <para>
+   タグは、ストレージオブジェクトのメタデータに割り当てられる順序付けのないキーワードまたは用語です。タグを使用すると、順序付けのないタグのリストをLVMストレージオブジェクトのメタデータに添付することによって、それらのオブジェクトのコレクションを有用になるように分類できます。
+  </para>
+
+  <sect2 xml:id="sec.lvm.tagging.using">
+   <title>LVM2タグの使用</title>
+   <para>
+    LVM2ストレージオブジェクトにタグを付けたら、それらのタグをコマンドで使用して、次のタスクを達成できます。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      特定のタグの有無に応じて、処理するLVMオブジェクトを選択します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      設定ファイル内でタグを使用することにより、サーバ上でアクティブにするボリュームグループと論理ボリュームを制御します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      コマンド内でタグを指定することにより、グローバル設定ファイルの設定を上書きします。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    コマンドラインでLVMオブジェクトを参照する代わりに、タグを使用して、次の項目を受け入れることができます。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      オブジェクトのリスト
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      単一のオブジェクト(タグが単一オブジェクトに展開する限り)
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    オブジェクト名をタグで置き換えることは、一部ではサポートされていません。引数の展開後、リスト内の重複引数は、重複引数を削除し、各引数の最初のインスタンスを保留することによって解決されます。
+   </para>
+   <para>
+    引数のタイプが曖昧になる可能性がある場合は、タグの前にアットマーク(@)文字を付けてください(たとえば、<literal>@mytag</literal>)。それ以外の接頭辞<quote>@</quote>の使用はオプションです。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.requirements">
+   <title>LVM2タグの作成要件</title>
+   <para>
+    LVMでタグを使用する場合は、以下の要件を考慮してください。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>サポートされている文字</term>
+     <listitem>
+      <para>
+       LVMタグのワードには、ASCII 大文字A～Z、小文字a～z、数字0～9、下線(_)、プラス(+)、ハイフン(-)、およびピリオド(.)を含めることができます。ワードをハイフンで始めることはできません。最大128文字まで入力できます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>サポートされているストレージオブジェクト</term>
+     <listitem>
+      <para>
+       タグ付けできるのは、LVM2の物理ボリューム、ボリュームグループ、論理ボリューム、および論理ボリュームセグメントです。PVタグは、そのボリュームグループのメタデータに保存されます。ボリュームグループを削除すると、孤立した物理ボリューム内のタグも削除されます。スナップショットにはタグを付けられませんが、元のオブジェクトはタグ付けできます。
+      </para>
+      <para>
+       LVM1オブジェクトは、そのディスクフォーマットがタグをサポートしていないので、タグ付けできません。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.syntax">
+   <title>コマンドラインでのタグ構文</title>
+   <variablelist>
+    <varlistentry>
+     <term>--addtag <replaceable>tag_info</replaceable>
+     </term>
+     <listitem>
+      <para>
+       LVM2ストレージオブジェクトにタグを追加(つまり、<emphasis>タグ付け</emphasis>)します。例:
+      </para>
+<screen>sudo vgchange --addtag @db1 vg1</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--deltag <replaceable>tag_info</replaceable>
+     </term>
+     <listitem>
+      <para>
+       LVM2ストレージオブジェクトからタグを削除(つまり、<emphasis>タグ解除</emphasis>)します。例:
+      </para>
+<screen>sudo vgchange --deltag @db1 vg1</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--tag <replaceable>tag_info</replaceable>
+     </term>
+     <listitem>
+      <para>
+       アクティブまたは非アクティブにするボリュームグループまたは論理ボリュームのリストを絞り込むために使用するタグを指定します。
+      </para>
+      <para>
+       次の例に示すコマンドを入力すると、指定のタグに一致するタグをもつボリュームがアクティブになります。
+      </para>
+<screen>sudo lvchange -ay --tag @db1 vg1/vol2</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.config">
+   <title>設定ファイル構文</title>
+   <para/>
+   <sect3 xml:id="sec.lvm.tagging.configuration.hostnames_enable">
+    <title><filename>lvm.conf</filename>ファイルでのホスト名タグの有効化</title>
+    <para>
+     次のコードを <filename>/etc/lvm/lvm.conf</filename>ファイルに追加することにより、<filename>/etc/lvm/lvm_&lt;<replaceable>ホスト名</replaceable>&gt;.conf</filename>ファイルでホストに個別に定義されているホストタグを有効にします。
+    </para>
+<screen>tags {
+   # Enable hostname tags
+   hosttags = 1
+}</screen>
+    <para>
+     ホストの<filename>/etc/lvm/lvm_&lt;<replaceable>ホスト名</replaceable>&gt;.conf</filename>ファイルにアクティベーションコードを入力します。<xref linkend="sec.lvm.tagging.configuration.activate" xrefstyle="HeadingOnPage"/>を参照してください。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.hostnames_define">
+    <title>lvm.confファイルでホスト名タグを定義する</title>
+<screen>tags {
+
+   tag1 { }
+      # Tag does not require a match to be set.
+
+   tag2 {
+      # If no exact match, tag is not set.
+      host_list = [ "hostname1", "hostname2" ]
+   }
+}</screen>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.activate">
+    <title>アクティベーションを定義する</title>
+    <para>
+     <filename>/etc/lvm/lvm.conf</filename>ファイルを変更すると、タグに基づいてLVM論理ボリュームをアクティブにできます。
+    </para>
+    <para>
+     テキストエディタで、次のコードをファイルに追加します。
+    </para>
+<screen>  activation {
+      volume_list = [ "vg1/lvol0", "@database" ]
+  }</screen>
+    <para>
+     <literal>@database</literal>をご使用のタグで置き換えます。ホストに設定されているすべてのタグにタグを一致させるには、<literal>"@*"</literal>を使用します。
+    </para>
+    <para>
+     アクティベーションコマンドは、ボリュームグループと論理ボリュームのメタデータで設定されている<replaceable>ボリュームグループ名</replaceable>、<replaceable>ボリュームグループ名/論理グループ名</replaceable>、または@<replaceable>タグ</replaceable>と照合を行います。ボリュームグループまたは論理グループは、メタデータタグが一致する場合のみアクティブになります。一致しない場合のデフォルトは、アクティブにしないことです。
+    </para>
+    <para>
+     <literal>volume_list</literal>が存在せず、ホストにタグが定義されていると、ホストタグがメタデータタグに一致する場合のみボリュームグループまたは論理グループがアクティブになります。
+    </para>
+    <para>
+     <literal>volume_list</literal>が存在せず、ホストにタグが定義されていないと、アクティブになりません。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.lvm.tagging.configuration.activate_multi">
+    <title>複数のホスト名設定ファイルでアクティベーションを定義する</title>
+    <para>
+     <filename>lvm.conf</filename>ファイルでホストタグが有効になっている場合、 ホストの設定ファイル(<filename>/etc/lvm/lvm_&lt;<replaceable>ホスト_タグ</replaceable>&gt;.conf</filename>)でアクティベーションコードを使用できます。たとえば、サーバの<filename>/etc/lvm/</filename>フォルダに、2つの設定ファイルがあるとします。
+    </para>
+    <simplelist>
+     <member><filename>lvm.conf</filename></member> <member><filename>lvm_&lt;<replaceable>ホスト_タグ</replaceable>&gt;.conf</filename></member>
+    </simplelist>
+    <para>
+     スタートアップ時に、<filename>/etc/lvm/lvm.conf</filename>ファイルがロードされ、ファイル内のすべてのタグ設定が処理されます。ホストタグが定義されている場合、関連する<filename>/etc/lvm/lvm_&lt;<replaceable>host_tag</replaceable>&gt;.conf</filename>ファイルがロードされます。特定の設定ファイルエントリを検索する際、最初にホストタグファイルが検索されます。続いて<filename>lvm.conf </filename>ファイルが検索され、最初に一致した箇所で停止します。<filename>lvm_&lt;<replaceable>host_tag</replaceable>&gt;.conf</filename>ファイル内で、タグが設定された順序とは逆の順序を使用します。これによって、最後に設定されたタグのファイルが最初に検索されます。ホストタグファイルで新しいタグが設定されると、追加の設定ファイルがロードされます。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.activate_cluster">
+   <title>クラスタで簡単なアクティベーション制御にタグを使用する</title>
+   <para>
+    簡単なホスト名のアクティベーション制御は、<literal>/etc/lvm/lvm.conf</literal>ファイルで<filename>hostname_tags</filename>オプションを有効にすることで設定できます。これがグローバル設定になるように、同じファイルをクラスタ内のすべてのコンピュータで使用します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      テキストエディタで、次のコードを<filename>/etc/lvm/lvm.conf</filename>ファイルに追加します。
+     </para>
+<screen>tags {
+   hostname_tags = 1
+}</screen>
+    </step>
+    <step>
+     <para>
+      ファイルをクラスタ内のすべてのホストに複製します。
+     </para>
+    </step>
+    <step>
+     <para>
+      クラスタ内の任意のコンピュータから、<filename>vg1/lvol2</filename>をアクティブにするコンピュータのリストに<literal>db1</literal>を追加します。
+     </para>
+<screen>sudo lvchange --addtag @db1 vg1/lvol2</screen>
+    </step>
+    <step>
+     <para>
+      <filename>db1</filename>サーバで、次のコードを入力してvg1/lvol2をアクティブにします。
+     </para>
+<screen>sudo lvchange -ay vg1/vol2</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.lvm.tagging.activate_cluster_preferred">
+   <title>タグを使用して、クラスタ内の好みのホストでアクティブにする</title>
+   <para>
+    本項の例では、次のようなアクティベーションを行う2つの方法を示します。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      ボリュームグループ<filename>vg1</filename>をデータベースホスト<filename>db1</filename>および<filename>db2</filename>でのみアクティブにします。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ボリュームグループ<filename>vg2</filename>をファイルサーバホスト<filename>fs1</filename>のみでアクティブにします。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ファイルサーバのバックアップホスト <filename>fsb1</filename>では、最初は何もアクティブにせず、ファイルサーバのホスト <filename>fs1</filename>に置き換わる準備をします。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <sect3>
+    <title>オプション1:一元化された管理とホスト間で複製された設定</title>
+    <para>
+     次のソリューションでは、単一の設定ファイルを複数のホスト間で複製します。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       <literal>@database</literal>タグをボリュームグループ<filename>vg1</filename>のメタデータに追加します。端末コンソールで、次のコマンドを入力します。
+      </para>
+<screen>sudo vgchange --addtag @database vg1</screen>
+     </step>
+     <step>
+      <para>
+       <literal>@fileserver</literal>タグをボリュームグループ<filename>vg2</filename>のメタデータに追加します。端末コンソールで、次のコマンドを入力します。
+      </para>
+<screen>sudo vgchange --addtag @fileserver vg2</screen>
+     </step>
+     <step>
+      <para>
+       テキストエディタで、次のコードを使用して<filename> /etc/lvm/lvm.conf</filename>を変更することにより、<literal>@database</literal>、<literal>@fileserver</literal>、<literal>@fileserverbackup</literal>の各タグを定義します。
+      </para>
+<screen>tags {
+   database {
+      host_list = [ "db1", "db2" ]
+   }
+   fileserver {
+      host_list = [ "fs1" ]
+   }
+   fileserverbackup {
+      host_list = [ "fsb1" ]
+   }
+}
+
+activation {
+   # Activate only if host has a tag that matches a metadata tag
+   volume_list = [ "@*" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       変更した<filename> /etc/lvm/lvm.conf</filename>ファイルを4つのホスト(<filename>db1</filename>、<filename>db2</filename>、<filename>fs1</filename>、および<filename>fsb1</filename>)に複製します。
+      </para>
+     </step>
+     <step>
+      <para>
+       ファイルサーバホストが故障した場合は、次のコマンドを任意のモードで端末コンソールから入力することにより、<filename>fsb1</filename>上で<filename>vg2</filename>を起動できます。
+      </para>
+<screen>sudo vgchange --addtag @fileserverbackup vg2
+sudo vgchange -ay vg2</screen>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3>
+    <title>オプション2:ローカライズされた管理と設定</title>
+    <para>
+     次のソリューションでは、各ホストがアクティブにするボリュームのクラスに関する情報をローカルに保持します。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       <literal>@database</literal>タグをボリュームグループ<filename>vg1</filename>のメタデータに追加します。端末コンソールで、次のコマンドを入力します。
+      </para>
+<screen>sudo vgchange --addtag @database vg1</screen>
+     </step>
+     <step>
+      <para>
+       <literal>@fileserver</literal>タグをボリュームグループ<filename>vg2</filename>のメタデータに追加します。端末コンソールで、次のコマンドを入力します。
+      </para>
+<screen>sudo vgchange --addtag @fileserver vg2</screen>
+     </step>
+     <step>
+      <para>
+       <filename>/etc/lvm/lvm.conf</filename>ファイルでホストタグを有効にします。
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         テキストエディタで、次のコードを使用して<filename>/etc/lvm/lvm.conf</filename>ファイルを変更することにより、ホストタグ設定ファイルを有効にします。
+        </para>
+<screen>tags {
+   hosttags = 1
+}</screen>
+       </step>
+       <step>
+        <para>
+         変更した<filename> /etc/lvm/lvm.conf</filename>ファイルを4つのホスト(<filename>db1</filename>、<filename>db2</filename>、<filename>fs1</filename>、および<filename>fsb1</filename>)に複製します。
+        </para>
+       </step>
+      </substeps>
+     </step>
+     <step>
+      <para>
+       ホスト<filename>db1</filename>で、データベースホスト<filename>db1</filename>のアクティベーション設定ファイルを作成します。テキストエディタで、<filename>/etc/lvm/lvm_db1.conf</filename>ファイルを作成し、次のコードを追加します。
+      </para>
+<screen>activation {
+   volume_list = [ "@database" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       ホスト<filename>db2</filename>で、データベースホスト<filename>db2</filename>のアクティベーション設定ファイルを作成します。テキストエディタで、<filename>/etc/lvm/lvm_db2.conf</filename>ファイルを作成し、次のコードを追加します。
+      </para>
+<screen>activation {
+   volume_list = [ "@database" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       ホストfs1で、ファイルサーバホスト<filename>fs1</filename>のアクティベーション設定ファイルを作成します。テキストエディタで、<filename>/etc/lvm/lvm_fs1.conf</filename>ファイルを作成し、次のコードを追加します。
+      </para>
+<screen>activation {
+   volume_list = [ "@fileserver" ]
+}</screen>
+     </step>
+     <step>
+      <para>
+       ファイルサーバホスト<filename>fs1</filename>が故障した場合は、スペアのファイルサーバホストfsb1をファイルサーバとして起動します。
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         ホスト<filename>fsb1</filename>で、ホスト<filename>fsb1</filename>のアクティベーション設定ファイルを作成します。テキストエディタで、<filename>/etc/lvm/lvm_fsb1.conf</filename>ファイルを作成し、次のコードを追加します。
+        </para>
+<screen>activation {
+   volume_list = [ "@fileserver" ]
+}</screen>
+       </step>
+       <step>
+        <para>
+         端末コンソールで、次のコマンドの1つを入力します。
+        </para>
+<screen>sudo vgchange -ay vg2
+sudo vgchange -ay @fileserver</screen>
+       </step>
+      </substeps>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>

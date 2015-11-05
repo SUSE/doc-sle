@@ -1,0 +1,548 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_mdadm-resize.xml" version="5.0" xml:id="cha.raid_resize" xml:lang="ja">
+ <title>mdadmによるソフトウェアRAIDアレイのサイズ変更</title>
+ <info>
+      <abstract>
+        <para>
+    本項では、ソフトウェアRAID 1、4、5、または6のデバイスのサイズを複数デバイス管理(<command>mdadm(8)</command>)ツールで増減する方法について説明します。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+          </dm:bugtracker>
+        <dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  既存のソフトウェアRAIDデバイスのサイズ変更には、各コンポーネントパーティションが提供するスペースの増減が必要です。デバイス上の使用可能スペースで変更内容を利用するために、RAIDに常駐するファイルシステムもサイズ変更できる必要があります。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>では、ファイルシステムBtrfs、Ext2、Ext3、Ext4、ReiserFS、およびXFS (サイズの増加のみ)用のファイルシステムサイズ変更ユーティリティが提供されています。詳細については、「<xref linkend="cha.resize_fs"/>」を参照してください。
+ </para>
+ <para>
+  <command>mdadm</command>ツールは、ソフトウェアRAIDレベル 1、4、5、および6に対してだけサイズ変更をサポートします。これらのRAIDレベルには耐障害性があるので、一度に1つずつ、サイズ変更するコンポーネントパーティションを削除できます。原則として、RAIDパーティションのホットリサイズが可能ですが、その場合は、データの保全に特に注意する必要があります。
+ </para>
+ <warning>
+  <title>サイズ変更前のデータのバックアップ</title>
+  <para>
+   パーティションまたはファイルシステムのサイズ変更には、データを失う可能性をはらむリスクが伴います。データの喪失を避けるには、データを必ずバックアップしてから、サイズ変更タスクを開始します。
+  </para>
+ </warning>
+ <para>
+  RAIDのサイズ変更には、次のようなタスクがあります。タスクの実行順序は、サイズを増加するか、減少するかによって異なります。
+ </para>
+ <table>
+  <title>RAIDのサイズ変更に必要なタスク</title>
+  <tgroup cols="4">
+   <colspec colnum="1" colname="1" colwidth="2500*"/>
+   <colspec colnum="2" colname="2" colwidth="5001*"/>
+   <colspec colnum="3" colname="3" colwidth="1250*"/>
+   <colspec colnum="4" colname="4" colwidth="1250*"/>
+   <thead>
+    <row>
+     <entry>
+      <para>
+       仕事
+      </para>
+     </entry>
+     <entry>
+      <para>
+       説明
+      </para>
+     </entry>
+     <entry>
+      <para>
+       サイズを増大させる場合の順序
+      </para>
+     </entry>
+     <entry>
+      <para>
+       サイズを減少させる場合の順序
+      </para>
+     </entry>
+    </row>
+   </thead>
+   <tbody>
+    <row>
+     <entry>
+      <para>
+       各コンポーネントパーティションのサイズを変更します。
+      </para>
+      <para/>
+     </entry>
+     <entry>
+      <para>
+       各コンポーネントパーティションのアクティブなサイズを増加または減少します。一度に1つのコンポーネントパーティションだけを削除し、そのサイズを変更してから、パーティションをRAIDに戻します。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       1
+      </para>
+     </entry>
+     <entry>
+      <para>
+       2
+      </para>
+     </entry>
+    </row>
+    <row>
+     <entry>
+      <para>
+       ソフトウェアRAID自体をサイズ変更します。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       RAIDは、ベースのコンポーネントパーティションの増減を自動的には認識しません。したがって、RAIDに新しいサイズを知らせる必要があります。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       2
+      </para>
+     </entry>
+     <entry>
+      <para>
+       3
+      </para>
+     </entry>
+    </row>
+    <row>
+     <entry>
+      <para>
+       ファイルシステムのサイズを変更します。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       RAIDに常駐するファイルシステムをサイズ変更する必要があります。これは、サイズ変更のツールを提供するファイルシステムの場合のみ可能です。
+      </para>
+     </entry>
+     <entry>
+      <para>
+       3
+      </para>
+     </entry>
+     <entry>
+      <para>
+       1
+      </para>
+     </entry>
+    </row>
+   </tbody>
+  </tgroup>
+ </table>
+ <para>
+  以降の各項の手順では、次の表に示すデバイス名を使用します。これらの名前は変更して、必ずご使用のデバイスの名前を使用してください。
+ </para>
+ <table>
+  <title>コンポーネントパーティションのサイズを増加するシナリオ</title>
+  <tgroup cols="2">
+   <colspec colnum="1" colname="1" colwidth="5001*"/>
+   <colspec colnum="2" colname="2" colwidth="5001*"/>
+   <thead>
+    <row>
+     <entry>
+      <para>
+       RAIDデバイス
+      </para>
+     </entry>
+     <entry>
+      <para>
+       コンポーネントパーティション
+      </para>
+     </entry>
+    </row>
+   </thead>
+   <tbody>
+    <row>
+     <entry>
+      <para>
+       <filename>/dev/md0</filename>
+      </para>
+     </entry>
+     <entry>
+      <para>
+       <filename>/dev/sda1</filename>
+      </para>
+      <para>
+       <filename>/dev/sdb1</filename>
+      </para>
+      <para>
+       <filename>/dev/sdc1</filename>
+      </para>
+     </entry>
+    </row>
+   </tbody>
+  </tgroup>
+ </table>
+ <sect1 xml:id="sec.raid_resize.incr">
+  <title>ソフトウェアRAIDのサイズの増加</title>
+
+  <para>
+   ソフトウェアRAIDのサイズを増やすには、複数のタスクを所定の順序で実行する必要があります。まずRAIDを構成するすべてのパーティションのサイズを増加させ、次にRAID自体のサイズを増加させます。そして最後に、ファイルシステムのサイズを増加させます。
+  </para>
+
+  <warning>
+   <title>データ消失の可能性</title>
+   <para>
+    RAIDに、ディスクの耐障害性がないか、単に一貫性がない場合、パーティションのどれかを削除すると、データが失われます。パーティションの削除は注意深く行い、必ず、データのバックアップをとってください。
+   </para>
+  </warning>
+
+  <sect2 xml:id="sec.raid_resize.incr.partitions">
+   <title>コンポーネントパーティションのサイズの増加</title>
+   <para>
+    RAID 1、4、5、または6のサイズを増加するには、本項の手順を適用します。RAID内のコンポーネントパーティションごとに、RAIDからパーティションを削除し、そのサイズを変更し、パーティションをRAIDに戻し、RAIDが安定するまで待機してから続行します。パーティションが削除されている間、RAIDはディグレードモードで動作し、ディスクの 耐障害性がまったくないか、または低下しています。複数の同時ディスク障害を許容できるRAIDの場合でも、一度に2つ以上のパーティションを削除しないでください。RAID用コンポーネントパーティションのサイズを増加させるには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のように入力して、RAIDアレイが一貫性を保っており、同期されていることを確認します。
+     </para>
+<screen>cat /proc/mdstat</screen>
+     <para>
+      このコマンドの出力によって、RAIDアレイがまだ同期中とわかる場合は、同期化の完了まで待って、続行してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      コンポーネントパーティションの1つをRAIDアレイから削除します。たとえば、次のように入力して、<filename>/dev/sda1</filename>を削除します。
+     </para>
+<screen>sudo mdadm /dev/md0 --fail /dev/sda1 --remove /dev/sda1</screen>
+     <para>
+      成功するためには、failとremoveの両方のアクションを指定する必要があります。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のオプションの1つを実行して、前の手順で削除したパーティションのサイズを増加させます。
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        YaSTパーティショナやpartedなどのディスクパーティショナを使用して、パーティションのサイズを増やします。通常は、このオプションが選択されます。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        パーティションの常駐ディスクを、容量のより大きいデバイスに置き換えます。このオプションは、元ディスクの他のファイルシステムがシステムによりアクセスされない場合だけ選択できます。置き換え用デバイスをRAIDに追加すると、元のデバイスにあったデータをすべて再構築しなければならないので、データの同期にはるかに長い時間がかかります。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      パーティションをRAIDアレイに再追加します。たとえば、次のように入力して、<filename>/dev/sda1</filename>を追加します。
+     </para>
+<screen>sudo mdadm -a /dev/md0 /dev/sda1</screen>
+     <para>
+      RAIDが同期され、一貫性をもつまで待機してから、次のパーティションの処理に進みます。
+     </para>
+    </step>
+    <step>
+     <para>
+      アレイ内の残りのコンポーネントデバイスごとに、これらの手順を繰り返します。正しいコンポーネントパーティションに対して、必ずコマンドを変更してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      カーネルがRAIDのパーティションテーブルを再読み込みできないというメッセージが表示されたら、すべてのパーティションのサイズ変更後にコンピュータを再起動して、パーティションテーブルの更新を強制する必要があります。
+     </para>
+    </step>
+    <step>
+     <para>
+      <xref linkend="sec.raid_resize.incr.raid" xrefstyle="SectTitleOnPage"/>に進みます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.incr.raid">
+   <title>RAIDアレイのサイズの増加</title>
+   <para>
+    RAID内の各コンポーネントパーティションのサイズ変更後(<xref linkend="sec.raid_resize.incr.partitions" xrefstyle="SectTitleOnPage"/>参照)も、新しい使用可能スペースの認識を強制するまで、RAIDアレイの設定では、元のアレイサイズが使用され続けます。RAIDアレイのサイズを指定したり、使用可能な最大スペースを使用できます。
+   </para>
+   <para>
+    本項の手順では、RAIDデバイスのデバイス名として <filename>//dev/md0</filename>を使用しています。この名前は変更して、必ずご使用のデバイスの名前を使用してください。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のように入力して、RAIDアレイが一貫性を保っており、同期されていることを確認します。
+     </para>
+<screen>cat /proc/mdstat</screen>
+     <para>
+      このコマンドの出力によって、RAIDアレイがまだ同期中とわかる場合は、同期化の完了まで待って、続行してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のように入力して、アレイのサイズとアレイに認識されるデバイスサイズをチェックします。
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Dev Size"</screen>
+    </step>
+    <step>
+     <para>
+      次のいずれかの操作を行います。
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        次のように入力して、アレイサイズを使用可能な最大サイズまで増加します。
+       </para>
+<screen>sudo mdadm --grow /dev/md0 -z max</screen>
+      </listitem>
+     </itemizedlist>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        次のように入力して、アレイサイズを使用可能な最大サイズまで増加します。
+       </para>
+<screen>sudo mdadm --grow /dev/md0 -z max --assume-clean</screen>
+       <para>
+        アレイは、デバイスに追加されたスペースを利用しますが、このスペースは同期されません。これがRAID 1に推奨される理由は、同期が不要だからです。メンバーデバイスに追加されたスペースが事前にゼロ化されていれば、他のRAIDレベルに有用なことがあります。
+       </para>
+      </listitem>
+     </itemizedlist>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        次のように入力して、アレイサイズを指定の値まで増加します。
+       </para>
+<screen>sudo mdadm --grow /dev/md0 -z <replaceable>size</replaceable></screen>
+       <para>
+        <replaceable>size</replaceable>を、キロバイト(1キロバイトは1024バイト)単位で目的のサイズを表す整数値で置き換えます。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      次のように入力して、アレイのサイズとアレイに認識されるデバイスサイズを再チェックします。
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Dev Size"</screen>
+    </step>
+    <step>
+     <para>
+      次のいずれかの操作を行います。
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        アレイのサイズ変更が成功していたら、<xref linkend="sec.raid_resize.incr.fs" xrefstyle="SectTitleOnPage"/>を続行します。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        アレイが予期どおりにサイズ変更されていない場合は、いったん再起動してから、このプロシージャを再試行する必要があります。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.incr.fs">
+   <title>ファイルシステムのサイズの増加</title>
+   <para>
+    アレイサイズの増加後は (<xref linkend="sec.raid_resize.incr.raid" xrefstyle="SectTitleOnPage"/>参照)、ファイルシステムのサイズ変更ができます。
+   </para>
+   <para>
+    ファイルシステムのサイズを使用可能な最大スペースまで増加したり、正確なサイズを指定できます。ファイルシステムに正確なサイズを指定する場合は、その新しいサイズが次の条件を満たすかどうかを必ず確認してください。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      新しいサイズは、既存データのサイズより大きくなければなりません。さもないと、データが失われます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ファイルシステムのサイズは使用可能なスペースより大きくできないので、新しいサイズは、現在のRAIDサイズ以下でなければなりません。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    詳しい手順については、<xref linkend="cha.resize_fs"/>を参照してください。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid_resize.decr">
+  <title>ソフトウェアRAIDのサイズの削減</title>
+
+  <para>
+   ソフトウェアRAIDのサイズを減らすには、複数のタスクを所定の順序で実行する必要があります。まずファイルシステムのサイズを縮小し、次にRAIDを構成するすべてのパーティションのサイズを縮小します。そして最後に、RAID自体のサイズを縮小します。
+  </para>
+
+  <warning>
+   <title>データ消失の可能性</title>
+   <para>
+    RAIDに、ディスクの耐障害性がないか、単に一貫性がない場合、パーティションのどれかを削除すると、データが失われます。パーティションの削除は注意深く行い、必ず、データのバックアップをとってください。
+   </para>
+  </warning>
+
+  <important>
+   <title>XFS</title>
+   <para>
+    XFSでフォーマットされたファイルシステムのサイズを縮小することはできません。XFSではそのような機能がサポートされていないためです。そのため、XFSファイルシステムを使用するRAIDのサイズを縮小することはできません。
+   </para>
+  </important>
+
+  <sect2 xml:id="sec.raid_resize.decr.fs">
+   <title>ファイルシステムのサイズの削減</title>
+   <para>
+    RAIDデバイス上のファイルシステムのサイズを削減する際には、新しいサイズが次の条件を満たすかどうかを必ず確認してください。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      新しいサイズは、既存データのサイズより大きくなければなりません。さもないと、データが失われます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ファイルシステムのサイズは使用可能なスペースより大きくできないので、新しいサイズは、現在のRAIDサイズ以下でなければなりません。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    詳しい手順については、<xref linkend="cha.resize_fs"/>を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.decr.raid">
+   <title>RAIDアレイサイズの削減</title>
+   <para>
+    ファイルシステムのサイズ変更後(<xref linkend="sec.raid_resize.decr.fs" xrefstyle="SectTitleOnPage"/>を参照)、RAIDアレイ設定では、利用可能スペースを縮小するよう強制するまで、元のアレイサイズを使い続けます。RAIDが、削減したセグメントサイズを使用するようにするには、<command>mdadm --grow</command>モードを使用します。それを行うには、-zオプションを使用して、RAID内の各デバイスが使用するスペースの量を、キロバイトで指定する必要があります。このサイズは、チャンクサイズの倍数である必要があり、RAIDのスーパーブロックをデバイスに書き込むためのスペースとして、約128KBを残しておかなければなりません。
+   </para>
+   <para>
+    本項の手順では、RAIDデバイスのデバイス名として <filename>//dev/md0</filename>を使用しています。コマンドを変更して、必ずご使用のデバイスの名前を使用してください。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のように入力して、アレイのサイズとアレイに認識されるデバイスサイズをチェックします。
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Dev Size"</screen>
+    </step>
+    <step>
+     <para>
+      次のコマンドで、アレイのデバイスサイズを指定の値まで減少させます。
+     </para>
+<screen>sudo mdadm --grow /dev/md0 -z <replaceable>size</replaceable></screen>
+     <para>
+      <replaceable>size</replaceable>を、目的のサイズを表す整数値(キロバイト単位)で置き換えます(1キロバイトは1024バイト)。
+     </para>
+     <para>
+      たとえば、次のコマンドでは、各RAIDデバイスのセグメントサイズを約40 GBに設定し、チャンクサイズは64 KBです。これには、RAIDのスーパーブロック用の128 KBが含まれます。
+     </para>
+<screen>sudo mdadm --grow /dev/md2 -z 41943168</screen>
+    </step>
+    <step>
+     <para>
+      次のように入力して、アレイのサイズとアレイに認識されるデバイスサイズを再チェックします。
+     </para>
+<screen>sudo mdadm -D /dev/md0 | grep -e "Array Size" -e "Device Size"</screen>
+    </step>
+    <step>
+     <para>
+      次のいずれかの操作を行います。
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        アレイのサイズ変更が成功していたら、<xref linkend="sec.raid_resize.decr.partitions" xrefstyle="SectTitleOnPage"/>を続行します。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        アレイが予期どおりにサイズ変更されていない場合は、いったん再起動してから、このプロシージャを再試行する必要があります。
+       </para>
+      </listitem>
+     </itemizedlist>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid_resize.decr.partitions">
+   <title>コンポーネントパーティションのサイズの削減</title>
+   <para>
+    RAID内の各デバイスで使用されるセグメントサイズの縮小後(<xref linkend="sec.raid_resize.decr.raid" xrefstyle="SectTitleOnPage"/>を参照)、各コンポーネントパーティション内の残りのスペースは、そのRAIDでは使われません。パーティションを現在のサイズのまま残して将来のRAIDの拡大に備えることも、今は使用しないそのスペースを利用することもできます。
+   </para>
+   <para>
+    そのスペースを利用するには、コンポーネントパーティションを1つずつ削減します。コンポーネントパーティションごとに、そのパーティションをRAIDから削除し、パーティションサイズを縮小し、パーティションをRAIDに戻したら、RAIDが安定するまで待機します。メタデータに備えるには、<xref linkend="sec.raid_resize.decr.raid" xrefstyle="SectTitleOnPage"/>でRAIDに対して指定したサイズより、若干大きなサイズを指定する必要があります。
+   </para>
+   <para>
+    パーティションが削除されている間、RAIDはディグレードモードで動作し、ディスクの 耐障害性がまったくないか、または低下しています。複数の同時ディスクエラーに耐えるRAIDの場合でも、一度に2つ以上のコンポーネントパーティションを削除しないでください。RAID用コンポーネントパーティションのサイズを縮小するには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のように入力して、RAIDアレイが一貫性を保っており、同期されていることを確認します。
+     </para>
+<screen>cat /proc/mdstat</screen>
+     <para>
+      このコマンドの出力によって、RAIDアレイがまだ同期中とわかる場合は、同期化の完了まで待って、続行してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      コンポーネントパーティションの1つをRAIDアレイから削除します。たとえば、次のように入力して、<filename>/dev/sda1</filename>を削除します。
+     </para>
+<screen>sudo mdadm /dev/md0 --fail /dev/sda1 --remove /dev/sda1</screen>
+     <para>
+      成功するためには、failとremoveの両方のアクションを指定する必要があります。
+     </para>
+    </step>
+    <step>
+     <para>
+      前の手順で削除したパーティションのサイズを、セグメントサイズに設定したサイズより若干小さいサイズに減らします。このサイズは、チャンクサイズの倍数であり、RAIDのスーパーブロック用に128 KBを確保する必要があります。YaSTパーティショナやコマンドラインツールpartedなどを使用して、パーティションのサイズを縮小します。
+     </para>
+    </step>
+    <step>
+     <para>
+      パーティションをRAIDアレイに再追加します。たとえば、次のように入力して、<filename>/dev/sda1</filename>を追加します。
+     </para>
+<screen>sudo mdadm -a /dev/md0 /dev/sda1</screen>
+     <para>
+      RAIDが同期され、一貫性をもつまで待機してから、次のパーティションの処理に進みます。
+     </para>
+    </step>
+    <step>
+     <para>
+      アレイ内の残りのコンポーネントデバイスごとに、これらの手順を繰り返します。正しいコンポーネントパーティションに対して、必ずコマンドを変更してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      カーネルがRAIDのパーティションテーブルを再読み込みできないというメッセージが表示されたら、すべてのパーティションのサイズ変更後にコンピュータを再起動する必要があります。
+     </para>
+    </step>
+    <step>
+     <para>
+      (オプション) RAIDとファイルシステムのサイズを拡大して、現在は小さめのコンポーネントパーティション内のスペースの最大量を利用し、後でファイルシステムのサイズを増やします。手順については、<xref linkend="sec.raid_resize.incr.raid"/>を参照してください。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+</chapter>
