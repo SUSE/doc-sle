@@ -466,23 +466,28 @@ DASD=600"</screen>
    your system.
   </para>
   <para>
-   As described in <xref linkend="sec.prep.makeavail"/>, there are two
+   As described in <xref linkend="sec.prep.makeavail"/>, there are three
    different installation modes for Linux on IBM &zseries;:
   </para>
   <itemizedlist mark="bullet" spacing="normal">
    <listitem>
     <para>
-     LPAR Installation
+     LPAR installation
     </para>
    </listitem>
    <listitem>
     <para>
-     z/VM Installation
+     z/VM installation
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     KVM guest installation
     </para>
    </listitem>
   </itemizedlist>
   <procedure xml:id="pro.prep.inst_types.lpar">
-   <title>Overview of LPAR Installation</title>
+   <title>Overview of an LPAR Installation</title>
    <step>
     <para>
      Prepare the devices needed for installation. See
@@ -529,6 +534,38 @@ DASD=600"</screen>
    <step>
     <para>
      Configure the network. See <xref linkend="sec.prep.netcfg"/>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Connect to the &productname; installation system. See
+     <xref linkend="sec.prep.connect"/>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Start the installation using &yast; and IPL the installed system.
+     See <xref linkend="cha.inst"/>.
+    </para>
+   </step>
+  </procedure>
+  <procedure xml:id="pro.prep.inst_types.kvm">
+   <title>Overview of a KVM Guest Installation</title>
+   <step>
+    <para>
+     Create a virtual disk image and write a domain XML file. See <xref
+     linkend="sec.prep.prep_ipl.kvm"/>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Prepare the installation target and IPL the &vmguest;. See <xref
+     linkend="sec.prep.ipling.kvm"/>.
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec.prep.netcfg.data"/>.
     </para>
    </step>
    <step>
@@ -646,6 +683,92 @@ DIRM USER WITHPASS</screen>
     <para>
      Proceed with <xref linkend="sec.prep.ipling.vm"/>.
     </para>
+   </sect4>
+  </sect3>
+
+  <sect3 xml:id="sec.prep.prep_ipl.kvm">
+   <title>KVM Guest Installation</title>
+   <para>
+    Prerequisite for a KVM guest installation are a domain XML file defining
+    the virtual machine and at least on virtual disk image to be used for the
+    installation.
+   </para>
+   
+   <sect4 xml:id="sec.prep.prep_ipl.kvm.disk">
+    <title>Create a Virtual Disk Image</title>
+    <para>
+     By default libvirt searches for disk images in
+     <filename>/var/lib/libvirt/images/</filename> on the &vmhost;. Images can
+     also be stored anywhere else on the file system, however, it is
+     recommended to store all images in a single location for easier
+     maintainability. The following example creates a qcow2 image with a size
+     of 10 GB in <filename>/var/lib/libvirt/images/</filename>. For more
+     information refer to <xref linkend="cha.qemu.guest_inst.qemu-img"/>.
+    </para>
+    <procedure>
+     <step>
+      <para>
+       Log in to the KVM host server.
+      </para>
+     </step>
+     <step>
+      <para>
+       Run the following commend to create the image:
+      </para>
+      <screen>qemu-img create -f qcow2 /var/lib/libvirt/images/s12lin_qcow2.img 10G</screen>
+     </step>
+    </procedure>
+   </sect4>
+   <sect4 xml:id="sec.prep.prep_ipl.kvm.domain">
+    <title>Write a Domain XML File</title>
+    <para>
+     A domain XML file is used to define the &vmguest;. To create the domain
+     XML file open an empty file <filename>s12-1.xml</filename> with an editor
+     and create a file like in the following example.
+    </para>
+    <example>
+     <title>Example Domain XML File</title>
+     <para>
+      The following example creates a &vmguest; with a single CPU, 1 GB RAM
+      and the virtual disk image created in the previous section (<xref
+      linkend="sec.prep.prep_ipl.kvm.disk"/>. It assumes that the host network
+      interface to which the virtual server is attached is
+      <literal>bond0</literal>. Please change the source devices element to
+      match your network setup.
+     </para>
+     <screen><![CDATA[<domain type="kvm">
+ <name>s12-1</name>
+ <description>Guest-System SUSE Sles12</description>
+ <memory>1048576</memory>
+ <vcpu>1</vcpu>
+ <os>
+  <type arch="s390x" machine="s390-ccw-virtio">hvm</type>
+  <!-- Boot kernel - remove 3 lines after successfull installation -->
+  <kernel>/var/lib/libvirt/images/s12-kernel.boot</kernel>
+  <initrd>/var/lib/libvirt/images/s12-initrd.boot</initrd>
+  <cmdline>linuxrcstderr=/dev/console</cmdline>
+ </os>
+ <iothreads>1</iothreads>
+ <on_poweroff>destroy</on_poweroff>
+ <on_reboot>restart</on_reboot>
+ <on_crash>preserve</on_crash>
+ <devices>
+  <emulator>/usr/bin/qemu-system-s390x</emulator>
+  <disk type="file" device="disk">
+   <driver name="qemu" type="qcow2" cache="none" iothread="1" io="native"/>
+   <source file="/var/lib/libvirt/images/s12lin_qcow2.img"/>
+   <target dev="vda" bus="virtio"/>
+  </disk>
+  <interface type="direct">
+   <source dev="bond0" mode="bridge"/>
+   <model type="virtio"/>
+  </interface>
+  <console type="pty">
+   <target type="sclp"/>
+  </console>
+ </devices>
+</domain>]]></screen>
+    </example>
    </sect4>
   </sect3>
  </sect2>
@@ -883,6 +1006,83 @@ IPLDISK 600</screen>
     </calloutlist>
    </sect4>
   </sect3>
+  <sect3 xml:id="sec.prep.ipling.kvm">
+   <title>KVM Guest Installation</title>
+   <para>
+    To start the guest installation, you first need to start the &vmguest;
+    defined in <xref linkend="sec.prep.prep_ipl.kvm.disk"/>. Prerequisite for
+    this is to first make the Kernel and initrd required for IPLing
+    available.
+   </para>
+   <sect4 xml:id="sec.prep.ipling.kvm.prep">
+    <title>Preparing the installation source</title>
+    <para>
+     Kernel and initrd of the installation system need to be copied to the
+     &vmhost; to be able to IPL the &vmguest; into the installation system.
+    </para>
+    <procedure>
+     <step>
+      <para>
+       Log in to the KVM host and make sure you can connect to the remote host
+       or device serving the installation source.
+      </para>
+     </step>
+     <step>
+      <para>
+       Copy the following two files from the installation source to
+       <filename>/var/lib/libvirt/images/</filename>. If the data is served
+       from a remote host, use <command>ftp</command>, <command>sftp</command>
+       or <command>scp</command> to transfer the files:
+      </para>
+      <simplelist>
+       <member><filename>/boot/s390x/initrd</filename></member>
+       <member><filename>/boot/s390x/cd.ikr</filename></member>
+      </simplelist>
+     </step>
+     <step>
+      <para>
+       Rename the files on the KVM host:
+      </para>
+      <screen>cd /var/lib/libvirt/images/
+mv initrd s12-initrd.boot
+ mv cd.ikr s12-kernel.boot</screen>
+     </step>
+    </procedure>
+   </sect4>
+   
+   <sect4 xml:id="sec.prep.ipling.kvm.">
+    <title>IPL the &vmguest;</title>
+    <para>
+     To IPL the &vmguest;, log in to the KVM host and run the following
+     command:
+    </para>
+    <screen>virsh  create s12-1.xml --console</screen>
+    <para>
+     After the start of the &vmguest; has completed, the installation system
+     starts and you will see the following message:
+    </para>
+    <screen>Domain s12-1 started
+Connected to domain s12-1
+Escape character is ^]
+Initializing cgroup subsys cpuset
+Initializing cgroup subsys cpu
+Initializing
+cgroup subsys cpuacct
+.
+.
+Please make sure your installation medium is available.
+Retry?
+0) &lt;-- Back &lt;--
+1) Yes
+2) No</screen>
+    <para>
+     Answer <guimenu>2) No</guimenu> and choose
+     <guimenu>Installation</guimenu> on the next step. Proceed as
+     described in <xref linkend="sec.prep.netcfg.data"/>.
+    </para>
+   </sect4>
+   
+  </sect3>
  </sect2>
 
  <sect2 xml:id="sec.prep.netcfg">
@@ -909,16 +1109,14 @@ IPLDISK 600</screen>
    also contain CTC, ESCON, or IUCV devices, but they are no longer
    supported on &productname;.
   </para>
-  <variablelist>
-   <varlistentry xml:id="sec.appdendix.inst_netcontypes.ethernet_tokenring">
-    <term>HiperSockets</term>
-    <listitem>
-     <para>
-      Select a Hipersocket device from the list of network devices. Then
-      enter the numbers for the read, write and data channels:
-     </para>
-     <example xml:id="ex.appdendix.inst_netcontypes.types">
-      <title>Supported Network Connection Types and Driver Parameters</title>
+  <sect3 xml:id="sec.prep.netcfg.hypersockets">
+    <title>Configure a HiperSockets Interface</title>
+    <para>
+     Select a Hipersocket device from the list of network devices. Then
+     enter the numbers for the read, write and data channels:
+    </para>
+    <example xml:id="ex.appdendix.inst_netcontypes.types">
+     <title>Supported Network Connection Types and Driver Parameters</title>
 <screen>Choose the network device.
 
  1) IBM parallel CTC Adapter (0.0.0600)
@@ -945,34 +1143,32 @@ Device address for write channel. (Enter '+++' to abort).
 
 Device address for data channel. (Enter '+++' to abort). 
 [0.0.802]&gt; 0.0.802</screen>
-     </example>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term>OSA Express</term>
-    <listitem>
-     <para>
-      Select an OSA Express device from the list of network devices and
-      provide a port number. Then enter the numbers for the read, write and
-      data channels and the port name, if applicable. Choose whether to
-      enable OSI Layer 2 support.
-     </para>
-     <para>
-      The port number was added to support the new 2 port OSA Express 3
-      Network devices. If you are not using an OSA Express 3 device, enter
-      <literal>0</literal>. OSA Express cards also have the option of
-      running in an <quote>OSI layer 2 support</quote> mode or using the
-      older more common <quote>layer 3</quote> mode. The card mode affects
-      all systems that share the device including systems on other LPARs. If
-      in doubt, specify <literal>2</literal> for compatibility with the
-      default mode used by other operating systems such as z/VM and z/OS.
-      Consult with your hardware administrator for further information on
-      these options.
-     </para>
-     <example xml:id="ex.appdendix.inst_netcontypes.gigabit.param">
-      <title>Network Device Driver Parameters</title>
-<screen>Choose the network device.
-
+    </example>
+  </sect3>
+  <sect3 xml:id="sec.prep.netcfg.osa">
+  <title>Configure an OSA Express Device</title>
+  <para>
+   Select an OSA Express device from the list of network devices and
+   provide a port number. Then enter the numbers for the read, write and
+   data channels and the port name, if applicable. Choose whether to
+   enable OSI Layer 2 support.
+  </para>
+  <para>
+   The port number was added to support the new 2 port OSA Express 3
+   Network devices. If you are not using an OSA Express 3 device, enter
+   <literal>0</literal>. OSA Express cards also have the option of
+   running in an <quote>OSI layer 2 support</quote> mode or using the
+   older more common <quote>layer 3</quote> mode. The card mode affects
+   all systems that share the device including systems on other LPARs. If
+   in doubt, specify <literal>2</literal> for compatibility with the
+   default mode used by other operating systems such as z/VM and z/OS.
+   Consult with your hardware administrator for further information on
+   these options.
+  </para>
+  <example xml:id="ex.appdendix.inst_netcontypes.gigabit.param">
+   <title>Network Device Driver Parameters</title>
+   <screen>Choose the network device.
+   
  1) IBM parallel CTC Adapter (0.0.0600)
  2) IBM parallel CTC Adapter (0.0.0601)
  3) IBM parallel CTC Adapter (0.0.0602)
@@ -1012,10 +1208,11 @@ Enable OSI Layer 2 support?
 MAC address. (Enter '+++' to abort). 
 &gt; +++</screen>
      </example>
-    </listitem>
-   </varlistentry>
-  </variablelist>
-  <para>
+  </sect3>
+  
+  <sect3 xml:id="sec.prep.netcfg.data">
+   <title>Set up the Network and Select the Installation Source</title>
+   <para>
    When all network device parameters have been entered, the respective
    driver is installed and you see the corresponding kernel messages.
   </para>
@@ -1085,6 +1282,7 @@ ter '+++' to abort).
    credentials. Once all required data is entered, the installation system
    loads.
   </para>
+  </sect3>
  </sect2>
 
  <sect2 xml:id="sec.prep.connect">
@@ -1190,23 +1388,20 @@ ter '+++' to abort).
   </sect3>
   <sect3 xml:id="sec.inst.connect.ssh">
    <title>Initiating the Installation for SSH</title>
-   <para>If your workstation runs on Microsoft Windows, use the SSH and
-     telnet client and terminal emulator Putty, which is available from <link
-          xlink:href="http://www.chiark.greenend.org.uk/~sgtatham/putty/"
-        />. Set <guimenu>Enable X11 forwarding</guimenu> in Putty under <menuchoice>
-          <guimenu>Connection</guimenu>
-          <guimenu>SSH</guimenu>
-          <guimenu>X11</guimenu>
-        </menuchoice>. If you use another operating system, execute
-     <command>ssh -X &exampleclient;</command> to connect to an installation
-     system with the name <systemitem class="server">&exampleclient;</systemitem>.
-     X-Forwarding over SSH is supported, if you have a local X server available.
-     Otherwise, &yast; provides a text interface over ncurses.
+   <para>
+    To connect to an installation system with the name
+    <literal>&exampleclient;</literal> using SSH, execute <command>ssh -X
+    &exampleclient;</command>. If your workstation runs on Microsoft
+    Windows, use the SSH and telnet client and terminal emulator putty,
+    which is available from
+    <link xlink:href="http://www.chiark.greenend.org.uk/~sgtatham/putty/"/>.
+    Set <guimenu>Enable X11 forwarding</guimenu> in putty under <menuchoice>
+    <guimenu>Connection</guimenu> <guimenu>SSH</guimenu>
+    <guimenu>X11</guimenu> </menuchoice>.
    </para>
    <para>
-    A login prompt appears. Enter &rootuser; and log in with
+    A login prompt appears. Enter <literal>root</literal> and log in with
     your password. Enter <command>yast.ssh</command> to start &yast;.
-     &yast; then guides you through the installation.
    </para>
    <para>
     Proceed with the detailed description of the installation procedure that
