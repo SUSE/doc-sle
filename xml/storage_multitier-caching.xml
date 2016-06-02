@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.multitiercache" xml:lang="en">
+ <title>Multitier Caching for Block Device Operations</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  A multitier cache is a replicated/distributed cache that consists of at
+  least two tires: one is represented by a slower but cheaper rotational
+  block devices (HDD), while the other is more expensive but performs faster
+  data operations (for example SSD flash disks).
+ </para>
+ <para>
+  &sls; implements two different solutions for caching between flash and
+  rotational devices: &dmcache; and &bcache;.
+ </para>
+ <sect1 xml:id="dm-cache">
+  <title>&dmcache;</title>
+
+  <para>
+   &dmcache; is a device mapper target that improves performance of a block
+   device by dynamically migrating some of its data to a faster, smaller
+   device. Existing plug-ins decide what data to migrate and when.
+  </para>
+
+  <sect2 xml:id="dm-cache.terminology">
+   <title>Terminology</title>
+   <para>
+    This section explains several terms often used when describing &dmcache;
+    related features:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>Migration</term>
+     <listitem>
+      <para>
+       Movement of the primary copy of a logical block from one device to
+       the other.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Promotion</term>
+     <listitem>
+      <para>
+       Migration from the slow device to the fast device.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Demotion</term>
+     <listitem>
+      <para>
+       Migration from the fast device to the slow device.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Origin device</term>
+     <listitem>
+      <para>
+       The big and slower block device. It always contains a copy of the
+       logical block, which may be out of date or kept in sync with the copy
+       on the cache device (depending on policy).
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Cache device</term>
+     <listitem>
+      <para>
+       The small and faster block device.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Metadata device</term>
+     <listitem>
+      <para>
+       A small device that records which blocks are in the cache, which are
+       dirty, and extra hints for use by the policy object. This information
+       could be put on the cache device as well, but having it separate
+       allows the volume manager to configure it differently. For example as
+       a mirror for extra robustness. The metadata device may only be used
+       by a single cache device.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Dirty block</term>
+     <listitem>
+      <para>
+       If some process writes to a block of data which is placed in the
+       cache, the cached block is marked as <emphasis>dirty</emphasis>
+       because it was overwritten in the cache and needs to be written back
+       to the original device.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Cache miss</term>
+     <listitem>
+      <para>
+       A request for I/O operations is pointed to the cached device's cache
+       first. If it cannot find the requested values, it looks into the
+       device itself, which is slow. This is called a <emphasis>cache
+       miss</emphasis>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Cache hit</term>
+     <listitem>
+      <para>
+       When a requested value is found in the cached device's cache, it is
+       served fast. This is called a <emphasis>cache hit</emphasis>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Cold cache</term>
+     <listitem>
+      <para>
+       Cache that holds no values (is empty) and causes <emphasis>cache
+       misses</emphasis>. As the cached block device operations progress, it
+       gets filled with data and becomes <emphasis>warm</emphasis>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Warm cache</term>
+     <listitem>
+      <para>
+       Cache that already holds some values and is probable to cause
+       <emphasis>cache hits</emphasis> .
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="dm-cache.caching_modes">
+   <title>Caching Modes</title>
+   <para>
+    &dmcache; has three operating modes: <emphasis>writeback</emphasis>,
+    <emphasis>writethrough</emphasis>, and <emphasis>passthrough</emphasis>.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>writeback</term>
+     <listitem>
+      <para>
+       Data written to a block that is cached go to the cache only, and the
+       block is marked dirty. This is the default caching mode.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>writethrough</term>
+     <listitem>
+      <para>
+       Writing to a cached block will not complete until it has hit both the
+       origin and cache devices. Clean blocks remain clean with
+       <emphasis>writethrough</emphasis> cache.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>passthrough</term>
+     <listitem>
+      <para>
+       To enable the <emphasis>passthrough</emphasis> mode, the cache needs
+       to be clean. Reading is served from the origin device bypassing the
+       cache. Writing is forwarded to the origin device and 'invalidates'
+       the cache block. <emphasis>Passthrough</emphasis> allows a cache
+       device activation without having to care about data coherency, which
+       is maintained. The cache will gradually become cold as writing takes
+       place. If you can verify the coherency of the cache later, or
+       establish it by using the 'invalidate_cblocks' message, you can
+       switch the cache device to <emphasis>writethrough</emphasis> or
+       <emphasis>writeback</emphasis> mode while it is still warm.
+       Otherwise, you can discard the cache contents before switching to the
+       desired caching mode.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    A simple cleaner policy is provided, which cleans (write back) all dirty
+    blocks in a cache. It is useful when decommissioning or shrinking the
+    cache. Shrinking the cache's fast device requires all cache blocks to be
+    clean. If the area being removed from the cache still contains dirty
+    blocks, the resize fails. You must never reduce the volume used for the
+    cache's fast device until the cache is clean. This is very important
+    importance if <emphasis>writeback</emphasis> mode is used.
+    <emphasis>Writethrough</emphasis> and <emphasis>passthrough</emphasis>
+    modes already maintain a clean cache.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="dm-cache.migration_throttling">
+   <title>Migration Throttling</title>
+   <para>
+    Migrating data between the origin and cache device uses some bandwidth.
+    You can set a 'throttle' to prevent more than a certain amount of
+    migration occurring at one time.
+   </para>
+   <para>
+    To set the maximum number of sectors being migrated, use the
+    <option>migration_threshold
+    <replaceable>num_of_sectors</replaceable></option> message. The default
+    is 204800 sectors (that is 100MB).
+   </para>
+  </sect2>
+  <sect2 xml:id="dm-cache.policy_messaging">
+   <title></title>
+   <para>
+    Policies have different sets of tunables specific to each one. To reach
+    a generic way of getting and setting tunable values, the device-mapper
+    messages are used.  Refer to cache-policies.txt.
+   </para>
+ </sect1>
+</chapter>
