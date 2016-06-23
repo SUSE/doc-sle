@@ -19,14 +19,11 @@
   data operations (for example SSD flash disks).
  </para>
  <para>
-<!-- 2016-06-21 tbazant: commenting as dm-cache lacks input info...
   &sls; implements two different solutions for caching between flash and
-  rotational devices: &dmcache; and &bcache;.
-  -->
-  This chapter introduces &bcache; 2-level caching supported by &sls;.
+  rotational devices: &bcache; and &lvmcache;.
  </para>
  <sect1 xml:id="terminology">
-  <title>Terminology</title>
+  <title>General Terminology</title>
 
   <para>
    This section explains several terms often used when describing cache
@@ -204,45 +201,7 @@
     </listitem>
    </varlistentry>
   </variablelist>
-
  </sect1>
-<!-- 2016-06-21 tbazant: commenting as dm-cache lacks input info...
- <sect1 xml:id="dm-cache">
-  <title>&dmcache;</title>
-
-  <para>
-   &dmcache; is a device mapper target that improves performance of a block
-   device by dynamically migrating some of its data to a faster, smaller
-   device. Existing plug-ins decide what data to migrate and when.
-  </para>
-
-  <sect2 xml:id="dm-cache.migration_throttling">
-   <title>Migration Throttling</title>
-   <para>
-    Migrating data between the origin and cache device uses some bandwidth.
-    You can set a 'throttle' to prevent more than a certain amount of
-    migration occurring at one time.
-   </para>
-   <para>
-    To set the maximum number of sectors being migrated, use the
-    <option>migration_threshold
-    <replaceable>num_of_sectors</replaceable></option> message. The default
-    is 204800 sectors (that is 100MB).
-   </para>
-  </sect2>
-
-  <sect2 xml:id="dm-cache.policy_messaging">
-   <title>Policy Messaging</title>
-   <para>
-    Policies have different sets of tunables specific to each one. To reach
-    a generic way of getting and setting tunable values, the device-mapper
-    messages are used. For more information on cache policies, see the
-    contents of
-    <filename>/usr/share/doc/packages/lvm2/kernel/cache-policies.txt</filename>.
-   </para>
-  </sect2>
- </sect1>
- -->
  <sect1 xml:id="bcache">
   <title>&bcache;</title>
 
@@ -253,7 +212,7 @@
    disk drives (such as SSDs) to act as a cache for one or more slower hard
    disk drives. &bcache; supports write-through and write-back, and is
    independent of the file system used. By default it caches random reads
-   and writes only where SSDs excel at. It is suitable for both desktops,
+   and writes only, where SSDs excel at. It is suitable for both desktops,
    servers, and high end storage arrays as well.
   </para>
 
@@ -396,6 +355,169 @@ mount /dev/bcache0 /mnt</screen>
     BACKING DEVICE STATS</literal>, and <literal>SYSFS - CACHE
     DEVICE</literal> sections.
    </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="lvmcache">
+  <title>&lvmcache;</title>
+
+  <para>
+   &lvmcache; is a caching mechanism consisting of logical volumes (LVs). It
+   makes use of the <literal>dm-cache</literal> kernel driver and supports
+   write-through (default) and write-back caching modes. &lvmcache; improves
+   performance of a large and slow LV by dynamically migrating some of its
+   data from to a faster and smaller LV. For more information on LVM, see
+   <xref linkend="part.lvm"/>
+  </para>
+
+  <para>
+   LVM refers to the small fast LV as a <emphasis>cache pool LV</emphasis> .
+   The large slow LV is called the <emphasis>origin LV</emphasis> . Due to
+   requirements from dm-cache, LVM further splits the cache pool LV into two
+   devices&mdash;the <emphasis>cache data LV</emphasis> and <emphasis>cache
+   metadata LV</emphasis> . The cache data LV is where copies of data blocks
+   are kept from the origin LV to increase speed. The cache metadata LV
+   holds the accounting information that specifies where data blocks are
+   stored.
+  </para>
+
+  <sect2 xml:id="lvmcache.configure">
+   <title>Configuring &lvmcache;</title>
+   <para>
+    This section describes steps to create and configure LVM based caching.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      <emphasis>Create the origin LV.</emphasis> Create a new LV or use an
+      existing LV to become the origin LV:
+     </para>
+<screen>lvcreate -n <replaceable>origin_lv</replaceable> -L 100G vg <replaceable>/dev/slow_dev</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>Create the cache data LV.</emphasis> This LV will hold data
+      blocks from the origin LV. The size of this LV is the size of the
+      cache and will be reported as the size of the cache pool LV.
+     </para>
+<screen>lvcreate -n <replaceable>cache_data_lv</replaceable> -L 10G vg <replaceable>/dev/fast</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>Create the cache metadata LV.</emphasis> This LV will hold
+      cache pool metadata. The size of this LV should be approximately 1000
+      times smaller than the cache data LV, with a minimum size of 8MB.
+     </para>
+<screen>lvcreate -n <replaceable>cache_metadata_lv</replaceable> -L 12M vg <replaceable>/dev/fast</replaceable></screen>
+     <para>
+      List the volumes you have created so far:
+     </para>
+<screen>lvs -a vg
+LV                VG   Attr        LSize   Pool Origin
+cache_data_lv     vg   -wi-a-----  10.00g
+cache_metadata_lv vg   -wi-a-----  12.00m
+origin_lv         vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>Create a cache pool LV.</emphasis> Combine the data and
+      metadata LVs into a cache pool LV. You can set the cache pool LV's
+      behavior at the same time.
+     </para>
+     <para>
+      <replaceable>cache_pool_lv</replaceable> takes the name of
+      <replaceable>cache_data_lv</replaceable>.
+     </para>
+     <para>
+      <replaceable>cache_data_lv</replaceable> is renamed to
+      <replaceable>cache_data_lv</replaceable>_cdata and becomes hidden.
+     </para>
+     <para>
+      <replaceable>cache_meta_lv</replaceable> is renamed to
+      <replaceable>cache_data_lv</replaceable>_cmeta and becomes hidden.
+     </para>
+<screen>lvconvert --type cache-pool \
+ --poolmetadata vg/cache_metadata_lv vg/cache_data_lv</screen>
+<screen>lvs -a vg
+LV                     VG   Attr       LSize   Pool Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-------  10.00g
+[cache_data_lv_cmeta]  vg   ewi-------  12.00m
+origin_lv              vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>Create a cache LV.</emphasis> Create a cache LV by linking
+      the cache pool LV to the origin LV.
+     </para>
+     <para>
+      The user accessible cache LV takes the name of the origin LV, while
+      the origin LV becomes a hidden LV renamed to
+      <replaceable>origin_lv</replaceable>_corig.
+     </para>
+     <para>
+      CacheLV takes the name of <replaceable>origin_lv</replaceable>.
+     </para>
+     <para>
+      <replaceable>origin_lv</replaceable> is renamed to
+      <replaceable>origin_lv</replaceable>_corig and becomes hidden.
+     </para>
+<screen>lvconvert --type cache --cachepool vg/cache_data_lv vg/origin_lv</screen>
+<screen>lvs -a vg
+LV              VG   Attr       LSize   Pool   Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-ao----  10.00g
+[cache_data_lv_cmeta]  vg   ewi-ao----  12.00m
+origin_lv              vg   Cwi-a-C--- 100.00g cache_data_lv [origin_lv_corig]
+[origin_lv_corig]      vg   -wi-ao---- 100.00g</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="lvmcache.remove">
+   <title>Removing a Cache Pool</title>
+   <para>
+    There are several ways to turn off the LV cache.
+   </para>
+   <sect3>
+    <title>Detach a Cache Pool LV from a Cache LV</title>
+    <para>
+     You can disconnect a cache pool LV from a cache LV, leaving an unused
+     cache pool LV and an uncached origin LV. Data are written back from the
+     cache pool to the origin LV when necessary.
+    </para>
+<screen>lvconvert --splitcache vg/origin_lv</screen>
+   </sect3>
+   <sect3>
+    <title>Removing a Cache Pool LV without Removing its Origin LV</title>
+    <para>
+     This writes back data from the cache pool to the origin LV when
+     necessary, then removes the cache pool LV, leaving the uncached origin
+     LV.
+    </para>
+<screen>lvremove vg/cache_data_lv</screen>
+    <para>
+     An alternative command that also disconnects the cache pool from the
+     cache LV, and deletes the cache pool:
+    </para>
+<screen>lvconvert --uncache vg/origin_lv</screen>
+   </sect3>
+   <sect3>
+    <title>Removing Both the Origin LV and the Cache Pool LV</title>
+    <para>
+     Removing a cache LV removes both the origin LV and the linked cache
+     pool LV.
+    </para>
+<screen>lvremove vg/origin_lv</screen>
+   </sect3>
+   <sect3>
+    <title>For More Information</title>
+    <para>
+     You can find more &lvmcache; related topics, such as supported cache
+     modes, redundant sub-logical volumes, cache policy, or converting
+     existing LVs to cache types, in the &lvmcache; manual page
+     (<command>man 7 lvmcache</command>).
+    </para>
+   </sect3>
   </sect2>
  </sect1>
 </chapter>
