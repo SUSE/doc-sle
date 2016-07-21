@@ -10,8 +10,8 @@
   <abstract>
    <para>
     This chapter introduces common networking configurations supported by
-    &libvirt;. It does not depend on the hypervisor used, which means that
-    it is valid for all hypervisors supported by &libvirt;, such as &kvm; or
+    &libvirt;. It does not depend on the hypervisor used.
+    It is valid for all hypervisors supported by &libvirt;, such as &kvm; or
     &xen;. These setups can be achieved using both the graphical interface
     of &vmm; and the command line tool <command>virsh</command>.
    </para>
@@ -313,6 +313,51 @@
      </step>
     </procedure>
    </sect3>
+   <sect3 xml:id="libvirt.networks.virtual.vmm.nsswitch">
+    <!-- fate#316628 -->
+    <title>Obtaining IP addresses with nsswitch for NAT networks (in
+    KVM)</title>
+    <itemizedlist>
+     <listitem>
+      <para>
+       On &vmhost;, install libvirt-nss, which provides NSS support for
+       libvirt:
+      </para>
+      <screen>zypper in libvirt-nss</screen>
+     </listitem>
+     <listitem>
+      <para>
+       Add <literal>libvirt</literal> to
+       <filename>/etc/nsswitch.conf</filename>:
+      </para>
+      <screen>...
+hosts:  files libvirt mdns_minimal [NOTFOUND=return] dns
+...</screen>
+     </listitem>
+     <listitem>
+      <para>
+       If NSCD is running, restart it:
+      </para>
+      <screen>systemctl restart nscd</screen>
+     </listitem>
+    </itemizedlist>
+    <para>
+     Now you can reach the guest system by name from the host.
+    </para>
+    <para>
+     The NSS module has limited functionality. It reads
+     <filename>/var/lib/libvirt/dnsmasq/*.status</filename> files to
+     find the hostname and corresponding IP addresses in a json record
+     describing each lease provided by
+     <command>dnsmasq</command>. Hostname translation is only be done on
+     those &vmhost;s using a libvirt-managed bridged network backed by
+     <command>dnsmasq</command>.
+    </para>
+    <para>
+     For more information, see <link
+     xlink:href="http://wiki.libvirt.org/page/NSS_module"/>.
+    </para>
+   </sect3>
   </sect2>
 
   <sect2 xml:id="libvirt.networks.virtual.virsh">
@@ -478,8 +523,7 @@ Networking (help keyword 'network'):
       other machines on the LAN, as the &lt;forward> element is missing in
       the XML description.
      </para>
-<screen>
-&lt;network>
+<screen>&lt;network>
         &lt;name>vnet_isolated&lt;/name>
         &lt;bridge name="virbr3" />
         &lt;ip address="192.168.152.1" netmask="255.255.255.0">
@@ -499,8 +543,7 @@ Networking (help keyword 'network'):
       the physical network, and there will be no restrictions on incoming or
       outgoing connections.
      </para>
-<screen>
-&lt;network>
+<screen>&lt;network>
         &lt;name>host-bridge&lt;/name>
         &lt;forward mode="bridge"/>
         &lt;bridge name="br0"/>
@@ -521,7 +564,41 @@ Networking (help keyword 'network'):
  vnet_nated           active     yes           yes
  vnet_routed          active     yes           yes
  vnet_isolated        inactive   yes           yes</screen>
+
+ <!-- fate#316628: Tool to obtain IP address allocated (DHCP)
+      for bridged network in KVM -->
+ <para>
+  To list available domains, run
+ </para>
+<screen>&prompt.root;virsh list
+ Id    Name                           State
+----------------------------------------------------
+ 1     nated_sles12sp1                running
+ ...</screen>
+ <para>
+  To get a list of interfaces of a running domain, run <option>domifaddr
+  <replaceable>DOMAIN</replaceable></option>, or optionally specify the
+  interface to limit the output to just this interface.  By default, it
+  additionally outputs their IP and MAC addresses:
+ </para>
+ 
+<screen>&prompt.root;virsh domifaddr nated_sles12sp1 --interface vnet0 --source lease
+ Name       MAC address          Protocol     Address
+-------------------------------------------------------------------------------
+ vnet0      52:54:00:9e:0d:2b    ipv6         fd00:dead:beef:55::140/64
+ -          -                    ipv4         192.168.100.168/24</screen>
+
+ <para>
+  To print brief information of all virtual interfaces associated with
+  the specified domain, run
+ </para>
+<screen>&prompt.root;virsh domiflist nated_sles12sp1
+Interface  Type       Source       Model       MAC
+---------------------------------------------------------
+vnet0      network    vnet_nated   virtio      52:54:00:9e:0d:2b</screen>
    </sect3>
+
+
    <sect3 xml:id="libvirt.networks.virtual.virsh.info">
     <title>Getting Details about a Network</title>
     <para>
