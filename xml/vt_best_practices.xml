@@ -1133,20 +1133,19 @@ w /sys/block/sdb/queue/scheduler - - - - noop</screen>
   &lt;feature name='invtsc'/&gt;
 &lt;/cpu&gt;</screen>
    </sect3>
-   <sect3>
+   <sect3 xml:id="vt.best.perf.vcpupin">
     <title>vCPU Pinning</title>
     <para>
-     This is a method to constrain vCPU threads to a NUMA node. The
-     <emphasis>vcpupin</emphasis> element specifies which of the host's
-     physical CPUs the domain vCPU will be pinned to. If this is omitted,
+     vCPU pinning is used to constrain vCPU threads to a set of physical
+     CPUs. The <emphasis>vcpupin</emphasis> element specifies which of the
+     host's physical CPUs the domain vCPU will be pinned to. If this is omitted,
      and the attribute <emphasis>cpuset</emphasis> of the element
      <emphasis>vcpu</emphasis> is not specified, the vCPU is pinned to all
      the physical CPUs by default.
     </para>
     <para>
-     You can pin a vCPU to a specific physical CPU, in which case the vCPU
-     will increase the CPU cache hit ratio. To pin a vCPU to a specific
-     core:
+     CPU intensive workloads can benefit from vCPU pinning by increasing
+     the physical CPU cache hit ratio. To pin a vCPU to a specific CPU:
     </para>
 <screen>virsh# vcpupin <replaceable>DOMAIN_ID</replaceable> --vcpu <replaceable>vCPU_NUMBER</replaceable>
 VCPU: CPU Affinity
@@ -1161,28 +1160,21 @@ virsh # vcpupin SLE12 --vcpu 0 0 --config</screen>
 &lt;/cputune&gt;</screen>
     <note>
      <para>
-      vCPU pinning can also be used for a non-numa node
+      On a NUMA system, vCPU pinning and memory allocation policies can be
+      used to ensure a VM's vCPUs and memory are confined to a NUMA node.
+      See <xref linkend="vt.best.perf.numa"/> for more information related
+      to NUMA tuning.
      </para>
     </note>
-    <figure xml:id="fig.qemu-img.vmnuma">
-     <title>NUMA vCPU placement</title>
-     <mediaobject>
-      <imageobject role="fo">
-       <imagedata fileref="vm_numa.png" width="95%" format="PNG"/>
-      </imageobject>
-      <imageobject role="html">
-       <imagedata fileref="vm_numa.png" width="95%" format="PNG"/>
-      </imageobject>
-     </mediaobject>
-    </figure>
     <warning>
      <title>Live Migration</title>
      <para>
-      Even if <emphasis>vcpupin</emphasis> can improve performance, you
+      Even though <emphasis>vcpupin</emphasis> can improve performance, you
       should take into consideration that live migration of a pinned
-      &vmguest; is difficult, because the resource may not be available on
-      the host, or the NUMA topology could be different on the destination
-      host. For more recommendations about Live Migration see
+      &vmguest; can be problematic. For example the requested physical
+      resources may not be available on the destination host, or the source
+      and destination hosts may have different NUMA topologies. For more
+      recommendations about Live Migration see
       <link
       xlink:href="https://www.suse.com/documentation/sles-12/book_virt/data/sec_libvirt_admin_migrate.html#libvirt_admin_live_migration_requirements">Virtualization
       Live Migration Requirements</link>.
@@ -1289,11 +1281,26 @@ virsh # vcpupin SLE12 --vcpu 0 0 --config</screen>
   </sect2>
 
   <sect2 xml:id="vt.best.perf.numa">
-   <title>NUMA Affinity</title>
+   <title>NUMA Tuning</title>
    <para>
-    Using <emphasis>NUMA</emphasis> can potentially have a huge impact on
-    performance. You should consider your host topology when sizing guests.
-    First check that your host has NUMA capabilities:
+    NUMA is an acronym for Non Uniform Memory Access. A NUMA system has
+    multiple physical CPUs, each with local memory attached. Each CPU
+    can also access other CPUs' memory, known as a remote memory
+    access, but it is much slower than accessing local memory. NUMA systems
+    can negatively impact &vmgeust; performance if not tuned properly.
+    Although ultimately tuning is workload dependent, this section describes
+    controls that should be considered when deploying VM workloads on NUMA
+    hosts. Always consider your host topology when sizing and deploying VMs.
+   </para>
+   <para>
+    SUSE Lunix Enterprise Server contains a NUMA auto-balancer that strives
+    to reduce remote memory access by placing memory on the same NUMA node
+    as the CPU processing it. In addition, standard tools such as
+    <command>cgset</command> and virtualization tools such as libvirt
+    provide mechanisms to constrain &vmguest; resources to physical resources.
+   </para>
+   <para>
+    <command>numactl</command> is used to check for host NUMA capabilities:
    </para>
 <screen># numactl --hardware
 available: 4 nodes (0-3)
@@ -1319,72 +1326,12 @@ node   0   1   2   3
 1:  21  10  21  21
 2:  21  21  10  21
 3:  21  21  21  10</screen>
-   <sect3>
-    <title>Numa Node Tuning (host)</title>
-    <para>
-     NUMA is the acronym of Non Uniform Memory Access. A NUMA system has
-     multiple physical CPUs with local memory attached. Moreover each CPU
-     can access other CPUs' Memory this is what we call remote memory, and
-     access is slower than accessing local memory.
-    </para>
-    <para>
-     You can control the NUMA policy performance
-     <remark>toms 2015-11-04:
-       Should this say "for the domain process" or "for domain processes"?
-     </remark>
-     for domain processes by using the <emphasis>numatune</emphasis>
-     element:
-    </para>
-<screen>&lt;numatune&gt;
-    &lt;memory mode="strict"<co xml:id="co.numat.mode"/> nodeset="1-4,^3"<co xml:id="co.numat.nodeset"/>/&gt;
-    &lt;memnode<co xml:id="co.numat.memnode"/> cellid="0"<co xml:id="co.numat.cellid"/> mode="strict" nodeset="1"/&gt;
-    &lt;memnode cellid="2" placement="strict"<co xml:id="co.numat.placement"/> mode="preferred" nodeset="2"/&gt;
-&lt;/numatune&gt;</screen>
-    <calloutlist>
-     <callout arearefs="co.numat.mode">
-      <para>
-       Policies available are: <emphasis>interleave</emphasis> (round-robin
-       like), <emphasis>strict</emphasis> (default) or
-       <emphasis>preferred</emphasis>
-      </para>
-     </callout>
-     <callout arearefs="co.numat.nodeset">
-      <para>
-       Specify the NUMA nodes
-      </para>
-     </callout>
-     <callout arearefs="co.numat.memnode">
-      <para>
-       Specify memory allocation policies for each guest NUMA node (if this
-       element is not defined then this will fall back and use the
-       <emphasis>memory</emphasis> element)
-      </para>
-     </callout>
-     <callout arearefs="co.numat.cellid">
-      <para>
-       Addresses the guest NUMA node for which the settings are applied
-      </para>
-     </callout>
-     <callout arearefs="co.numat.placement">
-      <para>
-       The placement attribute can be used to indicate the memory placement
-       mode
-       <remark>dublin 2015-11-04:
-          Should this say "for the domain process" or "for domain processes"?
-        </remark>
-       for domain processes, the value can be <emphasis>auto</emphasis> or
-       <emphasis>strict</emphasis>
-      </para>
-     </callout>
-    </calloutlist>
-    <warning>
-     <title>Memory and CPU across NUMA nodes</title>
-     <para>
-      You should avoid allocating &vmguest; memory across NUMA nodes, and
-      prevent vCPUs from floating across NUMA nodes.
-     </para>
-    </warning>
-   </sect3>
+   <para>
+    The <command>numactl</command> output shows this is a NUMA system with 4
+    nodes or cells, each containing 36 CPUs and approximately 32G memory.
+    <command>virsh capabilities</command> can also be used to examine the
+    systems NUMA capabilities and CPU topoloy.
+   </para>
    <sect3>
     <title>NUMA Balancing</title>
     <para>
@@ -1455,78 +1402,12 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
      </para>
     </warning>
    </sect3>
-   <sect3 xml:id="vt.best.numa.topo">
-    <title>Guest NUMA Topology</title>
-    <para>
-     &vmguest; NUMA topology can be specified using the
-     <emphasis>numa</emphasis> element in the XML configuration:
-    </para>
-<screen>&lt;cpu&gt;
-...
-  &lt;numa&gt;
-    &lt;cell<co xml:id="co.numa.cell"/> id='0'<co xml:id="co.numa.id"/> cpus='0-1'<co xml:id="co.numa.cpus"/> memory='512000' unit='KiB'/&gt;
-    &lt;cell id='1' cpus='2-3' memory='256000'<co xml:id="co.numa.mem"/>
-    unit='KiB'<co xml:id="co.numa.unit"/> memAccess='shared'<co
-    xml:id="co.numa.memaccess"/>/&gt;
-  &lt;/numa&gt;
-  ...
-&lt;/cpu&gt;</screen>
-    <calloutlist>
-     <callout arearefs="co.numa.cell">
-      <para>
-       Each <emphasis>cell</emphasis> element specifies a NUMA cell or a
-       NUMA node
-      </para>
-     </callout>
-     <callout arearefs="co.numa.id">
-      <para>
-       All cells should have an <emphasis>id</emphasis> attribute in case it
-       is necessary to refer to any cell in the code. Otherwise the cells
-       are assigned ids in ascending order starting from 0
-      </para>
-     </callout>
-     <callout arearefs="co.numa.cpus">
-      <para>
-       cpus specifies the CPU or range of CPUs that are part of the node
-      </para>
-     </callout>
-     <callout arearefs="co.numa.mem">
-      <para>
-       The node memory in kilobytes (i.e. blocks of 1024 bytes)
-      </para>
-     </callout>
-     <callout arearefs="co.numa.unit">
-      <para>
-       Attribute to define units in which memory is specified
-      </para>
-     </callout>
-     <callout arearefs="co.numa.memaccess">
-      <para>
-       Optional attribute which can control whether the memory is to be
-       mapped as <option>shared</option> or <option>private</option>. This
-       is valid only for hugepages-backed memory.
-      </para>
-     </callout>
-    </calloutlist>
-    <para>
-     To find where the &vmguest; has allocated its pages. use: <command>cat
-     /proc/<replaceable>PID</replaceable>/numa_maps</command> and
-     <command>cat
-     /sys/fs/cgroup/memory/sysdefault/libvirt/qemu/<replaceable>KVM_NAME</replaceable>/memory.numa_stat</command>.
-    </para>
-    <warning>
-     <title>NUMA specification</title>
-     <para>
-      The &libvirt; guest NUMA specification is currently only available for
-      QEMU/KVM.
-     </para>
-    </warning>
-   </sect3>
    <sect3>
-    <title>Cpuset Memory Policy</title>
+    <title>Memory Allocation control with cpuset Controller</title>
     <para>
-     There are three memory cpuset policy modes available: interleave, bind
-     and preferred.
+     The cgroups cpuset controller can be used confine memory used by a
+     process to a NUMA node. There are three cpuset memory policy modes
+     available: interleave, bind, and preferred.
     </para>
     <itemizedlist>
      <listitem>
@@ -1535,7 +1416,7 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
        which is also known as round-robin. This policy can provide
        substantial improvements for jobs that need to place thread local
        data on the corresponding node. When the interleave destination is
-       not available, it will be moved to another nodes.
+       not available, it will be moved to another node.
       </para>
      </listitem>
      <listitem>
@@ -1554,7 +1435,7 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
     </itemizedlist>
     <para>
      You can change the memory policy mode with the <command>cgset</command>
-     tool:
+     tool from the libcgroup-tools package:
     </para>
 <screen># cgset -r cpuset.mems=<replaceable>NODE</replaceable> sysdefault/libvirt/qemu/<replaceable>KVM_NAME</replaceable>/emulator</screen>
     <para>
@@ -1580,11 +1461,60 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
     </note>
    </sect3>
    <sect3>
-    <title>Memory Pinning</title>
-    <sect4>
-     <title>non-vNUMA Guest</title>
+    <title>Memory Allocation Control with &libvirt;</title>
+    <para>
+     &libvirt; allows controlling &vmguest; memory allocation policy using the
+     the <emphasis>numatune</emphasis> element:
+    </para>
+<screen>&lt;numatune&gt;
+    &lt;memory mode="strict"<co xml:id="co.numat.mode"/> nodeset="1-4,^3"<co xml:id="co.numat.nodeset"/>/&gt;
+    &lt;memnode<co xml:id="co.numat.memnode"/> cellid="0"<co xml:id="co.numat.cellid"/> mode="strict" nodeset="1"/&gt;
+    &lt;memnode cellid="2" placement="strict"<co xml:id="co.numat.placement"/> mode="preferred" nodeset="2"/&gt;
+&lt;/numatune&gt;</screen>
+    <calloutlist>
+     <callout arearefs="co.numat.mode">
+      <para>
+       Policies available are: <emphasis>interleave</emphasis> (round-robin
+       like), <emphasis>strict</emphasis> (default) or
+       <emphasis>preferred</emphasis>
+      </para>
+     </callout>
+     <callout arearefs="co.numat.nodeset">
+      <para>
+       Specify the NUMA nodes
+      </para>
+     </callout>
+     <callout arearefs="co.numat.memnode">
+      <para>
+       Specify memory allocation policies for each guest NUMA node (if this
+       element is not defined then this will fall back and use the
+       <emphasis>memory</emphasis> element)
+      </para>
+     </callout>
+     <callout arearefs="co.numat.cellid">
+      <para>
+       Addresses the guest NUMA node for which the settings are applied
+      </para>
+     </callout>
+     <callout arearefs="co.numat.placement">
+      <para>
+       The placement attribute can be used to indicate the memory placement
+       mode for a domain process, the value can be <emphasis>auto</emphasis> or
+       <emphasis>strict</emphasis>
+      </para>
+     </callout>
+    </calloutlist>
+    <warning>
+     <title>Memory and CPU across NUMA nodes</title>
      <para>
-      On a non-vNUMA guest, pinning memory to host NUMA nodes would be done
+      You should avoid allocating &vmguest; memory across NUMA nodes, and
+      prevent vCPUs from floating across NUMA nodes.
+     </para>
+    </warning>
+    <sect4>
+     <title>Non-vNUMA &vmguest;</title>
+     <para>
+      On a non-vNUMA &vmguest;, pinning memory to host NUMA nodes would be done
       with:
      </para>
 <screen>&lt;numatune&gt;
@@ -1600,9 +1530,9 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
      </para>
     </sect4>
     <sect4>
-     <title>vNUMA Guest</title>
+     <title>vNUMA &vmguest;</title>
      <para>
-      If the guest has a vNUMA topology, the method is as follows:
+      If the &vmguest; has a vNUMA topology, the method is as follows:
      </para>
 <screen>&lt;numatune&gt;
    &lt;memnode cellid="0" mode="strict" nodeset="0"/&gt;
@@ -1616,14 +1546,92 @@ kernel.numa_balancing_scan_size_mb = 256<co xml:id="co.numa.size"/></screen>
       <xref linkend="vt.best.numa.topo"/>).
      </para>
     </sect4>
-    <sect4>
-     <title>virt-install / virt-manager</title>
+   </sect3>
+   <sect3>
+    <title>vCPU Allocation Control with &libvirt;</title>
+    <para>
+     See <xref linkend="vt.best.perf.vcpupin"/> for more information
+     related to pinning vCPUs to a physical CPU or set of physical CPUs.
+     vCPU pinning can be used to ensure all &vmguest; vCPUs are confined
+     to a NUMA node.
+    </para>
+   </sect3>
+   <sect3 xml:id="vt.best.numa.topo">
+    <title>&vmguest; Virtual NUMA Topology</title>
+    <para>
+     Creating a &vmguest; virtual NUMA (vNUMA) policy that resembles
+     the host NUMA topology can often increase performace of traditional
+     large, scale-up workloads. &vmguest; vNUMA topology can be specified
+     using the <emphasis>numa</emphasis> element in the XML configuration:
+    </para>
+<screen>&lt;cpu&gt;
+...
+  &lt;numa&gt;
+    &lt;cell<co xml:id="co.numa.cell"/> id='0'<co xml:id="co.numa.id"/> cpus='0-1'<co xml:id="co.numa.cpus"/> memory='512000' unit='KiB'/&gt;
+    &lt;cell id='1' cpus='2-3' memory='256000'<co xml:id="co.numa.mem"/>
+    unit='KiB'<co xml:id="co.numa.unit"/> memAccess='shared'<co
+    xml:id="co.numa.memaccess"/>/&gt;
+  &lt;/numa&gt;
+  ...
+&lt;/cpu&gt;</screen>
+    <calloutlist>
+     <callout arearefs="co.numa.cell">
+      <para>
+       Each <emphasis>cell</emphasis> element specifies a vNUMA cell or
+       node
+      </para>
+     </callout>
+     <callout arearefs="co.numa.id">
+      <para>
+       All cells should have an <emphasis>id</emphasis> attribute, allowing
+       to reference the cell in other configuration blocks. Otherwise cells
+       are assigned ids in ascending order starting from 0.
+      </para>
+     </callout>
+     <callout arearefs="co.numa.cpus">
+      <para>
+       cpus specifies the CPU or range of CPUs that are part of the node
+      </para>
+     </callout>
+     <callout arearefs="co.numa.mem">
+      <para>
+       The node memory
+      </para>
+     </callout>
+     <callout arearefs="co.numa.unit">
+      <para>
+       Units in which node memory is specified
+      </para>
+     </callout>
+     <callout arearefs="co.numa.memaccess">
+      <para>
+       Optional attribute which can control whether the memory is to be
+       mapped as <option>shared</option> or <option>private</option>. This
+       is valid only for hugepages-backed memory.
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     To find where the &vmguest; has allocated its pages. use: <command>cat
+     /proc/<replaceable>PID</replaceable>/numa_maps</command> and
+     <command>cat
+     /sys/fs/cgroup/memory/sysdefault/libvirt/qemu/<replaceable>KVM_NAME</replaceable>/memory.numa_stat</command>.
+    </para>
+    <warning>
+     <title>NUMA specification</title>
      <para>
-      Configuring vNUMA and pinning guest memory to host nodes is not
-      supported by <command>virt-install</command> or
-      <command>virt-manager</command>.
+      The &libvirt; &vmguest; NUMA specification is currently only available for
+      QEMU/KVM.
      </para>
-    </sect4>
+    </warning>
+   </sect3>
+   <sect3>
+    <title>virt-install / virt-manager</title>
+    <para>
+     Configuring vNUMA and pinning guest memory to host nodes is not
+     supported by <command>virt-install</command> or
+     <command>virt-manager</command>.
+    </para>
    </sect3>
   </sect2>
  </sect1>
