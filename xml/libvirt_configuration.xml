@@ -1250,38 +1250,96 @@ igb                   185649  0</screen>
       non-<xref linkend="vt.io.sriov"/> driver for the Intel 82576NS network
       card:
      </para>
-<screen>sudo /sbin/rmmod igbvf</screen>
+     <screen>sudo /sbin/rmmod igbvf</screen>
+     <!-- the following by a mail from Nefi Munoz <NMunoz> -->
      <para>
-      Load the <xref linkend="vt.io.sriov"/> driver subsequently using the
-      <command>modprobe</command> command:
+      Load the <xref linkend="vt.io.sriov"/> driver subsequently using
+      the <command>modprobe</command> command&mdash;the VF parameter
+      (<literal>max_vfs</literal>) is mandatory:
      </para>
-<screen>sudo /sbin/modprobe igb</screen>
+     <screen>sudo /sbin/modprobe igb max_vfs=8</screen>
+     <para>
+      Or load the driver via SYSFS:
+     </para>
+     <para>
+      Find the PCI ID of the physical NIC by listing Ethernet devices:
+     </para>
+<screen>&prompt.user;sudo lspci | grep Eth
+06:00.0 Ethernet controller: Emulex Corporation OneConnect NIC (Skyhawk) (rev 10)
+06:00.1 Ethernet controller: Emulex Corporation OneConnect NIC (Skyhawk) (rev 10)</screen>
+     <para>
+      To enable VFs, echo the number of desired VFs to load to the
+      <literal>sriov_numvfs</literal> parameter:
+     </para>
+
+<screen>&prompt.user;sudo echo 1 > /sys/bus/pci/devices/0000:06:00.1/sriov_numvfs</screen>
+
+<para>Verify that the VF NIC was loaded:</para>
+<screen>&prompt.user;sudo lspci | grep Eth
+06:00.0 Ethernet controller: Emulex Corporation OneConnect NIC (Skyhawk) (rev 10)
+06:00.1 Ethernet controller: Emulex Corporation OneConnect NIC (Skyhawk) (rev 10)
+06:08.0 Ethernet controller: Emulex Corporation OneConnect NIC (Skyhawk) (rev 10)</screen>
+
+<para>Obtain the maximum number of VFs available:</para>
+
+<screen>&prompt.user;sudo lspci -vvv -s 06:00.1 | grep 'Initial VFs'
+                       Initial VFs: 32, Total VFs: 32, Number of VFs: 0,
+Function Dependency Link: 01</screen>
+
     </step>
+
     <step>
      <para>
-      Configure the driver by adding the number of VFs you want to make
-      available and, if necessary, by blacklisting the non-SR-IOV driver:
+      Create a <filename>before.service</filename> file which loads VF via
+      SYSFS on boot:
      </para>
-<screen>sudo echo -e "options igb max_vfs=8\nblacklist igbvf" &gt;&gt; /etc/modprobe.d/50-igb/</screen>
-     <para>
-      Make sure to replace the example values <literal>igb</literal>,
-      <literal>igbvf</literal> and <literal>50-igb</literal> by values
-      appropriate for your driver.
-     </para>
+<screen>[Unit]
+Before=
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/bin/bash -c "echo 1 > /sys/bus/pci/devices/0000:06:00.1/sriov_numvfs"
+# beware, executable is run directly, not through a shell, check the man pages
+# systemd.service and systemd.unit for full syntax
+[Install]
+# target in which to start the service
+WantedBy=multi-user.target
+#WantedBy=graphical.target</screen>
+<para>
+And copy it to <filename>/etc/systemd/system</filename>.
+</para>
+<para>
+ Additionally, it is required to create another service file
+ (<filename>after-local.service</filename>) pointing to
+ <filename>/etc/init.d/after.local</filename> script that detaches the
+ NIC prior to starting the VM, otherwise, the VM would fail to start:
+</para>
+
+<screen>[Unit]
+Description=/etc/init.d/after.local Compatibility
+After=libvirtd.service
+Requires=libvirtd.service
+[Service]
+Type=oneshot
+ExecStart=/etc/init.d/after.local
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target</screen>
+<para>
+And copy it to <filename>/etc/systemd/system</filename>.
+</para>
+
+<screen>#! /bin/sh
+#
+# Copyright (c) 2010 SuSE LINUX Products GmbH, Germany.  All rights reserved.
+# ...
+virsh nodedev-detach pci_0000_06_08_0</screen>
+<para>
+And save it as <filename>/etc/init.d/after.local</filename>.
+</para>
     </step>
-    <step>
-     <para>
-      Now make sure the driver is loaded on boot by creating the file
-      <filename>/etc/modules-load.d/igb.conf</filename> with the following
-      content:
-     </para>
-<screen># Load the igb driver at boot
-igb</screen>
-     <para>
-      Make sure to replace the example value <literal>igb</literal> by a
-      string appropriate for your driver.
-     </para>
-    </step>
+
     <step>
      <para>
       Reboot the machine and check if the SR-IOV driver is loaded by
