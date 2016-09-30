@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_router.xml" version="5.0" xml:id="sec.basicnet.router">
+ <title>ルータの基本セットアップ</title>
+
+
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  ルータは、複数のネットワークの間でデータ(ネットワークパケット)を送受信するネットワークデバイスです。多くの場合、ルータは、ローカルネットワークとリモートネットワーク(インターネット)またはローカルネットワークセグメントとの接続に使用します。SUSE Linux Enterprise Serverを使用すると、NAT(ネットワークアドレス変換)や高度なファイアウォール設定などの機能を備えたルータを構築できます。
+ </para>
+
+
+
+ <para>
+  次に、SUSE Linux Enterprise Serverをルータにする基本手順を示します。
+ </para>
+
+ <procedure>
+  <step>
+   <para>
+    たとえば<filename>/etc/sysctl.d/50-router.conf</filename>で、転送を有効にします。
+   </para>
+<screen>net.ipv4.conf.all.forwarding = 1
+net.ipv6.conf.all.forwarding = 1</screen>
+   <para>
+    次に、インタフェースにIPv4とIPv6の静的IPセットアップを指定します。転送を有効にすると、さまざまなメカニズムが無効になります。たとえば、IPv6はIPv6 RA(Router Advertisement)を受け付けなくなり、その結果デフォルトルートが作成されなくなります。
+   </para>
+  </step>
+  <step>
+   <para>
+    複数のインタフェースを経由して同一(内部)ネットワークに接続可能な場合、または通常はVPNを使用する(そして、VPNが<quote>正常なマルチホームホスト</quote>上にすでに存在する)場合など、多くの場合に、IPv4戻り経路フィルタ(この機能は現在IPv6には存在しません)を無効にする必要があります。
+   </para>
+<screen>net.ipv4.conf.all.rp_filter = 0</screen>
+   <para>
+    代わりに、ファイアウォール設定でフィルタを適用することもできます。
+   </para>
+  </step>
+  <step>
+   <para>
+    (外部、アップリンク、またはISPインタフェース上のルータからの)IPv6 RAを受け付けて、デフォルトの(またはより具体的な)IPv6ルートを再作成するには、次のように設定します。
+   </para>
+<screen>net.ipv6.conf.${ifname}.accept_ra = 2
+net.ipv6.conf.${ifname}.autoconf = 0</screen>
+   <para>
+    (注: <quote><literal>eth0.42</literal></quote>は、ドット区切りのsysfsパスでは<literal>eth0/42</literal>と記述する必要があります。)
+   </para>
+  </step>
+ </procedure>
+
+ <para>
+  ルータの動作および転送の依存関係の詳細については、<link xlink:href="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt">https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt</link>を参照してください。
+ </para>
+
+ <para>
+  内部(DMZ)インタフェースでIPv6を提供し、自身をIPv6ルータおよび<quote>自動環境設定ネットワーク</quote>としてクライアントにアナウンスするには、たとえば<systemitem class="daemon">radvd</systemitem>をインストールして<filename>/etc/radvd.conf</filename>で設定します。
+ </para>
+
+<screen>interface eth0
+{
+    IgnoreIfMissing on;         # do not fail if interface missed
+
+    AdvSendAdvert on;           # enable sending RAs
+    AdvManagedFlag on;          # IPv6 addresses managed via DHCPv6
+    AdvOtherConfigFlag on;      # DNS, NTP... only via DHCPv6
+
+    AdvDefaultLifetime 3600;    # client default route lifetime of 1 hour
+
+    prefix 2001:db8:0:1::/64    # (/64 is default and required for autoconf)
+    {
+        AdvAutonomous off;         # Disable address autoconf (DHCPv6 only)
+
+        AdvValidLifetime 3600;     # prefix (autoconf addr) is valid 1 h
+        AdvPreferredLifetime 1800; # prefix (autoconf addr) is prefered 1/2 h
+    }
+}</screen>
+
+ <para>
+  最後に、ファイアウォールを設定します。SuSEfirewall2では、<literal>FW_ROUTE="yes"</literal>と設定して(設定しない場合は、forwarding sysctlのリセットも再実行されます)、<literal>FW_DEV_INT</literal>、<literal>FW_DEV_EXT</literal>(および<literal>FW_DEV_DMZ</literal>)の各ゾーン変数でインタフェースを定義する必要があります。また、<literal>FW_MASQUERADE="yes"</literal>と<literal>FW_MASQ_DEV</literal>も設定する必要があるかもしれません。
+ </para>
+</sect1>

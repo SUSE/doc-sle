@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_lvm-snapshots.xml" version="5.0" xml:id="cha.lvm_snapshots" xml:lang="zh-tw">
+ <title>LVM 磁碟區快照</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  邏輯磁碟區管理員 (LVM) 邏輯磁碟區快照是一種寫入時複製技術，它會監控現有磁碟區資料區塊的變更，以便在對其中一個區塊執行寫入操作時，將建立快照時區塊的值複製到快照磁碟區。使用這種方式便會保留一份時間點資料，直到快照磁碟區被刪除。
+ </para>
+ <sect1 xml:id="sec.lvm_snapshots.intro">
+  <title>瞭解磁碟區快照</title>
+
+  <para>
+   檔案系統快照包含關於自身的中繼資料，以及在建立快照後已變更之來源邏輯磁碟區的資料區塊。透過快照存取資料時，您會看到來源邏輯磁碟區的時間點副本。您無需從備份媒體還原資料，或是覆寫已變更的資料。
+  </para>
+
+  <important>
+   <title>掛接具有快照的磁碟區</title>
+   <para>
+    在快照的存留期間，必須先掛接快照，然後才能掛接其來源邏輯磁碟區。
+   </para>
+  </important>
+
+  <para>
+   LVM 磁碟區快照可用於從檔案系統的時間點檢視建立備份。您可以實時建立快照，建立後它會一直保留，直到您將它刪除。您可以從快照備份檔案系統，而磁碟區本身仍可繼續供使用者使用。快照最初包含自身相關的一些中繼資料，但不包含來源邏輯磁碟區的實際資料。快照會使用寫入時複製技術偵測原始資料區塊中發生的資料變更。當在快照磁碟區中拍攝某個區塊的快照時，它會複製所包含的值，然後允許在來源區塊中儲存新的資料。隨著來源邏輯磁碟區上有更多區塊變更其原始值，快照大小會不斷增大。
+  </para>
+
+  <para>
+   調整快照大小時，請考慮來源邏輯磁碟區中將會變更的資料量，以及要保留快照的時間。根據來源邏輯磁碟區大小、您打算保留快照的時間，以及在快照存留期間預期要變更的資料區塊數，您為快照磁碟區配置的空間容量可能會有所不同。快照磁碟區一經建立，就無法調整大小。建議在建立快照磁碟區時，將其大小設定成約為原始邏輯磁碟區的 10%。如果您預測在刪除快照前，來源邏輯磁碟區中的每個區塊都至少會變更一次，則快照磁碟區大小至少應不小於來源邏輯磁碟區的容量加上儲存快照磁碟區相關中繼資料所需的一些額外空間。如果資料變更並不頻繁，或者預計的存留期足夠簡短，所需的空間就會減少。
+  </para>
+
+  <para>
+   在 LVM2 中，快照預設為讀/寫模式。當您直接將資料寫入快照時，該區塊在例外表格中會標記為已使用，因此不會從來源邏輯磁碟區中複製。您可以掛接快照磁碟區，並透過直接將資料寫入快照磁碟區的方式來測試應用程式的變更。您可以透過卸下快照，移除快照，然後重新掛接來源邏輯磁碟區，輕鬆丟棄變更。
+  </para>
+
+  <para>
+   在虛擬客體環境中，您可以如同在實體伺服器上一般，對在伺服器磁碟上建立的 LVM 邏輯磁碟區使用快照功能。
+  </para>
+
+  <para>
+   在虛擬主機環境中，您可以使用快照功能來備份虛擬機器的儲存後端，或測試對虛擬機器影像進行的變更 (例如針對修補程式或升級進行的變更)，而不必修改來源邏輯磁碟區。虛擬機器必須使用 LVM 邏輯磁碟區做為其儲存後端，而不應使用虛擬磁碟檔案。您可以掛接 LVM 邏輯磁碟區，並將它用做檔案型磁碟來儲存虛擬機器影像，您也可以指定 LVM 邏輯磁碟區做為實體磁碟，將它做為區塊裝置向其中寫入資料。
+  </para>
+
+  <para>
+   從 SLES 11 SP3 開始，LVM 邏輯磁碟區快照可以簡易佈建。如果您建立沒有指定大小的快照，系統就會使用簡易佈建。建立為簡易磁碟區的快照會視需要使用簡易池中的空間。簡易快照磁碟區的特性與任何其他簡易磁碟區相同。您可以獨立啟動磁碟區、擴充磁碟區、重新命名磁碟區、移除磁碟區，甚至可以建立磁碟區的快照。
+  </para>
+
+  <important>
+   <title>叢集中簡易佈建的磁碟區</title>
+   <para>
+    若要在叢集中使用簡易佈建的快照，來源邏輯磁碟區及其快照必須在單個叢集資源中管理。如此，該磁碟區及其快照便可永遠獨佔地掛接在同一個節點上。
+   </para>
+  </important>
+
+  <para>
+   對快照的操作完成後，請務必將其從系統中移除。隨著來源邏輯磁碟區上資料區塊的不斷變更，快照終將完全填滿。快照填滿時就會處於停用狀態，導致您無法重新裝載來源邏輯磁碟區。
+  </para>
+
+  <para>
+   如果您為一個來源邏輯磁碟區建立了多個快照，在移除這些快照時，請採用最後建立的最先刪除的順序。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.create">
+  <title>使用 LVM 建立 Linux 快照</title>
+
+  <para>
+   邏輯磁碟區管理員 (LVM) 可用於建立檔案系統的快照。
+  </para>
+
+  <para>
+   開啟終端機主控台，然後輸入
+  </para>
+
+<screen>sudo lvcreate -s [-L <replaceable>&lt;size</replaceable>&gt;] -n <replaceable>snap_volume</replaceable> <replaceable>source_volume_path</replaceable></screen>
+
+  <para>
+   如果不指定大小，快照會建立為簡易快照。
+  </para>
+
+  <para>
+   例如：
+  </para>
+
+<screen>sudo lvcreate -s -L 1G -n linux01-snap /dev/lvm/linux01</screen>
+
+  <para>
+   則快照建立為 <filename>/dev/lvm/linux01-snap</filename> 磁碟區。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.monitor">
+  <title>監控快照</title>
+
+  <para>
+   開啟終端機主控台，然後輸入
+  </para>
+
+<screen>sudo lvdisplay <replaceable>snap_volume</replaceable></screen>
+
+  <para>
+   例如：
+  </para>
+
+<screen><prompt>tux &gt; </prompt>sudo lvdisplay /dev/vg01/linux01-snap
+
+--- Logical volume ---
+  LV Name                /dev/lvm/linux01
+  VG Name                vg01
+  LV UUID                QHVJYh-PR3s-A4SG-s4Aa-MyWN-Ra7a-HL47KL
+  LV Write Access        read/write
+  LV snapshot status     active destination for /dev/lvm/linux01
+  LV Status              available
+  # open                 0
+  LV Size                80.00 GB
+  Current LE             1024
+  COW-table size         8.00 GB
+  COW-table LE           512
+  Allocated to snapshot  30%
+  Snapshot chunk size    8.00 KB
+  Segments               1
+  Allocation             inherit
+  Read ahead sectors     0
+  Block device           254:5</screen>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.delete">
+  <title>刪除 Linux 快照</title>
+
+  <para>
+   開啟終端機主控台，然後輸入
+  </para>
+
+<screen>sudo lvremove <replaceable>snap_volume_path</replaceable></screen>
+
+  <para>
+   例如：
+  </para>
+
+<screen>sudo lvremove /dev/lvmvg/linux01-snap</screen>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.xen_host">
+  <title>在虛擬主機上使用虛擬機器的快照</title>
+
+  <para>
+   使用 LVM 邏輯磁碟區做為虛擬機器的後端儲存，可為基礎裝置管理提供彈性，例如，可讓您更輕鬆地移動儲存物件、建立快照和備份資料。您可以掛接 LVM 邏輯磁碟區，並將它用做檔案型磁碟來儲存虛擬機器影像，您也可以指定 LVM 邏輯磁碟區做為實體磁碟，將它做為區塊裝置向其中寫入資料。您可以在 LVM 邏輯磁碟區上建立虛擬磁碟影像，然後建立 LVM 的快照。
+  </para>
+
+  <para>
+   您可以利用快照的讀/寫功能為虛擬機器建立多個不同例項，以使變更針對特定虛擬機器例項的快照進行。您可以在 LVM 邏輯磁碟區上建立虛擬磁碟影像、建立來源邏輯磁碟區的快照，以及修改特定虛擬機器例項的快照。您可以建立來源邏輯磁碟區的另一個快照，並為另一個不同的虛擬機器例項修改該快照。各虛擬機器例項的大部分資料與影像一起儲存在來源邏輯磁碟區上。
+  </para>
+
+  <para>
+   在客體環境中，您還可以利用快照的讀/寫功能保留虛擬磁碟影像，同時測試修補程式或升級。您需要為包含影像的 LVM 磁碟區建立一個快照，然後在快照位置執行虛擬機器。來源邏輯磁碟區將保持不變，對機器的所有變更均會寫入快照。為了恢復到虛擬機器影像的來源邏輯磁碟區，您需要關閉虛擬機器，然後從來源邏輯磁碟區中移除快照。為了重新開始，您需要重新建立快照，掛接該快照，然後在快照影像上重新啟動虛擬機器。
+  </para>
+
+  <para>
+   以下程序將使用檔案型虛擬磁碟影像和 Xen 監管程式。對於在 SUSE Linux 平台上執行的其他監管程式 (例如 KVM)，您可以調整本節中的程序。若要從快照磁碟區中執行檔案型虛擬機器影像︰
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     確保包含檔案型虛擬機器影像的來源邏輯磁碟區已掛接，例如在掛接點 <filename>/var/lib/xen/images/&lt;<replaceable>影像名稱</replaceable>&gt;</filename> 處掛接。
+    </para>
+   </step>
+   <step>
+    <para>
+     為具有足夠空間來儲存預期差異的 LVM 邏輯磁碟區建立快照。
+    </para>
+<screen>sudo lvcreate -s -L 20G -n myvm-snap /dev/lvmvg/myvm</screen>
+    <para>
+     如果不指定大小，快照會建立為簡易快照。
+    </para>
+   </step>
+   <step>
+    <para>
+     建立一個用來掛接快照磁碟區的掛接點。
+    </para>
+<screen>sudo mkdir -p /mnt/xen/vm/myvm-snap</screen>
+   </step>
+   <step>
+    <para>
+     在您建立的掛接點掛接快照磁碟區。
+    </para>
+<screen>sudo mount -t auto /dev/lvmvg/myvm-snap /mnt/xen/vm/myvm-snap</screen>
+   </step>
+   <step>
+    <para>
+     在文字編輯器中，複製來源虛擬機器的組態檔案，修改指向所掛接快照磁碟區上的檔案型影像檔案的路徑，然後儲存檔案，例如 <filename>/etc/xen/myvm-snap.cfg</filename>。
+    </para>
+   </step>
+   <step>
+    <para>
+     使用虛擬機器的掛接快照磁碟區啟動虛擬機器。
+    </para>
+<screen>sudo xm create -c /etc/xen/myvm-snap.cfg</screen>
+   </step>
+   <step>
+    <para>
+     (選擇性) 移除快照，然後在來源邏輯磁碟區上使用未變更的虛擬機器影像。
+    </para>
+<screen>sudo unmount /mnt/xenvms/myvm-snap
+sudo lvremove -f /dev/lvmvg/mylvm-snap</screen>
+   </step>
+   <step>
+    <para>
+     (選擇性) 根據需要重複此程序。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.rollback">
+  <title>將快照與來源邏輯磁碟區合併以回復變更或復原至先前的狀態</title>
+
+  <para>
+   如果您需要將磁碟區上的資料復原或還原至先前的狀態，快照可能非常有用。例如，您可能需要回復由於管理員錯誤或是失敗或不需要的套件安裝或升級所導致的資料變更。
+  </para>
+
+  <para>
+   您可以使用 <command>lvconvert --merge</command> 指令回復對 LVM 邏輯磁碟區進行的變更。合併程序會按如下所述的方式開始︰
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     如果來源邏輯磁碟區和快照磁碟區均未開啟，合併將立即開始。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     如果來源邏輯磁碟區或快照磁碟區已開啟，合併會在來源邏輯磁碟區或快照磁碟區已啟動且都關閉的情況第一次發生時開始。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     如果來源邏輯磁碟區不能關閉 (例如根檔案系統)，合併將延遲到下次伺服器重新開機且來源邏輯磁碟區處於啟動狀態時開始。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     如果來源邏輯磁碟區包含虛擬機器影像，您必須關閉虛擬機器，取消啟動來源邏輯磁碟區和快照磁碟區 (透過依該順序將其卸下)，然後再發出合併指令。因為來源邏輯磁碟區會自動重新掛接，並且合併完成時會刪除快照磁碟區，因此，在合併完成之前，您不應重新啟動虛擬機器。在合併完成之後，您便可將產生的邏輯磁碟區用於虛擬機器。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   合併開始後，該程序將在伺服器重新啟動之後繼續進行，直到完成為止。當正在進行合併時，您不能為來源邏輯磁碟區建立新快照。
+  </para>
+
+  <para>
+   當正在進行合併時，針對來源邏輯磁碟區的讀取或寫入操作會透明地重新導向至正在合併的快照。這使得使用者能夠立即檢視和存取資料，就如建立快照時一樣。他們不需要等到合併完成。
+  </para>
+
+  <para>
+   合併完成時，來源邏輯磁碟區包含的資料為快照建立時的資料加上合併開始後的任何資料變更。產生的邏輯磁碟區具有來源邏輯磁碟區的名稱、次要編號和 UUID。來源邏輯磁碟區會自動重新掛接，並且會移除快照磁碟區。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     開啟終端機主控台，然後輸入
+    </para>
+<screen>sudo lvconvert --merge  [-b] [-i <replaceable>seconds</replaceable>] [<replaceable>snap_volume_path</replaceable>[...<replaceable>snapN</replaceable>]|@<replaceable>volume_tag</replaceable>]</screen>
+    <para>
+     您可以在指令行上指定一或多個快照。您也可以使用相同磁碟區標記來標記多個來源邏輯磁碟區，然後在指令行上指定 <literal>@&lt;<replaceable>磁碟區標記</replaceable>&gt;</literal>。已標記磁碟區的快照會合併到它們各自的來源邏輯磁碟區中。如需標記邏輯磁碟區的的資訊，請參閱<xref linkend="sec.lvm.tagging" xrefstyle="SectTitleOnPage"/>。
+    </para>
+    <para>
+     選項包括︰
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>-b</term>
+      <term>--background</term>
+      <listitem>
+       <para>
+        在背景中執行精靈。這允許以平行方式同時合併多個指定的快照。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>-i</term>
+      <term>--interval &lt;<replaceable>秒</replaceable>&gt;</term>
+      <listitem>
+       <para>
+        按固定間隔以百分比形式報告進度。請以秒為單位指定間隔。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <para>
+     如需此指令的詳細資訊，請參閱 <command>lvconvert(8)</command> man 頁面。
+    </para>
+    <para>
+     例如：
+    </para>
+<screen>sudo lvconvert --merge /dev/lvmvg/linux01-snap</screen>
+    <para>
+     此指令會將 <filename>/dev/lvmvg/linux01-snap</filename> 合併到其來源邏輯磁碟區中。
+    </para>
+<screen>sudo lvconvert --merge @mytag</screen>
+    <para>
+     如果 <filename>lvol1</filename>，<filename>lvol2</filename> 和 <filename>lvol3</filename> 全都標記了 <literal>mytag</literal>，每個快照磁碟區將按順序與其各自的來源邏輯磁碟區合併；即先合併 <filename>lvol1</filename>，然後是 <filename>lvol2</filename>，最後是 <filename>lvol3</filename>。如果指定了 <literal>--background</literal> 選項，各個已標記邏輯磁碟區的快照將以平行方式同時合併。
+    </para>
+   </step>
+   <step>
+    <para>
+     (選擇性) 如果來源邏輯磁碟區和快照磁碟區均已開啟並且兩者都可以關閉，您可以手動取消啟動來源邏輯磁碟區，然後再將其啟動，讓合併立即開始。
+    </para>
+<screen>sudo umount <replaceable>original_volume</replaceable>
+sudo lvchange -an <replaceable>original_volume</replaceable>
+sudo lvchange -ay <replaceable>original_volume</replaceable>
+sudo mount <replaceable>original_volume</replaceable> <replaceable>mount_point</replaceable></screen>
+    <para>
+     例如：
+    </para>
+<screen>sudo umount /dev/lvmvg/lvol01
+sudo lvchange -an /dev/lvmvg/lvol01
+sudo lvchange -ay /dev/lvmvg/lvol01
+sudo mount /dev/lvmvg/lvol01 /mnt/lvol01</screen>
+   </step>
+   <step>
+    <para>
+     (選擇性) 如果來源邏輯磁碟區和快照磁碟區均已開啟，但來源邏輯磁碟區不能關閉 (例如<systemitem class="username">根</systemitem>檔案系統)，您可以重新啟動伺服器並掛接來源邏輯磁碟區，讓合併在重新啟動之後立即開始。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+</chapter>

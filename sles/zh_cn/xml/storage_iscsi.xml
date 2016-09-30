@@ -1,0 +1,1191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_iscsi.xml" version="5.0" xml:id="cha.iscsi" xml:lang="zh-cn">
+ <title>经由 IP 网络的大容量储存：iSCSI</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  计算机中心和运行服务器时的核心问题之一是为服务器系统提供硬盘容量。通常为此目的使用光纤通道。iSCSI（因特网 SCSI）解决方案提供了光纤通道的低成本备用方案，可以充分利用商品服务器和以太网联网设备。Linux iSCSI 提供 iSCSI 发起程序和 iSCSI LIO 目标软件，用于将 Linux 服务器连接到中心储存系统。
+ </para>
+ <figure>
+  <title>使用 iSNS 服务器的 iSCSI SAN</title>
+  <mediaobject>
+   <imageobject role="fo">
+    <imagedata fileref="iscsi_san_a.svg" width="80%" format="SVG"/>
+   </imageobject>
+   <imageobject role="html">
+    <imagedata fileref="iscsi_san_a.png" width="100%" format="PNG"/>
+   </imageobject>
+  </mediaobject>
+ </figure>
+ <note>
+  <title>LIO</title>
+  <para>
+   LIO (<link xlink:href="http://linux-iscsi.org"/>) 是 Linux 适用的标准开源多协议 SCSI 目标。LIO 以 Linux 内核 2.6.38 及更高版本替代 STGT（SCSI 目标）框架成为 Linux 中的标准统一储存目标。在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 中，iSCSI LIO 目标服务器替换了先前版本中的 iSCSI 目标服务器。
+  </para>
+ </note>
+ <para>
+  iSCSI 是一种储存联网协议，可简化在块储存设备和服务器之间通过 TCP/IP 网络进行的 SCSI 包数据传输。iSCSI 目标软件在目标服务器上运行，并将逻辑单元定义为 iSCSI 目标设备。iSCSI 发起程序软件在不同服务器上运行并连接到目标设备，以使此服务器上的储存设备可用。
+ </para>
+ <para>
+  iSCSI LIO 目标服务器与 iSCSI 发起程序服务器之间通过在 LAN 的 IP 级别上发送 SCSI 包来进行通讯。当在发起程序服务器上运行的应用程序启动针对 iSCSI LIO 目标设备的查询时，操作系统会生成必要的 SCSI 命令。然后，SCSI 命令会嵌入到 IP 包中并在需要时由软件进行加密，此软件通常为 <emphasis>iSCSI 发起程序</emphasis>。包经由内部 IP 网络传输到相应的 iSCSI 远程站，该站称为 <emphasis>iSCSI LIO 目标服务器</emphasis>（简称为 <emphasis>iSCSI 目标</emphasis>）。
+ </para>
+ <para>
+  许多储存解决方案允许通过 iSCSI 进行访问，但是也可以运行提供 iSCSI 目标的 Linux 服务器。在此情况下，对已针对文件系统服务优化过的 Linux 服务器进行设置是很重要的。iSCSI 目标会访问 Linux 中的块设备。因此，可以使用 RAID 解决方案增加磁盘空间及大量内存，从而改进数据超速缓存。有关 RAID 的更多信息，请参见<xref linkend="cha.raid" xrefstyle="ChapTitleOnPage"/>。
+ </para>
+ <sect1 xml:id="sec.iscsi.install">
+  <title>安装 iSCSI LIO 目标服务器和 iSCSI 发起程序</title>
+
+  <para>
+   系统会默认安装 iSCSI 发起程序（包 <systemitem class="resource">open-iscsi</systemitem> 和 <systemitem class="resource">yast2-iscsi-client</systemitem>），iSCSI LIO 目标包则需要手动安装。
+  </para>
+
+  <important>
+   <title>发起程序和目标不能在同一台服务器上运行</title>
+   <para>
+    不支持在生产环境中的同一服务器上运行 iSCSI 目标软件和 iSCSI 发起程序软件。
+   </para>
+  </important>
+
+  <para>
+   要安装 iSCSI LIO 目标服务器，请在终端控制台中运行以下命令︰
+  </para>
+
+<screen>sudo zypper in yast2-iscsi-lio-server</screen>
+
+  <para>
+   如果您需要安装 iSCSI 发起程序或任何依赖项，请运行命令 <command>sudo zypper in yast2-iscsi-client</command>。
+  </para>
+
+  <para>
+   也可以使用 YaST 软件管理模块来进行安装。
+  </para>
+
+  <para>
+   除了上述包之外，任何额外需要的包将由安装程序自动提取，或者在您第一次运行相应的 YaST 模块时安装。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.target">
+  <title>设置 iSCSI LIO 目标服务器</title>
+
+  <para>
+   本章说明如何使用 YaST 配置 iSCSI LIO 目标服务器以及如何设置 iSCSI LIO 目标设备。您可以使用任何 iSCSI 发起程序访问目标设备。
+  </para>
+
+  <sect2 xml:id="sec.iscsi.target.start">
+   <title>iSCSI LIO 目标服务启动和防火墙设置</title>
+   <para>
+    iSCSI LIO 目标服务默认配置为手动启动。您可以将该服务配置为在引导时自动启动。如果服务器上使用防火墙，并且您想让 iSCSI LIO 目标对其他计算机可用，则必须为想要用于目标访问的每一个适配器打开防火墙中的端口。TCP 端口 3260 是 IANA（因特网号码分配机构）所定义的 iSCSI 协议的端口号。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      启动 YaST，然后起动<menuchoice><guimenu>网络服务</guimenu> <guimenu>iSCSI LIO 目标</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切换到<guimenu>服务</guimenu>选项卡。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_service_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_service_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      在<guimenu>服务启动</guimenu>下，指定 iSCSI LIO 目标服务的启动方式：
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <formalpara>
+        <title>引导时：</title>
+        <para>
+         服务器重启动时自动启动服务。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>手动：</title>
+        <para>
+         （默认）服务器重启动之后，您必须运行 <command>sudo systemctl start target</command> 命令来手动启动该服务。只有启动服务后才可以使用目标设备。
+        </para>
+       </formalpara>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      如果在服务器上使用防火墙，并且希望 iSCSI LIO 目标对其他计算机可用，请为要用于目标访问的每个适配器接口打开防火墙中的端口 3260。如果端口对于所有网络接口均为关闭，则其他计算机将无法使用 iSCSI LIO 目标。
+     </para>
+     <para>
+      如果您未在服务器上使用防火墙，则防火墙设置会被禁用。在此情况下，请跳过下面的步骤，并单击<guimenu>完成</guimenu>离开配置对话框，或切换到另一个选项卡继续配置。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        在<guimenu>服务</guimenu>选项卡上，选中<guimenu>打开防火墙中的端口</guimenu>复选框，以启用防火墙设置。
+       </para>
+      </step>
+      <step>
+       <para>
+        单击<guimenu>防火墙细节</guimenu>，查看或配置要使用的网络接口。列出所有可用的网络接口，并且默认全部选中。取消选择<emphasis>不</emphasis>应打开的端口上的所有接口。单击<guimenu>确定</guimenu>保存您的设置。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>，以保存和应用 iSCSI LIO 目标服务设置。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.authenticate">
+   <title>配置 iSCSI LIO 目标和发起端发现的身份验证</title>
+   <para>
+    iSCSI LIO 目标服务器软件支持 PPP-CHAP（点对点协议-质询握手身份验证协议），该协议是 <citetitle>Internet 工程任务组 (IETF) RFC 1994</citetitle> (<link xlink:href="http://www.ietf.org/rfc/rfc1994.txt"/>) 中定义的一种三向身份验证方法。服务器使用此身份验证方法来发现 iSCSI LIO 目标与发起程序，并不用于访问目标上的文件。如果不希望限制对发现的访问，则使用<guimenu>无身份验证</guimenu>。默认情况下，<guimenu>无身份验证</guimenu>选项处于启用状态。不需要经过身份验证，此服务器上的所有 iSCSI LIO 目标都可由同一网络上的任何 iSCSI 发起端发现。
+   </para>
+   <para>
+    如果是为了更为安全的配置而需要身份验证，则可以使用传入身份验证、传出身份验证，或二者皆使用。<guimenu>传入身份验证</guimenu>要求 iSCSI 发起程序证明其具有在 iSCSI LIO 目标上运行发现的权限。发起程序必须提供传入用户名和口令。<guimenu>传出身份验证</guimenu>要求 iSCSI LIO 目标向发起程序证明它是预期的目标。iSCSI LIO 目标必须向 iSCSI 发起程序提供传出用户名和口令。用于传入和传出发现的口令必须不同。如果启用发现身份验证，则其设置将应用到所有 iSCSI LIO 目标组。
+   </para>
+   <important>
+    <title>安全性</title>
+    <para>
+     为安全起见，建议您对生产环境中的目标与发起端发现使用身份验证。
+    </para>
+   </important>
+   <para>
+    配置 iSCSI LIO 目标的身份验证自选设置：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      启动 YaST，然后起动<menuchoice><guimenu>网络服务</guimenu> <guimenu>iSCSI LIO 目标</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切换到<guimenu>全局</guimenu>选项卡。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_global_noauth_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_global_noauth_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      默认情况下，身份验证处于禁用状态（<guimenu>无身份验证</guimenu>）。要启用身份验证，请选择<guimenu>传入身份验证</guimenu>及/或<guimenu>传出身份验证</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      提供所选身份验证方法的身份凭证。对于进来和传出发现，用户名和口令对可以有所不同。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>保存并应用设置。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.storage">
+   <title>准备储存空间</title>
+   <para>
+    iSCSI LIO 目标配置会将现有块设备导出到 iSCSI 发起程序。您必须为目标设备准备好使用的储存空间，方法是使用 YaST 中的分区程序来设置未格式化的分区或设备，或从命令行使用 parted 对设备进行分区。iSCSI LIO 目标可将未格式化的分区用于 Linux、Linux LVM 或 Linux RAID 文件系统 ID。有关详细信息，请参见<xref linkend="sec.yast2.i_y2_part_expert"/>。
+   </para>
+   <important>
+    <title>不要装入 iSCSI 目标设备</title>
+    <para>
+     设置完用作 iSCSI 目标的设备或分区后，切勿通过其本地路径直接对其进行访问。创建时，不要为其指定安装点。
+    </para>
+   </important>
+   <sect3 xml:id="sec.iscsi.target.storage.vm">
+    <title>在虚拟环境中对设备分区</title>
+    <para>
+     您可以将虚拟机 guest 服务器作为 iSCSI LIO 目标服务器使用。本节说明如何给 Xen 虚拟机指派分区。您还可以使用 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 支持的其他虚拟环境。
+    </para>
+    <para>
+     在 Xen 虚拟环境中，必须将要用于 iSCSI LIO 目标设备的储存空间指派给 guest 虚拟机，然后作为 guest 环境中的虚拟磁盘访问该空间。每个虚拟磁盘都可以是一个物理块设备，如整个磁盘、分区或卷，或者可以是一个基于文件的磁盘映像，其中虚拟磁盘是 Xen 主机服务器上较大物理磁盘上的单个映像文件。为了获得最佳性能，请从物理磁盘或分区创建每个虚拟磁盘。为 guest 虚拟机设置完虚拟磁盘后，请启动 guest 服务器，然后按照物理服务器所用的同一过程将新的空虚拟磁盘配置为 iSCSI 目标设备。
+    </para>
+    <para>
+     在 Xen 主机服务器上创建基于文件的磁盘映像，然后将其指派给 Xen guest 服务器。默认情况下，Xen 将基于文件的磁盘映像储存在目录 <filename>/var/lib/xen/images/<replaceable>虚拟机名称</replaceable></filename> 中，其中<filename><replaceable>虚拟机名称</replaceable></filename>是虚拟机的名称。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.target_group">
+   <title>设置 iSCSI LIO 目标组</title>
+   <para>
+    您可以使用 YaST 配置 iSCSI LIO 目标设备。YaST 使用 <command>lio-utils</command> 软件提供的 API。iSCSI LIO 目标可将未格式化的分区用于 Linux、Linux LVM 或 Linux RAID 文件系统 ID。
+   </para>
+   <important>
+    <title>分区</title>
+    <para>
+     开始之前，请按照<xref linkend="sec.iscsi.target.storage" xrefstyle="SectTitleOnPage"/>中所述创建想要用作 iSCSI LIO 目标的未格式化分区。
+    </para>
+   </important>
+   <procedure>
+    <step>
+     <para>
+      启动 YaST，然后起动<menuchoice><guimenu>网络服务</guimenu> <guimenu>iSCSI LIO 目标</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切换到<guimenu>目标</guimenu>选项卡。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_targets_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_targets_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>添加</guimenu>，然后定义新的 iSCSI LIO 目标组以及设备：
+     </para>
+     <para>
+      iSCSI LIO 目标软件将自动填写 <guimenu>目标</guimenu>、<guimenu>标识符</guimenu>、<guimenu>门户组</guimenu>、<guimenu>IP 地址</guimenu>以及<guimenu>端口号</guimenu>字段。默认会选择<guimenu>使用身份验证</guimenu>。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        如果您有多个网络接口，请使用 IP 地址下拉框选择要用于此目标组的网络接口的 IP 地址。要使服务器在所有地址下都可访问，请选择<guimenu>绑定所有 IP 地址</guimenu>。
+       </para>
+      </step>
+      <step>
+       <para>
+        如果您不想对此目标组进行发起端身份验证，请取消选择<guimenu>使用身份验证</guimenu>（不建议此做法）。
+       </para>
+      </step>
+      <step>
+       <para>
+        单击<guimenu>添加</guimenu>。输入设备或分区的路径，或单击<guimenu>浏览</guimenu>添加该路径。也可以指定名称，然后单击<guimenu>确定</guimenu>。系统将自动生成 LUN 号（从 0 开始）。如果将该字段保留为空，则会自动生成名称。
+       </para>
+      </step>
+      <step>
+       <para>
+        （可选）重复前面的步骤将更多目标添加至此目标组。
+       </para>
+      </step>
+      <step>
+       <para>
+        将所有所需的目标添加到该组后，单击<guimenu>下一步</guimenu>。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      在<guimenu>修改 iSCSI 目标发起端设置</guimenu>页面上，配置允许访问目标组中 LUN 的发起端的信息：
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_target_client_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_target_client_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+     <para>
+      在为目标组指定了至少一个发起端后，<guimenu>编辑 LUN</guimenu>、<guimenu>编辑身份验证</guimenu>、<guimenu>删除</guimenu>和<guimenu>复制</guimenu>按钮才会启用。您可以使用<guimenu>添加</guimenu>或<guimenu>复制</guimenu>来为目标组添加更多发起端：
+     </para>
+     <itemizedlist xml:id="il.iscsi.target.target_group.options" mark="bullet" spacing="normal">
+      <title>修改 iSCSI 目标︰选项</title>
+      <listitem>
+       <formalpara>
+        <title>添加：</title>
+        <para>
+         为选中的 iSCSI LIO 目标组添加新的发起端项。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>编辑 LUN：</title>
+        <para>
+         配置将 iSCSI LIO 目标组中的哪些 LUN 映射到选定发起端。您可以将分配的每一个目标都映射到某个首选的发起端。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>编辑身份验证：</title>
+        <para>
+         为选定发起端配置首选身份验证方法。您可以指定无身份验证，也可以配置传入身份验证、传出身份验证或二者皆配置。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>删除：</title>
+        <para>
+         将选定发起端项从分配给目标组的发起端列表中去除。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>复制：</title>
+        <para>
+         添加具有与选定发起端项相同 LUN 映射和身份验证设置的新发起端项。如此，您便可以轻松地将相同的共享 LUN 逐一分配给群集中的每一个节点。
+        </para>
+       </formalpara>
+      </listitem>
+     </itemizedlist>
+     <substeps performance="required">
+      <step>
+       <para>
+        单击<guimenu>添加</guimenu>，指定发起端名称，选中或取消选中<guimenu>从 TPG 中导入 LUN</guimenu> 复选框，然后单击<guimenu>确定</guimenu>保存设置。
+       </para>
+      </step>
+      <step>
+       <para>
+        选择发起端项，单击<guimenu>编辑 LUN</guimenu>，修改 LUN 映射，以指定将 iSCSI LIO 目标组中的哪些 LUN 分配给选定发起端，然后单击<guimenu>确定</guimenu>保存更改。
+       </para>
+       <para>
+        如果 iSCSI LIO 目标组由多个 LUN 组成，您可以将一个或多个 LUN 分配给选定发起端。默认情况下，会将该组中的每个可用 LUN 都指派给某个发起端 LUN。
+       </para>
+       <para>
+        要修改 LUN 分配，请完成以下一项或多项操作：
+       </para>
+       <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+         <formalpara>
+          <title>添加：</title>
+          <para>
+           单击<guimenu>添加</guimenu>创建新的<guimenu>发起端 LUN</guimenu> 项，然后使用<guimenu>更改</guimenu>下拉框将一个目标 LUN 映射到该项。
+          </para>
+         </formalpara>
+        </listitem>
+        <listitem>
+         <formalpara>
+          <title>删除：</title>
+          <para>
+           选择<guimenu>发起端 LUN</guimenu> 项，然后单击<guimenu>删除</guimenu>去除目标 LUN 映射。
+          </para>
+         </formalpara>
+        </listitem>
+        <listitem>
+         <formalpara>
+          <title>更改：</title>
+          <para>
+           选择<guimenu>发起端 LUN</guimenu> 项，然后使用<guimenu>更改</guimenu>下拉框选择要与之映射的目标 LUN。
+          </para>
+         </formalpara>
+        </listitem>
+       </itemizedlist>
+       <para>
+        典型的分配计划包括：
+       </para>
+       <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+         <para>
+          单个服务器列为一个发起端。将目标组中的所有 LUN 分配给它。
+         </para>
+         <para>
+          您可以使用此分组策略，为指定服务器逻辑分组 iSCSI SAN 储存。
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          多个独立服务器列为多个发起端。将一个或多个目标 LUN 分配给每一个服务器。将每个 LUN 只分配给一个服务器。
+         </para>
+         <para>
+          您可以使用此分组策略，为数据中心中的指定部门或服务类别逻辑分组 iSCSI SAN 储存。
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          群集的每个节点列为一个发起端。将所有共享的目标 LUN 分配给每一个节点。所有节点都将连接到设备，但对于大多数文件系统，群集软件会锁定设备不让它们访问，并且一次只在一个节点上装入该设备。共享的文件系统（例如 OCFS2）可让多个节点同时装入相同的文件结构，并以读写访问权打开相同文件。
+         </para>
+         <para>
+          您可以使用此分组策略，为指定服务器群集逻辑分组 iSCSI SAN 储存。
+         </para>
+        </listitem>
+       </itemizedlist>
+      </step>
+      <step>
+       <para>
+        选择发起端项，单击<guimenu>编辑身份验证</guimenu>，指定发起端的身份验证设置，然后单击<guimenu>确定</guimenu>保存设置。
+       </para>
+       <para>
+        您可以要求<guimenu>无身份验证</guimenu>，也可以配置<guimenu>传入身份验证</guimenu>、<guimenu>传出身份验证</guimenu>，或二者皆配置。您仅可为每个发起端指定一对用户名和口令。对于发起端的传入和传出身份验证，身份凭证可以有所不同。每个发起端的身份凭证均可不同。
+       </para>
+      </step>
+      <step>
+       <para>
+        对每个可以访问此目标组的 iSCSI 发起端重复上述步骤。
+       </para>
+      </step>
+      <step>
+       <para>
+        配置完发起端指派后，单击<guimenu>下一步</guimenu>。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>保存并应用设置。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.tg_modify">
+   <title>修改 iSCSI LIO 目标组</title>
+   <para>
+    您可以按照如下方式修改现有 iSCSI LIO 目标组：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      在目标组中添加或删除目标 LUN 设备
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      为目标组添加或去除发起端
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      为目标组的发起端修改发起端 LUN 到目标 LUN 的映射
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      修改发起端身份验证（传入、传出或二者）的用户名和口令身份凭证。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    查看或修改 iSCSI LIO 目标组的设置：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      启动 YaST，然后起动<menuchoice><guimenu>网络服务</guimenu> <guimenu>iSCSI LIO 目标</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切换到<guimenu>目标</guimenu>选项卡。
+     </para>
+    </step>
+    <step>
+     <para>
+      选择要修改的 iSCSI LIO 目标组，然后单击<guimenu>编辑</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在“修改 iSCSI 目标 LUN 设置”页面上，将 LUN 添加到目标组，编辑 LUN 指派或从组中删除目标 LUN。在对组完成所有想要的更改后，单击<guimenu>下一步</guimenu>。
+     </para>
+     <para>
+      有关选项信息，请参见<xref linkend="il.iscsi.target.target_group.options"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在“修改 iSCSI 目标发起端设置”页面上，配置允许访问目标组中 LUN 的发起端的信息。在对组完成所有想要的更改后，单击<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>保存并应用设置。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.tg_delete">
+   <title>删除 iSCSI LIO 目标组</title>
+   <para>
+    删除 iSCSI LIO 目标组会去除组的定义以及发起端的相关设置，包括 LUN 映射和身份验证凭证。该操作不会销毁分区上的数据。要再次赋予发起端访问权限，您可以将目标 LUN 分配给不同的或新的目标组，并为其配置发起端访问权限。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      启动 YaST，然后起动<menuchoice><guimenu>网络服务</guimenu> <guimenu>iSCSI LIO 目标</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切换到<guimenu>目标</guimenu>选项卡。
+     </para>
+    </step>
+    <step>
+     <para>
+      选择要删除的 iSCSI LIO 目标组，然后单击<guimenu>删除</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      系统提示时，单击<guimenu>继续</guimenu>确认删除，或单击<guimenu>取消</guimenu>予以取消。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>保存并应用设置。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.initiator">
+  <title>配置 iSCSI 发起程序</title>
+
+  <para>
+   iSCSI 发起端可用于连接到任意 iSCSI 目标。连接不限于<xref linkend="sec.iscsi.target" xrefstyle="SectTitleOnPage"/>说明的 iSCSI 目标解决方案。iSCSI 发起程序配置包括两个主要步骤 － 发现可用 iSCSI 目标和设置 iSCSI 会话。这两个步骤都可通过 YaST 完成。
+  </para>
+
+  <sect2 xml:id="sec.iscsi.initiator.yast">
+   <title>使用 YaST 执行 iSCSI 发起程序配置</title>
+   <para>
+    在 YaST 中，“iSCSI 发起程序概述”包括三个选项卡：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>服务：</term>
+     <listitem>
+      <para>
+       可使用<guimenu>服务</guimenu>选项卡来在引导时启用 iSCSI 发起程序。它还允许设置唯一的<guimenu>发起程序名称</guimenu>和 iSNS 服务器以用于发现。iSNS 的默认端口为 3205。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>已连接目标：</term>
+     <listitem>
+      <para>
+       <guimenu>已连接目标</guimenu>选项卡概述了当前已连接的 iSCSI 目标。与<guimenu>已发现目标</guimenu>选项卡类似，它还提供用于向系统添加新目标的选项。
+      </para>
+      <para>
+       在此页上，可以选择目标设备，然后切换每个 iSCSI 目标设备的启动设置：
+      </para>
+      <formalpara>
+       <title>自动：</title>
+       <para>
+        此选项用于 iSCSI 服务本身启动时要连接的 iSCSI 目标。这是典型配置。
+       </para>
+      </formalpara>
+      <formalpara>
+       <title>引导时：</title>
+       <para>
+        此选项用于引导期间要连接的 iSCSI 目标；即，当根目录 (<filename>/</filename>) 位于 iSCSI 上时。这样，iSCSI 目标设备在服务器引导时将从 initrd 进行评估。
+       </para>
+      </formalpara>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>已发现目标：</term>
+     <listitem>
+      <para>
+       <guimenu>已发现目标</guimenu>选项卡使您能够手动发现网络中的 iSCSI 目标。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <sect3 xml:id="sec.iscsi.initiator.yast.configuration">
+    <title>配置 iSCSI 发起程序</title>
+    <procedure>
+     <step>
+      <para>
+       启动 YaST，然后起动<menuchoice><guimenu>网络服务</guimenu> <guimenu>iSCSI 发起端</guimenu></menuchoice>。
+      </para>
+     </step>
+     <step>
+      <para>
+       切换到<guimenu>服务</guimenu>选项卡。
+      </para>
+      <informalfigure>
+       <mediaobject>
+        <imageobject role="fo">
+         <imagedata fileref="iscsi_init_service_a.png" width="80%" format="PNG"/>
+        </imageobject>
+        <imageobject role="html">
+         <imagedata fileref="iscsi_init_service_a.png" width="100%" format="PNG"/>
+        </imageobject>
+       </mediaobject>
+      </informalfigure>
+     </step>
+     <step>
+      <para>
+       在<guimenu>启动服务</guimenu>下，指定 iSCSI 发起程序服务的启动方式︰
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <formalpara>
+         <title>引导时：</title>
+         <para>
+          服务器重启动时自动启动服务。
+         </para>
+        </formalpara>
+       </listitem>
+       <listitem>
+        <formalpara>
+         <title>手动：</title>
+         <para>
+          （默认）服务器重启动之后，您必须运行 <command>sudo systemctl start iscsi iscsid</command> 命令来手动启动该服务。
+         </para>
+        </formalpara>
+       </listitem>
+      </itemizedlist>
+     </step>
+     <step>
+      <para>
+       指定或校验<guimenu>发起程序名称</guimenu>。
+      </para>
+      <para>
+       为此服务器上的 iSCSI 发起程序指定格式正确的 iSCSI 限定名称 (IQN)。此发起程序名称在网络上必须具有全局唯一性。IQN 使用以下常规格式：
+      </para>
+<screen>iqn.yyyy-mm.com.mycompany:n1:n2</screen>
+      <para>
+       其中，n1 和 n2 是字母数字字符。例如：
+      </para>
+<screen>iqn.1996-04.de.suse:01:a5dfcea717a</screen>
+      <para>
+       <guimenu>发起程序名称</guimenu>将用服务器上文件 <filename>/etc/iscsi/initiatorname.iscsi</filename> 中的相应值自动填充。
+      </para>
+      <para>
+       如果服务器提供 iBFT (iSCSI Boot Firmware Table) 支持，则<guimenu>发起程序名称</guimenu>将用 IBFT 中的相应值填充，并且您不能在此界面中更改发起程序名称。不过，您可以使用 BIOS 设置来进行修改。iBFT 是指包含各种对 iSCSI 引导进程有用的参数的信息块，包括针对服务器的 iSCSI 目标与发起程序描述。
+      </para>
+     </step>
+     <step>
+      <para>
+       使用以下方法之一发现网络上的 iSCSI 目标。
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <formalpara>
+         <title>iSNS：</title>
+         <para>
+          要使用 iSNS (Internet Storage Name Service) 来发现 iSCSI 目标，请按<xref linkend="sec.iscsi.initiator.yast.isn" xrefstyle="HeadingOnPage"/>中所述继续操作。
+         </para>
+        </formalpara>
+       </listitem>
+       <listitem>
+        <formalpara>
+         <title>已发现目标：</title>
+         <para>
+          要手动发现 iSCSI 目标设备，请按<xref linkend="sec.iscsi.initiator.yast.discovered" xrefstyle="HeadingOnPage"/>中所述继续操作。
+         </para>
+        </formalpara>
+       </listitem>
+      </itemizedlist>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.initiator.yast.isn">
+    <title>使用 iSNS 发现 iSCSI 目标</title>
+    <para>
+     必须在环境中已安装并配置 iSNS 服务器后，才能使用此选项。有关信息，请参见<xref linkend="cha.isns" xrefstyle="ChapTitleOnPage"/>。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       在 YaST 中，选择<guimenu> iSCSI 发起程序</guimenu>，然后选择<guimenu>服务</guimenu>选项卡。
+      </para>
+     </step>
+     <step>
+      <para>
+       指定 iSNS 服务器的 IP 地址和端口。默认端口为 3205。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>确定</guimenu>保存并应用更改。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.initiator.yast.discovered">
+    <title>手动发现 iSCSI 目标</title>
+    <para>
+     对要从已设置 iSCSI 发起程序的服务器访问的每个 iSCSI 目标服务器重复以下过程。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       在 YaST 中，选择<guimenu> iSCSI 发起程序</guimenu>，然后选择<guimenu>已发现目标</guimenu>选项卡。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>发现</guimenu>打开 iSCSI 发起程序发现对话框。
+      </para>
+     </step>
+     <step>
+      <para>
+       输入 IP 地址并根据需要更改端口。默认端口为 3260。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果要求进行身份验证，请取消选择<guimenu>无身份验证</guimenu>，然后为<guimenu>传入</guimenu>或<guimenu>传出</guimenu>身份验证指定身分凭证。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>下一步</guimenu>启动发现并连接到 iSCSI 目标服务器。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果要求提供身份凭证，在成功发现后，请使用<guimenu>连接</guimenu>激活目标。
+      </para>
+      <para>
+       系统会提示您输入身份验证凭证以使用所选 iSCSI 目标。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>下一步</guimenu>完成配置。
+      </para>
+      <para>
+       该目标会立即出现在<guimenu>已连接目标</guimenu>中，现在便可使用虚拟 iSCSI 设备了。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>确定</guimenu>保存并应用更改。
+      </para>
+     </step>
+     <step>
+      <para>
+       您可以使用 <command>lsscsi</command> 命令查找 iSCSI 目标设备的本地设备路径。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.initiator.yast.startup">
+    <title>为 iSCSI 目标设备设置启动自选设置</title>
+    <procedure>
+     <step>
+      <para>
+       在 YaST 中，选择<guimenu> iSCSI 发起程序</guimenu>，然后选择<guimenu>已连接目标</guimenu>选项卡以查看当前连接到服务器的 iSCSI 目标设备的列表。
+      </para>
+     </step>
+     <step>
+      <para>
+       选择要管理的 iSCSI 目标设备。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>切换启动</guimenu>修改设置：
+      </para>
+      <formalpara>
+       <title>自动：</title>
+       <para>
+        此选项用于 iSCSI 服务本身启动时要连接的 iSCSI 目标。这是典型配置。
+       </para>
+      </formalpara>
+      <formalpara>
+       <title>引导时：</title>
+       <para>
+        此选项用于引导期间要连接的 iSCSI 目标；即，当根目录 (<filename>/</filename>) 位于 iSCSI 上时。这样，iSCSI 目标设备在服务器引导时将从 initrd 进行评估。
+       </para>
+      </formalpara>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>确定</guimenu>保存并应用更改。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.initiator.manually">
+   <title>手动设置 iSCSI 发起程序</title>
+   <para>
+    发现和配置 iSCSI 连接都要求 iscsid 正在运行。首次运行发现时，将在 <filename>/etc/iscsi/</filename> 目录中创建 iSCSI 发起端的内部数据库。
+   </para>
+   <para>
+    如果发现受口令保护，则向 iscsid 提供身份验证信息。由于首次执行发现时内部数据库并不存在，因此此时无法使用内部数据库。相反，必须编辑配置文件 <filename>/etc/iscsid.conf</filename> 以提供信息。要为发现添加口令信息，请在 <filename>/etc/iscsid.conf</filename> 末尾添加以下行：
+   </para>
+<screen>discovery.sendtargets.auth.authmethod = CHAP
+discovery.sendtargets.auth.username = <replaceable>username</replaceable>
+discovery.sendtargets.auth.password = <replaceable>password</replaceable></screen>
+   <para>
+    发现会将所有接收到的值储存在一个内部持久数据库中。此外，它会显示所有检测到的目标。使用以下命令运行此发现：
+   </para>
+<screen>sudo iscsiadm <option>-m discovery --type=st --portal=<replaceable>target_ip</replaceable></option>
+</screen>
+   <para>
+    输出如下所示：
+   </para>
+<screen>10.44.171.99:3260,1 iqn.2006-02.com.example.iserv:systems</screen>
+   <para>
+    要发现 <literal>iSNS</literal> 服务器上的可用目标，请使用以下命令︰
+   </para>
+<screen>sudo iscsiadm --mode discovery --type isns --portal <replaceable>target_ip</replaceable></screen>
+   <para>
+    对于 iSCSI 目标上定义的每个目标，将显示一行。有关储存数据的更多信息，请参见<xref linkend="sec.iscsi.initiator.database" xrefstyle="SectTitleOnPage"/>。
+   </para>
+   <para>
+    <option>iscsiadm</option> 的特殊 <command> --login</command> 选项会创建所有需要的设备：
+   </para>
+<screen>sudo iscsiadm -m node -n iqn.2006-02.com.example.iserv:systems --login</screen>
+   <para>
+    新生成的设备会显示在 <command>lsscsi</command> 的输出中，现在便可装入该设备。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.initiator.database">
+   <title>iSCSI 发起端数据库</title>
+   <para>
+    iSCSI 发起端发现的所有信息都储存在位于 <filename>/etc/iscsi</filename> 中的两个数据库文件中。一个数据库用于发现的目标，另一个数据库用于发现的节点。访问数据库时，首先必须选择是希望从发现获取数据还是从节点数据库获取数据。可使用 <command>iscsiadm</command> 的参数 <option>-m discovery</option> 和 <option>-m node</option> 来执行此操作。使用 <command>iscsiadm</command> 搭配其中一个参数，可提供储存记录的概述：
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo iscsiadm -m discovery
+10.44.171.99:3260,1 iqn.2006-02.com.example.iserv:systems
+</screen>
+   <para>
+    本示例中的目标名称为 <literal>iqn.2006-02.com.example.iserv:systems</literal>。与此特殊数据集相关的所有操作都需要此名称。要检查 ID 为 <literal>iqn.2006-02.com.example.iserv:systems</literal> 数据记录的内容，可使用以下命令：
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo iscsiadm -m node --targetname iqn.2006-02.com.example.iserv:systems
+node.name = iqn.2006-02.com.example.iserv:systems
+node.transport_name = tcp
+node.tpgt = 1
+node.active_conn = 1
+node.startup = manual
+node.session.initial_cmdsn = 0
+node.session.reopen_max = 32
+node.session.auth.authmethod = CHAP
+node.session.auth.username = joe
+node.session.auth.password = ********
+node.session.auth.username_in = <replaceable>empty</replaceable>
+node.session.auth.password_in = <replaceable>empty</replaceable>
+node.session.timeo.replacement_timeout = 0
+node.session.err_timeo.abort_timeout = 10
+node.session.err_timeo.reset_timeout = 30
+node.session.iscsi.InitialR2T = No
+node.session.iscsi.ImmediateData = Yes
+....</screen>
+   <para>
+    要编辑这些变量的值，可将 <command>iscsiadm</command> 与<option>更新</option>操作一起使用。例如，如果希望 iscsid 在初始化时登录 iSCSI 目标，则将变量 <option>node.startup</option> 的值设置为 <option>automatic</option>：
+   </para>
+<screen>sudo iscsiadm -m node -n iqn.2006-02.com.example.iserv:systems \
+-p ip:port --op=update --name=node.startup --value=automatic</screen>
+   <para>
+    使用 <literal>delete</literal> 操作删除过时的数据集。如果目标 <literal>iqn.2006-02.com.example.iserv:systems</literal> 不再是有效的记录，请使用以下命令予以删除︰
+   </para>
+<screen>sudo iscsiadm -m node -n iqn.2006-02.com.example.iserv:systems \
+-p ip:port --op=delete</screen>
+   <important>
+    <title>不确认</title>
+    <para>
+     使用此选项时应谨慎，因为它会删除该记录而无任何附加确认提示。
+    </para>
+   </important>
+   <para>
+    要获取所有已发现目标的列表，请运行 <command>sudo iscsiadm -m node</command> 命令。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.installation">
+  <title>安装时使用 iSCSI 磁盘</title>
+
+  <para>
+   使用支持 iSCSI 的固件时，支持从 AMD64/Intel 64 和 IBM POWER 体系结构上的 iSCSI 磁盘引导。
+  </para>
+
+  <para>
+   要在安装过程中使用 iSCSI 磁盘，必须将以下参数添加到引导选项行：
+  </para>
+
+<screen>withiscsi=1</screen>
+
+  <para>
+   安装过程中会额外显示一个屏幕，让您可以将 iSCSI 磁盘连接到系统，并在安装过程中加以使用。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.trouble">
+  <title>iSCSI 查错</title>
+
+  <para>
+   本节介绍一些已知问题和针对 iSCSI 目标及 iSCSI 发起程序问题的可行的解决方案。
+  </para>
+
+  <sect2 xml:id="sec.iscsi.trouble.no_service">
+   <title>在 iSCSI LIO 目标服务器上设置目标 LUN 时发生门户错误</title>
+   <para>
+    添加或编辑 iSCSI LIO 目标组时发生错误：
+   </para>
+<screen>Problem setting network portal <replaceable>ip_address</replaceable>:3260</screen>
+   <para>
+    <filename>/var/log/YasT2/y2log</filename> 日志文件包含以下错误：
+   </para>
+<screen>find: `/sys/kernel/config/target/iscsi': No such file or directory</screen>
+   <para>
+    若 iSCSI LIO 目标服务器软件当前未运行则会发生此问题。要解决此问题，请退出 YaST，并在命令行中使用 <command>systemctl start target</command> 命令手动启动 iSCSI LIO，然后重试。
+   </para>
+   <para>
+    您也可以输入以下内容来检查 <command>configfs</command>、<command>iscsi_target_mod</command> 和 <command>target_core_mod</command> 是否载入。随即显示响应示例。
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo lsmod | grep iscsi
+iscsi_target_mod      295015  0
+target_core_mod       346745  4
+iscsi_target_mod,target_core_pscsi,target_core_iblock,target_core_file
+configfs               35817  3 iscsi_target_mod,target_core_mod
+scsi_mod              231620  16
+iscsi_target_mod,target_core_pscsi,target_core_mod,sg,sr_mod,mptctl,sd_mod,
+scsi_dh_rdac,scsi_dh_emc,scsi_dh_alua,scsi_dh_hp_sw,scsi_dh,libata,mptspi,
+mptscsih,scsi_transport_spi</screen>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.not_visible">
+   <title>iSCSI LIO 目标在其他计算机上不可见</title>
+   <para>
+    如果目标服务器上使用防火墙，则必须打开要使用的 iSCSI 端口，以允许其他计算机看到 iSCSI LIO 目标。有关信息，请参见<xref linkend="sec.iscsi.target.start"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.package_loss">
+   <title>丢弃 iSCSI 通讯的数据包</title>
+   <para>
+    如果防火墙很忙，可能会丢弃包。SUSE 防火墙默认为三分钟后丢弃包。如果您发现防火墙正在丢弃 iSCSI 通讯包，可以考虑将 SUSE 防火墙配置为对包排队，而不是太忙时丢弃包。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.lvm">
+   <title>将 iSCSI 卷用于 LVM</title>
+   <para>
+    在 iSCSI 目标上使用 LVM 时，请使用本部分的查错提示。
+   </para>
+   <sect3 xml:id="sec.iscsi.trouble.lvm.boot_initiator">
+    <title>检查在引导时是否执行 iSCSI 发起程序发现</title>
+    <para>
+     设置 iSCSI 发起程序时，确保引导时启用发现，以便 udev 在引导时可以发现 iSCSI 设备，并设置可供 LVM 使用的设备。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.trouble.lvm.boot_target">
+    <title>检查 iSCSI 目标在引导时能否被发现</title>
+    <para>
+     请记住，<filename>udev</filename> 会为设备提供默认设置。确保创建设备的所有应用程序均已在引导时启动，以便 <command>udev</command> 在系统启动时能为这些应用程序识别出并指派设备。如果应用程序或服务在稍后才启动，则 <command>udev</command> 不会像在引导时那样自动创建设备。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.mount">
+   <title>配置文件设置为手动时，会装入 iSCSI 目标</title>
+   <para>
+    如果您之前手动修改了 <literal>/etc/iscsi/iscsid.conf</literal> 配置文件，那么，即使在该文件中将 <filename>node.startup</filename> 选项设置为手动，Open-iSCSI 启动时也会装入目标。
+   </para>
+   <para>
+    检查 <filename>/etc/iscsi/nodes/<replaceable>目标名称</replaceable>/<replaceable>IP 地址</replaceable>,<replaceable>端口</replaceable>/default</filename> 文件。它包含覆盖 <filename>/etc/iscsi/iscsid.conf</filename> 文件的 <literal>node.startup</literal> 设置。使用 YaST 接口将装入选项设置为手动，也会在 <filename>/etc/iscsi/nodes/<replaceable>目标名称</replaceable>/<replaceable>IP 地址</replaceable>,<replaceable>端口</replaceable>/default </filename>文件中设置 <literal>node.startup = manual</literal>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.terminology">
+  <title>iSCSI LIO 目标术语</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>后备储存</term>
+    <listitem>
+     <para>
+      提供 iSCSI 端点底层的实际储存的物理储存对象。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>CDB（命令描述符块）)</term>
+    <listitem>
+     <para>
+      SCSI 命令的标准格式。CDB 通常长度为 6、10 或 12 个字节，但也可以达到 16 个字节或具有可变长度。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>CHAP （Challenge Handshake Authentication Protocol）</term>
+    <listitem>
+     <para>
+      点对点协议 (PPP) 身份验证方法用于向另一台计算机确认一台计算机的身份。链路控制协议 (LCP) 连接两台计算机并协商 CHAP 方法后，身份验证者会向对等体发送随机询问。然后该对等体会根据询问以及密钥发出以哈希加密的应答。再由身份验证者比照由预期哈希值自己计算出的结果对该哈希应答进行验证，以决定是确认身份验证还是中断连接。CHAP 在 RFC 1994 中定义。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>CID（连接标识符）</term>
+    <listitem>
+     <para>
+      由发起程序生成的 16 位编号，用于唯一识别两个 iSCSI 设备之间的连接。登录阶段会显示此编号。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>端点</term>
+    <listitem>
+     <para>
+      iSCSI 目标名称与 iSCSI TPG（IQN + 标记）的组合。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>EUI（扩展的唯一标识符）</term>
+    <listitem>
+     <para>
+      在全球范围内唯一标识每个设备的 64 位编号。其格式由指定公司的唯一的 24 位编号和由该公司分配给所构建的每个设备的 40 位编号组成。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>发起程序</term>
+    <listitem>
+     <para>
+      SCSI 会话的发起程序。通常是计算机等控制设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>IPS（因特网协议储存）</term>
+    <listitem>
+     <para>
+      使用 IP 协议在储存网络中移动数据的一类协议或设备。FCIP（基于 IP 的光纤通道）、iFCP（因特网光纤通道协议）以及 iSCSI（因特网 SCSI）都属于 IPS 协议。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>IQN（iSCSI 限定的名称）</term>
+    <listitem>
+     <para>
+      在全球范围内唯一标识每个设备的 iSCSI 的名称格式（例如：<filename>iqn.5886.com.acme.tapedrive.sn‐a12345678</filename>）。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ISID（发起程序会话标识符）</term>
+    <listitem>
+     <para>
+      由发起程序生成的一个 48 位编号，用于唯一识别发起程序与目标之间的会话。此值在登录过程中创建，生成后将与登录 PDU 一起发送给目标。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>MCS（每个会话多重连接）</term>
+    <listitem>
+     <para>
+      它是 iSCSI 规范的组成部分，允许发起程序与目标之间存在多个 TCP/IP 连接。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>MPIO（多路径 I/O）</term>
+    <listitem>
+     <para>
+      一种可在服务器和储存设备之间建立多个冗余数据路径的方法。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>网络门户</term>
+    <listitem>
+     <para>
+      iSCSI 端点与 IP 地址及 TCP（传输控制协议）端口的组合。TCP 端口 3260 是 IANA（因特网号码分配机构）所定义的 iSCSI 协议的端口号。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>SAM（SCSI 体系结构模型）</term>
+    <listitem>
+     <para>
+      以一般术语说明 SCSI 行为的文档。它支持不同类型的设备通过各种介质进行通讯。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目标</term>
+    <listitem>
+     <para>
+      SCSI 会话的接收端，通常是磁盘驱动器、磁带驱动器或扫描仪等设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目标组 (TG)</term>
+    <listitem>
+     <para>
+      在创建视图时视为同等对待的 SCSI 目标端口的列表。创建视图可帮助简化 LUN（逻辑单元号）映射。每个视图项指定一个目标组、主机组以及一个 LUN。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目标端口</term>
+    <listitem>
+     <para>
+      一个 iSCSI 端点与一个或多个 LUN 的组合。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目标端口组 (TPG)</term>
+    <listitem>
+     <para>
+      IP 地址和 TCP 端口号的列表，用于确定特定 iSCSI 目标将要侦听的接口。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目标会话标识符 (TSID)</term>
+    <listitem>
+     <para>
+      由目标生成的 16 位编号，用于唯一标识发起程序和目标之间的会话。此值在登录过程中创建，生成后将与登录响应 PDU（协议数据单元）一起发送给发起程序。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.info">
+  <title>其他信息</title>
+
+  <para>
+   iSCSI 协议已面世多年。有许多评论将 iSCSI 与 SAN 解决方案作比较、评测性能，此外还有一份文档说明硬件解决方案。有关 open-iscsi 的更多信息，请参见以下重要页面：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <citetitle>Open-iSCSI 项目</citetitle> (<link xlink:href="http://www.open-iscsi.org/"/>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <citetitle>AppNote：Open Enterprise Server Linux 群集上使用 iSCSI 的 iFolder</citetitle> (<link xlink:href="http://www.novell.com/coolsolutions/appnote/15394.html"/>)
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   还有一些联机文档。请参见 <command>iscsiadm</command>、<command>iscsid</command>、<filename>ietd.conf</filename> 和 <command>ietd</command> 的手册页，以及示例配置文件 <filename>/etc/iscsid.conf</filename>。
+  </para>
+ </sect1>
+</chapter>

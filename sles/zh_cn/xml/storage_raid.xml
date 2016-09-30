@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_raid.xml" version="5.0" xml:id="cha.raid" xml:lang="zh-cn">
+ <title>软件 RAID 配置</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  RAID（独立磁盘冗余阵列）的用途是将多个硬盘分区合并成一个大的虚拟硬盘，以便优化性能和/或数据安全性。大多数 RAID 控制器使用 SCSI 协议，因为对大量硬盘，它可用比 IDE 协议更高效的方式寻址，更适于命令的并行处理。还有一些支持 IDE 或 SATA 硬盘的 RAID 控制器。软件 RAID 具有 RAID 系统的优势，同时没有硬件 RAID 控制器的额外成本。但是这需要一些 CPU 时间以及内存，所以不适用于真正高性能的计算机。
+ </para>
+ <important>
+  <title>群集文件系统上的 RAID</title>
+  <para>
+   需要使用群集多设备（群集 MD）来设置群集文件系统下的软件 RAID。请参考 <link xlink:href="https://www.suse.com/documentation/sle-ha-12/book_sleha/data/cha_ha_cluster-md.html"/> 上的 High Availability Extension 文档。
+  </para>
+ </important>
+ <para>
+  SUSE Linux Enterprise 提供了将若干硬盘组合为一个软 RAID 系统的选项。RAID 暗示将多块硬盘合成一个 RAID 系统的多种策略，这些策略的目标、优点及特点各不相同。这些变化形式通常称作 <emphasis>RAID 级别</emphasis>。
+ </para>
+ <sect1 xml:id="sec.raid.intro">
+  <title>了解 RAID 级别</title>
+
+  <para>
+   本节描述常见的 RAID 级别 0、1、2、3、4、5 和嵌套的 RAID 级别。
+  </para>
+
+  <sect2 xml:id="sec.raid.intro.raid0">
+   <title>RAID 0</title>
+   <para>
+    此级别通过将每个文件按块分放到多个磁盘上，提高了数据访问性能。这实际上并不是真正的 RAID，因为它未提供数据备份，但 <emphasis>RAID  0</emphasis> 已成为这种类型的系统的标准名称。使用 RAID 0，可以将两块或多块硬盘组合在一起。这样性能固然很好，但如果有任何一块硬盘出现故障，都将损坏 RAID 系统并丢失数据。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid1">
+   <title>RAID 1</title>
+   <para>
+    此级别为数据提供了充分的安全性，因为它将数据按 1:1 复制到另一块硬盘上。这种方法称为<emphasis>硬盘镜像</emphasis>。如果一块磁盘损坏，则可以使用另一块镜像磁盘上的内容副本。在所有这些硬盘中，只要有一块硬盘没有损坏，您的数据就不会丢失。但是，如果没有检测到损坏，损坏的数据可能会镜像到正确的磁盘，并以这种方式损坏其数据。与使用单个磁盘访问时相比，写性能在复制过程中稍有损失（慢 10% 到 20%），但读访问的速度要大大快于任何一块普通物理硬盘，原因是对数据进行了复制，从而可以并行扫描它们。RAID 1 通常提供几乎为单个磁盘读事务速率两倍的速率，写事务速率与单个磁盘几乎相同。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid23">
+   <title>RAID 2 和 RAID 3</title>
+   <para>
+    这些不是典型的 RAID 实现。级别 2 在位一级而不是块一级对数据进行分段。级别 3 则利用专用的校验磁盘在字节一级进行分段，但不能同时处理多个请求。这两种级别都极少使用。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid4">
+   <title>RAID 4</title>
+   <para>
+    级别 4 与级别 0 一样，也是在块一级进行分段，但结合使用了专用的校验磁盘。如果一块数据磁盘失败，将使用奇偶校验数据创建替换磁盘。不过，这块奇偶校验磁盘可能造成写访问的瓶颈。尽管如此，有时仍使用级别 4。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid5">
+   <title>RAID 5</title>
+   <para>
+    RAID 5 是级别 0 和级别 1 在性能和冗余方面经优化后的折衷方案。硬盘空间等于使用的磁盘数减 1。数据分布在这些硬盘上，这一点与 RAID  0 相同。但出于安全原因，在其中一个分区上创建了<emphasis>奇偶校验块</emphasis>。这些块通过 XOR 互相链接，并在系统出现故障时，通过启用相应的校验块重构建内容。对于 RAID 5，在同一时间只能有一块硬盘出现故障。如果一块硬盘出现故障，则必须在情况允许时将其更换，以防止丢失数据。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid6">
+   <title>RAID 6</title>
+   <para>
+    RAID 6 实际上是 RAID 5 的扩展，通过允许第二种独立分布式奇偶校验模式（双重奇偶校验），允许更多容错功能。即使在数据恢复过程中两个硬盘出现故障，系统仍将继续运行，数据不会丢失。
+   </para>
+   <para>
+    RAID 6 可承受多个并行驱动器故障，从而提供非常高的数据容错性能。它处理任何两个设备的丢失而不会丢失数据。此外，它还需要 N+2 个驱动器来储存相当于 N 个驱动器的数据。它至少需要四个设备。
+   </para>
+   <para>
+    RAID 6 的性能稍微低一些，但在正常模式和单磁盘故障模式下可以与 RAID 5 媲美。它在双磁盘故障模式下非常慢。RAID 6 配置需要占用相当多的 CPU 时间和内存，用于写入操作。
+   </para>
+   <table>
+    <title>RAID 5 和 RAID 6 的比较</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="3334*"/>
+     <colspec colnum="2" colname="2" colwidth="3334*"/>
+     <colspec colnum="3" colname="3" colwidth="3334*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         功能
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 5
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 6
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         设备数
+        </para>
+       </entry>
+       <entry>
+        <para>
+         N+1，至少 3 个
+        </para>
+       </entry>
+       <entry>
+        <para>
+         N+2，至少 4 个
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         奇偶校验
+        </para>
+       </entry>
+       <entry>
+        <para>
+         分布式，单
+        </para>
+       </entry>
+       <entry>
+        <para>
+         分布式，双
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         性能
+        </para>
+       </entry>
+       <entry>
+        <para>
+         在写和重构建方面有中度影响
+        </para>
+       </entry>
+       <entry>
+        <para>
+         比 RAID 5 在串行写方面影响大
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         容错
+        </para>
+       </entry>
+       <entry>
+        <para>
+         一个组件设备的故障
+        </para>
+       </entry>
+       <entry>
+        <para>
+         两个组件设备的故障
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid_nested">
+   <title>嵌套和复杂 RAID 级别</title>
+   <para>
+    已经开发出了若干其他 RAID 级别，例如 RAIDn、RAID 10、RAID 0+1、RAID 30 和 RAID 50。有些是硬件供应商创建的专用实施。创建 RAID 10 配置的示例可在<xref linkend="cha.raid10"/>中找到。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid.yast">
+  <title>使用 YaST 配置软 RAID</title>
+
+  <para>
+   可以通过 YaST 专家分区程序访问 YaST 软 RAID 配置。此分区工具还用于编辑和删除现有分区，并创建用于软 RAID 的新分区。下列说明在设置 RAID 级别 0、1、5 和 6 时适用。设置 RAID 10 配置的方法如<xref linkend="cha.raid10"/>所述。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     起动 YaST 并打开<guimenu>分区程序</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     如果需要，请创建应该与 RAID 配置搭配使用的分区。请勿将它们格式化，并将分区类型设置为 <guimenu>0xFD Linux RAID</guimenu>。使用现有分区时，不需要更改它们的分区类型 — YaST 会自动更改。有关详细信息，请参见<xref linkend="sec.yast2.i_y2_part_expert"/>。
+    </para>
+    <para>
+     强烈建议您使用储存在其他硬盘上的分区，以便降低当其中一个硬盘损坏时（RAID 1 和 5）遗失数据的风险，并优化 RAID 0 的性能。
+    </para>
+    <para>
+     对于 RAID 0，至少需要两个分区。RAID 1 只需要两个分区，而 RAID 5 至少需要三个分区。RAID 6 设置至少需要四个分区。建议仅使用大小相同的分区，因为每个段仅可将相同的空间量作为最小大小的分区。
+    </para>
+   </step>
+   <step>
+    <para>
+     在左侧面板中，选择 <guimenu>RAID</guimenu>。
+    </para>
+    <para>
+     右侧面板中即会打开现有 RAID 配置的列表。
+    </para>
+   </step>
+   <step>
+    <para>
+     在 RAID 页面的左下方，单击 <guimenu>添加 RAID</guimenu>。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_raid2_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_raid2_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     选择<guimenu>RAID 类型</guimenu>并从<guimenu>可用设备</guimenu>对话框中<guimenu>添加</guimenu>适当数目的分区。
+    </para>
+    <para>
+     您可以选择性地为 RAID 指派一个 <guimenu>RAID 名称</guimenu>。它会变成有效的格式：<filename>/dev/md/<replaceable>名称</replaceable></filename>。有关详细信息，请参见 <xref linkend="sec.raid.yast.names"/>。
+    </para>
+    <figure xml:id="fig.yast2.raid3">
+     <title>RAID 5 配置示例</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_raid3_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_raid3_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+    <para>
+     单击<guimenu>下一步</guimenu>继续。
+    </para>
+   </step>
+   <step>
+    <para>
+     选择<guimenu>大块大小</guimenu>，如果适用，同时选择<guimenu>奇偶校验算法</guimenu>。最佳的大块大小视数据的类型和 RAID 的类型而定。有关详细信息，请参见 <link xlink:href="https://raid.wiki.kernel.org/index.php/RAID_setup#Chunk_sizes"/>。有关奇偶校验算法的详细信息，请在搜索 <option>--layout</option> 选项时加上 <command>man 8 mdadm</command>。如果不确定，请接受默认值。
+    </para>
+   </step>
+   <step>
+    <para>
+     选择卷的<guimenu>角色</guimenu>。您在此处所做选择只会影响将要打开的对话框的默认值。这些值可在下一个步骤中更改。如果不确定，请选择<guimenu>原始卷（未格式化）</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     在<guimenu>格式化选项</guimenu>下，选择<guimenu>格式化分区</guimenu>，然后选择<guimenu>文件系统</guimenu>。<guimenu>选项</guimenu>菜单的内容取决于文件系统。通常不需要更改默认值。
+    </para>
+    <para>
+     在<guimenu>装入选项</guimenu>下，选择<guimenu>装入分区</guimenu>，然后选择安装点。单击 <guimenu>Fstab 选项</guimenu>，为卷添加特殊装入选项。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+   <step>
+    <para>
+     单击<guimenu>下一步</guimenu>，验证是否列出了所做的更改，然后单击<guimenu>完成</guimenu>。
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 xml:id="sec.raid.yast.names">
+   <title>RAID 名称</title>
+   <para>
+    软件 RAID 设备默认带有 <literal>mdN</literal> 模式的数值名称，其中 <literal>N</literal> 是数字。因此，以 md127 为例，它可以按 <filename>/dev/md127</filename> 这样的方式进行访问，并且在 <filename>/proc/mdstat</filename> 和 <filename>/proc/partitions</filename> 中会列出为 <literal>md127</literal>。但这些名称不方便使用，为此，<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 提供了两种解决方法：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>提供指向设备的具名链接</term>
+     <listitem>
+      <para>
+       使用 YaST 或在命令行上使用 <command>mdadm --create '/dev/md/</command> <replaceable>名称</replaceable>' 创建 RAID 设备时，您可以选择性地指定 RAID 设备的名称。设备名称仍是 <literal>mdN</literal>，但系统会创建一个链接 <filename>/dev/md/<replaceable>名称</replaceable></filename>：
+      </para>
+<screen><prompt>tux &gt; </prompt>ls -og /dev/md
+total 0
+lrwxrwxrwx 1 8 Dec  9 15:11 myRAID -&gt; ../md127</screen>
+      <para>
+       设备在 <filename>/proc</filename> 下仍显示为 <literal>md127</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>提供具名设备</term>
+     <listitem>
+      <para>
+       在设置时，如果指向设备的具名链接仍然不够方便，请运行下列命令将 CREATE names=yes 行添加至 <filename>/etc/mdadm.conf</filename>：
+      </para>
+<screen>sudo echo "CREATE names=yes" &gt;&gt; /etc/mdadm.conf</screen>
+      <para>
+       它会让系统将 <literal>myRAID</literal> 之类的名称用做<quote>真实</quote>的设备名称。设备不但可以在 <filename>/dev/myRAID</filename> 中访问，而且也会在 <filename>/proc</filename> 下列为 <literal>myRAID</literal>。请注意，只有在更改配置文件之后，此项才适用于 RAID。工作中的 RAID 将继续使用 <literal>mdN</literal> 名称，直到这些 RAID 停止并重新组装为止。
+      </para>
+      <warning>
+       <title>不兼容的工具</title>
+       <para>
+        不是所有工具都可以支持具名 RAID 设备。如果工具认为一个 RAID 设备是命名为 <literal>mdN</literal>，它将无法识别该设备。
+       </para>
+      </warning>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid.trouble">
+  <title>软件 RAID 疑难解答</title>
+
+  <para>
+   查看 <filename>/proc/mdstats</filename> 文件以确定 RAID 分区是否受损。如果磁盘出现故障，请关闭 Linux 系统并用以同样方式分区的新硬盘替换出现问题的硬盘。然后重启动您的系统并输入命令 <command>mdadm /dev/mdX --add /dev/sdX</command>。将 <literal>X</literal> 替换为您的特定设备标识符。这会自动将硬盘整合到 RAID 系统中并完全重新构造（适用于除 RAID 0 以外的所有 RAID 级别）。
+  </para>
+
+  <para>
+   尽管可以在重构建期间访问所有数据，但在 RAID 完全重构建之前，仍然可能遇到一些性能问题。
+  </para>
+
+  <sect2 xml:id="sec.raid.trouble.autorecovery">
+   <title>修复故障磁盘之后进行恢复</title>
+   <para>
+    RAID 阵列中的磁盘可能会出于多种原因而发生故障。下面列出了最常见的原因：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      磁盘媒体出现问题。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      磁盘驱动器控制器发生故障。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      与磁盘的连接断开。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    在发生磁盘媒体或控制器故障时，需要更换或修复设备。如果未在 RAID 中配置热备件，则需要手动干预。
+   </para>
+   <para>
+    对于后一种情况，可以在修复连接（可能会自动修复）之后，使用 <command>mdadm</command> 命令自动重新添加发生故障的设备。
+   </para>
+   <para>
+    由于 <command>md</command>/<command>mdadm</command> 不能可靠地判断磁盘发生故障的原因，因此会臆测发生了严重的磁盘错误，并一直将任何发生操作失败的设备视为有故障，直到明确被告知该设备可靠为止。
+   </para>
+   <para>
+    在某些情况下（例如，储存设备包含内部 RAID 阵列），连接问题往往是设备发生故障的原因。在这种情况下，您可以告知 <command>mdadm</command>，在设备出现后，可以放心地使用 <option>--re-add</option> 自动重新添加该设备。为此，您可以将下面一行添加到 <filename>/etc/mdadm.conf</filename> 中：
+   </para>
+<screen>POLICY action=re-add</screen>
+   <para>
+    请注意，仅当 <systemitem>udev</systemitem> 规则导致 <command>mdadm -I <replaceable>磁盘设备名称</replaceable></command>在自发出现的任何设备上运行（默认行为），并且已配置 write-intent 位图（默认会配置）时，才会在设备重新出现之后自动重新添加该设备。
+   </para>
+   <para>
+    如果您希望此策略仅应用到某些设备而不应用到其余设备，可以将 <literal>path=</literal> 选项添加到 <filename>/etc/mdadm.conf</filename> 中的 <literal>POLICY</literal> 一行，以将非默认操作限制为只对选定的设备执行。可以使用通配符来识别设备组。有关详细信息，请参见 <command>man 5 mdadm.conf</command>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid.more">
+  <title>更多信息</title>
+
+  <para>
+   位于下列位置的 HOWTO 文档提供了软 RAID 的配置说明和详细信息：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <citetitle>Linux RAID wiki</citetitle>：<link xlink:href="https://raid.wiki.kernel.org/index.php/Linux_Raid"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>/usr/share/doc/packages/mdadm/Software-RAID.HOWTO.html</filename> 文件中的<citetitle>软件 RAID HOWTO</citetitle>
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   此外还提供了 Linux RAID 邮件列表，例如 <citetitle>linux-raid</citetitle> (<link xlink:href="http://marc.info/?l=linux-raid"/>)。
+  </para>
+ </sect1>
+</chapter>

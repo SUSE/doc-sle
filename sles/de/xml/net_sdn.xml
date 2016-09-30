@@ -1,0 +1,409 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_sdn.xml" version="5.0" xml:id="sec.ovs">
+ <title>Softwaredefiniertes Networking mit <phrase role="productname">Open vSwitch</phrase></title>
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>Ja</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  Softwaredefiniertes Networking (SDN) bedeutet eine Trennung des Systems, das steuert, wohin der Datenverkehrs gesendet wird (die <emphasis>Steuerebene</emphasis>), vom zugrunde liegenden System, das den Datenverkehr zum ausgewählten Ziel weiterleitet (die <emphasis>Datenebene</emphasis>, auch <emphasis>Weiterleitungsebene</emphasis> genannt). Dies bedeutet, dass die Funktionen, die zuvor von einem einzelnen, in der Regel nicht flexiblen, Switch erbracht wurden, jetzt zwischen einem Switch (Datenebene) und seinem Controller (Steuerebene) aufgeteilt werden können. In diesem Modell ist der Controller programmierbar und funktioniert sehr flexibel und passt sich schnell an sich ändernde Netzwerkbedingungen an.
+ </para>
+
+ <para>
+  <phrase role="productname">Open vSwitch</phrase> ist eine Software, die einen verteilten Switch mit mehreren Ebenen implementiert, der mit dem <phrase role="productname">OpenFlow</phrase>-Protokoll kompatibel ist. <phrase role="productname">OpenFlow</phrase> erlaubt es einer Controller-Anwendung, die Konfiguration eines Switch zu bearbeiten. <phrase role="productname">OpenFlow</phrase> baut als Ebene auf dem TCP-Protokoll auf und wird in einer Reihe von Hardware und Software implementiert. Ein einzelner Controller kann daher mehrere, sehr unterschiedliche Switches unterstützen.
+ </para>
+
+ <sect2 xml:id="sec.ovs.advantage">
+  <title>Vorteile von <phrase role="productname">Open vSwitch</phrase></title>
+  <para>
+   Softwaredefiniertes Networking mit <phrase role="productname">Open vSwitch</phrase> bietet einige Vorteile, vor allem wenn es gemeinsam mit virtuellen Computern verwendet wird:
+  </para>
+  <remark>
+   Tried to create short version of this:
+   https://github.com/openvswitch/ovs/blob/master/WHY-OVS.md
+   - sknorr, 2015-09-30
+  </remark>
+  <itemizedlist>
+   <listitem>
+    <para>
+     Networking-Zustände können einfach identifiziert werden.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Netzwerke und ihre Live-Zustände können von einem Host auf einen anderen übertragen werden.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Netzwerkdynamiken sind nachverfolgbar und externe Software kann dafür konfiguriert werden, auf diese zu antworten.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Sie können Tags in Netzwerkpaketen anwenden und so einstellen, dass sie identifizieren, von welchem bzw. an welchen Computer sie gesendet werden, und andere Netzwerkkontexte verwalten. Zuweisungsregeln für Tags können konfiguriert und migriert werden.
+    </para>
+    <remark>
+     Feedback from Éric Bischoff: "[...] isn't that _how OVS works_, rather
+     than _what OVS can do_?"
+     =&gt; Added second sentence. It does ultimately seem like a feature to me,
+       though. Leaving it in for the moment.
+     - sknorr, 2015-10-15
+    </remark>
+   </listitem>
+   <listitem>
+    <para>
+     <phrase role="productname">Open vSwitch</phrase> implementiert das GRE-Protokoll (<emphasis>Generic Routing Encapsulation</emphasis>). Dies erlaubt es Ihnen beispielsweise, private Netzwerke virtueller Computer miteinander zu verbinden.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <phrase role="productname">Open vSwitch</phrase> kann eigenständig verwendet werden, ist jedoch für die Integration mit Networking-Hardware konzipiert und kann Hardware-Switches steuern.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.install">
+  <title>Installieren von <phrase role="productname">Open vSwitch</phrase></title>
+  <procedure>
+   <step>
+    <para>
+     Installieren Sie <phrase role="productname">Open vSwitch</phrase> und ergänzende Pakete:
+    </para>
+<screen><prompt>root # </prompt><command>zypper</command> install openvswitch openvswitch-switch</screen>
+    <para>
+     Wenn Sie <phrase role="productname">Open vSwitch</phrase> zusammen mit dem KVM-Hypervisor verwenden möchten, installieren Sie zusätzlich
+     <package>tunctl</package>
+     . Wenn Sie <phrase role="productname">Open vSwitch</phrase> zusammen mit dem Xen-Hypervisor verwenden möchten, installieren Sie zusätzlich
+     <package>openvswitch-kmp-xen</package>
+     .
+    </para>
+   </step>
+   <step>
+    <para>
+     Aktivieren Sie den <phrase role="productname">Open vSwitch</phrase>-Dienst:
+    </para>
+<screen><prompt>root # </prompt><command>systemctl</command> enable openvswitch</screen>
+
+   </step>
+   <step>
+    <para>
+     Starten Sie entweder den Computer neu oder verwenden Sie <command>systemctl</command>, um den <phrase role="productname">Open vSwitch</phrase>-Dienst sofort zu starten:
+    </para>
+<screen><prompt>root # </prompt><command>systemctl</command> start openvswitch</screen>
+   </step>
+   <step>
+    <para>
+     Um zu überprüfen, ob <phrase role="productname">Open vSwitch</phrase> richtig aktiviert wurde, verwenden Sie das Kommando:
+    </para>
+<screen><prompt>root # </prompt><command>systemctl</command> status openvswitch</screen>
+   </step>
+  </procedure>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.userspace">
+  <title>Überblick über <phrase role="productname">Open vSwitch</phrase>-Daemons und -Dienstprogramme</title>
+  <para>
+   <phrase role="productname">Open vSwitch</phrase> besteht aus mehreren Komponenten. Hierzu gehören ein Kernel-Modul und verschiedenste Userspace-Komponenten. Das Kernel-Modul wird zur Beschleunigung des Datenpfads verwendet, ist für eine Minimalinstallation von <phrase role="productname">Open vSwitch</phrase> jedoch nicht erforderlich.
+  </para>
+  <sect3 xml:id="sec.ovs.daemon">
+   <title>Daemons</title>
+   <para>
+    Die zentralen ausführbaren Dateien von <phrase role="productname">Open vSwitch</phrase> sind die zugehörigen zwei Daemons. Wenn Sie den <systemitem>openvswitch</systemitem>-Dienst starten, starten Sie die Daemons indirekt.
+   </para>
+   <para>
+    Der Haupt-Daemon (<command>ovs-vswitchd</command>) von <phrase role="productname">Open vSwitch</phrase> stellt die Implementierung eines Switch bereit. Der Datenbank-Daemon (<command>ovsdb-server</command>) von <phrase role="productname">Open vSwitch</phrase> dient der Datenbank, in der die Konfiguration und der Zustand von <phrase role="productname">Open vSwitch</phrase> gespeichert werden.
+   </para>
+  </sect3>
+  <sect3 xml:id="sec.ovs.utility">
+   <title>Dienstprogramme</title>
+   <para>
+    <phrase role="productname">Open vSwitch</phrase> wird außerdem mit mehreren Dienstprogrammen bereitgestellt, die die Arbeit damit vereinfachen. Die folgende Liste ist nicht vollständig, es werden nur die wichtigsten Kommandos beschrieben.
+   </para>
+
+   <variablelist xml:id="vl.ovs.utility">
+    <varlistentry>
+     <term><command>ovsdb-tool</command>
+     </term>
+     <listitem>
+      <para>
+       <phrase role="productname">Open vSwitch</phrase>-Datenbanken erstellen, aufrüsten, komprimieren und abfragen. Transaktionen auf <phrase role="productname">Open vSwitch</phrase>-Datenbanken durchführen.
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><command>ovs-appctl</command>
+     </term>
+     <listitem>
+      <para>
+       Einen aktiven <command>ovs-vswitchd</command>- oder <command>ovsdb-server</command>-Daemon konfigurieren.
+      </para>
+     </listitem>
+    </varlistentry>
+
+
+    <varlistentry>
+     <term><command>ovs-dpctl</command>, <command>ovs-dpctl-top</command>
+     </term>
+     <listitem>
+      <para>
+       Datenpfade erstellen, bearbeiten, visualisieren und löschen. Die Verwendung dieses Werkzeugs kann zu einem Konflikt mit <command>ovs-vswitchd</command> führen, wenn dieser auch Datenpfade verwaltet. Daher wird es oft nur zu Diagnostikzwecken verwendet.
+      </para>
+      <para>
+       <command>ovs-dpctl-top</command> erstellt eine Visualisierung ähnlich wie <command>top</command>- für Datenpfade. <remark>Is visualize/ation the right word? - sknorr, 2015-09-30</remark>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>ovs-ofctl</command>
+     </term>
+     <listitem>
+      <para>
+       Alle Switches verwalten, die dem <phrase role="productname">OpenFlow</phrase>-Protokoll unterliegen. <command>ovs-ofctl</command> ist nicht auf die Interaktion mit <phrase role="productname">Open vSwitch</phrase> beschränkt.
+      </para>
+     </listitem>
+    </varlistentry>
+
+
+
+
+    <varlistentry>
+     <term><command>ovs-vsctl</command>
+     </term>
+     <listitem>
+      <para>
+       Bietet eine Schnittstelle auf höchster Ebene für die Konfigurationsdatenbank. Sie kann zum Abfragen und Bearbeiten der Datenbank verwendet werden. Konkret zeigt sie den Zustand von <command>ovs-vswitchd</command> und kann zur Konfiguration verwendet werden. 
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect3>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.bridge">
+  <title>Erstellen einer Bridge mit <phrase role="productname">Open vSwitch</phrase></title>
+  <para>
+   In der folgenden Beispielkonfiguration wird der Wicked-Netzwerkdienst standardmäßig auf <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> verwendet. Weitere Informationen zu Wicked finden Sie unter <xref linkend="sec.basicnet.manconf"/>.
+  </para>
+  <para>
+   Wenn Sie <phrase role="productname">Open vSwitch</phrase> installiert und gestartet haben, gehen Sie wie folgt vor:
+  </para>
+  <procedure>
+   <step>
+    <para>
+     Um eine Bridge zur Verwendung durch Ihren virtuellen Computer zu konfigurieren, erstellen Sie eine Datei mit folgendem Inhalt:
+    </para>
+<screen>STARTMODE='auto'<co xml:id="ovs.ifcfg.mode"/>
+BOOTPROTO='dhcp'<co xml:id="ovs.ifcfg.protocol"/>
+OVS_BRIDGE='yes'<co xml:id="ovs.ifcfg.bridge"/>
+OVS_BRIDGE_PORT_DEVICE_1='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.port"/></screen>
+    <calloutlist>
+     <callout arearefs="ovs.ifcfg.mode">
+      <para>
+       Richten Sie die Bridge automatisch ein, wenn der Netzwerkdienst gestartet wird.
+      </para>
+     </callout>
+     <callout arearefs="ovs.ifcfg.protocol">
+      <para>
+       Das zu verwendende Protokoll für die Konfiguration der IP-Adresse.
+      </para>
+     </callout>
+     <callout arearefs="ovs.ifcfg.bridge">
+      <para>
+       Kennzeichnen Sie die Konfiguration als <phrase role="productname">Open vSwitch</phrase>-Bridge.
+      </para>
+     </callout>
+     <callout arearefs="ovs.ifcfg.port">
+      <para>
+       Wählen Sie aus, welche(s) Gerät(e) zur Bridge hinzugefügt werden soll(en). Um mehr Geräte hinzuzufügen, fügen Sie zusätzliche Zeilen für jedes der Geräte in der Datei hinzu:
+      </para>
+<screen>OVS_BRIDGE_PORT_DEVICE_<replaceable>SUFFIX</replaceable>='<replaceable>DEVICE</replaceable>'</screen>
+      <para>
+       Das <replaceable>SUFFIX</replaceable> kann eine beliebige alphanummerische Zeichenfolge darstellen. Stellen Sie jedoch sicher, dass das <replaceable>SUFFIX</replaceable> für jedes Gerät eindeutig ist, um das Überschreiben einer vorherigen Definition zu vermeiden.
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     Speichern Sie die Datei im Verzeichnis <filename>/etc/sysconfig/network</filename> mit dem Namen <filename>ifcfg-br0</filename>. Anstelle von <replaceable>br0</replaceable> können Sie jeden beliebigen Namen verwenden. Jedoch muss der Dateiname mit <literal>ifcfg-</literal> beginnen.
+    </para>
+    <para>
+     Informationen zu weiteren Optionen finden Sie auf den man-Seiten von <literal>ifcfg</literal> (<command>man 5 ifcfg</command>) und <literal>ifcfg-ovs-bridge</literal> (<command>man 5 ifcfg-ovs-bridge</command>).
+    </para>
+   </step>
+   <step>
+    <para>
+     Starten Sie nun die Bridge: <remark>"Start" is weird - sknorr, 2015-10-26</remark>
+    </para>
+<screen><prompt>root # </prompt><command>wicked</command> ifup <replaceable>br0</replaceable></screen>
+    <para>
+     Wenn Wicked fertig ist, sollte es den Namen der Bridge und daneben den Zustand <literal>up</literal> ausgeben.
+    </para>
+   </step>
+  </procedure>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.kvm">
+  <title>Verwenden von <phrase role="productname">Open vSwitch</phrase> direkt mit KVM</title>
+  <para>
+   Nach dem Erstellen der Bridge, wie zuvor in <xref linkend="sec.ovs.bridge"/> beschrieben, können Sie <phrase role="productname">Open vSwitch</phrase> zum Verwalten des Netzwerkzugriffs auf virtuelle Computer verwenden, die mit KVM/QEMU erstellt wurden.
+  </para>
+  <procedure>
+   <step>
+    <para>
+     Um die Möglichkeiten von Wicked am besten nutzen zu können, führen Sie weitere Änderungen an der zuvor konfigurierten Bridge durch. Öffnen Sie die zuvor erstellte Datei <filename>/etc/sysconfig/network/ifcfg-br0</filename> und fügen Sie eine Zeile für ein weiteres Port-Gerät hinzu:
+    </para>
+<screen>OVS_BRIDGE_PORT_DEVICE_2='<replaceable>tap0</replaceable>'</screen>
+    <para>
+     Legen Sie zusätzlich für <literal>BOOTPROTO</literal> den Wert <literal>none</literal> fest. Die Datei sollte nun wie folgt aussehen:
+    </para>
+<screen>STARTMODE='auto'
+BOOTPROTO='none'
+OVS_BRIDGE='yes'
+OVS_BRIDGE_PORT_DEVICE_1='<replaceable>eth0</replaceable>'
+OVS_BRIDGE_PORT_DEVICE_2='<replaceable>tap0</replaceable>'</screen>
+    <para>
+     Das neue Port-Gerät <replaceable>tap0</replaceable> wird im nächsten Schritt konfiguriert.
+    </para>
+   </step>
+   <step>
+    <para>
+     Fügen Sie nun eine Konfigurationsdatei für das Gerät <replaceable>tap0</replaceable> hinzu:
+    </para>
+<screen>STARTMODE='auto'
+BOOTPROTO='none'
+TUNNEL='tap'</screen>
+    <para>
+     Speichern Sie die Datei im Verzeichnis <filename>/etc/sysconfig/network</filename> mit dem Namen <filename>ifcfg-tap0</filename>.
+    </para>
+    <tip>
+     <title>Anderen Benutzern den Zugriff auf das Tap-Gerät erlauben</title>
+     <para>
+      Um dieses Tap-Gerät über einen virtuellen Computer verwenden zu können, der als Benutzer ohne <systemitem class="username">root</systemitem>-Berechtigungen gestartet wurde, fügen Sie Folgendes hinzu:
+     </para>
+<screen>TUNNEL_SET_OWNER=<replaceable>USER_NAME</replaceable></screen>
+     <para>
+      Um den Zugriff für eine ganze Gruppe zu erlauben, fügen Sie Folgendes hinzu:
+     </para>
+<screen>TUNNEL_SET_GROUP=<replaceable>GROUP_NAME</replaceable></screen>
+    </tip>
+   </step>
+   <step>
+    <para>
+     Öffnen Sie schließlich die Konfiguration für das Gerät, das als das erste <literal>OVS_BRIDGE_PORT_DEVICE</literal>-Gerät definiert ist. Wenn Sie den Namen nicht geändert haben, sollte dies <literal>eth0</literal> sein. Öffnen Sie daher <filename>/etc/sysconfig/network/ifcfg-eth0</filename> und stellen Sie sicher, dass die folgenden Optionen festgelegt sind:
+    </para>
+<screen>STARTMODE='auto'
+BOOTPROTO='none'</screen>
+    <para>
+     Wenn die Datei noch nicht vorhanden ist, erstellen Sie sie.
+    </para>
+   </step>
+   <step>
+    <para>
+     Starten Sie die Bridge-Schnittstelle mithilfe von Wicked neu:
+    </para>
+<screen><prompt>root # </prompt><command>wicked</command> ifreload <replaceable>br0</replaceable></screen>
+    <para>
+     Dies löst auch das erneute Laden der neu definierten Bridge-Port-Geräte aus.
+    </para>
+   </step>
+   <step>
+    <para>
+     Verwenden Sie zum Starten eines virtuellen Computers beispielsweise:
+    </para>
+<screen><prompt>root # </prompt><command>qemu-kvm</command> \
+-drive file=<replaceable>/PATH/TO/DISK-IMAGE</replaceable><co xml:id="co.ovs.pathimage"/> \
+-m 512 -net nic,vlan=0,macaddr=00:11:22:EE:EE:EE \
+-net tap,ifname=<replaceable>tap0</replaceable>,script=no,downscript=no<co xml:id="co.ovs.tapdevice"/></screen>
+    <calloutlist>
+     <callout arearefs="co.ovs.pathimage">
+      <para>
+       Pfad zum QEMU-Laufwerksabbild, das Sie starten möchten.
+      </para>
+     </callout>
+     <callout arearefs="co.ovs.tapdevice">
+      <para>
+       Verwenden Sie das zuvor erstellte Tap-Gerät (<literal>tap0</literal>).
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     Weitere Informationen zur Verwendung von KVM/QEMU finden Sie im <xref linkend="part.virt.qemu"/>.
+    </para>
+   </step>
+  </procedure>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.libvirt">
+  <title>Verwenden von <phrase role="productname">Open vSwitch</phrase> mit <systemitem class="library">libvirt</systemitem></title>
+  <para>
+   Nach Erstellen der Bridge, wie zuvor in <xref linkend="sec.ovs.bridge"/> beschrieben, können Sie die Bridge zu einem vorhandenen virtuellen Computer hinzufügen, der mit <systemitem class="library">libvirt</systemitem> verwaltet wird. Da <systemitem class="library">libvirt</systemitem> <phrase role="productname">Open vSwitch</phrase>-Bridges bereits teilweise unterstützt, können Sie die in <xref linkend="sec.ovs.bridge"/> erstellte Bridge ohne weitere Änderungen an der Networking-Konfiguration verwenden.
+  </para>
+  <procedure>
+   <step>
+    <para>
+     Öffnen Sie die Domänen-XML-Datei für den gewünschten virtuellen Computer:
+    </para>
+<screen><prompt>root # </prompt><command>virsh</command> edit <replaceable>VM_NAME</replaceable></screen>
+    <para>
+     Ersetzen Sie <replaceable>VM-NAME</replaceable> durch den Namen des gewünschten virtuellen Computers. Hiermit wird Ihr Standardtexteditor geöffnet.
+    </para>
+   </step>
+   <step>
+    <para>
+     Suchen Sie nach einem Abschnitt, der mit <literal>&lt;interface type="..."&gt;</literal> beginnt und mit <literal>&lt;/interface&gt;</literal> endet, um den Networking-Abschnitt des Dokuments zu finden.
+    </para>
+    <para>
+     Ersetzen Sie den vorhandenen Abschnitt durch einen Networking-Abschnitt, der etwa so aussieht:
+    </para>
+<screen>&lt;interface type='bridge'&gt;
+  &lt;source bridge='br0'/&gt;
+  &lt;virtualport type='openvswitch'/&gt;
+&lt;/interface&gt;</screen>
+    <important>
+     <title>Kompatibilität von <command>virsh iface-*</command> und Virtual Machine Manager mit <phrase role="productname">Open vSwitch</phrase></title>
+     <para>
+      Zurzeit wird die <phrase role="productname">Open vSwitch</phrase>-Kompatibilität von <systemitem class="library">libvirt</systemitem> nicht über die <command>virsh iface-*</command>-Werkzeuge und Virtual Machine Manager verfügbar gemacht. Wenn Sie eines dieser Werkzeuge verwenden, kann die Konfiguration beschädigt werden.
+     </para>
+    </important>
+   </step>
+   <step>
+    <para>
+     Sie können die virtuellen Computer nun wie üblich starten oder neu starten.
+    </para>
+   </step>
+  </procedure>
+  <para>
+   Weitere Informationen zur Verwendung von <systemitem class="library">libvirt</systemitem> finden Sie im <xref linkend="part.virt.libvirt"/>.
+  </para>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.more">
+  <title>Weitere Informationen</title>
+  <variablelist>
+   <varlistentry>
+    <term><link xlink:href="http://openvswitch.org/support/"/>
+    </term>
+    <listitem>
+     <para>
+      Dokumentationsabschnitt der <phrase role="productname">Open vSwitch</phrase>-Projekt-Website
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><link xlink:href="https://www.opennetworking.org/images/stories/downloads/sdn-resources/white-papers/wp-sdn-newnorm.pdf"/>
+    </term>
+    <listitem>
+     <para>
+      Whitepaper der Open Networking Foundation zum softwaredefinierten Networking und zum <phrase role="productname">OpenFlow</phrase>-Protokoll
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+</sect1>

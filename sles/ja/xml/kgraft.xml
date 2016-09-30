@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="kgraft.xml" version="5.0" xml:id="cha.kgraft" xml:lang="ja">
+<?suse-quickstart color="suse"?>
+
+
+ <title>kGraftを使用したLinuxカーネルのライブパッチ適用</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    このドキュメントでは、kGraftライブパッチ適用テクノロジの基本原理について説明するとともに、SLE Live Patchingサービスの使用ガイドラインを提供します。
+   </para>
+
+   <para>
+    kGraftは、Linuxカーネルを停止することなく、実行時にカーネルのパッチを適用するライブパッチ適用テクノロジです。これにより、ミッションクリティカルなシステムにとって重要なシステムのアップタイム、つまりシステムの可用性が最大化されます。また、このテクノロジによってカーネルの動的なパッチ適用が可能になるため、ユーザは、予定されたダウンタイムまで延期することなく、重要なセキュリティアップデートをインストールできます。
+   </para>
+
+   <para>
+    kGraftパッチは、カーネル内の関数全体を置換することを目的としたカーネルモジュールです。kGraftは基本的に、パッチが適用されたコードとカーネルのベースコードを実行時に統合するためのカーネル内インフラストラクチャを提供します。
+   </para>
+
+   <para>
+    SLE Live Patchingは、SUSE Linux Enterprise Serverの定期保守に加えて提供されるサービスです。SLE Live Patchingを通じて配信されるkGraftパッチは、SLESの定期保守のアップデートを補足するものです。SLE Live Patchingの展開にも共通の更新スタックおよび手順を使用することができます。
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec.kgraft.advantages">
+  <title>kGraftの利点</title>
+
+  <para>
+   kGraftを使用したカーネルのライブパッチ適用は、緊急時(深刻な脆弱性が確認され、極力修正する必要がある場合や、システムの安定性に関する深刻な問題があり、既知の修正が提供されている場合など)における迅速な対応に特に役立ちます。緊急を要しない、予定されたアップデートには使用されません。
+  </para>
+
+  <para>
+   kGraftの一般的な使用事例としては、起動に 15分以上かかることも例外ではない、大容量のRAMを搭載したメモリデータベースなどのシステム、再起動なしで数週間または数カ月を要する大規模なシミュレーション、多数の消費者に継続的なサービスを提供するインフラストラクチャのビルディングブロックなどがあります。
+  </para>
+
+  <para>
+   kGraftの主な利点は、短時間であってもカーネルを停止する必要がない点です。
+  </para>
+
+  <para>
+   kGraftパッチは、KMP RPMパッケージ内の<filename>.ko</filename>カーネルモジュールです。RPMパッケージのインストールまたは更新時に、<command>insmod</command>コマンドを使用してカーネルに挿入されます。kGraftは、関数が実行中であってもカーネル内の関数全体を置換します。必要に応じて、更新されたkGraftモジュールが既存のパッチを置換することもあります。
+  </para>
+
+  <para>
+   さらに、kGraftは効率的です。他の標準のLinuxテクノロジを活用するので、kGraftには少量のコードしか含まれていません。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.low-level">
+  <title>kGraftの機能の詳細</title>
+
+  <para>
+   kGraftは、ftraceインフラストラクチャを使用してパッチを適用します。AMD64/Intel 64アーキテクチャにおける実装は次のとおりです。
+  </para>
+
+  <para>
+   カーネル関数にパッチを適用する場合、kGraftは、新しい関数へのジャンプを挿入するために、関数の冒頭にスペースを必要とします。このスペースは、関数のプロファイリングをオンにしたGCCによってカーネルのコンパイル時に割り当てられます。具体的には、5バイトの呼び出し命令がカーネル関数の冒頭に挿入されます。このようにインストルメント化されたカーネルの起動時に、プロファイリング中の呼び出しが5バイトのNOP (操作なし)命令に置換されます。
+  </para>
+
+  <para>
+   パッチの適用が開始されると、最初のバイトがINT3 (ブレークポイント)命令に置換されます。これにより、5バイトの命令を置換する際の不可分性が確保されます。他の4バイトは、新しい関数のアドレスに置換されます。最後に、最初のバイトがJMP (ロングジャンプ)命令コードに置換されます。
+  </para>
+
+  <para>
+   システム内の他のCPUの推論的なデコードキューをフラッシュするために、このプロセス全体を通してIPI NMIが使用されます。これにより、ごく短時間であってもカーネルを停止することなく、新しい関数に切り替えることができます。IPI NMIによる割り込みはマイクロ秒単位で測定することができ、いずれの場合でもカーネルの実行中に発生するので、サービスの中断とは見なされません。
+  </para>
+
+  <para>
+   呼び出し元にパッチが適用されることはありません。代わりに、呼び出し先のNOPが新しい関数へのJMPに置換されます。JMP命令は永久に残ります。これにより、構造体内でも関数ポインタが考慮されるので、パッチが適用されない場合に備えて古いデータを保存しておく必要はありません。
+  </para>
+
+  <para>
+   ただし、これらの手順だけでは十分ではありません。関数は不可分的に置換されるわけではないので、カーネルの一部で修正された新しい関数が引き続き、別の場所で古い関数を呼び出したり、その逆の呼び出しが行われたりすることがあります。関数インタフェースのセマンティクスがパッチで変更された場合は、混乱が生じます。
+  </para>
+
+  <para>
+   そのため、すべての関数が置換されるまで、kGraftは、トランポリンに基づいた、RCU(読み取り-コピー-更新)に似たアプローチを使用して、それぞれのユーザ側スレッド、カーネルスレッド、カーネル割り込みで一貫性を確保します。カーネルの最初と最後にスレッド別のフラグが設定されます。これにより、古い関数は常に別の古い関数を呼び出し、新しい関数は常に新しい関数を呼び出すようになります。すべてのプロセスに「新しいユニバース」のフラグが設定されると、パッチの適用が完了し、トランポリンを削除することができます。コードは、パッチが適用された各関数の過度に長いジャンプを除き、パフォーマンスに影響を及ぼすことなく、フルスピードで動作することができます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.inst_patches">
+  <title>kGraftパッチのインストール</title>
+
+  <para>
+   ここでは、SUSE Linux Enterprise Live Patching拡張機能のアクティベーションとkGraftパッチのインストールについて説明します。
+  </para>
+
+  <sect2 xml:id="sec.kgraft.inst_patches.activate">
+   <title>SLE Live Patchingのアクティベーション</title>
+   <para>
+    SLE Live Patchingをシステムでアクティベートするには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      SLESシステムをまだ登録していない場合は、登録します。登録は、システムのインストール時に行うことも、YaSTの<guimenu>Product Registration (製品登録)</guimenu>モジュール(<command>yast2 registration</command>)を使用して後から行うこともできます。登録後、<guimenu>Yes (はい)</guimenu>をクリックすると、入手可能なオンラインアップデートのリストが表示されます。
+     </para>
+     <para>
+      SLESシステムはすでに登録しているものの、SLE Live Patchingをまだアクティベートしていない場合は、YaSTの<guimenu>Product Registration (製品登録)</guimenu>モジュール(<command>yast2 registration</command>)を開き、<guimenu>Select Extensions (拡張機能の選択)</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      入手可能な拡張機能のリストで<guimenu>SUSE Linux Enterprise Live Patching 12</guimenu>を選択し、<guimenu>Next (次へ)</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      ライセンス条項を確認し、<guimenu>Next (次へ)</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      SLE Live Patchingの登録コードを入力し、<guimenu>Next (次へ)</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>Installation Summary (インストールの概要)</guimenu>と選択されている<guimenu>Patterns (パターン)</guimenu>を確認します。インストールの対象として<systemitem>Live Patching</systemitem>パターンが選択されているはずです。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>Accept (承諾)</guimenu>をクリックしてインストールを完了します。これにより、kGraftの基本コンポーネントが初期ライブパッチとともにシステムにインストールされます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.kgraft.inst_patches.update">
+   <title>システムの更新</title>
+   <procedure>
+    <step>
+     <para>
+      SLE Live Patchingのアップデートは、パッチの適用に標準のSLE更新スタックを使用できるような形で配信されます。初期ライブパッチの更新には、<command>zypper patch</command>、YaSTオンラインアップデート、または同等の方法を使用できます。
+     </para>
+    </step>
+    <step>
+     <para>
+      パッケージのインストール時に、カーネルに自動的にパッチが適用されます。ただし、スリープ状態のすべてのプロセスがウェイクアップし、処理を完了するまで、古いカーネル関数の呼び出しが完全になくなるわけではありません。これにはかなりの時間がかかることがあります。それでも、古いカーネル関数を使用するスリープ状態のプロセスがセキュリティ上の問題になるとは考えられません。それにもかかわらず、kGraftの最新バージョンでは、すべてのプロセスがカーネルとユーザ側の境界を越えて、以前のパッチからパッチが適用された関数を使用するようになるまで、別のkGraftパッチを適用することはできません。
+     </para>
+     <para>
+      パッチ適用の全体的なステータスを参照するには、<filename>/sys/kernel/kgraft/in_progress</filename>でフラグを確認します。値<literal>1</literal>は、ウェイクアップする必要があるスリープ状態のプロセスがあり、パッチの適用が進行中であることを示します。値<literal>0</literal>は、すべてのプロセスがパッチが適用された関数のみを使用しており、パッチの適用がすでに完了していることを示します。また、<command>kgr status</command>コマンドを使用して同じ情報を取得することもできます。
+     </para>
+     <para>
+      プロセスごとにフラグを確認することもできます。それぞれのプロセスについて、<filename>/proc/<replaceable>process_number</replaceable>/kgr_in_progress</filename>で数値を確認します。この場合も、値<literal>1</literal>は、ウェイクアップする必要があるスリープ状態のプロセスを示します。また、<command>kgr blocking</command>コマンドを使用して、スリープ状態のプロセスのリストを出力することもできます。
+     </para>
+    </step>
+
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.remove">
+  <title>kGraftパッチの削除</title>
+
+  <para>
+   kGraftパッチを削除するには、次の手順に従います。
+  </para>
+
+
+
+  <procedure>
+   <step>
+    <para>
+     まず、Zypperを使用してパッチ自体を削除します。
+    </para>
+<screen>zypper rm kgraft-patch-<replaceable>3_12_32-25-default</replaceable></screen>
+   </step>
+   <step>
+    <para>
+     次に、マシンを再起動します。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.exec_threads">
+  <title>カーネル実行スレッドのスタック</title>
+
+  <para>
+   kGraftを処理するには、カーネルスレッドを作成する必要があります。サードパーティのソフトウェアはkGraftの採用に完全には対応していないことがあり、カーネルモジュールによってカーネル実行スレッドが大量に生成される場合があります。このようなスレッドによって、パッチ適用プロセスが無期限にブロックされます。緊急手段として、kGraftでは、すべての実行スレッドが安全なチェックポイントを越えるまで待機することなく、パッチ適用プロセスを強制的に終了することができます。そのためには、<filename>/sys/kernel/kgraft/in_progress</filename>に<literal>0</literal>を書き込みます。この手順を実行する前に、SUSEのサポートにお問い合わせください。
+  </para>
+
+
+ </sect1>
+ <sect1 xml:id="sec.kgraft.kgr">
+  <title><command>kgr</command>ツール</title>
+
+  <para>
+   <command>kgr</command>ツールを使用すると、kGraftのさまざまな管理タスクを簡略化することができます。使用可能なコマンドは次のとおりです。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>kgr status</command>
+    </term>
+    <listitem>
+     <para>
+      kGraftパッチ適用の全体的なステータス(<literal>ready</literal>または<literal>in_progress</literal>)を表示します。
+
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr patches</command>
+    </term>
+    <listitem>
+     <para>
+      ロードされたkGraftパッチのリストを表示します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kgr blocking</command>
+    </term>
+    <listitem>
+     <para>
+      kGraftパッチ適用の完了を妨げているプロセスのリストを表示します。デフォルトでは、PIDのみが列挙されます。<option>-v</option>を指定すると、コマンドラインが出力されます(可能な場合)。<option>-v</option>をもう1つ指定すると、スタックトレースも表示されます。
+     </para>
+    </listitem>
+   </varlistentry>
+
+  </variablelist>
+
+  <para>
+   詳細については、<command>man kgr</command>を参照してください。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.scope">
+  <title>kGraftテクノロジの範囲</title>
+
+  <para>
+   kGraftは、関数の置換に基づいています。kGraftでは、データ構造の変更は間接的にしか実行できません。そのため、カーネルのデータ構造の変更には特別な注意が必要です。変更が大規模な場合は、再起動が必要になることもあります。また、kGraftでは、1つのコンパイラを使用して古いカーネルをコンパイルし、別のコンパイラを使用してパッチをコンパイルするような状況に対処できない場合があります。
+  </para>
+
+  <para>
+   kGraftの動作により、カーネルスレッドを大量に生成するサードパーティモジュールのサポートは限定的です。
+
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.scope_patching">
+  <title>SLE Live Patchingの範囲</title>
+
+  <para>
+   CVSS (共通脆弱性評価システム)のレベル6以上の脆弱性に関する修正、およびシステムの安定性やデータの破損に関連するバグ修正は、SLE Live Patchingの範囲内で提供されます。前述の基準を満たすすべての種類の修正についてライブパッチを生成できるわけではありません。技術的な理由でカーネルライブパッチの生成が実行不可能な場合、SUSEは修正をスキップする権利を有します。CVSSの詳細については、<link xlink:href="http://nvd.nist.gov/cvss.cfm/"/>を参照してください。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.kgraft.support_interaction">
+  <title>サポートプロセスとの相互作用</title>
+
+  <para>
+   SUSEのサポートを利用して技術的な問題を解決する間に、いわゆるProgram Temporary Fix(PTF)を受け取ることがあります。PTFは、SLE Live Patchingの基盤を成すパッケージをはじめ、さまざまなパッケージについて発行されることがあります。
+  </para>
+
+  <para>
+   前のセクションに記載された条件に適合するkGraftのPTFは、通常どおりにインストールできます。SUSEでは、当該のシステムを再起動する必要がないこと、将来のライブアップデートが問題なく適用されることを確認します。
+  </para>
+
+  <para>
+   ベースカーネルについて発行されたPTFによって、ライブパッチ適用プロセスが中断されます。まず、PTFカーネル全体を実行時に置換することはできないので、PTFカーネルのインストール時には再起動が必要になります。次に、定期保守のアップデートについてライブパッチが発行された場合、PTFを置換するには、再起動がもう一度必要になります。
+  </para>
+
+  <para>
+   SLE Live Patchingの他のパッケージに関するPTFは、通常の保証を含む通常のPTFと同様に処理できます。
+  </para>
+ </sect1>
+</chapter>

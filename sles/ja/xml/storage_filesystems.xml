@@ -1,0 +1,1481 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_filesystems.xml" version="5.0" xml:id="cha.filesystems" xml:lang="ja">
+ <title>Linuxファイルシステムの概要</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>にはいくつかの異なるファイルシステム(Btrfs、Ext4、Ext3、Ext2、ReiserFS、XFSなど)が付属しており、そのいずれかを選択することができます。各ファイルシステムには、それぞれ独自の利点と欠点があります。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>における主要オペレーティングシステムの機能の対照比較については、<link xlink:href="http://www.suse.com/products/server/technical-information/#FileSystem"/> (「ファイルシステムのサポートとサイズ」)を参照してください。この章では、それらのファイルシステムの機能および利点の概要を説明します。
+   </para>
+  </abstract>
+ </info>
+ <para>
+  SUSE Linux Enterprise 12では、オペレーティングシステム用のデフォルトファイルシステムはBtrfsであり、他はすべてXFSがデフォルトです。また、Extファイルシステムファミリ、ReiserFS、およびOCFS2も引き続きサポートします。デフォルトでは、Btrfsファイルシステムは複数のサブボリュームと共に設定されます。ルートファイルシステムでは、Snapperインフラストラクチャを使用して、スナップショットが自動的に有効になります。Snapperの詳細については、<xref linkend="cha.snapper"/>を参照してください。
+ </para>
+ <para>
+  高い処理能力が求められるハイパフォーマンスセットアップでは、高可用性ストレージシステムが必要になる場合があります。ハイパフォーマンスのクラスタリングシナリオの要件を満たすため、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>では、High Availability ExtensionアドオンにOCFS2 (Oracle Cluster File System 2)とDRBD (Distributed Replicated Block Device)を組み込んでいます。これらの高度なストレージシステムは、本書では扱いません。詳細については、<citetitle><citetitle>で『</citetitle></citetitle>SUSE Linux Enterprise High Availability Extension Administration Guide<link xlink:href="http://www.suse.com/doc"/>』を参照してください。
+ </para>
+ <para>
+  ただし、すべてのアプリケーションに最適なファイルシステムは存在しません。各ファイルシステムには特定の利点と欠点があり、それらを考慮する必要があります。最も高度なファイルシステムを選択する場合でも、適切なバックアップ戦略が必要です。
+ </para>
+ <para>
+  本項で使用される<emphasis>データの完全性</emphasis>および<emphasis>データの一貫性</emphasis>という用語は、ユーザスペースデータ(ユーザが使用するアプリケーションによりファイルに書き込まれるデータ)の一貫性を指す言葉ではありません。ユーザスペースのデータが一貫しているかどうかは、アプリケーション自体が管理する必要があります。
+ </para>
+ <para>
+  本項で特に指定のない限り、パーティションおよびファイルシステムの設定または変更に必要なすべての手順は、YaSTパーティショナを使用して実行できます(そうすることをお勧めします)。詳細については、<xref linkend="cha.advdisk"/>を参照してください。
+ </para>
+ <sect1 xml:id="sec.filesystems.glossary">
+  <title>用語集</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>メタデータ(metadata)</term>
+    <listitem>
+     <para>
+      ファイルシステムが内包するデータ構造です。これにより、すべてのオンディスクデータが正しく構成され、アクセス可能になります。基本的には、<quote>データに関するデータ</quote>です。ほとんどすべてのファイルシステムに独自のメタデータ構造があり、それが各ファイルシステムに異なるパフォーマンス特性が存在する理由の1つになっています。メタデータが破損しないよう維持するのは、非常に重要なことです。もし破損した場合、ファイルシステム内にあるすべてのデータがアクセス不能になる可能性があるからです。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>inode</term>
+    <listitem>
+     <para>
+      サイズ、リンク数、ファイルの内容を実際に格納しているディスクブロックへのポインタ、作成日時、変更日時、アクセス日時など、ファイルに関する各種の情報を含むファイルシステムのデータ構造。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ジャーナル(journal)</term>
+    <listitem>
+     <para>
+      ファイルシステムのジャーナルは、ファイルシステムがそのメタデータ内で行う変更を特定のログに記録するオンディスク構造です。ジャーナル機能は、システム起動時にファイルシステム全体をチェックする長時間の検索プロセスが不要なため、ファイルシステムの回復時間を大幅に短縮します。ただし、それはジャーナルが再現できる場合に限定されます。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.major.btrfs">
+  <title>Btrfs</title>
+
+  <para>
+   Btrfsは、Chris Masonが開発したCOW(コピーオンライト)ファイルシステムです。このシステムは、Ohad Rodehが開発したCOWフレンドリなBツリーに基づいています。Btrfsは、ロギングスタイルのファイルシステムです。このシステムでは、ブロックの変更をジャーナリングする代わりに、それらの変更を新しい場所に書き込んで、リンクインします。新しい変更は、最後の書き込みまで確定されません。
+  </para>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.features">
+   <title>主な機能</title>
+   <para>
+    Btrfsは、次のような耐障害性、修復、容易な管理機能を提供します。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      書き込み可能なスナップショット。更新適用後に必要に応じてシステムを容易にロールバックしたり、ファイルをバックアップできます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      サブボリュームのサポート: BtrFSでは、割り当てられたスペースのプールにデフォルトのサブボリュームが作成されます。BtrFSでは、同じスペースプール内で個々のファイルシステムとして機能する追加サブボリュームを作成できます。サブボリュームの数は、プールに割り当てられたスペースによってのみ制限されます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <command>scrub</command>を使用したオンラインでのチェックと修復の機能が、Btrfsのコマンドラインツールの一部として利用できます。ツリー構造が正しいことを前提として、データとメタデータの完全性を検証します。マウントしたファイルシステム上で、scrubを定期的に実行することができます。これは、通常の操作中にバックグラウンドプロセスとして実行されます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      メタデータとユーザデータ用のさまざまなRAIDレベル。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      メタデータとユーザデータ用のさまざまなチェックサム。エラー検出が向上します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Linux LVM (Logical Volume Manager)ストレージオブジェクトとの統合。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>上でのYaSTパーティショナおよびAutoYaSTとの統合。その際、MD (複数デバイス)およびDM (デバイスマッパー)の各ストレージ設定ではBtrfsファイルシステムの作成も行われます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      既存のExt2、Ext3、およびExt4ファイルシステムからの、オフラインのマイグレーション。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <filename>/boot</filename>のブートローダサポート。Btrfsパーティションからの起動を可能にします。
+     </para>
+    </listitem>
+    <listitem>
+
+     <para>
+      マルチボリュームBtrfsは、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled;slerte">12 SP2</phrase></phrase>では、RAID0、RAID1、およびRAID10プロファイルでサポートされます。それより高いレベルのRAIDは現時点サポートされませんが、将来のサービスパックでサポートされる可能性があります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Btrfsのコマンドを使用して、透過圧縮を設定します。 
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.suse">
+   <title><phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>上のルートファイルシステム設定</title>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>のルートパーティションは、デフォルトでBtrfsとスナップショットを使用して設定されます。スナップショットを使用すると、更新適用後に必要に応じてシステムを容易にロールバックしたり、ファイルをバックアップしたりできます。スナップショットは、<xref linkend="cha.snapper"/>で説明するSUSE Snapperインフラストラクチャを使用して簡単に管理できます。SUSEのSnapperプロジェクトの一般情報については、OpenSUSE.orgにあるSnapper Portal wiki (<link xlink:href="http://snapper.io"/>)を参照してください。
+   </para>
+   <para>
+    スナップショットを使用してシステムをロールバックする場合、ユーザのホームディレクトリ、WebサーバとFTPサーバのコンテンツ、ログファイルなどのデータがロールバック中に失われたり、上書きされたりしないようにする必要があります。それには、ルートファイルシステムでBtrfsサブボリュームを使用します。サブボリュームは、スナップショットから除外できます。インストール時にYaSTによって提示される<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>のルートファイルシステムのデフォルト設定には、次のサブボリュームが含まれます。これらがスナップショットから除外される理由を次に示します。
+   </para>
+   <xi:include href="snapshot_excludes_i.xml"/>
+   <warning>
+    <title>ロールバックのサポート</title>
+    <para>
+     SUSEサポートがロールバックをサポートするのは、事前設定されているサブボリュームがまったく削除されていない場合のみです。ただし、Yastパーティショナを使用して、サブボリュームを追加することはできます。
+    </para>
+   </warning>
+   <sect3 xml:id="sec.filesystems.major.btrfs.compress">
+    <title>圧縮されたBtrfsファイルシステムのマウント</title>
+    <remark>toms 2015-09-16: FATE#316463</remark>
+    <note>
+     <title>GRUB 2およびLZO圧縮ルート</title>
+     <para>
+      GRUB 2は、LZO圧縮ルートを読み込むことができません。圧縮を使用するには、別の<filename>/boot</filename>パーティションが必要です。
+     </para>
+    </note>
+    <para>
+     SLE12 SP1から、Btrfsファイルシステムの圧縮がサポートされるようになりました。<option>compress</option>または<option>compress-force</option>オプションを使用し、圧縮アルゴリズム(<literal>lzo</literal>または<literal>zlib)を選択します</literal>(zlibがデフォルト値です)。zlib圧縮は、より圧縮率が高く、一方lzo圧縮はより高速でCPU負荷が低くなります。
+    </para>
+    <para>
+     次に例を示します。
+    </para>
+<screen><prompt>root # </prompt>mount -o compress /dev/sdx /mnt</screen>
+    <para>
+     ファイルを作成し、そのファイルに書き込む場合で、圧縮された結果のサイズが未圧縮サイズよりも大きいか等しい場合、Btrfsはこのファイルに以後も書き込みができるように圧縮をスキップします。この動作が必要ない場合、<option>compress-force</option>オプションを使用します。最初の圧縮できないデータを含むファイルには有効です。
+    </para>
+    <para>
+     圧縮は、新規ファイルのみに効果があることに注意してください。圧縮なしで書き込まれたファイルは、ファイルシステムが<option>compress</option>オプションまたは<option>compress-force</option>オプションを使用してマウントされたときに圧縮されません。また、<option>nodatacow</option>属性を持つファイルのエクステントは圧縮されません。
+    </para>
+<screen><prompt>root # </prompt><command>chattr</command> +C <replaceable>FILE</replaceable>
+<prompt>root # </prompt><command>mount</command> -o nodatacow  /dev/sdx /mnt</screen>
+    <para>
+     暗号化は、圧縮処理とは関係のない独立した処理です。このパーティションにデータを書き込んだら、詳細を印刷してください。
+    </para>
+<screen><prompt>root # </prompt>btrfs filesystem show /mnt
+btrfs filesystem show /mnt
+Label: 'Test-Btrfs'  uuid: 62f0c378-e93e-4aa1-9532-93c6b780749d
+        Total devices 1 FS bytes used 3.22MiB
+      devid    1 size 2.00GiB used 240.62MiB path /dev/sdb1</screen>
+    <para>
+     永続的に設定したい場合、<option>compress</option>オプションまたは<option>compress-force</option>オプションを<filename>/etc/fstab</filename>設定ファイルに追加します。次に例を示します。
+    </para>
+<screen>UUID=1a2b3c4d /home btrfs subvol=@/home,<emphasis role="strong">compress</emphasis> 0 0</screen>
+   </sect3>
+   <sect3 xml:id="sec.filesystems.major.btrfs.suse.mount">
+    <title>サブボリュームのマウント</title>
+    <para>
+     <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>上のスナップショットからシステムをロールバックするには、まずスナップショットからブートします。これにより、ロールバックを実行する前に、スナップショットを実行しながらチェックできます。スナップショットからブートできるようにするには、サブボリュームをマウントします(通常は不要な操作です)。
+    </para>
+    <para>
+     <xref linkend="sec.filesystems.major.btrfs.suse"/>の一覧に示されているサブボリューム以外に、<literal>@</literal>という名前のボリュームが存在します。これは、ルートパーティション(<filename>/</filename>)としてマウントされるデフォルトサブボリュームです。それ以外のサブボリュームは、このボリュームにマウントされます。
+    </para>
+    <para>
+     スナップショットからブートすると、<literal>@</literal>サブボリュームではなく、スナップショットが使用されます。スナップショットに含まれるファイルシステムの部分は、<filename>/</filename>として読み込み専用でマウントされます。それ以外のサブボリュームは、スナップショットに書き込み可能でマウントされます。この状態は、デフォルトでは一時的なものです。次回の再起動により、前の設定が復元されます。これを永久的なものにするには、<command>snapper rollback</command>コマンドを実行します。これにより、今回のブートに使用したスナップショットが新しいデフォルトのサブボリュームになり、再起動後はこのサブボリュームが使用されます。<emphasis/>
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.filesystems.major.btrfs.suse.space">
+    <title>空き領域の確認</title>
+    <para>
+     通常、ファイルシステムの使用量は<command>df</command>コマンドで確認します。Btrfsファイルシステムでは、<command>df</command>の出力は誤解を招く可能性があります。生データが割り当てる領域とは別に、Btrfsファイルシステムもメタデータ用の領域を割り当てて使用するからです。
+    </para>
+    <para>
+     その結果、まだ大量の領域を使用できるように見えても、Btrfsファイルシステムによって領域不足がレポートされることがあります。その場合、メタデータ用に割り当てられた領域はすべて使用されています。Btrfsファイルシステム上の使用済みの領域と使用可能な領域を確認するには、次のコマンドを使用します。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><command>btrfs filesystem show</command>
+      </term>
+      <listitem>
+<screen><prompt>tux &gt; </prompt>sudo btrfs filesystem show /
+Label: 'ROOT'  uuid: 52011c5e-5711-42d8-8c50-718a005ec4b3
+        Total devices 1 FS bytes used 10.02GiB
+        devid    1 size 20.02GiB used 13.78GiB path /dev/sda3</screen>
+       <para>
+        ファイルシステムの合計サイズとその使用量を表示します。最後の行の両方の値が一致する場合、ファイルシステム上の領域はすべて割り当て済みです。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><command>btrfs filesystem df</command>
+      </term>
+      <listitem>
+<screen><prompt>tux &gt; </prompt>sudo btrfs file system df /
+Data, single: total=13.00GiB, used=9.61GiB
+System, single: total=32.00MiB, used=16.00KiB
+Metadata, single: total=768.00MiB, used=421.36MiB
+GlobalReserve, single: total=144.00MiB, used=0.00B</screen>
+       <para>
+        ファイルシステムの割り当て済みの領域(<literal>total</literal>)および使用済みの領域の値を表示します。メタデータの<literal>total</literal>および<literal>used</literal>の値がほぼ等しい場合、メタデータ用の領域はすべて割り当て済みです。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><command>btrfs filesystem usage</command>
+      </term>
+      <listitem>
+<screen><prompt>tux &gt; </prompt>sudo btrfs filesystem usage /
+Overall:
+    Device size:                  20.02GiB
+    Device allocated:             13.78GiB
+    Device unallocated:            6.24GiB
+    Device missing:                  0.00B
+    Used:                         10.02GiB
+    Free (estimated):              9.63GiB      (min: 9.63GiB)
+    Data ratio:                       1.00
+    Metadata ratio:                   1.00
+    Global reserve:              144.00MiB      (used: 0.00B)
+
+             Data     Metadata  System
+Id Path      single   single    single   Unallocated
+-- --------- -------- --------- -------- -----------
+ 1 /dev/sda3 13.00GiB 768.00MiB 32.00MiB     6.24GiB
+-- --------- -------- --------- -------- -----------
+   Total     13.00GiB 768.00MiB 32.00MiB     6.24GiB
+   Used       9.61GiB 421.36MiB 16.00KiB</screen>
+       <para>
+        前の2つのコマンドを組み合わせたのと同様のデータを表示します。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <para>
+     詳細については、<command>man 8 btrfs-filesystem</command>および<link xlink:href="https://btrfs.wiki.kernel.org/index.php/FAQ"/>を参照してください。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.migrate">
+   <title>ExtおよびReiserFSの各ファイルシステムからBtrfsへのマイグレーション</title>
+   <para>
+    既存のExt (Ext2、Ext3、またはExt4)またはReiserFSから、Btrfsファイルシステムへデータボリュームをマイグレートすることができます。変換プロセスはオフラインで、デバイス上において行われます。ファイルシステムは、このデバイスに少なくとも15%に相当する空き領域を必要とします。
+   </para>
+   <para>
+    ファイルシステムをBtrfsに変換するには、ファイルシステムをオフラインにしてから、次のように入力します。
+   </para>
+<screen>sudo btrfs-convert &lt;<replaceable>device</replaceable>&gt;</screen>
+   <para>
+    マイグレーションを、元のファイルシステムにロールバックするには、ファイルシステムをオフラインにしてから、次のように入力します。
+   </para>
+<screen>sudo btrfs-convert -r &lt;<replaceable>device</replaceable>&gt;</screen>
+   <warning>
+    <title>ルートファイルシステムの変換は未サポート</title>
+    <para>
+     ルートファイルシステムをBtrfsに変換することはできません。既存のファイルシステムをそのまま使用するか、システム全体を初めから再インストールしてください。
+    </para>
+   </warning>
+   <important>
+    <title>データ損失の可能性</title>
+    <para>
+     元のファイルシステムにロールバックする際、Btrfsへの変換後に追加したデータはすべて失われます。つまり、元から存在するデータのみが、変換前のファイルシステムに逆変換されます。
+    </para>
+   </important>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.admin">
+   <title>Btrfsの管理</title>
+   <para>
+    Btrfsは、YaSTパーティショナおよびAutoYaST内に統合されています。これはインストール時に利用可能で、ルートファイルシステム用のソリューションを設定することができます。インストール後に、YaSTパーティショナを使用して、Btrfsのボリュームの参照と管理を行うことができます。
+   </para>
+   <para>
+    Btrfsの管理ツールは、<filename>btrfsprogs</filename>パッケージ内に用意されています。Btrfsコマンドの使用については、<command>man 8 btrfs</command>、<command>man 8 btrfsck</command>、および<command>man 8 mkfs.btrfs</command>の各コマンドを参照してください。Btrfsの機能については、<citetitle>Btrfs wiki</citetitle> (<link xlink:href="http://btrfs.wiki.kernel.org"/>)を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.quota">
+   <title>サブボリュームに対するBtrfsクォータのサポート</title>
+   <para>
+    Btrfs rootファイルシステムのサブボリューム<filename>/var/log</filename>、<filename>/var/crash</filename>および<filename>/var/cache</filename>が、通常の操作時に利用可能なディスクスペースのすべてを使用でき、システムに不具合が発生します。この状況を回避するため、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>ではサブボリュームに対するBtrfsクォータのサポートを提供するようになりました。YaSTからの提案に従ってルートファイルシステムを設定する場合、ルートファイルシステムは必要に応じて準備されます。サブボリュームはすべて、クォータグループ(<literal>qgroup</literal>)を設定済みです。ルートファイルシステムのサブボリュームにクォータを設定するには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      クォータサポートを有効にします。
+     </para>
+<screen>sudo btrfs quota enable /</screen>
+    </step>
+    <step>
+     <para>
+      サブボリュームのリストを取得します。
+     </para>
+<screen>sudo btrfs subvolume list /</screen>
+     <para>
+      クォータは既存のサブボリュームにのみ設定できます。
+     </para>
+    </step>
+    <step>
+     <para>
+      前の手順で表示されたサブボリュームの1つにクォータを設定します。サブボリュームは、パス(<filename>/var/tmp</filename>など)または<literal>0/<replaceable>subvolume id</replaceable></literal> (<literal>0/272</literal>など)のどちらかによって識別できます。次に、<filename>/var/tmp</filename>に5GBのクォータを設定する例を示します。
+     </para>
+<screen>sudo btrfs qgroup limit 5G /var/tmp</screen>
+     <para>
+      サイズは、バイト(5000000000)、キロバイト(5000000K)、メガバイト(5000M)、またはギガバイト(5G)のいずれかの単位で指定できます。結果として得られるサイズは多少異なります。これは、1024バイト=1KiB、1024KiB=1MiBなどだからです。
+     </para>
+    </step>
+    <step>
+     <para>
+      既存のクォータを一覧にするには、次のコマンドを使用します。<literal>max_rfer</literal>列に、クォータがバイト単位で表示されます。
+     </para>
+<screen>sudo btrfs qgroup show -r /</screen>
+    </step>
+   </procedure>
+   <tip>
+    <title>クォータの無効化</title>
+    <para>
+     既存のクォータを無効にする場合、クォータサイズを<literal>none</literal>に設定します。
+    </para>
+<screen>sudo btrfs qgroup limit none /var/tmp</screen>
+    <para>
+     特定のパーティションとそのすべてのサブボリュームのクォータサポートを無効にするには、<command>btrfs quota disable</command>を使用します。
+    </para>
+<screen>sudo btrfs quota disable /</screen>
+   </tip>
+   <para>
+    詳細については、<command>man 8 btrfs-qgroup</command>および<command>man 8 btrfs-quota</command>を参照してください。Btrfs wiki (<link xlink:href="https://btrfs.wiki.kernel.org/index.php/UseCases"/>)の<citetitle>UseCases</citetitle>ページにも詳細情報が記載されています。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.s-r">
+   <title>Btrfs send/receive</title>
+   <para>
+    Btrfsでは、ファイルシステムの状態をキャプチャするためのスナップショットを作成できます。Snapperでは、たとえばこの機能を使用してシステムの変更前後のスナップショットを作成することで、ロールバックを可能にしています。ただし、send/receive機能とスナップショットを併用すると、リモートの場所にファイルシステムのコピーを作成して管理することもできます。たとえば、この機能を使用してインクリメンタルバックアップを実行できます。
+   </para>
+   <para>
+    <command>btrfs send</command>操作は、同じサブボリュームの2つの読み込み専用スナップショットの差分を計算して、それをファイルまたはSTDOUTに送信します。<command>Btrfs receive</command>操作は、sendコマンドの結果を取得して、それをスナップショットに適用します。
+   </para>
+   <sect3 xml:id="sec.filesystems.major.btrfs.s-r.requires">
+    <title>前提条件</title>
+    <para>
+     Btrfsのsend/receive機能を使用するには、次の要件を満たす必要があります。
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       ソース側(<literal>send</literal>)とターゲット側(<literal>receive</literal>)にBtrfsファイルシステムが必要です。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Btrfs send/receiveはスナップショットを操作するため、それぞれのデータがBtrfsサブボリュームに存在する必要があります。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       ソース側のスナップショットは読み込み専用である必要があります。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       SUSE Linux Enterprise 12 SP2以上。それより古いバージョンのSUSE Linux Enterpriseはsend/receiveをサポートしていません。
+      </para>
+     </listitem>
+    </itemizedlist>
+   </sect3>
+   <sect3 xml:id="sec.filesystems.major.btrfs.s-r.backup">
+    <title>インクリメンタルバックアップ</title>
+    <para>
+     次の手順では、<filename>/data</filename>(ソース側)のインクリメンタルバックアップを<filename>/backup/data</filename>(ターゲット側)に作成する場合を例にして、Btrfs send/receiveの基本的な使用方法を示します。<filename>/data</filename>はサブボリュームである必要があります。
+    </para>
+    <procedure>
+     <title>初期セットアップ</title>
+     <step>
+      <para>
+       ソース側に初期スナップショット(この例では<literal>snapshot_0</literal>という名前)を作成し、それがディスクに書き込まれていることを確認します。
+      </para>
+<screen>sudo btrfs subvolume snapshot -r /data /data/bkp_data
+sync</screen>
+      <para>
+       新しいサブボリューム<filename>/data/bkp_data</filename>が作成されます。これは次のインクリメンタルバックアップの基として使用されるので、参照用に保持しておく必要があります。
+      </para>
+     </step>
+     <step>
+      <para>
+       初期スナップショットをターゲット側に送信します。これは初期のsend/receive操作であるため、完全なスナップショットを送信する必要があります。
+      </para>
+<screen>sudo bash -c 'btrfs send /data/bkp_data | btrfs receive /backup'</screen>
+      <para>
+       ターゲット側に新しいサブボリューム<filename>/backup/bkp_data</filename>が作成されます。
+      </para>
+     </step>
+    </procedure>
+    <para>
+     初期セットアップが完了したら、インクリメンタルバックアップを作成して、現在のスナップショットと以前のスナップショットの差分をターゲット側に送信できます。手順は常に同じです。
+    </para>
+    <orderedlist>
+     <listitem>
+      <para>
+       ソース側に新しいスナップショットを作成します。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       差分をターゲット側に送信します。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       オプション: 両側のスナップショットの名前変更またはクリーンアップ、あるいはその両方を行います。
+      </para>
+     </listitem>
+    </orderedlist>
+    <procedure>
+     <title>インクリメンタルバックアップの実行</title>
+     <step>
+      <para>
+       ソース側に新しいスナップショットを作成し、それがディスクに書き込まれていることを確認します。次の例では、スナップショットにbkp_data_<replaceable>CURRENT_DATE</replaceable>という名前が付いています。
+      </para>
+<screen>sudo btrfs subvolume snapshot -r /data /data/bkp_data_$(date +%F)
+sync</screen>
+      <para>
+       新しいサブボリューム(たとえば、<filename>/data/bkp_data_2016-07-07</filename>)が作成されます。
+      </para>
+     </step>
+     <step>
+      <para>
+       以前のスナップショットと新たに作成したスナップショットの差分をターゲット側に送信します。そのためには、オプション<option>-p <replaceable>snapshot</replaceable></option>を使用して、以前のスナップショットを指定します。
+      </para>
+<screen>sudo bash -c 'btrfs send -p /data/bkp_data /data/bkp_data_2016-07-07 \
+| btrfs receive /backup'</screen>
+      <para>
+       新しいサブボリューム<filename>/backup/bkp_data_2016-07-07</filename>が作成されます。
+      </para>
+     </step>
+     <step>
+      <para>
+       その結果、それぞれの側に2つずつ、合計4つのスナップショットが存在することになります。
+      </para>
+      <simplelist>
+       <member><filename>/data/bkp_data</filename> </member> <member><filename>/data/bkp_data_2016-07-07</filename> </member> <member><filename>/backup/bkp_data</filename> </member> <member><filename>/backup/bkp_data_2016-07-07</filename> </member>
+      </simplelist>
+      <para>
+       続行するには、次の3つのオプションがあります。
+      </para>
+      <itemizedlist>
+       <listitem>
+        <para>
+         両方の側のすべてのスナップショットを保持する。このオプションの場合、両方の側のどのスナップショットにもロールバックすることが可能であると同時に、すべてのデータの複製を保持していることになります。これ以上のアクションは必要ありません。次回のインクリメンタルバックアップを実行するときには、最後から2番目のスナップショットをsend操作の親として使用することに注意してください。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         ソース側には最新のスナップショットのみを保持し、ターゲット側にはすべてのスナップショットを保持する。この場合も、両方の側のどのスナップショットにもロールバックできます。ソース側で特定のスナップショットへのロールバックを実行するには、ターゲット側からソース側に、完全なスナップショットのsend/receive操作を実行します。ソース側で削除/移動操作を実行します。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         両方の側に最新のスナップショットのみを保持する。この方法では、ソース側で作成された最新のスナップショットと同じ状態のバックアップがターゲット側にあります。ほかのスナップショットにロールバックすることはできません。ソース側とターゲット側で削除/移動操作を実行します。
+        </para>
+       </listitem>
+      </itemizedlist>
+      <substeps>
+       <step>
+        <para>
+         ソース側に最新のスナップショットのみを保持するには、次のコマンドを実行します。
+        </para>
+<screen>sudo btrfs subvolume delete /data/bkp_data
+sudo mv /data/bkp_data_2016-07-07 /data/bkp_data</screen>
+        <para>
+         最初のコマンドで以前のスナップショットを削除し、2番目のコマンドで現在のスナップショットの名前を<filename>/data/bkp_data</filename>に変更します。これにより、バックアップされた最新のスナップショットは常に<filename>/data/bkp_data</filename>という名前になります。その結果、常にこのサブボリューム名をインクリメンタルsend操作の親として使用できます。
+        </para>
+       </step>
+       <step>
+        <para>
+         ターゲット側に最新のスナップショットのみを保持するには、次のコマンドを実行します。
+        </para>
+<screen>sudo btrfs subvolume delete /backup/bkp_data
+sudo mv /backup/bkp_data_2016-07-07 /backup/bkp_data</screen>
+        <para>
+         最初のコマンドで以前のバックアップスナップショットを削除し、2番目のコマンドで現在のスナップショットの名前を<filename>/backup/bkp_data</filename>に変更します。これにより、最新のバックアップスナップショットは常に<filename>/backup/bkp_data</filename>という名前になります。
+        </para>
+       </step>
+      </substeps>
+     </step>
+    </procedure>
+    <tip>
+     <title>リモートターゲット側への送信</title>
+     <para>
+      スナップショットをリモートマシンに送信するには、SSHを使用します。
+     </para>
+<screen>btrfs send /data/bkp_data | ssh root@jupiter.example.com 'btrfs receive /backup'</screen>
+    </tip>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.btrfs.deduplication">
+   <title>データ重複排除のサポート</title>
+   <para>
+    Btrfsはデータ重複排除をサポートします。そのための方法として、ファイルシステム内の複数の同一ブロックを、共通ストレージロケーションにある、そのブロックの1つのコピーを指す論理リンクで置き換えます。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>では、ファイルシステムをスキャンして同一ブロックをチェックする<command>duperemove</command>ツールを提供しています。このツールをBtrfsファイルシステムで使用した場合、該当するブロックを重複排除することもできます。<command>duperemoveはデフォルトではインストールされません。</command>これを使用できるようにするには、パッケージ
+    <package>duperemove</package>
+    をインストールします。
+   </para>
+   <note>
+    <title>使用例</title>
+    <para>
+     <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled;slerte">12 SP2</phrase></phrase>の時点では、duperemoveはファイルシステム全体の重複排除という用途には適していません。このツールは、仮想マシンイメージなど、大量のブロックが共通する可能性がある10～50個の大容量ファイルの重複排除に使用することを想定しています。
+    </para>
+   </note>
+   <para>
+    <command>duperemove</command>は、ファイルのリストを処理することも、ディレクトリを再帰的にスキャンすることもできます。
+   </para>
+<screen>sudo duperemove <replaceable>[options]</replaceable> file1 file2 file3
+sudo duperemove -r <replaceable>[options]</replaceable> directory</screen>
+   <para>
+    動作モードには、読み込み専用と重複排除の2つがあります。読み込み専用モードで実行した場合(<option>-d</option>スイッチを指定しない)、指定されたファイルまたはディレクトリをスキャンして重複ブロックをチェックし、出力します。これは、どのファイルシステムでも機能します。
+   </para>
+   <para>
+    重複排除モードでの<command>duperemove</command>の実行は、Btrfsファイルシステムでのみサポートされています。指定されたファイルまたはディレクトリをスキャンした後、重複しているブロックは重複排除用に送信されます。
+   </para>
+   <para>
+    詳細については、<command>man 8 duperemove</command>を参照してください。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.major.xfs">
+  <title>XFS</title>
+
+  <para>
+   本来は、IRIX OS用のファイルシステムを意図してSGIがXFSの開発を開始したのは、1990年代初期です。XFSの開発動機は、ハイパフォーマンスの64ビットジャーナルファイルシステムの作成により、非常に厳しいコンピューティングの課題に対応することでした。XFSは大規模なファイルを操作する点で非常に優れていて、ハイエンドのハードウェアを適切に活用します。XFSは、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>のデータパーティション用のデフォルトファイルシステムです。
+  </para>
+
+  <para>
+   ただし、XFSの主要機能を一見すれば、XFSが、ハイエンドコンピューティングの分野で、他のジャーナリングファイルシステムの強力な競合相手となっている理由がわかります。
+  </para>
+
+  <sect2 xml:id="sec.filesystems.major.xfs.scalability">
+   <title>アロケーショングループを使用した高スケーラビリティ</title>
+   <para>
+    XFSファイルシステムの作成時に、ファイルシステムの基にあるブロックデバイスは、等しいサイズをもつ8つ以上の線形の領域に分割されます。これらを「アロケーショングループ」<emphasis/>と呼びます。各アロケーショングループは、独自のinodeと空きディスクスペースを管理します。実用的には、アロケーショングループを、1つのファイルシステムの中にある複数のファイルシステムと見なすこともできます。アロケーショングループは互いに独立しているものではないため、複数のアロケーショングループをカーネルから同時にアドレス指定できるという特徴があります。この機能は、XFSの高いスケーラビリティに大きく貢献しています。独立性の高いアロケーショングループは、性質上、マルチプロセッサシステムのニーズに適しています。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.xfs.mgmt">
+   <title>ディスクスペースの効率的な管理によるハイパフォーマンス</title>
+   <para>
+    空きスペースとinodeは、各アロケーショングループ内のB<superscript>+</superscript>-Treeによって処理されます。B<superscript>+</superscript>ツリーの採用は、XFSのパフォーマンスとスケーラビリティを大きく向上させています。XFSでは、プロセスを2分割して割り当てを処理する<emphasis>遅延割り当て</emphasis>を使用します。保留されているトランザクションはRAMの中に保存され、適切な量のスペースが確保されます。XFSは、この時点では、データを正確にはどこに(ファイルシステムのどのブロックに)格納するか決定していません。決定可能な最後の瞬間まで、この決定は遅延(先送り)されます。暫定的に使用される一時データは、ディスクに書き込まれません。XFSがデータの実際の保存場所を決定するまでに、その役割を終えているからです。このように、XFSは、書き込みのパフォーマンスを向上させ、ファイルシステムのフラグメンテーションを減少させます。遅延アロケーションは、他のファイルシステムより書き込みイベントの頻度を下げる結果をもたらすので、書き込み中にクラッシュが発生した場合、データ損失が深刻になる可能性が高くなります。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.prealloc">
+   <title>事前割り当てによるファイルシステムの断片化の回避</title>
+   <para>
+    データをファイルシステムに書き込む前に、XFSはファイルが必要とする空きスペースを<emphasis>予約</emphasis>(プリアロケート、事前割り当て)します。したがって、ファイルシステムの断片化は大幅に減少します。ファイルの内容がファイルシステム全体に分散することがないので、パフォーマンスが向上します。
+   </para>
+   <note>
+    <title>新しいXFSオンディスクフォーマット</title>
+    <para>
+     <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>はバージョン12以降、XFSファイルシステムの新しい<quote>オンディスクフォーマット</quote> (v5)をサポートしています。YaSTによって作成されるXFSファイルシステムは、この新しいフォーマットを使用します。このフォーマットの主な利点には、全XFSメタデータの自動チェックサム、ファイルタイプのサポート、および1つのファイルに対する大量のアクセス制御リストのサポートがあります。
+    </para>
+    <para>
+     このフォーマットは、SUSE Linux Enterpriseカーネルの3.12より古いバージョン、xfsprogsの3.2.0より古いバージョン、およびSUSE Linux Enterprise 12より前にリリースされたバージョンのGRUB 2ではサポートされて「いません」<emphasis/>。このことは、これらの前提条件を満たさないシステムからもこのファイルシステムを使用する必要がある場合に問題になります。
+    </para>
+    <para>
+     XFSファイルシステムと古いSUSEシステムまたは他のLinuxディストリビューションとの相互運用性が必要な場合は、<command>mkfs.xfs</command>コマンドを使用して手動でファイルシステムをフォーマットします。これにより、古いフォーマットでXFSファイルシステムが作成されます(<option>-m crc=1</option>オプションを使用する場合を除く)。
+    </para>
+   </note>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.major.ext2">
+  <title>Ext2</title>
+
+  <para>
+   Ext2の起源は、Linuxの歴史の初期にさかのぼります。その前身であったExtended File Systemは、1992年4月に実装され、Linux 0.96cに統合されました。Extended File Systemにはさまざまな変更が加えられてきました。そして、Ext2はLinuxファイルシステムとして数年にわたり非常に高い人気を得ています。その後、ジャーナルファイルシステムが作成され、回復時間が非常に短くなったため、Ext2の重要性は低下しました。
+  </para>
+
+  <para>
+   Ext2の利点に関する短い要約を読むと、かつて幅広く好まれ、そして今でも一部の分野で多くのLinuxユーザから好まれるLinuxファイルシステムである理由を理解するのに役立ちます。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>堅実性と速度</term>
+    <listitem>
+     <para>
+      <quote>古くからある標準</quote>であるExt2は、さまざまな改良が加えられ、入念なテストが実施されてきました。だからこそ、Ext2は非常に信頼性が高いとの評価を得ることが多いのでしょう。ファイルシステムが正常にアンマウントできず、システムが機能停止した場合、e2fsckはファイルシステムのデータの分析を開始します。メタデータは一貫した状態に戻り、保留されていたファイルとデータブロックは、指定のディレクトリ(<filename>lost+found</filename>)に書き込まれます。ジャーナルファイルシステムとは対照的に、e2fsckは、最近変更されたわずかなメタデータだけではなく、ファイルシステム全体を分析します。この結果、ジャーナルファイルシステムがログデータだけをチェックするのに比べて、かなり長い時間を要します。ファイルシステムのサイズにもよりますが、この手順は30分またはそれ以上を要することがあります。したがって、高可用性を必要とするどのようなサーバでも、Ext2を選択することは望ましくありません。ただし、Ext2はジャーナルを維持せず、わずかなメモリを使用するだけなので、他のファイルシステムより高速なことがあります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>容易なアップグレード性</term>
+    <listitem>
+     <para>
+      Ext3は、Ext2のコードをベースとし、Ext2のオンディスクフォーマットとメタデータフォーマットも共用するので、Ext2からExt3へのアップグレードは非常に容易です。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.major.ext3">
+  <title>Ext3</title>
+
+  <para>
+   Ext3は、Stephen Tweedieによって設計されました。他のすべての次世代ファイルシステムとは異なり、Ext3は完全に新しい設計理念に基づいているわけではありません。Ext3は、Ext2をベースとしています。これら2つのファイルシステムは、非常に似ています。Ext3ファイルシステムを、Ext2ファイルシステムの上に構築することも容易です。Ext2とExt3の最も重要な違いは、Ext3がジャーナルをサポートしていることです。要約すると、Ext3には、次の3つの主要な利点があります。
+  </para>
+
+  <sect2 xml:id="sec.filesystems.major.ext3.upgrade">
+   <title>Ext2からの容易で信頼性の高いアップグレード</title>
+   <para>
+    Ext2のコードは、Ext3が次世代ファイルシステムであることを明確に主張するための強力な土台になりました。Ext3では、Ext2の信頼性および堅実性がExt3で採用されたジャーナルファイルシステムの利点とうまく統合されています。ReiserFSまたはXFSのような他のファイルシステムへの移行はかなり手間がかかります(ファイルシステム全体のバックアップを作成し、移行先ファイルシステムを新規に作成する必要があります)が、それとは異なり、Ext3への移行は数分で完了します。ファイルシステム全体を新たに作成し直しても、それが完璧に動作するとは限らないので、Ext3への移行は非常に安全でもあります。ジャーナルファイルシステムへのアップグレードを必要とする既存のExt2システムの数を考慮に入れると、多くのシステム管理者にとってExt3が重要な選択肢となり得る理由が容易にわかります。Ext3からExt2へのダウングレードも、アップグレードと同じほど容易です。Ext3ファイルシステムのアンマウントを正常に行い、Ext2ファイルシステムとして再マウントします。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.ext3.performance">
+   <title>信頼性とパフォーマンス</title>
+   <para>
+    他のジャーナルファイルシステムは、<quote>メタデータのみ</quote>のジャーナルアプローチに従っています。つまり、メタデータは常に一貫した状態に保持されますが、ファイルシステムのデータ自体については、一貫性が自動的に保証されるわけではありません。Ext3は、メタデータとデータの両方に注意するよう設計されています。<quote>注意</quote>の度合いはカスタマイズできます。Ext3の<option>data=journal</option>モードを有効にした場合、最大の保護(データの完全性)を実現しますが、メタデータとデータの両方がジャーナル化されるので、システムの動作が遅くなります。比較的新しいアプローチは、<option>data=ordered</option>モードを使用することです。これは、データとメタデータ両方の完全性を保証しますが、ジャーナルを適用するのはメタデータのみです。ファイルシステムドライバは、1つのメタデータの更新に対応するすべてのデータブロックを収集します。これらのブロックは、メタデータの更新前にディスクに書き込まれます。その結果、パフォーマンスを犠牲にすることなく、メタデータとデータの両方に関する一貫性を達成できます。3番目のオプションは、<option>data=writeback</option>を使用することです。これは、対応するメタデータをジャーナルにコミットした後で、データをメインファイルシステムに書き込むことを可能にします。多くの場合、このオプションは、パフォーマンスの点で最善と考えられています。しかし、内部のファイルシステムの完全性が維持される一方で、クラッシュと回復を実施した後では、古いデータがファイル内に再登場させてしまう可能性があります。Ext3では、デフォルトとして、<option>data=ordered</option>オプションを使用します。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.ext3.ext22ext3a">
+   <title>Ext2ファイルシステムからExt3への変換</title>
+   <para>
+    Ext2ファイルシステムをExt3に変換するには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Ext3ジャーナルの作成には、<command>tune2fs -j</command>を<systemitem class="username">root</systemitem>ユーザとして実行します。
+     </para>
+     <para>
+      この結果、デフォルトのパラメータを使用してExt3ジャーナルが作成されます。
+     </para>
+     <para>
+      ジャーナルのサイズおよびジャーナルを常駐させるデバイスを指定するには、<command>tune2fs </command><option>-J</option>とともに適切なジャーナルオプション<option>size=</option>および<option>device=</option>を指定して、実行します。<command>tune2fs</command>プログラムの詳細については、<command>tune2fs</command>のマニュアルページを参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      ファイル<filename>/etc/fstab</filename>を<systemitem class="username">root</systemitem>ユーザとして編集して、該当するパーティションに指定されているファイルシステムタイプを<literal>ext2</literal>から<literal>ext3</literal>に変更し、その変更内容を保存します。
+     </para>
+     <para>
+      これにより、Ext3ファイルシステムが認識されるようになります。この変更結果は、次回の再起動後に有効になります。
+     </para>
+    </step>
+    <step>
+     <para>
+      Ext3パーティションとしてセットアップされたルートファイルシステムをブートするには、<literal>ext3</literal>と<literal>jbd</literal>の各モジュールを<filename>initrd</filename>に追加します。それには、次を実行します。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        次の行を<filename>/etc/dracut.conf.d/01-dist.conf</filename>に追加します。
+       </para>
+<screen>force_drivers+="ext3 jbd"</screen>
+      </step>
+      <step>
+       <para>
+        <command>dracut </command><option>-f</option>コマンドを実行します。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      システムを再起動します。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.filesystems.major.ext3.inodesize">
+   <title>Ext3ファイルシステムのinodeサイズとinode数</title>
+   <para>
+    inodeには、ファイルシステム内のファイルとそのブロック位置に関する情報が格納されます。拡張した属性とACLのためのスペースをinode内に確保するため、Ext3のデフォルトのinodeサイズは、SLES 10での128バイトから、SLES 11では256バイトに拡大されました。SLES 10と比較して、SLES 11上で新しいExt3ファイルシステムを作成する際、同数のinodeに対する事前割り当てされたデフォルトのスペースの量は2倍になり、ファイルシステム内のファイルに対して使用可能なスペースは、その分少なくなっています。したがって、同数のinodeとファイルを収容するのに、SLES 10上のExt3ファイルシステムの場合より大きなパーティションを使用する必要があります。
+   </para>
+   <para>
+    新規のExt3ファイルシステムを作成する際、inodeテーブル内のスペースは、作成可能なinodeの総数に対して事前に割り当てられています。バイト数/inode数の比率と、ファイルシステムのサイズによって、inode数の上限が決まります。ファイルシステムが作成されると、バイト数/inode数のバイト数の各スペースに対して、1つのinodeが作成されます。
+   </para>
+<screen>number of inodes = total size of the file system divided by the number of bytes per inode</screen>
+   <para>
+    inodeの数によって、ファイルシステム内に保有できるファイルの数が決まります。つまり、各ファイルにつき1つのinodeです。inodeサイズの増大と、利用可能なスペースの縮小に対応するため、バイト数/inode数の比率のデフォルトが、SLES 10での8192バイトから、SLES 11では16384バイトに増えています。この2倍に増えた比率により、作成可能なファイルの数は、SLES 10上のExt3ファイルシステムで可能だった数の半分となります。
+   </para>
+   <important>
+    <title>既存のExt3ファイルシステムのInodeサイズの変更</title>
+    <para>
+     inodeの割り当て後は、inodeサイズやバイト数/inode数の比率の設定を変えることはできません。異なる設定のファイルシステムを再度作成するか、ファイルシステムを拡張しない限り、新規のinodeは設定できません。inodeの最大数を超えると、ファイルをいくつか削除するまで、ファイルシステム上に新規のファイルを作成することはできません。
+    </para>
+   </important>
+   <para>
+    新規のExt3ファイルシステムを作成する際に、inodeのスペース使用をコントロールするためのinodeサイズとバイト数/inode数の比率、およびファイルシステム上のファイル数の上限を指定することができます。ブロックサイズ、inodeサイズ、およびバイト数/inode数の比率が指定されない場合は、<filename>/etc/mked2fs.conf</filename>ファイル内のデフォルト値が適用されます。詳細については、<filename>mke2fs.conf(5)</filename>マニュアルページを参照してください。
+   </para>
+   <para>
+    次のガイドラインを使用します。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <formalpara>
+      <title>inodeサイズ</title>
+      <para>
+       デフォルトのinodeサイズは256バイトです。2の累乗で、ブロックサイズ以下の128以上のバイト数の値を指定します(128、256、512など)。Ext3ファイルシステムで拡張属性またはACLを使用しない場合は、128バイトのみを使用してください。
+      </para>
+     </formalpara>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>バイト数/inode数の比率:</title>
+      <para>
+       デフォルトのバイト数/inode数の比率は、16384バイトです。有効なバイト数/inode数の比率は、2の累乗で1024バイト以上(1024、2048、4096、8192、16384、32768など)です。この値は、ファイルシステムのブロックサイズより小さくはできません。なぜなら、ブロックサイズは、データを格納するために使用するスペースの最小チャンクだからです。Ext3ファイルシステムのデフォルトのブロックサイズは、4 KBです。
+      </para>
+     </formalpara>
+     <para>
+      また、格納する必要があるファイルの数とサイズを、検討する必要があります。たとえば、ファイルシステムに多数の小さなファイルを持つことになる場合は、バイト数/inode数の比率を小さめに指定すれば、inodeの数を増やすことができます。ファイルシステムに非常に大きなファイルを入れる場合は、バイト数/inode数の比率を大きめに指定できますが、それによって許容されるinodeの数は減ります。
+     </para>
+     <para>
+      一般的に、inodeの数は、足りなくなるよりは多すぎる方が得策です。inodeの数が少な過ぎてファイルも非常に小さい場合、実際には空であってもディスク上のファイルの最大数に到達してしまいます。inodeの数が多すぎて、ファイルが非常に大きい場合は、空き領域があることが表示されたとしても、それを使うことができません。なぜなら、inode用に確保されたスペースに新規のファイルを作成することはできないからです。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Ext3ファイルシステムで拡張属性またはACLを使用しない場合は、ファイルシステムの作成時に、inodeサイズとして128バイト、バイト数/inode数の比率として8192バイトを指定して、SLES 10の動作を復元することができます。inodeサイズとバイト数/inode数の比率を設定するには、次のいずれかの方法を使用します。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <formalpara>
+      <title>すべての新規Ext3ファイルのデフォルト設定を変更する:</title>
+      <para>
+       テキストエディタで、<filename>/etc/mke2fs.conf</filename>ファイルの<literal>defaults</literal>セクションを変更して、<literal>inode_size</literal>および<literal>inode_ratio</literal>を、希望するデフォルト値に設定します。その値が、すべての新規のExt3ファイルシステムに適用されます。たとえば、
+      </para>
+     </formalpara>
+<screen>blocksize = 4096
+inode_size = 128
+inode_ratio = 8192</screen>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>コマンドラインで:</title>
+      <para>
+       Ext3ファイルシステムを作成する際に、inodeサイズ(<literal>-I 128</literal>)およびバイト数/inode数の比率(<literal>-i 8192</literal>)を、<command>mkfs.ext3(8)</command>コマンドまたは<command>mke2fs(8)</command>コマンドに渡します。たとえば、次のコマンドのいずれかを使用します:
+      </para>
+     </formalpara>
+<screen>sudo mkfs.ext3 -b 4096 -i 8092 -I 128 /dev/sda2
+sudo mke2fs -t ext3 -b 4096 -i 8192 -I 128 /dev/sda2</screen>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>YaSTを使用したインストール時に:</title>
+      <para>
+       インストール時に新規のExt3ファイルシステムを作成する際に、inodeサイズとバイト数/inode数の比率を渡します。YaST<guimenu>フォーマット設定のオプション</guimenu>にある<guimenu>パーティションの編集</guimenu>ページで、<guimenu>パーティションのフォーマット</guimenu><guimenu>Ext3</guimenu>を選択して、<guimenu>オプション</guimenu>をクリックします。<guimenu>ファイルシステムオプション</guimenu>ダイアログで、<guimenu>ブロックサイズ(バイト単位)</guimenu>、<guimenu>inodeごとのバイト数</guimenu>、および<guimenu>iノードのサイズ</guimenu>ドロップダウンボックスから、希望の値を選択します。
+      </para>
+     </formalpara>
+     <para>
+      たとえば、<guimenu>ブロックサイズ(バイト単位)</guimenu>ドロップダウンボックスから4096を選択し<guimenu>inodeごとのバイト数</guimenu>ドロップダウンボックスから8192を選択し、<guimenu>iノードのサイズ</guimenu>ドロップダウンボックスから128を選択して、<guimenu>OK</guimenu>をクリックします。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="ext3_inode_yast_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="ext3_inode_yast_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>AutoYaSTを使用したインストール時に:</title>
+      <para>
+       autoyastのプロファイルで、<literal>fs_options</literal>タグを使用して、<literal>opt_bytes_per_inode</literal>の比率の値を、-iに対して8192に、<literal>opt_inode_density</literal>の値を-Iに対して 128に設定することができます。
+      </para>
+     </formalpara>
+<screen>
+&lt;partitioning config:type="list"&gt;
+  &lt;drive&gt;
+    &lt;device&gt;/dev/sda&lt;/device&gt;
+    &lt;initialize config:type="boolean"&gt;true&lt;/initialize&gt;
+    &lt;partitions config:type="list"&gt;
+      &lt;partition&gt;
+        &lt;filesystem config:type="symbol"&gt;ext3&lt;/filesystem&gt;
+        &lt;format config:type="boolean"&gt;true&lt;/format&gt;
+        &lt;fs_options&gt;
+          &lt;opt_bytes_per_inode&gt;
+            &lt;option_str&gt;-i&lt;/option_str&gt;
+            &lt;option_value&gt;8192&lt;/option_value&gt;
+          &lt;/opt_bytes_per_inode&gt;
+          &lt;opt_inode_density&gt;
+            &lt;option_str&gt;-I&lt;/option_str&gt;
+            &lt;option_value&gt;128&lt;/option_value&gt;
+          &lt;/opt_inode_density&gt;
+        &lt;/fs_options&gt;
+        &lt;mount&gt;/&lt;/mount&gt;
+        &lt;partition_id config:type="integer"&gt;131&lt;/partition_id&gt;
+        &lt;partition_type&gt;primary&lt;/partition_type&gt;
+        &lt;size&gt;25G&lt;/size&gt;
+      &lt;/partition&gt;
+    &lt;/partitions&gt;
+  &lt;/drive&gt;
+&lt;partitioning&gt;</screen>
+    </listitem>
+   </itemizedlist>
+   <para>
+    詳細については、<link xlink:href="http://www.suse.com/support/kb/doc.php?id=7009075"/>を参照してください(<citetitle>SLES11のExt3パーティションには、SLES10で格納できるファイルの50%しか格納することができません</citetitle>) [技術情報文書7009075]。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.major.ext4">
+  <title>Ext4</title>
+
+  <para>
+   2006年に、Ext4はExt3の後継として登場しました。最大1エクスビバイトのサイズのボリューム、最大16テビバイトのサイズのファイル、および無制限のサブディレクトリをサポートすることによって、Ext3のストレージに関する制限を解消しました。同時に、遅延ブロック割り当て、ファイルシステムチェックルーチンの大幅な高速化など、さまざまなパフォーマンス強化も図られています。また、Ext4は、ジャーナルチェックサムのサポートおよびナノ秒単位でのタイムスタンプの提供により、信頼性を高めています。Ext4には、Ext2およびExt3との完全な後方互換性があり、どちらのファイルシステムもExt4としてマウントできます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.major.reiser">
+  <title>ReiserFS</title>
+
+  <para>
+   2.4カーネルリリースから公式に主要機能として採用されたReiserFSは、SUSE 6.4以降、2.2.x SUSEカーネルのカーネルパッチとして利用可能となりました。ReiserFSは、Hans ReiserとNamesys開発チームにより設計されました。ReiserFSは、Ext2に代わる強力な選択肢であることを実証してきました。ReiserFSの主要な利点としては、より効率的なディスクスペースの使用、より優れたディスクアクセスパフォーマンス、より高速なクラッシュ回復、およびデータジャーナリングの使用による信頼性の向上があります。
+  </para>
+
+  <important>
+   <title><phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12でのReiserFSのサポート</title>
+   <para>
+    既存のReiserFSパーティションは、マイグレーション専用に、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12のライフタイム中はサポートされます。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12から、新しいReiserFSファイルシステムの作成はサポートされなくなりました。
+   </para>
+  </important>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.other">
+  <title>サポートされている他のファイルシステム</title>
+
+  <para role="intro">
+   <xref linkend="tab.filesystems.other" xrefstyle="TableXRef"/>は、Linuxがサポートしている他のいくつかのファイルシステムを要約したものです。これらは主に、他の種類のメディアや外部オペレーティングシステムとの互換性およびデータの相互交換を保証することを目的としてサポートされています。
+  </para>
+
+  <table xml:id="tab.filesystems.other">
+   <title>Linux環境でのファイルシステムのタイプ</title>
+   <tgroup cols="2">
+    <colspec colnum="1" colname="1" colwidth="2381*"/>
+    <colspec colnum="2" colname="2" colwidth="7620*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        ファイルシステムのタイプ
+       </para>
+      </entry>
+      <entry>
+       <para>
+        説明
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        <systemitem>cramfs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Compressed ROM file system (圧縮ROMファイルシステム): ROM用の圧縮された読み込み専用ファイルシステムです。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>hpfs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        High Performance File System（ハイパフォーマンスファイルシステム） ：IBM OS/2の標準ファイルシステム。読み取り専用モードでのみサポートされます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>iso9660</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        CD-ROMの標準ファイルシステム。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>minix</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        このファイルシステムは、オペレーティングシステムに関する学術的なプロジェクトを起源とするもので、Linuxで最初に使用されたファイルシステムです。現在では、フロッピーディスク用のファイルシステムとして使用されています。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>msdos</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <filename>fat</filename>、つまり当初はDOSで使用されていたファイルシステムであり、現在はさまざまなオペレーティングシステムで使用されています。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>ncpfs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Novellのボリュームをネットワーク経由でマウントするためのファイルシステム。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>nfs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Network File System (ネットワークファイルシステム) ：ネットワーク内の任意のコンピュータにデータを格納でき、ネットワーク経由でアクセスを付与できます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>ntfs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Windows NT file system (NTファイルシステム) ：読み取り専用です。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>smbfs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Server Message Block (サーバメッセージブロック): Windowsのような製品が、ネットワーク経由でのファイルアクセスを可能にする目的で採用しています。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>sysv</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        SCO UNIX、Xenix、およびCoherent(PC用の商用UNIXシステム)が採用。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>ufs</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        BSD、SunOS、およびNextStepで使用されています。読み取り専用モードでサポートされています。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>umsdos</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        UNIX on MS-DOS(MS-DOS上のUNIX) - 標準<filename>fat</filename>ファイルシステムに適用され、特別なファイルを作成することによりUNIXの機能(パーミッション、リンク、長いファイル名)を実現します。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        <systemitem>vfat</systemitem>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        Virtual FAT: <literal>fat</literal>ファイルシステムを拡張したものです(長いファイル名をサポートします)。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+ </sect1>
+ <sect1 xml:id="sec.filesystems.lfs">
+  <title>Linux環境での大規模ファイルサポート</title>
+
+  <para>
+   当初、Linuxは、最大ファイルサイズとして 2GiB (2<superscript>31</superscript>バイト)をサポートしていました。また、ファイルシステムに大規模ファイルサポートが付いていない限り、32ビットシステム上での最大ファイルサイズは2GiBです。
+  </para>
+
+  <para>
+   現在、弊社のすべての標準ファイルシステムでは、LFS (大規模ファイルサポート)を提供しています。LFSは、理論的には、2<superscript>63</superscript>バイトの最大ファイルサイズをサポートします。<xref linkend="tab.filesystems.maxsize" xrefstyle="TableXRef"/>では、Linuxのファイルとファイルシステムの、現行のオンディスクフォーマットの制限事項を概説しています。表内の数字は、ファイルシステムで使用しているブロックサイズが、共通規格である4KiBであることを前提としています。異なるブロックサイズを使用すると結果は異なります。スパースブロックを使用している場合、<xref linkend="tab.filesystems.maxsize" xrefstyle="TableXRef"/>に記載の最大ファイルサイズは、ファイルシステムの実際のサイズより大きいことがあります。
+  </para>
+
+  <note>
+   <title>バイナリの倍数</title>
+   <para>
+    このマニュアルでの換算式: 1024バイト = 1KiB、1024KiB  = 1MiB、1024MiB  = 1GiB、1024GiB = 1TiB、1024TiB = 1PiB、1024PiB = 1EiB（「<link xlink:href="http://physics.nist.gov/cuu/Units/binary.html"><citetitle>NIST: Prefixes for Binary Multiples</citetitle></link>」も参照してください)。
+   </para>
+  </note>
+
+  <table xml:id="tab.filesystems.maxsize">
+   <title>ファイルおよびファイルシステムの最大サイズ(オンディスクフォーマット、4KiBブロックサイズ)</title>
+   <tgroup cols="3">
+    <colspec colnum="1" colname="1" colwidth="3334*"/>
+    <colspec colnum="2" colname="2" colwidth="3334*"/>
+    <colspec colnum="3" colname="3" colwidth="3334*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        ファイルシステム(4KiBブロックサイズ)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ファイルシステムの最大サイズ
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ファイルの最大サイズ
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        Btrfs
+       </para>
+      </entry>
+      <entry>
+       <para>
+        16EiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        16EiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        Ext3
+       </para>
+      </entry>
+      <entry>
+       <para>
+        16TiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        2TiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        Ext4
+       </para>
+      </entry>
+      <entry>
+       <para>
+        1EiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        16TiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        OCFS2 (High Availability Extensionで使用可能な、クラスタ認識のファイルシステム)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        16TiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        1EiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        ReiserFS v3.6
+       </para>
+      </entry>
+      <entry>
+       <para>
+        16TiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        1EiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        XFS
+       </para>
+      </entry>
+      <entry>
+       <para>
+        8EiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        8EiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        NFSv2 (クライアント側)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        8EiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        2GiB
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        NFSv3 (クライアント側)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        8EiB
+       </para>
+      </entry>
+      <entry>
+       <para>
+        8EiB
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <important>
+   <title>制限</title>
+   <para>
+    <xref linkend="tab.filesystems.maxsize" xrefstyle="TableXRef"/>は、ディスクフォーマット時の制限について説明しています。Linuxカーネルは、操作するファイルとファイルシステムのサイズについて、独自の制限を課しています。管理の初期設定には、次のオプションがあります。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>ファイルサイズ</term>
+     <listitem>
+      <para>
+       32ビットシステムでは、ファイルサイズが2TiB (2<superscript>41</superscript>バイト)を超えることはできません。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ファイルシステムのサイズ</term>
+     <listitem>
+      <para>
+       ファイルシステムのサイズは、最大2<superscript>73</superscript>バイトまで可能です。しかし、この制限は、現在使用可能なハードウェアが到達可能な範囲を上回っています。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </important>
+ </sect1>
+ <sect1 xml:id="sect.filesystems.stor_limits">
+  <title>Linuxのカーネルにおけるストレージの制限</title>
+
+  <para>
+   <xref linkend="tab.filesystems.stor_limits" xrefstyle="TableXRef"/>に、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>に関連したストレージに関するカーネルの制限をまとめています。
+  </para>
+
+  <table xml:id="tab.filesystems.stor_limits">
+   <title>ストレージの制限</title>
+   <tgroup cols="2">
+    <colspec colnum="1" colname="1" colwidth="5001*"/>
+    <colspec colnum="2" colname="2" colwidth="5001*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        ストレージの機能
+       </para>
+      </entry>
+      <entry>
+       <para>
+        制限
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        サポートされるLUNの最大数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ターゲットあたり16384 LUN。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        単一LUNあたりのパスの最大数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        デフォルトで無制限。それぞれのパスが、通常のLUNとして扱われます。
+       </para>
+       <para>
+        実際の制限は、ターゲットあたりのLUNの数と、HBAあたりのターゲットの数(ファイバチャネルHBAの場合は16777215)により決まります。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        HBAの最大数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        無制限. 実際の制限は、システムのPCIスロットの量で決まります。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        オペレーティングシステムあたりの、デバイスマッパーマルチパス付きパスの最大数(合計)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        約1024。実際の数は、デバイス番号文字列の長さによります。これはマルチパスツール内のコンパイル時変数であり、この制限が問題となる場合は増やすこともできます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        最大サイズ(ブロックデバイスごと)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        最大8EiB。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+ </sect1>
+ <sect1 xml:id="sect.filesystems.trouble">
+  <title>ファイルシステムのトラブルシューティング</title>
+
+  <para>
+   本項では、ファイルシステムに関するいくつかの既知の問題と、考えられる解決手段について説明します。
+  </para>
+
+  <sect2 xml:id="sect.filesystems.trouble.btrfs_volfull">
+   <title>Btrfsエラー: デバイスに空き領域がない</title>
+   <para>
+    Btrfsファイルシステムを使用しているルート(<filename>/</filename>)パーティションにデータを書き込めなくなります。<quote><literal>No space left on device</literal></quote>というエラーが表示されます。
+   </para>
+   <para>
+    考えられる原因とこの問題の回避策については、この後の各項を参照してください。
+   </para>
+   <sect3 xml:id="sect.filesystems.trouble.btrfs_volfull.snapshots">
+    <title>Snapperスナップショットによるディスク容量の使用</title>
+    <para>
+     BtrfsファイルシステムでSnapperが動作している場合、<quote><literal>No space left on device</literal></quote>が表示される問題は、通常は、システム上にスナップショットとして保存されているデータが多すぎるために発生します。
+    </para>
+    <para>
+     Snapperからいくつかのスナップショットを削除することはできますが、スナップショットはすぐには削除されないので、必要な容量が解放されない可能性があります。
+    </para>
+    <para>
+     Snapperからファイルを削除するには:
+    </para>
+    <procedure>
+     <step>
+      <para>
+       端末コンソールを開きます。
+      </para>
+     </step>
+     <step>
+      <para>
+       コマンドプロンプトで、たとえば「<command>btrfs filesystem show</command>」と入力します。
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo btrfs filesystem show
+Label: none uuid: 40123456-cb2c-4678-8b3d-d014d1c78c78
+ Total devices 1 FS bytes used 20.00GB
+ devid 1 size 20.00GB used 20.00GB path /dev/sda3</screen>
+     </step>
+     <step>
+      <para>
+       次のように入力します。
+      </para>
+<screen>sudo btrfs fi balance start <replaceable>mountpoint</replaceable> -dusage=5</screen>
+      <para>
+       このコマンドは、データを空またはほぼ空のデータチャンクに再配置して、その容量を回収し、メタデータに再割り当てしようとします。この処理にはしばらくかかります(1TBで数時間)が、処理中もシステムは使用可能です。
+      </para>
+     </step>
+     <step>
+      <para>
+       Snapperのスナップショットを一覧にします。次のように入力します。
+      </para>
+<screen>sudo snapper -c root list</screen>
+     </step>
+     <step>
+      <para>
+       Snapperから1つ以上のスナップショットを削除します。次のように入力します。
+      </para>
+<screen>sudo snapper -c root delete <replaceable>snapshot_number(s)</replaceable></screen>
+      <para>
+       必ず最も古いスナップショットを最初に削除してください。古いスナップショットほど、多くの容量を使用します。
+      </para>
+     </step>
+    </procedure>
+    <para>
+     この問題が発生しないように、Snapperのクリーンアップアルゴリズムを変更できます。詳細については、<xref linkend="sec.snapper.manage.metadata.cleanup"/>を参照してください。スナップショットクリーンアップを制御する設定値は、<envar>EMPTY_*</envar>、<envar>NUMBER_*</envar>、および<envar>TIMELINE_*</envar>です。
+    </para>
+    <para>
+     ファイルシステムディスクでBtrfsとSnapperを使用する場合、標準のストレージ案の2倍のディスク容量を確保しておくことが推奨されます。YaSTパーティショナは、ルートファイルシステムでBtrfsを使用する場合のストレージ案として、自動的に標準の2倍のディスク容量を提案します。
+    </para>
+   </sect3>
+   <sect3 xml:id="sect.filesystems.trouble.btrfs_volfull.var">
+    <title>ログ、クラッシュ、およびキャッシュのファイルによるディスク容量の使用</title>
+    <para>
+     システムディスクがデータでいっぱいになりつつある場合、<filename>/var/log</filename>、<filename>/var/crash</filename>、および<filename>/var/cache</filename>からファイルを削除する方法があります。
+    </para>
+    <para>
+     Btrfs <systemitem class="username">root</systemitem>ファイルシステムのサブボリューム<filename>/var/log</filename>、<filename>/var/crash</filename>および<filename>/var/cache</filename>が、通常の操作時に利用可能なディスクスペースのすべてを使用でき、システムに不具合が発生します。この状況を回避するため、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>ではサブボリュームに対するBtrfsクォータのサポートを提供するようになりました。詳細については、<xref linkend="sec.filesystems.major.btrfs.quota"/>を参照してください。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sect.filesystems.trouble.trim">
+   <title>未使用のファイルシステムブロックの解放</title>
+   <para>
+    SSD(Solid-State Drive)およびシンプロビジョニングされたボリュームでは、ファイルシステムによって使用されていないブロックに対してTrimを実行すると効果的です。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>は、<literal>unmap</literal>または<literal>trim</literal>の手法をサポートするすべてのファイルシステムで、これらの操作を完全にサポートします。
+   </para>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>でサポートされるファイルシステムのTrimの方法としては、<command>/sbin/wiper.sh</command>を実行することをお勧めします。このスクリプトを実行する前に、必ず<filename>/usr/share/doc/packages/hdparm/README.wiper</filename>を読んでください。ほとんどのデスクトップおよびサーバシステムでは、Trimは週1回実行すれば十分です。ファイルシステムを<option>-o discard</option>でマウントすることは、パフォーマンスの低下を伴い、SSDの寿命に悪影響を与えることがあるため、推奨しません。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec_filesystems_info">
+  <title>追加情報</title>
+
+  <para>
+   ここまでに説明した各ファイルシステムのプロジェクトには、独自のWebページがあります。そこで詳しいドキュメントとFAQ、さらにメーリングリストを参照することができます。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     Kernel.orgのBtrfs Wiki: <link xlink:href="https://btrfs.wiki.kernel.org/"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     E2fsprogs: Ext2/3/4 File System Utilities: <link xlink:href="http://e2fsprogs.sourceforge.net/"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Introducing Ext3: <link xlink:href="http://www.ibm.com/developerworks/linux/library/l-fs7/"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     XFS: 高パフォーマンスジャーナリングファイルシステム: <link xlink:href="http://oss.sgi.com/projects/xfs/"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     OCFS2プロジェクト: <link xlink:href="http://oss.oracle.com/projects/ocfs2/"/>
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   Linuxファイルシステムの総合的なマルチパートチュートリアルは、「<citetitle>Advanced File System Implementor's Guide</citetitle>」(<link xlink:href="https://www.ibm.com/developerworks/linux/library/l-fs/"/>)にあるIBM developerWorksで見つけることができます。
+  </para>
+
+  <para>
+   ファイルシステム(Linuxファイルシステムに限らない)の詳しい比較については、Wikipediaプロジェクトの「Comparison of file systems」(<link xlink:href="http://en.wikipedia.org/wiki/Comparison_of_file_systems#Comparison"/>)を参照してください。
+  </para>
+ </sect1>
+</chapter>

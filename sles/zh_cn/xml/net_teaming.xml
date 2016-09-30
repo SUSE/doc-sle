@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model href="urn:x-suse:rng:geekodoc5-flat.rnc" type="application/relax-ng-compact-syntax"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_teaming.xml" version="5.1" xml:id="sec.team">
+ <title>设置小组设备以进行网络协作</title>
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <remark>toms 2016-06-16: FATE#320468</remark>
+
+ <para>
+  <quote>链路聚合</quote>属于通用术语，指组合（或聚合）网络连接以提供逻辑层。有时，您还会看到<quote>通道聚合</quote>、<quote>以太网绑定</quote>、<quote>端口汇聚</quote>等术语，这些同义词都是指同一个概念。
+ </para>
+
+ <para>
+  这个概念通常被称为<quote>绑定</quote>，最初是集成到 Linux 内核中的（请参见<xref linkend="sec.bond"/>了解最初的实现方式）。<emphasis>网络协作</emphasis>一词用来指代这个概念的新实现方式。
+ </para>
+
+ <para>
+  绑定和网络协作之间的主要差别在于，协作提供一组小型内核模块，由它们负责提供用于 teamd 实例的接口。其他一切都在用户空间中处理。这一点与最初的绑定实现方式不同，后者是将自己的所有功能都专门包含在内核中。
+ </para>
+
+ <para>
+  绑定和网络协作这两种实现方式可以并行使用。可将网络协作作为现有绑定实现方式的备选。它不会取代绑定。
+ </para>
+
+ <para>
+  网络协作可用于不同使用情况。稍后将会介绍其中两种最重要的使用情况，它们涉及：
+ </para>
+
+ <itemizedlist>
+  <listitem>
+   <para>
+    不同网络设备之间的负载平衡。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    从一个网络设备到另一个网络设备的故障转移（当其中一个设备出现故障时）。
+   </para>
+  </listitem>
+ </itemizedlist>
+
+ <para>
+  <remark>toms 2016-06-21: FATE#320947 for Teaming in/with YaST</remark>目前没有用于支持创建协作设备的 YaST 模块。您需要手动配置网络协作。以下是适用于所有网络协作配置的一般过程：
+ </para>
+
+ <procedure xml:id="pro.team.general">
+  <title>一般过程</title>
+  <step>
+   <para>
+    确保已安装所有必需的包。安装包
+    <package>libteam-tools</package>
+    、
+    <package>libteamdctl0</package>
+    、
+    <package>libteamdctl0</package>
+     和 
+    <package>python-libteam</package>
+    。
+   </para>
+  </step>
+  <step>
+   <para>
+    在 <filename>/etc/sysconfig/network/</filename> 下创建一个配置文件，通常为 <filename>ifcfg-team0</filename>。如果您需要多个网络协作设备，请为它们指定依次递增的编号。
+   </para>
+   <para>
+    该配置文件包含若干变量，手册页中对这些变量做了说明（请参见 <command>man ifcfg</command> 和 <command>man ifcfg-team</command>）。
+   </para>
+  </step>
+  <step>
+   <para>
+    去除将用于协作设备的接口的配置文件（通常为 <filename>ifcfg-eth0</filename> 和 <filename>ifcfg-eth1</filename>）。
+   </para>
+   <para>
+    建议您先备份这两个文件，然后再将其去除。Wicked 将会使用协作的必要参数重新创建配置文件。
+   </para>
+  </step>
+  <step>
+   <para>
+    （可选）检查 Wicked 的配置文件中是否已包含所有内容：
+   </para>
+<screen>wicked show-config</screen>
+  </step>
+  <step>
+   <para>
+    启动网络协作设备 <systemitem class="service">team0</systemitem>：
+   </para>
+<screen>wicked all ifup team0</screen>
+   <para>
+    如果您需要其他调试信息，请在 <command>all</command> 子命令后面使用 <option>--debug all</option> 选项。
+   </para>
+  </step>
+  <step>
+   <para>
+    检查网络协作设备的状态。通过执行以下命令可以完成该操作：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      从 Wicked 获取 teamd 实例的状态：
+     </para>
+<screen>wicked ifstatus --verbose team0</screen>
+    </listitem>
+    <listitem>
+     <para>
+      获取整个实例的状态：
+     </para>
+<screen>teamdctl team0 state</screen>
+    </listitem>
+    <listitem>
+     <para>
+      获取 teamd 实例的 systemd 状态：
+     </para>
+<screen>systemctl status teamd@team0</screen>
+    </listitem>
+   </itemizedlist>
+   <para>
+    以上各命令将根据您的需要分别显示稍有不同的视图。
+   </para>
+  </step>
+  <step>
+   <para>
+    如果您之后需要对 <filename>ifcfg-team0</filename> 文件中的内容进行更改，请使用以下命令重新装载其配置：
+   </para>
+<screen>wicked ifreload team0</screen>
+  </step>
+ </procedure>
+
+ <para>
+  请<emphasis>勿</emphasis>使用 <command>systemctl</command> 来启动或停止协作设备！而是使用如上所示的 <command>wicked</command> 命令。
+ </para>
+
+ <sect2 xml:id="sec.team.lb">
+  <title>使用案例：使用网络协作实现负载平衡</title>
+  <para>
+   负载平衡用于提高带宽。使用下面的配置文件可创建具有负载平衡功能的网络协作设备。继续<xref linkend="pro.team.general"/>以设置设备。使用 <command>teamdctl</command> 检查输出。
+  </para>
+  <example xml:id="ex.team.lb">
+   <title>通过网络协作进行负载平衡的配置</title>
+<screen>STARTMODE=auto <co xml:id="co.team.lb.startmode"/>
+BOOTPROTO=static <co xml:id="co.team.lb.boot-and-ip"/>
+IPADDRESS="192.168.1.1/24" <xref linkend="co.team.lb.boot-and-ip"/>
+IPADDR6="fd00:deca:fbad:50::1/64" <xref linkend="co.team.lb.boot-and-ip"/>
+
+TEAM_RUNNER="loadbalance" <co xml:id="co.team.lb.loadbalance"/>
+TEAM_LB_TX_HASH="ipv4,ipv6,eth,vlan"
+TEAM_LB_TX_BALANCER_NAME="basic"
+TEAM_LB_TX_BALANCER_INTERVAL="100"
+
+TEAM_PORT_DEVICE_0="eth0" <co xml:id="co.team.lb.dev"/>
+TEAM_PORT_DEVICE_1="eth1" <xref linkend="co.team.lb.dev"/>
+
+TEAM_LW_NAME="ethtool" <co xml:id="co.team.lb.name"/>
+TEAM_LW_ETHTOOL_DELAY_UP="10" <co xml:id="co.team.lb.ethtool.delay"/>
+TEAM_LW_ETHTOOL_DELAY_DOWN="10" <xref linkend="co.team.lb.ethtool.delay"/></screen>
+
+   <calloutlist>
+    <callout arearefs="co.team.lb.startmode">
+     <para>
+      控制协作设备的启动。<literal>auto</literal> 这个值表示接口将在网络服务可用时设置，并且会在每次重引导时自动启动。
+     </para>
+     <para>
+      如果您需要自己来控制设备（并阻止其自动启动），请将 <varname>STARTMODE</varname> 设置为 <literal>manual</literal>。
+     </para>
+    </callout>
+    <callout arearefs="co.team.lb.boot-and-ip">
+     <para>
+      设置静态 IP 地址（此处对于 IPv4 指定 <systemitem class="ipaddress">192.168.1.1</systemitem>，对于 IPv6 指定 <systemitem class="ipaddress">fd00:deca:fbad:50::1</systemitem>）。
+     </para>
+     <para>
+      如果网络协作设备应该使用动态 IP 地址，请设置 <literal>BOOTPROTO="dhcp"</literal> 并去除（或注释掉）带有以下内容的行：
+      <varname>IPADDRESS</varname> 和 <varname>IPADDR6</varname>。
+     </para>
+    </callout>
+    <callout arearefs="co.team.lb.loadbalance">
+     <para>
+      将 <varname>TEAM_RUNNER</varname> 设置为 <literal>loadbalance</literal>，以激活负载平衡模式。
+     </para>
+    </callout>
+    <callout arearefs="co.team.lb.dev">
+     <para>
+      指定应聚合以创建网络协作设备的一个或多个设备。
+     </para>
+    </callout>
+    <callout arearefs="co.team.lb.name">
+     <para>
+      定义链路监视器，以监视从属设备的状态。只有当设备已启动并可访问时，默认值 <literal>ethtool</literal> 才会执行检查。因此，检查速度将会足够快。但是，它不会检查设备实际上是否可以发送或接收包。
+     </para>
+     <para>
+      如果您需要确保连接的可信度更高，请使用 <literal>arp_ping</literal> 选项。这样会将 ping 发送给一个任意主机（在 <varname>TEAM_LW_ARP_PING_TARGET_HOST</varname>
+      变量中进行配置）。仅当收到答复时，网络协作设备才会被视为已启动。
+     </para>
+    </callout>
+    <callout arearefs="co.team.lb.ethtool.delay">
+     <para>
+      定义链路启动（或关闭）与运行程序收到通知之间的延迟（以毫秒为单位）。
+     </para>
+    </callout>
+   </calloutlist>
+  </example>
+ </sect2>
+
+ <sect2 xml:id="sec.team.dhcp">
+  <title>使用案例：使用网络协作实现故障转移</title>
+  <para>
+   故障转移用于确保关键网络协作设备的高可用性，方法是纳入并行的备用网络设备。备用网络设备时刻都在运行，并在主设备出现故障时接替主设备。
+  </para>
+  <para>
+   使用以下配置文件可创建具有故障转移功能的网络协作设备。继续<xref linkend="pro.team.general"/>以设置设备。使用 <command>teamdctl</command> 检查输出。
+  </para>
+  <example xml:id="ex.team.failover">
+   <title>DHCP 网络协作设备的配置</title>
+<screen>STARTMODE=auto <co xml:id="co.team.failover.startmode"/>
+BOOTPROTO=static <co xml:id="co.team.failover.boot-and-ip"/>
+IPADDR="192.168.1.2/24" <xref linkend="co.team.failover.boot-and-ip"/>
+IPADDR6="fd00:deca:fbad:50::2/64" <xref linkend="co.team.failover.boot-and-ip"/>
+
+TEAM_RUNNER=activebackup <co xml:id="co.team.failover.activebackup"/>
+TEAM_PORT_DEVICE_0="eth0" <co xml:id="co.team.failover.dev"/>
+TEAM_PORT_DEVICE_1="eth1" <xref linkend="co.team.failover.dev"/>
+
+TEAM_LW_NAME=ethtool <co xml:id="co.team.failover.name"/>
+TEAM_LW_ETHTOOL_DELAY_UP="10" <co xml:id="co.team.failover.ethtool.delay"/>
+TEAM_LW_ETHTOOL_DELAY_DOWN="10" <xref linkend="co.team.failover.ethtool.delay"/></screen>
+   <calloutlist>
+    <callout arearefs="co.team.failover.startmode">
+     <para>
+      控制协作设备的启动。<literal>auto</literal> 这个值表示接口将在网络服务可用时设置，并且会在每次重引导时自动启动。
+     </para>
+     <para>
+      如果您需要自己来控制设备（并阻止其自动启动），请将 <varname>STARTMODE</varname> 设置为 <literal>manual</literal>。
+     </para>
+    </callout>
+    <callout arearefs="co.team.failover.boot-and-ip">
+     <para>
+      设置静态 IP 地址（此处对于 IPv4 指定 <systemitem class="ipaddress">192.168.1.2</systemitem>，对于 IPv6 指定 <systemitem class="ipaddress">fd00:deca:fbad::50::2</systemitem>）。
+     </para>
+     <para>
+      如果网络协作设备应该使用动态 IP 地址，请设置 <literal>BOOTPROTO="dhcp"</literal> 并去除（或注释掉）带有以下内容的行：
+      <varname>IPADDRESS</varname> 和 <varname>IPADDR6</varname>。
+     </para>
+    </callout>
+    <callout arearefs="co.team.failover.activebackup">
+     <para>
+      将 <varname>TEAM_RUNNER</varname> 设置为 <literal>activebackup</literal> 以激活故障转移模式。
+     </para>
+    </callout>
+    <callout arearefs="co.team.failover.dev">
+     <para>
+      指定应聚合以创建网络协作设备的一个或多个设备。
+     </para>
+    </callout>
+    <callout arearefs="co.team.failover.name">
+     <para>
+      定义链路监视器，以监视从属设备的状态。只有当设备已启动并可访问时，默认值 <literal>ethtool</literal> 才会执行检查。因此，检查速度将会足够快。但是，它不会检查设备实际上是否可以发送或接收包。
+     </para>
+     <para>
+      如果您需要确保连接的可信度更高，请使用 <literal>arp_ping</literal> 选项。这样会将 ping 发送给一个任意主机（在 <varname>TEAM_LW_ARP_PING_TARGET_HOST</varname>
+      变量中进行配置）。仅当收到答复时，网络协作设备才会被视为已启动。
+     </para>
+    </callout>
+    <callout arearefs="co.team.failover.ethtool.delay">
+     <para>
+      定义链路启动（或关闭）与运行程序收到通知之间的延迟（以毫秒为单位）。
+     </para>
+    </callout>
+   </calloutlist>
+  </example>
+ </sect2>
+</sect1>

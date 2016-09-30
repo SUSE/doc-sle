@@ -1,0 +1,550 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_nfs.xml" version="5.0" xml:id="cha.nfs">
+
+
+
+ <title>通过 NFS 共享文件系统</title>
+ <info>
+  <abstract>
+   <para>
+    在企业环境中通过网络分发和共享文件系统是一项常见任务。久经验证的网络文件系统 (<emphasis>NFS</emphasis>) 与黄页协议 <emphasis>NIS</emphasis> 协同工作。如需与 <emphasis>LDAP</emphasis> 和 Kerberos 搭配使用且更为安全的协议，请选中 <emphasis>NFSv4</emphasis>（默认值）。结合使用 pNFS，您可以突破性能瓶颈。
+   </para>
+
+   <para>
+    NFS 与 NIS 一起使用时网络面向用户是透明的。利用 NFS，可以通过网络分发任意文件系统。进行适当的设置后，用户将发现自己始终处于同一环境中，而与当前使用的终端无关。
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+<indexterm><primary>NFS</primary></indexterm><indexterm><primary>网络文件系统</primary><see>NFS</see></indexterm>
+ <important os="sles;osuse">
+  <title>需要 DNS 的原因</title>
+  <para>
+   从理论上讲，所有导出都可以仅使用 IP 地址来完成。为避免超时，您需要一个有效的 DNS 系统。至少为了日志记录目的也应使用 DNS，因为 mountd 守护程序执行反向查找。
+  </para>
+ </important>
+ <sect1 xml:id="sec.nfs.term">
+  <title>术语</title>
+
+  <para>
+   下面是 YaST 模块中使用的术语。
+  </para>
+
+
+
+  <variablelist>
+   <varlistentry>
+    <term>导出</term>
+    <listitem>
+     <para>
+      由 NFS 服务器<emphasis>导出的</emphasis>目录，客户端可将其集成到系统中。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>NFS 客户端</term>
+    <listitem>
+     <para>
+      NFS 客户端是通过网络文件系统协议使用来自 NFS 服务器的 NFS 服务的系统。TCP/IP 协议已集成到 Linux 内核中；无需再安装任何其他软件。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>NFS 服务器</term>
+    <listitem>
+     <para>
+      NFS 服务器向客户端提供 NFS 服务。运行中的服务器依赖于以下守护程序：<systemitem class="daemon">nfsd</systemitem>（工作）、<systemitem class="daemon">idmapd</systemitem>（到 ID 的用户和组名映射，反之亦然）、<systemitem class="daemon">statd</systemitem>（文件锁定）和 <systemitem class="daemon">mountd</systemitem>（装入请求）。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>NFSv3</term>
+    <listitem>
+     <para>
+      NFSv3 是版本 3 实施，支持客户端身份验证的<quote>旧版</quote>无状态 NFS。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>NFSv4</term>
+    <listitem>
+     <para>
+      NFSv4 是新的版本 4 实施，支持通过 kerberos 进行安全用户身份验证。NFSv4 只需要一个端口，因此，它比 NFSv3 更适合用于防火墙后的环境。
+     </para>
+     <para>
+      协议指定为 <link xlink:href="http://tools.ietf.org/html/rfc3530"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>pNFS</term>
+    <listitem>
+     <para>
+      并行 NFS，属于 NFSv4 的一种协议扩展。任何 pNFS 客户端都可以直接访问 NFS 服务器上的数据。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+
+ 
+
+ <sect1 os="sles;osuse" xml:id="sec.nfs.installation">
+  <title>安装 NFS 服务器</title>
+
+  <para>
+   NFS 服务器软件不会默认安装。如果您按照<xref linkend="sec.nfs.configuring-nfs-server"/>中的说明配置 NFS 服务器，则系统会自动提示您安装所需的包。或者，使用 YaST 或 Zypper 安装包 <systemitem class="resource">nfs-kernel-server</systemitem>。
+  </para>
+
+  <para>
+   与 NIS 一样，NFS 也是一个客户端/服务器系统。但是，一台计算机可充当这两种角色：它可以通过网络提供文件系统（导出），也可以从其他主机装入文件系统（导入）。
+  </para>
+
+  <note>
+
+   <title>在导出服务器上本地装入 NFS 卷</title>
+   <para>
+    SUSE Linux Enterprise 系统不支持在导出服务器上本地装入 NFS 卷，所有企业级 Linux 系统同样也不支持。
+   </para>
+  </note>
+ </sect1>
+ <sect1 xml:id="sec.nfs.configuring-nfs-server" os="sles;osuse">
+  <title>配置 NFS 服务器</title>
+
+  <para>
+   可通过 YaST 配置 NFS 服务器，也可以手动配置它。NFS 还可与 Kerberos 结合来进行身份验证。
+  </para>
+
+  <sect2 xml:id="sec.nfs.export-yast2">
+   <title>使用 YaST 导出文件系统</title><indexterm><primary>NFS</primary> <secondary>服务器</secondary></indexterm>
+   <para>
+    使用 YaST 将网络中的某台主机转换为 NFS 服务器，此服务器可将目录和文件导出到所有有权访问它的主机或导出到某个组的所有成员。因此，无需在每台主机本地安装应用程序，服务器也能提供应用程序。
+   </para>
+   <para>
+    要设置此类服务器，请继续执行以下步骤：
+   </para>
+   <procedure xml:id="pro.nfs.export-yast2.nfs">
+    <title>设置 NFS 服务器</title>
+    <step>
+     <para>
+      启动 YaST 并选择<menuchoice><guimenu>网络服务</guimenu> <guimenu>NFS 服务器</guimenu></menuchoice>；请参见<xref linkend="fig.inst.nfsserver1"/>。系统会提示您安装其他软件。
+     </para>
+     <figure xml:id="fig.inst.nfsserver1">
+      <title>NFS 服务器配置工具</title>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="yast2_inst_nfsserver1.png" width="75%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="yast2_inst_nfsserver1.png" width="75%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </figure>
+    </step>
+    <step>
+     <para>
+      激活<guimenu>启动</guimenu>单选按钮。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果防火墙在您的系统 (SuSEfirewall2) 中处于活动状态，请选中<guimenu>在防火墙中打开端口</guimenu>。YaST 会针对 NFS 服务器更改其配置，方法是启用 <systemitem class="service">nfs</systemitem> 服务。
+     </para>
+    </step>
+    <step>
+     <para>
+      选中是否<guimenu>启用 NFSv4</guimenu>。如果您停用 NFSv4，YaST 将只支持 NFSv3。有关启用 NFSv2 的信息，请参见<xref linkend="sec.nfs.export.manual.nsfv2"/>。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        如果选择 NFSv4，另外还请输入相应的 NFSv4 域名。
+       </para>
+       <para>
+        请确保名称与访问此特定服务器的任何 NFSv4 客户端的 <filename>/etc/idmapd.conf</filename> 文件中的名称相同。此参数用于（服务器和客户端上）NFSv4 支持所需的 <systemitem class="daemon">idmapd</systemitem> 守护程序。如果没有特殊要求，请将它保留为 <literal>localdomain</literal>（默认值）。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      如果您需要安全访问服务器，请单击<guimenu>启用 GSS 安全性</guimenu>。先决条件是您的域中安装了 Kerberos 并且服务器和客户端都已采用 Kerberos 系统。<remark>emap 2011-0824: A reference to a Kerberos chapter
+      would be good.</remark>单击<guimenu>下一步</guimenu>继续执行下一个配置对话框。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击对话框上半部分中的<guimenu>添加目录</guimenu>以导出您的目录。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果您尚未配置允许的主机，系统会自动弹出另一个对话框及相应的选项，供您输入客户端信息。输入主机通配符（通常您可以保留默认值不变）。
+     </para>
+
+     <para>
+      可以为每个主机设置四类主机通配符：单主机（名称或 IP 地址）、网络组、通配符（如 <literal>*</literal> 表示所有计算机都能访问服务器）和 IP 网络。
+     </para>
+     <para>
+      有关这些选项的更多信息，请参见 <literal>exports</literal> 手册页。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>以完成配置。
+     </para>
+    </step>
+   </procedure>
+
+
+
+
+
+
+  </sect2>
+
+
+
+  <sect2 xml:id="sec.nfs.export.manual" os="sles;osuse">
+   <title>手动导出文件系统</title><indexterm><primary>NFS</primary><secondary>导出</secondary></indexterm>
+   <para>
+    NFS 导出服务的配置文件是 <filename>/etc/exports</filename> 和 <filename>/etc/sysconfig/nfs</filename>。除了这些文件之外，NFSv4 服务器配置还需要 <filename>/etc/idmapd.conf</filename>。要启动或重启动服务，请运行命令 <command>systemctl restart nfsserver</command>。如果在 <filename>/etc/sysconfig/nfs</filename> 中配置了 NFSv4，这还将启动 <literal>rpc.idmapd</literal>。NFS 服务器依赖于运行的 RPC 端口映射器。因此，它还会启动或重启动该端口映射器服务。
+
+   </para>
+
+
+   <note>
+    <title>NFSv4</title>
+    <para>
+     NFSv4 是 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上可用的最新版 NFS 协议。现在，通过 NFSv4 导出所用的配置目录与通过 NFSv3 导出所用的目录相同。
+    </para>
+    <para>
+     在以前的 SUSE Linux Enterprise Server 11 版本上，会将 BIND 强制装入 <filename>/etc/exports</filename>。该设置仍然受支持，但现在已弃用。
+    </para>
+   </note>
+   <variablelist>
+    <varlistentry>
+     <term>/etc/exports</term>
+     <listitem>
+      <para>
+       <filename>/etc/exports</filename> 文件包含项列表。每个条目表示共享的目录以及共享的方式。<filename>/etc/exports</filename> 中的条目通常包含：
+      </para>
+<screen>/<replaceable>shared</replaceable>/<replaceable>directory</replaceable>   <replaceable>host</replaceable>(<replaceable>option_list</replaceable>)</screen>
+      <para>
+       例如：
+      </para>
+<screen>/export/data   192.168.1.2(rw,sync)</screen>
+      <para>
+       在此，使用 IP 地址 <literal>192.168.1.2</literal> 标识允许的客户端。您可以使用主机名、表示一组主机的通配符（<literal>*.abc.com</literal>、<literal>*</literal> 等）或网络组 (<literal>@my-hosts</literal>)。
+      </para>
+      <para>
+       有关所有选项及其含义的详细说明，请参见 <command>exports</command> 的手册页 (<command>man exports</command>)。
+      </para>
+
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>/etc/sysconfig/nfs</term>
+     <listitem>
+      <para>
+       <filename>/etc/sysconfig/nfs</filename> 文件包含一些决定 NFSv4 服务器守护程序行为的参数。请务必将参数 <systemitem>NFS4_SUPPORT</systemitem> 设置为 <literal>yes</literal>（默认值）。<systemitem>NFS4_SUPPORT</systemitem> 决定 NFS 服务器是否支持 NFSv4 导出和客户端。
+      </para>
+      <tip>
+       <title>装入选项</title>
+       <para>
+        在版本低于 12 的 SUSE Linux Enterprise 上，会强制将 <option>--bind</option> 装入 <filename>/etc/exports</filename>。该设置仍然受支持，但现在已弃用。现在，通过 NFSv4 导出所用的配置目录与通过 NFSv3 导出所用的目录相同。
+       </para>
+      </tip>
+      <note xml:id="sec.nfs.export.manual.nsfv2">
+
+       <title>NFSv2</title>
+       <para>
+        如果 NFS 客户端仍依赖于 NFSv2，请在服务器的 <filename>/etc/sysconfig/nfs</filename> 中设置以下几项启用该协议：
+       </para>
+<screen>NFSD_OPTIONS="-V2"
+MOUNTD_OPTIONS="-V2"</screen>
+       <para>
+        重启动服务后，请使用以下命令检查版本 2 是否可用：
+       </para>
+<screen><prompt>tux &gt; </prompt>cat /proc/fs/nfsd/versions
++2 +3 +4 +4.1 -4.2</screen>
+      </note>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>/etc/idmapd.conf</term>
+     <listitem>
+      <para>
+       Linux 计算机上的每个用户都有一个名称和 ID。idmapd 针对服务器的 NFSv4 请求执行名称到 ID 的映射并答复客户端。它必须同时在服务器和客户端上针对 NFSv4 运行，因为 NFSv4 仅将名称用于通讯。
+      </para>
+      <para>
+       对于可能使用 NFS 来共享文件系统的计算机，请确保以统一的方式在这些计算机间为用户指定用户名和 ID (UID)。这可以使用 NIS、LDAP 或域中的任何统一的域身份验证机制来实现。
+      </para>
+      <para>
+       对于客户端和服务器，必须在 <filename>/etc/idmapd.conf</filename> 文件中将参数 <literal>Domain</literal> 设为相同值。如果您不确定，请在服务器和客户端文件中将域保留为 <literal>localdomain</literal>。配置文件样本如下：
+      </para>
+<screen>[General]
+Verbosity = 0
+Pipefs-Directory = /var/lib/nfs/rpc_pipefs
+Domain = localdomain
+
+[Mapping]
+Nobody-User = nobody
+Nobody-Group = nobody</screen>
+      <para>
+       有关更多信息，请参见 <literal>idmapd</literal> 和 <literal>idmapd.conf</literal> 的手册页（<literal>man idmapd</literal> 和 <literal>man idmapd.conf</literal>）。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    更改 <filename>/etc/exports</filename> 或 <filename>/etc/sysconfig/nfs</filename> 后，启动或重启动 NFS 服务器服务：
+   </para>
+<screen>systemctl restart nfsserver</screen>
+   <para>
+    更改 <filename>/etc/idmapd.conf</filename> 之后，重新装载配置文件：
+   </para>
+<screen>killall -HUP rpc.idmapd</screen>
+   <para>
+    如果 NFS 服务需要在引导时启动，则运行：
+   </para>
+<screen>systemctl enable nfsserver</screen>
+  </sect2>
+
+
+
+  <sect2 xml:id="sec.nfs.kerberos">
+   <title>采用 Kerberos 的 NFS</title>
+   <para>
+    要对 NFS 使用 Kerberos 身份验证，必须启用 GSS 安全性。在初始 YaST NFS 服务器对话框中选择<guimenu>启用 GSS 安全</guimenu>。必须具有一个有效的 Kerberos 服务器才能使用此功能。YaST 不会设置服务器，而只使用所提供的功能。如果希望使用 Kerberos 进行身份验证，则除了 YaST 配置外，还必须首先至少完成以下步骤，才能运行 NFS 配置：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      请确保服务器和客户端都在同一 Kerberos 域中。它们必须访问相同的 KDC（密钥分发中心）服务器并共享其 <filename>krb5.keytab</filename> 文件（在任何计算机上的默认位置是 <filename>/etc/krb5.keytab</filename>）。有关 Kerberos 的更多信息，请参见<xref linkend="cha.security.kerberos"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在客户端上运行 <command>systemctl start rpc-gssd.service</command> 启动 gssd 服务。
+     </para>
+    </step>
+    <step os="sles;osuse">
+     <para>
+      在服务器上运行 <command>systemctl start rpc-svcgssd.service</command> 启动 svcgssd 服务。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    有关配置采用 Kerberos 的 NFS 的更多信息，请参见<xref linkend="sec.nfs.info" xrefstyle="SectTitleOnPage"/> 中的链接。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.nfs.configuring-nfs-clients">
+  <title>配置客户端</title>
+
+  <para>
+   要将主机配置为 NFS 客户端，无需安装其他软件。将默认安装所有需要的包。
+  </para>
+
+  <sect2 xml:id="sec.nfs.import-yast2">
+   <title>使用 Yast 导入文件系统</title><indexterm><primary>NFS</primary><secondary>客户端</secondary></indexterm>
+   <para>
+    授权用户可以用 YaST NFS 客户端模块从 NFS 服务器将 NFS 目录装入本地文件树。按如下所示继续：
+   </para>
+   <procedure xml:id="pro.nfs.import-yast2">
+    <title>导入 NFS 目录</title>
+    <step>
+     <para>
+      启动 YaST NFS 客户端模块。
+     </para>
+    </step>
+
+    <step>
+     <para>
+      单击 <guimenu>NFS 共享</guimenu>选项卡中的<guimenu>添加</guimenu>。输入 NFS 服务器的主机名、要导入的目录以及要在本地的哪个装入点装入此目录。
+     </para>
+    </step>
+
+
+    <step>
+     <para>
+      使用 NFSv4 时，在 <guimenu>NFS 设置</guimenu>选项卡中选择<guimenu>启用 NFSv4</guimenu>。另外，<guimenu>NFSv4 域名</guimenu>必须包含 NFSv4 服务器所用的相同值。默认域为 <literal>localdomain</literal>。
+     </para>
+    </step>
+    <step>
+     <para>
+      要对 NFS 使用 Kerberos 身份验证，必须启用 GSS 安全性。选择<guimenu>启用 GSS 安全</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      若要使用防火墙并允许从远程计算机访问服务，请启用 <guimenu>NFS 设置</guimenu>选项卡中的<guimenu>打开防火墙中的端口</guimenu>。防火墙状态将显示在复选框旁边。
+     </para>
+    </step>
+
+    <step>
+     <para>
+      单击<guimenu>确定</guimenu>保存更改。
+     </para>
+    </step>
+   </procedure>
+   <para>
+    配置写入<filename>/etc/fstab</filename>，并将装入指定的文件系统。当您稍后启动 YaST 配置客户端时，它还将读取此文件中的现有配置。
+   </para>
+   <tip>
+    <title>NFS 用作根文件系统</title>
+    <para>
+     在通过网络以 NFS 共享形式装入根分区的（无磁盘）系统中，配置可供访问 NFS 共享的网络设备时需保持谨慎。
+    </para>
+    <para>
+     关闭或重引导系统时，默认的处理顺序是关闭网络连接，然后卸载根分区。对于 NFS 根分区，这种顺序会产生问题，因为在尚未激活与 NFS 共享的网络连接的情况下，根分区无法完全卸载。为防止系统停用相关的网络设备，请按<xref linkend="sec.basicnet.yast.change.start"/>中所述打开网络设备配置选项卡，然后在<guimenu>设备激活</guimenu>窗格中选择<guimenu>通过 NFSroot</guimenu>。
+    </para>
+   </tip>
+
+  </sect2>
+
+  <sect2 xml:id="sec.nfs.import">
+   <title>手动导入文件系统</title>
+<indexterm><primary>NFS</primary><secondary>导入</secondary></indexterm><indexterm><primary>NFS</primary><secondary>装入</secondary></indexterm>
+
+   <para>
+    手动从 NFS 服务器导入文件系统的先决条件是运行 RPC 端口映射器。<option>nfs</option> 服务负责正确启动该程序；因此，请以 <systemitem class="username">root</systemitem> 身份输入 <command>systemctl start nfs</command> 来启动该服务。然后就可以使用 <command>mount</command> 将远程文件系统像本地分区那样装入文件系统中：
+   </para>
+<screen>mount <replaceable>host</replaceable>:<replaceable>remote-path</replaceable><replaceable>local-path</replaceable></screen>
+   <para>
+    例如，要从 <systemitem>nfs.example.com</systemitem> 计算机导入用户目录，请使用：
+   </para>
+<screen>mount nfs.example.com:/home /home</screen>
+   <sect3 xml:id="sec.nfs.automount">
+    <title>使用自动装入服务</title>
+    <para>
+     autofs 守护程序可用于自动装入远程文件系统。请在 <filename>/etc/auto.master</filename> 文件中添加以下条目：
+    </para>
+<screen>/nfsmounts /etc/auto.nfs</screen>
+    <para>
+     如果 <filename>auto.nfs</filename> 文件正确填充，<filename>/nfsmounts</filename> 目录将作为客户端上所有 NFS 装入的 root 目录。选择 <filename>auto.nfs</filename> 这个名称是为了方便起见，您可以选择任何名称。在 <filename>auto.nfs</filename> 中为所有 NFS 装入添加条目，如下所示：
+    </para>
+<screen>localdata -fstype=nfs server1:/data
+nfs4mount -fstype=nfs4 server2:/</screen>
+    <para>
+     以 <systemitem class="username">root</systemitem> 身份运行 <command>systemctl start autofs</command> 来激活该设置。对于此示例，<filename>/nfsmounts/localdata</filename>，<systemitem>server1</systemitem> 的 <filename>/data</filename> 目录将通过 NFS 装入，<systemitem>server2</systemitem> 的 <filename>/nfsmounts/nfs4mount</filename> 将通过 NFSv4 装入。
+    </para>
+    <para>
+     如果在 autofs 服务正在运行时编辑了 <filename>/etc/auto.master</filename> 文件，则必须使用 <command>systemctl restart autofs</command> 重启动自动装载器才能使更改生效。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.nfs.fstab">
+    <title>手动编辑 <filename>/etc/fstab</filename></title>
+    <para>
+     通常，<filename>/etc/fstab</filename> 中的 NFSv3 装入项如下：
+    </para>
+<screen>nfs.example.com:/data /local/path nfs rw,noauto 0 0</screen>
+    <para>
+     对于 NFSv4 装入，请在第三列中使用 <literal>nfs4</literal> 而不是 <literal>nfs</literal>：
+    </para>
+<screen>nfs.example.com:/data /local/pathv4 nfs4 rw,noauto 0 0</screen>
+    <para>
+     <literal>noauto</literal> 选项可禁止在启动时自动装入文件系统。如果您要手动安装各文件系统，可以缩短只指定安装点的安装命令：
+    </para>
+<screen>mount /local/path</screen>
+    <note>
+     <title>启动时装入</title>
+     <para>
+      如果您没有输入 <literal>noauto</literal> 选项，系统的 init 脚本将在启动时处理这些文件系统的装入。
+     </para>
+    </note>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.nfs.pnfs">
+   <title>并行 NFS (pNFS)</title>
+   <para>
+    NFS 是最老的协议之一，开发于上世纪八十年代。因此，如果您要共享小文件，NFS 通常能够满足需求。但是，如果您要传送大文件或有大量的客户端要访问数据，则 NFS 会陷入瓶颈并且严重影响系统性能。这是因为文件迅速变大，而以太网的相对速度没有完全跟上这一变化。
+   </para>
+   <para>
+    当您请求<quote>普通</quote> NFS 服务器中的文件时，服务器会查找文件元数据、收集所有数据并通过网络将数据传送到您的客户端。但是，无论文件的大小如何，性能瓶颈都会凸显出来：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      如果是小文件，则大部分时间都花在收集元数据上。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果是大文件，则大部分时间花在将数据从服务器传送到客户端上。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    pNFS 或并行 NFS 则突破了此种限制，因为它将文件系统元数据从数据位置分离出来。因此，pNFS 需要两类服务器：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      一个<emphasis>元数据</emphasis>或<emphasis>控制服务器</emphasis>，用于处理所有非数据通讯
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      一个或多个<emphasis>储存服务器</emphasis>，用于存放数据
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    元数据和储存服务器组成单独一个逻辑 NFS 服务器。当客户端要读取或写入时，元数据服务器会告诉 NFSv4 客户端使用哪个储存服务器访问文件块。客户端可以直接访问该服务器上的数据。
+   </para>
+   <para>
+    SUSE Linux Enterprise 仅支持在客户端上的 pNFS。
+   </para>
+   <sect3 xml:id="sec.nfs.pnfs.yast">
+    <title>使用 YaST 配置 pNFS 客户端</title>
+    <para>
+     请执行<xref linkend="pro.nfs.import-yast2"/>中所述的步骤，但选中 <guimenu>pNFS (v4.1)</guimenu> 复选框以及可选的 <guimenu>NFSv4 共享</guimenu>。YaST 会执行所有必需的步骤，并且会在文件 <filename>/etc/exports</filename> 中写入所有必要选项。 <remark>toms 2013-02-15:
+           Is that enough? Any other files for pNFS?</remark>
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.nfs.pnfs.manual">
+    <title>手动配置 pNFS 客户端</title>
+    <para>
+     请参阅<xref linkend="sec.nfs.import"/>着手配置。大多数配置通过 NFSv4 服务器完成。对于 pNFS，唯一的区别是将 <option>minorversion</option> 选项和元数据服务器 <replaceable>MDS_服务器</replaceable>添加到您的 <command>mount</command> 命令：
+    </para>
+<screen>mount -t nfs4 -o minorversion=1 <replaceable>MDS_SERVER</replaceable> <replaceable>MOUNTPOINT</replaceable></screen>
+    <para>
+     为方便调试，请更改 <filename>/proc</filename> 文件系统中的值：
+    </para>
+<screen>echo 32767 &gt; /proc/sys/sunrpc/nfsd_debug
+echo 32767 &gt; /proc/sys/sunrpc/nfs_debug</screen>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.nfs.info">
+  <title>更多信息</title>
+
+  <para>
+   除了 <command>exports</command>、<command>nfs</command> 和 <command>mount</command> 的手册页外，还可在 <filename>/usr/share/doc/packages/nfsidmap/README</filename> 中找到关于配置 NFS 服务器和客户端的信息。有关更多联机文档，请参见以下网站：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     在 <link xlink:href="http://nfs.sourceforge.net/">SourceForge</link> 上联机查找详细的技术文档。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     关于设置采用 Kerberos 的 NFS 的描述，请参见 <link xlink:href="http://www.citi.umich.edu/projects/nfsv4/linux/krb5-setup.html">NFS Version 4 Open Source Reference Implementation</link>。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     如果您对 NFSv4 有疑问，请参考 <link xlink:href="http://www.citi.umich.edu/projects/nfsv4/linux/faq/">Linux NFSv4 FAQ</link>（Linux NFSv4 常见问题）。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

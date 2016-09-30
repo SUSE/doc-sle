@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_isns.xml" version="5.0" xml:id="cha.isns" xml:lang="ja">
+ <title>Linux用iSNS</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  ストレージエリアネットワーク(SAN)には、複数のネットワークにまたがる多数のディスクドライブを使用できます。これによって、デバイス検出とデバイスの所有権の判定が難しくなります。iSCSIイニシエータはSANのストレージリソースを識別し、どれにアクセスできるか判定できる必要があります。
+ </para>
+ <para>
+  Internet Storage Name Service(iSNS)は、TCP/IPネットワーク上のiSCSIデバイスの自動化された検出、管理、および設定を簡素化する、標準ベースのサービスです。iSNSでは、ファイバチャネルネットワークと同等の知的なストレージの検出および管理のサービスを提供します。
+ </para>
+ <important>
+  <title>セキュリティ上の考慮事項</title>
+  <para>
+   iSNSは安全な社内ネットワークだけで使用してください。
+  </para>
+ </important>
+ <sect1 xml:id="sec.isns.overview">
+  <title>iSNSのしくみ</title>
+
+  <para>
+   iSCSIイニシエータがiSCSIターゲットを検出するには、ネットワークのどのデバイスがストレージリソースで、アクセスするにはどのIPアドレスが必要かを特定する必要があります。iSNSサーバへクエリすると、iSCSIターゲットとイニシエータがアクセス許可をもつIPアドレスのリストが返されます。
+  </para>
+
+  <para>
+   iSNSを使用してiSNS検出ドメインを作成し、そこにiSCSIターゲットとiSCSIイニシエータをグループ化または構成します。多くのストレージノードを複数のドメインに振り分けることで、各ホストの検出プロセスをiSNSで登録された最適なターゲットのサブセットに限定でき、これによって、不要な検出を削減し、各ホストが検出関係の確立に費やす時間を制限することで、ストレージネットワークの規模を調整できるようになります。このようにして、ディスカバリ対象のターゲットとイニシエータの数を制御し、簡略化できます。
+  </para>
+
+  <figure>
+   <title>iSNS検出ドメイン</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="isns_a.png" width="80%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="isns_a.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   iSCSIターゲットとiSCSIイニシエータは両方とも、iSNSクライアントを使用して、iSNSプロトコルによるiSNSサーバとのトランザクションを開始します。iSCSIターゲットとiSCSIイニシエータは、次にデバイス属性情報を共通検出ドメインに登録し、その他の登録されたクライアント情報をダウンロードし、検出ドメインで発生したイベントの非同期通知を受け取ります。
+  </para>
+
+  <para>
+   iSNSサーバは、iSNSプロトコルクエリとiSNSクライアントがiSNSプロトコルを使用して作成した要求に応答します。iSNSサーバはiSNSプロトコル状態変更通知を開始し、登録要求から送られてきた適切に認証された情報をiSNSデータベースに保存します。
+  </para>
+
+  <para>
+   Linux用iSNSは次の利点をもたらします。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     ネットワーク接続させたストレージ資産の登録、検出、管理に役立つ情報を提供する。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     DNSインフラストラクチャと統合する。
+    </para>
+   </listitem>
+
+   <listitem>
+    <para>
+     iSCSIストレージの登録、検出、管理を統合する。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ストレージ管理の実装が簡素化される。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     その他のディスカバリ方法よりもスケーラビリティが向上する。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   次のシナリオは、iSNSのメリットについて具体的に説明したものです。
+  </para>
+
+
+
+  <para>
+   100個のiSCSIイニシエータと100個のiSCSIターゲットが会社にあるとします。設定によっては、すべてのiSCSIイニシエータが100個のiSCSIターゲットを検出して接続しようとする可能性があります。このため、検出や接続が困難になる場合があります。イニシエータとターゲットをいくつかの検出ドメインにグループ化することで、ある部門のiSCSIイニシエータが別の部門のiSCSIターゲットを検出しないようにできます。その結果、特定部門のiSCSIイニシエータは、その部門の検出ドメインに属するiSCSIターゲットしか検出しません。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.isns.install">
+  <title>Linux用iSNSサーバのインストール</title>
+
+  <para>
+   Linux用iSNSサーバは、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>に付属していますが、デフォルトではインストールも設定も行われません。パッケージ<systemitem class="resource">open-isns</systemitem>をインストールして、iSNSサービスを設定する必要があります。
+  </para>
+
+
+
+  <note>
+   <title>同一サーバ上のiSNSとiSCSI</title>
+   <para>
+    iSNSは、iSCSIターゲットまたはiSCSIイニシエータのソフトウェアがインストールされる同じサーバにインストールできます。ただし、iSCSIターゲットソフトウェアとiSCSIイニシエータソフトウェアの両方を同じサーバにインストールすることはできません。
+   </para>
+  </note>
+
+  <para>
+   Linux向けiSNSをインストールするには、次の手順に従います。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動して、<menuchoice><guimenu>ネットワークサービス</guimenu><guimenu>iSNSサーバ</guimenu></menuchoice>の順に選択します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <systemitem class="resource">open-isns</systemitem>がまだインストールされていない場合、今すぐインストールするようプロンプトが表示されます。<guimenu>インストール</guimenu>をクリックして確認します。
+    </para>
+   </step>
+   <step>
+    <para>
+     iSNSサービスの設定ダイアログが表示され、自動的に<guimenu>サービス</guimenu>タブが開きます。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="isns_config_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="isns_config_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+
+   <step>
+    <para>
+     <guimenu>サービスの開始</guimenu>で、次のいずれかを選択します。
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>ブート時:</title>
+       <para>
+        iSNSサービスは、サーバの起動時に自動的に開始します。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>手動(デフォルト):</title>
+       <para>
+        iSNSのインストール先サーバのサーバコンソールで、「<command>sudo systemctl start isnsd</command>」と入力して、iSNSサービスを手動で開始する必要があります。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     次のファイアウォール設定を指定します。
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <formalpara>
+       <title>Open Port in Firewall(ファイアウォールのポートを開く):</title>
+       <para>
+        このチェックボックスを選択して、ファイアウォールを開き、リモートコンピュータからサービスにアクセスできるようにします。ファイアウォールのポートは、デフォルトでは閉じています。
+       </para>
+      </formalpara>
+     </listitem>
+     <listitem>
+      <formalpara>
+       <title>ファイアウォールの詳細:</title>
+       <para>
+        ファイアウォールのポートを開いた場合、デフォルトでは、ポートがすべてのネットワークインタフェースで開きます。ポートを開くインタフェースを選択するには、<guimenu>Firewall Details(ファイアウォールの詳細)</guimenu>をクリックし、使用するネットワークインタフェースを選択し、次に、<guimenu>OK</guimenu>をクリックします。
+       </para>
+      </formalpara>
+     </listitem>
+    </itemizedlist>
+   </step>
+   <step>
+    <para>
+     <guimenu>OK</guimenu>をクリックして、設定を適用し、インストールを完了します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec.isns.domains" xrefstyle="SectTitleOnPage"/>に進みます。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.isns.domains">
+  <title>iSNS検出ドメインの設定</title>
+
+  <para>
+   iSCSIイニシエータおよびターゲットでiSNSサービスを使用するには、これらが検出ドメインに属している必要があります。
+  </para>
+
+  <important>
+   <title>iSNSサービスがアクティブである必要がある</title>
+   <para>
+    iSNS検出ドメインを設定するには、iSNSサービスがインストール済みで、実行されている必要があります。詳細については、<xref linkend="sec.isns.start" xrefstyle="SectTitleOnPage"/>を参照してください。
+   </para>
+  </important>
+
+  <sect2 xml:id="sec.isns.domains.ddcreate">
+   <title>iSNS検出ドメインの作成</title>
+   <para>
+    iSNSサービスをインストールすると、<guimenu>デフォルトDD</guimenu>というデフォルトの検出ドメインが自動的に作成されます。iSNSを使用するように設定されている既存のiSCSIターゲットとイニシエータは、デフォルト検出ドメインに自動的に追加されます。
+   </para>
+   <para>
+    新しい検出ドメインを作成するには、次の手順に従います。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      YaSTを起動して、<guimenu>ネットワークサービス</guimenu>の下で<guimenu>iSNSサーバ</guimenu>を選択します。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>検出ドメイン</guimenu>タブをクリックします。
+     </para>
+     <para>
+      <guimenu>検出ドメイン</guimenu>領域に既存のすべての検出ドメインが一覧にされます。<guimenu>Create Discovery Domains (検出ドメインの作成)</guimenu>で検出ドメインを作成したり、<guimenu>削除</guimenu>で既存の検出ドメインを削除したりできます。ドメインを削除すると、ドメインのメンバーは削除されますが、iSCSIノードメンバーは削除されません。
+     </para>
+     <para>
+      <guimenu>検出ドメインメンバー</guimenu>の領域に、選択した検出ドメインに割り当てられているすべてのiSCSIノードがリストされます。別の検出ドメインを選択すると、その検出ドメインからのメンバーで、リストが更新されます。選択した検出ドメインからiSCSIノード を追加したり、削除できます。iSCSIノード を削除すると、そのノードは、ドメインから削除されますが、iSCSIノード自体は削除されません。
+     </para>
+     <para>
+      <guimenu>iSCSIノードメンバーの作成</guimenu>を使用すると、未登録のノードを検出ドメインのメンバーとして追加できます。iSCSIイニシエータまたはiSCSIターゲットがこのノード を登録すると、このノード は、このドメインの一部となります。
+     </para>
+     <para role="intro">
+      iSCSIイニシエータが検出要求を発行すると、iSNSサービスは同じ検出ドメイン内のメンバーであるすべてのiSCSIノードターゲットを返します。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="isns_discdomains_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="isns_discdomains_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      <guimenu>検出ドメインの作成</guimenu>ボタンをクリックします。
+     </para>
+     <para>
+      既存の検出ドメインを選択して<guimenu>削除</guimenu>ボタンをクリックして、その検出ドメインを削除できます。
+     </para>
+    </step>
+    <step>
+     <para>
+      作成している検出ドメインの名前を指定して、<guimenu>OK</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <xref linkend="sec.isns.domains.iscsi_nodes" xrefstyle="SectTitleOnPage"/>に進みます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.isns.domains.iscsi_nodes">
+   <title>iSCSIノードの検出ドメインへの追加</title>
+   <procedure>
+    <step>
+     <para>
+      YaSTを起動して、<guimenu>ネットワークサービス</guimenu>の下で<guimenu>iSNSサーバ</guimenu>を選択します。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>iSCSIノード</guimenu>タブをクリックします。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="isns_iscsinodes_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="isns_iscsinodes_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      ノード のリストをレビューして、iSNSサービスを使用させたい iSCSIターゲットおよびイニシエータがリストされていることを確認します。
+     </para>
+     <para>
+      iSCSIターゲットまたはイニシエータが一覧にない場合、ノード上のiSCSIサービスを再起動する必要があります。それには以下を実行して、
+     </para>
+<screen>sudo systemctl restart iscsid.socket
+sudo systemctl restart iscsi</screen>
+     <para>
+      イニシエータまたは
+     </para>
+<screen>sudo systemctl restart target-isns</screen>
+     <para>
+      ターゲットを再起動します。
+     </para>
+     <para>
+      iSCSIノードを選択して<guimenu>削除</guimenu>ボタンをクリックして、そのノードをiSNSデータベースから削除できます。iSCSIノードをもう使用しない場合や名前を変更した場合に有効です。
+     </para>
+     <para>
+      iSCSI環境設定ファイルのiSNSの部分を削除したりコメント化していない限り、iSCSIノードは、iSCSIサービスの再開始時またはサーバの再起動時に、リスト(iSNSデータベース)に自動的に追加されます。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>検出ドメイン</guimenu>タブをクリックして、目的の検出ドメインを選択します。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>Add existing iSCSI Node</guimenu>をクリックしてドメインに追加するノードを選択し、<guimenu>ノードの追加</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      検出ドメインに追加するノードの数だけ最後の手順を繰り返し、ノードの追加が終了したら<guimenu>完了</guimenu>をクリックします。
+     </para>
+     <para>
+      iSCSIノードは複数の検出ドメインに属することができます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.isns.start">
+  <title>iSNSサービスの開始</title>
+
+  <para>
+   iSNSは、インストール先のサーバで起動する必要があります。まだ起動時に開始するように設定していない場合(詳細については<xref linkend="sec.isns.install"/>を参照)、端末コンソールで次のコマンドを入力します。
+  </para>
+
+<screen>sudo systemctl start isnsd</screen>
+
+  <para>
+   iSNSでは、<command>stop</command>、<command>status</command>、<command>restart</command>の各オプションも使用できます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.isns.info">
+  <title>その他の情報</title>
+
+  <para>
+   詳細については、「<citetitle>Linux iSNS for iSCSI project</citetitle>」 (<link xlink:href="http://sourceforge.net/projects/linuxisns/"/>)を参照してください。このプロジェクトの電子メーリングリストが<link xlink:href="http://sourceforge.net/mailarchive/forum.php?forum_name=linuxisns-discussion"/>にあります。
+  </para>
+
+  <para>
+   iSNSの一般情報は、「<citetitle>RFC 4171: Internet Storage Name Service</citetitle>」 (<link xlink:href="http://www.ietf.org/rfc/rfc4171"/>)に記載されています。
+  </para>
+ </sect1>
+</chapter>

@@ -1,0 +1,1191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_iscsi.xml" version="5.0" xml:id="cha.iscsi" xml:lang="zh-tw">
+ <title>IP 網路上的大型儲存裝置：iSCSI</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  如何為伺服器系統提供硬碟容量，是電腦中心以及操作伺服器時的一項關鍵任務。為此通常使用光纖通道。iSCSI (網際網路 SCSI) 解決方案的實施成本較低，可用來替代光纖通道，並能充分發揮商用伺服器與乙太網路設備的價值。Linux iSCSI 提供 iSCSI 啟動器和 iSCSI LIO 目標軟體，用於將 Linux 伺服器連接至中央儲存系統。
+ </para>
+ <figure>
+  <title>配有 iSNS 伺服器的 iSCSI SAN</title>
+  <mediaobject>
+   <imageobject role="fo">
+    <imagedata fileref="iscsi_san_a.svg" width="80%" format="SVG"/>
+   </imageobject>
+   <imageobject role="html">
+    <imagedata fileref="iscsi_san_a.png" width="100%" format="PNG"/>
+   </imageobject>
+  </mediaobject>
+ </figure>
+ <note>
+  <title>LIO</title>
+  <para>
+   LIO (<link xlink:href="http://linux-iscsi.org"/>) 是適用於 Linux 的標準開放原始碼多協定 SCSI 目標。LIO 取代了 STGT (SCSI 目標) 架構，成為 Linux 核心版本為 2.6.38 及更新版本之 Linux 中的標準統一儲存目標。在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 中，iSCSI LIO 目標伺服器取代了先前版本中的 iSCSI 目標伺服器。
+  </para>
+ </note>
+ <para>
+  iSCSI 是一種儲存網路通訊協定，可以透過 TCP/IP 網路來簡化區塊儲存裝置與伺服器之間 SCSI 封包資料的傳輸。iSCSI 目標軟體在目標伺服器上執行，並將邏輯單元定義為 iSCSI 目標裝置。iSCSI 啟動器軟體在不同伺服器上執行，然後會連接到目標裝置，以使該伺服器上的儲存裝置可用。
+ </para>
+ <para>
+  iSCSI LIO 目標伺服器與 iSCSI 啟動器伺服器之間透過在 LAN 的 IP 層級上傳送 SCSI 封包來通訊。如果在啟動器伺服器上執行的應用程式發出 iSCSI LIO 目標裝置查詢，作業系統會產生必要的 SCSI 指令。接著，通常稱為 <emphasis>iSCSI 啟動器</emphasis>的軟體會根據需要將 SCSI 指令嵌入 IP 封包並加密。封包透過內部 IP 網路傳送到相應的 iSCSI 遠端工作站，該工作站稱為 <emphasis>iSCSI LIO 目標伺服器</emphasis>，簡稱為 <emphasis>iSCSI 目標</emphasis>。
+ </para>
+ <para>
+  許多儲存解決方案提供透過 iSCSI 的存取方式，但還另一種可能就是執行提供 iSCSI 目標的 Linux 伺服器。在這種情況下，針對檔案系統服務設定最佳化的 Linux 伺服器是很重要的。iSCSI 目標會存取 Linux 中的區塊裝置，因此，您可以使用 RAID 解決方案來增加磁碟空間及大量記憶體來提高資料快取效率。如需關於 RAID 的詳細資訊，請參閱<xref linkend="cha.raid" xrefstyle="ChapTitleOnPage"/>。
+ </para>
+ <sect1 xml:id="sec.iscsi.install">
+  <title>安裝 iSCSI LIO 目標伺服器和 iSCSI 啟動器</title>
+
+  <para>
+   系統中預設會安裝 iSCSI 啟動器 (套件 <systemitem class="resource">open-iscsi</systemitem> 和 <systemitem class="resource">yast2-iscsi-client</systemitem>)，而 iSCSI LIO 目標套件則需要手動安裝。
+  </para>
+
+  <important>
+   <title>啟動器和目標不能在同一伺服器上執行</title>
+   <para>
+    在線上環境中，不能在同一部伺服器上執行 iSCSI 目標軟體與 iSCSI 啟動器軟體。
+   </para>
+  </important>
+
+  <para>
+   若要安裝 iSCSI LIO 目標伺服器，請在終端機主控台中執行以下指令︰
+  </para>
+
+<screen>sudo zypper in yast2-iscsi-lio-server</screen>
+
+  <para>
+   如果您需要安裝 iSCSI 啟動器或其任何相依項，請執行指令 <command>sudo zypper in yast2-iscsi-client</command>。
+  </para>
+
+  <para>
+   也可以使用 YaST 軟體管理模組來進行安裝。
+  </para>
+
+  <para>
+   除了上述套件之外，任何其他所需的套件將由安裝程式自動提取，或者在您第一次執行相應的 YaST 模組時安裝。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.target">
+  <title>設定 iSCSI LIO 目標伺服器</title>
+
+  <para>
+   本章說明如何使用 YaST 設定 iSCSI LIO 目標伺服器以及設定 iSCSI LIO 目標裝置。您可以使用任一 iSCSI 啟動器軟體來存取目標裝置。
+  </para>
+
+  <sect2 xml:id="sec.iscsi.target.start">
+   <title>iSCSI LIO 目標服務啟動和防火牆設定</title>
+   <para>
+    iSCSI LIO 目標服務預設設為手動啟動。您可以將該服務設定為在開機時自動啟動。如果在伺服器上使用防火牆並且希望 iSCSI LIO 目標在其他電腦上可用，則必須為要用於目標存取的每個介面卡開啟防火牆中的連接埠。按照 IANA (Internet Assigned Numbers Authority) 的定義，TCP 連接埠 3260 是 iSCSI 通訊協定的埠號。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      啟動 YaST，然後啟動<menuchoice><guimenu>網路服務</guimenu> <guimenu>iSCSI LIO 目標</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切換至<guimenu>服務</guimenu>索引標籤。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_service_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_service_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      在<guimenu>服務啟動</guimenu>下，指定 iSCSI LIO 目標服務的啟動方式︰
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <formalpara>
+        <title>開機時：</title>
+        <para>
+         該服務會在伺服器重新啟動時自動啟動。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>自訂：</title>
+        <para>
+         (預設) 伺服器重新啟動之後，您必須執行 <command>sudo systemctl start target</command> 來手動啟動該服務。啟動該服務之後，目標裝置才可用。
+        </para>
+       </formalpara>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      如果在伺服器上使用防火牆，並且希望 iSCSI LIO 目標在其他電腦上可用，請為要用於存取目標的每個介面卡介面開啟防火牆中的連接埠 3260。如果關閉所有網路介面的連接埠，則 iSCSI LIO 目標將無法供其他電腦使用。
+     </para>
+     <para>
+      如果您未在伺服器上使用防火牆，則防火牆 設定會停用。在此情況下，請跳過下列步驟，按一下<guimenu>完成</guimenu>結束組態設定對話方塊，或切換至另一個索引標籤繼續進行組態設定。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        在<guimenu>服務</guimenu>索引標籤上，選取<guimenu>在防火牆中開啟埠</guimenu>核取方塊以啟用防火牆設定。
+       </para>
+      </step>
+      <step>
+       <para>
+        按一下<guimenu>防火牆詳細資料</guimenu>以檢視或設定要使用的網路介面。隨即會列出所有可用的網路介面，並且預設會選取所有介面。取消選取<emphasis>不</emphasis>應該開啟連接埠的所有介面。按一下<guimenu>確定</guimenu>儲存您的設定。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>完成</guimenu>以儲存並套用 iSCSI LIO 目標服務設定。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.authenticate">
+   <title>設定用於探查 iSCSI LIO 目標與啟動器的驗證</title>
+   <para>
+    iSCSI LIO 目標伺服器軟體支援 PPP-CHAP (點對點通訊協定-Challenge Handshake 驗證通訊協定)，它是<citetitle>網際網路工程任務推動小組 (IETF) RFC 1994</citetitle> (<link xlink:href="http://www.ietf.org/rfc/rfc1994.txt"/>) 中定義的一種三向驗證方法。伺服器使用此驗證方法是用來探查 iSCSI LIO 目標與啟動器，而不是用來存取目標上的檔案。如果不想將存取僅限於搜索，請使用<guimenu>無驗證</guimenu>。系統預設會啟用<guimenu>無驗證</guimenu>選項。此伺服器上的所有 iSCSI LIO 目標都可由同一網路上的任何 iSCSI 啟動器探查，而不需要驗證。
+   </para>
+   <para>
+    如果為了設定更安全的組態而需要驗證，則可以使用內送驗證、外送驗證或兩者。<guimenu>內送驗證</guimenu>需要 iSCSI 啟動器證明它有權在 iSCSI LIO 目標上執行探查。啟動器必須提供內送使用者名稱和密碼。<guimenu>外送驗證</guimenu>需要 iSCSI LIO 目標向啟動器證明它是預期的目標。iSCSI LIO 目標必須向 iSCSI 啟動器提供外送使用者名稱和密碼。用於內送和外送探查的密碼必須不同。如果探查驗證已啟用，其設定將會套用至所有 iSCSI LIO 目標群組。
+   </para>
+   <important>
+    <title>安全性</title>
+    <para>
+     為安全起見，建議您在線上環境中針對目標與啟動器探查使用驗證。
+    </para>
+   </important>
+   <para>
+    若要設定 iSCSI LIO 目標的驗證偏好設定，請執行下列步驟：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      啟動 YaST，然後啟動<menuchoice><guimenu>網路服務</guimenu> <guimenu>iSCSI LIO 目標</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切換至<guimenu>全域</guimenu>索引標籤。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_global_noauth_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_global_noauth_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      依預設，驗證處於停用狀態 (<guimenu>無驗證</guimenu>)。若要啟用驗證，請選取<guimenu>內送驗證</guimenu>及/或<guimenu>外送驗證</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      提供所選驗證方法的身分證明。內送和外送探查的使用者名稱和密碼對可以不同。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>完成</guimenu>以儲存並套用設定。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.storage">
+   <title>準備儲存空間</title>
+   <para>
+    iSCSI LIO 目標組態會將現有區塊裝置輸出到 iSCSI 啟動器中。您必須準備要用於目標裝置的儲存空間，方法是使用 YaST 中的磁碟分割程式來設定未格式化的分割區或裝置，或從指令行使用 parted 對裝置進行磁碟分割。iSCSI LIO 目標能夠以 Linux、Linux LVM 或 Linux RAID 檔案系統 ID 來使用未格式化的分割區。如需詳細資訊，請參閱<xref linkend="sec.yast2.i_y2_part_expert"/>。
+   </para>
+   <important>
+    <title>不要掛接 iSCSI 目標裝置</title>
+    <para>
+     將某個裝置或分割區設定為 iSCSI 目標後，您將無法再透過其本地路徑直接存取它。請勿在建立時為其指定掛接點。
+    </para>
+   </important>
+   <sect3 xml:id="sec.iscsi.target.storage.vm">
+    <title>對虛擬環境中的裝置進行磁碟分割</title>
+    <para>
+     您可以使用虛擬機器客體伺服器做為 iSCSI LIO 目標伺服器。本節說明如何將分割區指定給 Xen 虛擬機器。您還可以使用 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 支援的其他虛擬環境。
+    </para>
+    <para>
+     在 Xen 虛擬環境中，您必須為客體虛擬機器指定要用於 iSCSI LIO 目標裝置的儲存空間，然後在客體環境內以虛擬磁碟的方式存取該空間。每個虛擬磁碟可以是實體區塊裝置，如整個磁碟、分割區或磁碟區，也可以是檔案備份磁碟影像，其中虛擬磁碟是 Xen 主機伺服器中較大實體磁碟上的一個影像檔案。為獲得最佳效能，請從實體磁碟或分割區建立所有虛擬磁碟。為訪客虛擬機器設定虛擬磁碟後，啟動訪客伺服器，然後依照與實體伺服器相同的程序將新的空白虛擬磁碟設定為 iSCSI 目標裝置。
+    </para>
+    <para>
+     檔案備份磁碟影像建立在 Xen 主機伺服器上，然後會指定給 Xen 客體伺服器。依預設，Xen 會將檔案備份磁碟影像儲存到 <filename>/var/lib/xen/images/<replaceable>vm 名稱</replaceable></filename>目錄中，其中 <filename><replaceable>vm 名稱</replaceable></filename>為虛擬機器的名稱。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.target_group">
+   <title>設定 iSCSI LIO 目標群組</title>
+   <para>
+    您可以使用 YaST 來設定 iSCSI LIO 目標裝置。YaST 使用 <command>lio-utils</command> 軟體提供的 API。iSCSI LIO 目標能夠以 Linux、Linux LVM 或 Linux RAID 檔案系統 ID 來使用未格式化的分割區。
+   </para>
+   <important>
+    <title>分割區</title>
+    <para>
+     在開始之前，請先依<xref linkend="sec.iscsi.target.storage" xrefstyle="SectTitleOnPage"/> 中所示建立要用做 iSCSI LIO 目標的未格式化分割區。
+    </para>
+   </important>
+   <procedure>
+    <step>
+     <para>
+      啟動 YaST，然後啟動<menuchoice><guimenu>網路服務</guimenu> <guimenu>iSCSI LIO 目標</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切換至<guimenu>目標</guimenu>索引標籤。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_targets_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_targets_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>新增</guimenu>，然後定義新的 iSCSI LIO 目標群組和裝置：
+     </para>
+     <para>
+      iSCSI LIO 目標軟體會自動填寫<guimenu>目標</guimenu>、<guimenu>識別碼</guimenu>、<guimenu>入口群組</guimenu>、<guimenu>IP 位址</guimenu>和<guimenu>埠號</guimenu>欄位。<guimenu>使用驗證</guimenu>預設會處於選中狀態。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        如果您有多個網路介面，請使用 IP 位址下拉式方塊來選取要用於此目標群組的網路介面 IP 位址。若要讓伺服器在所有位址下都能存取，請選擇<guimenu>結合所有 IP 位址</guimenu>。
+       </para>
+      </step>
+      <step>
+       <para>
+        如果您不想對此目標群組進行啟動器驗證，請取消選取<guimenu>使用驗證</guimenu> (不建議)。
+       </para>
+      </step>
+      <step>
+       <para>
+        按一下<guimenu>新增</guimenu>。輸入裝置或分割區的路徑，或按一下<guimenu>瀏覽</guimenu>新增路徑。(選擇性) 指定名稱，然後按一下<guimenu>確定</guimenu>。LUN 編號將會自動產生，從 0 開始。如果將該欄位保留為空白，則會自動產生名稱。
+       </para>
+      </step>
+      <step>
+       <para>
+        (選擇性) 重複前面的步驟，將更多目標新增至此目標群組。
+       </para>
+      </step>
+      <step>
+       <para>
+        將所有需要的目標新增到群組之後，按<guimenu>下一步</guimenu>。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      在<guimenu>修改 iSCSI 目標啟動器設定</guimenu>頁面上，設定允許存取目標群組中 LUN 之啟動器的資訊：
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="lio_target_client_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="lio_target_client_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+     <para>
+      為目標群組至少指定一個啟動器後，<guimenu>編輯 LUN</guimenu>、<guimenu>編輯驗證</guimenu>、<guimenu>刪除</guimenu>和<guimenu>複製</guimenu>按鈕都將啟用。您可以使用<guimenu>新增</guimenu>或<guimenu>複製</guimenu>來為目標群組新增更多啟動器。
+     </para>
+     <itemizedlist xml:id="il.iscsi.target.target_group.options" mark="bullet" spacing="normal">
+      <title>修改 iSCSI 目標︰選項</title>
+      <listitem>
+       <formalpara>
+        <title>新增</title>
+        <para>
+         為所選 iSCSI LIO 目標群組新增啟動器項目。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>編輯 LUN：</title>
+        <para>
+         設定將 iSCSI LIO 目標群組中的哪些 LUN 對應到所選啟動器。您可以將每個已配置目標對應到偏好的啟動器。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>編輯驗證：</title>
+        <para>
+         為所選啟動器設定偏好的驗證方法。您可以指定無驗證，也可以設定內送驗證、外送驗證或兩者。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>刪除</title>
+        <para>
+         從配置給目標群組的啟動器清單中移除所選啟動器項目。
+        </para>
+       </formalpara>
+      </listitem>
+      <listitem>
+       <formalpara>
+        <title>複製：</title>
+        <para>
+         新增啟動器項目，其 LUN 對應和驗證設定與所選啟動器項目相同。這樣，您可以依次將相同的共享 LUN 輕鬆地配置給叢集中的每個節點。
+        </para>
+       </formalpara>
+      </listitem>
+     </itemizedlist>
+     <substeps performance="required">
+      <step>
+       <para>
+        按一下<guimenu>新增</guimenu>，指定啟動器名稱，選取或取消選取<guimenu>從 TPG 輸入 LUN</guimenu> 核取方塊，然後按一下<guimenu>確定</guimenu>以儲存設定。
+       </para>
+      </step>
+      <step>
+       <para>
+        選取啟動器項目，按一下<guimenu>編輯 LUN</guimenu>，修改 LUN 對應以指定將 iSCSI LIO 目標群組中的哪些 LUN 配置給所選啟動器，然後按一下<guimenu>確定</guimenu>以儲存變更。
+       </para>
+       <para>
+        如果 iSCSI LIO 目標群組由多個 LUN 組成，則您可以將一或多個 LUN 配置給所選啟動器。依預設，群組中每個可用的 LUN 會指定給一個啟動器 LUN。
+       </para>
+       <para>
+        若要修改 LUN 配置，請執行下列一或多個動作：
+       </para>
+       <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+         <formalpara>
+          <title>新增</title>
+          <para>
+           按一下<guimenu>新增</guimenu>以建立新的<guimenu>啟動器 LUN</guimenu> 項目，然後使用<guimenu>變更</guimenu>下拉式方塊將一個目標 LUN 對應至該項目。
+          </para>
+         </formalpara>
+        </listitem>
+        <listitem>
+         <formalpara>
+          <title>刪除：</title>
+          <para>
+           選取<guimenu>啟動器 LUN</guimenu> 項目，然後按一下<guimenu>刪除</guimenu>以移除目標 LUN 對應。
+          </para>
+         </formalpara>
+        </listitem>
+        <listitem>
+         <formalpara>
+          <title>將:</title>
+          <para>
+           選取<guimenu>啟動器 LUN</guimenu> 項目，然後使用<guimenu>變更</guimenu>下拉式方塊來選取要將哪個目標 LUN 對應至該項目。
+          </para>
+         </formalpara>
+        </listitem>
+       </itemizedlist>
+       <para>
+        一般配置計畫包含下列各項：
+       </para>
+       <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+         <para>
+          單個伺服器列出為啟動器。目標群組中的所有 LUN 都會配置給它。
+         </para>
+         <para>
+          您可以使用此分組策略，為指定伺服器邏輯分組 iSCSI SAN 儲存。
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          多個獨立伺服器列出為啟動器。一或多個目標 LUN 會配置給每個伺服器。每個 LUN 僅會配置給一個伺服器。
+         </para>
+         <para>
+          您可以使用此分組策略，為資料中心中的指定部門或服務類別邏輯分組 iSCSI SAN 儲存。
+         </para>
+        </listitem>
+        <listitem>
+         <para>
+          叢集的每個節點列出為啟動器。所有共享的目標 LUN 都會配置給每個節點。所有節點都會連接至裝置，但是對於大部分檔案系統，叢集軟體會鎖定裝置以禁止存取，並且一次只在一個節點上掛接該裝置。共享檔案系統 (例如 OCFS2) 可讓多個節點同時掛接相同的檔案結構，並以讀寫權限開啟相同檔案。
+         </para>
+         <para>
+          您可以使用此分組策略，為指定伺服器叢集邏輯分組 iSCSI SAN 儲存。
+         </para>
+        </listitem>
+       </itemizedlist>
+      </step>
+      <step>
+       <para>
+        選取啟動器項目，按一下<guimenu>編輯驗證</guimenu>，指定啟動器的驗證設定，然後按一下<guimenu>確定</guimenu>以儲存設定。
+       </para>
+       <para>
+        您可以要求<guimenu>無驗證</guimenu>，也可以設定<guimenu>內送驗證</guimenu>、<guimenu>外送驗證</guimenu>或兩者。您只能為每個啟動器指定一個使用者名稱和密碼組。對於啟動器的內送和外送驗證，其身分證明可以不同。每個啟動器的身分證明都可以不同。
+       </para>
+      </step>
+      <step>
+       <para>
+        對每個可以存取此目標群組的 iSCSI 啟動器重複上述步驟。
+       </para>
+      </step>
+      <step>
+       <para>
+        設定啟動器指定之後，按<guimenu>下一步</guimenu>。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>完成</guimenu>以儲存並套用設定。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.tg_modify">
+   <title>修改 iSCSI LIO 目標群組</title>
+   <para>
+    您可以按如下方式修改現有的 iSCSI LIO 目標群組：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      在目標群組中新增或移除目標 LUN 裝置
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      為目標群組新增或移除啟動器
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      為目標群組之啟動器修改啟動器 LUN 至目標 LUN 對應
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      修改啟動器驗證 (內送、外送或兩者) 的使用者名稱和密碼身分證明
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    若要檢視或修改 iSCSI LIO 目標群組的設定，請執行下列步驟：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      啟動 YaST，然後啟動<menuchoice><guimenu>網路服務</guimenu> <guimenu>iSCSI LIO 目標</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切換至<guimenu>目標</guimenu>索引標籤。
+     </para>
+    </step>
+    <step>
+     <para>
+      選取要修改的 iSCSI LIO 目標群組，然後按一下<guimenu>編輯</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在「修改 iSCSI 目標 LUN 設定」頁面上，將 LUN 新增至目標群組，編輯 LUN 指定或從該群組中移除目標 LUN。對群組進行所有需要的變更之後，按<guimenu>下一步</guimenu>。
+     </para>
+     <para>
+      如需選項資訊，請參閱<xref linkend="il.iscsi.target.target_group.options"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      在「修改 iSCSI 目標啟動器設定」頁面上，設定允許存取目標群組中 LUN 之啟動器的資訊。對群組進行所有需要的變更之後，按<guimenu>下一步</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>完成</guimenu>以儲存並套用設定。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.target.tg_delete">
+   <title>刪除 iSCSI LIO 目標群組</title>
+   <para>
+    刪除 iSCSI LIO 目標群組會移除群組的定義以及啟動器的相關設定，包括 LUN 對應和驗證身分證明。此操作不會損毀分割區上的資料。若要再次提供啟動器存取權限，您可以將目標 LUN 配置給其他或新的目標群組，並為它們設定啟動器存取權限。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      啟動 YaST，然後啟動<menuchoice><guimenu>網路服務</guimenu> <guimenu>iSCSI LIO 目標</guimenu></menuchoice>。
+     </para>
+    </step>
+    <step>
+     <para>
+      切換至<guimenu>目標</guimenu>索引標籤。
+     </para>
+    </step>
+    <step>
+     <para>
+      選取要刪除的 iSCSI LIO 目標群組，然後按一下<guimenu>刪除</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      系統提示時，按一下<guimenu>繼續</guimenu>以確認刪除，或按一下<guimenu>取消</guimenu>進行取消。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>完成</guimenu>以儲存並套用設定。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.initiator">
+  <title>設定 iSCSI 啟動程式</title>
+
+  <para>
+   iSCSI 啟動器可用來連接任何 iSCSI 目標。這不僅限於<xref linkend="sec.iscsi.target" xrefstyle="SectTitleOnPage"/> 中說明的 iSCSI 目標解決方案。iSCSI 啟動器的組態涉及兩個主要步驟：探查可用的 iSCSI 目標和設定 iSCSI 工作階段。這兩個步驟都可以使用 YaST 來完成。
+  </para>
+
+  <sect2 xml:id="sec.iscsi.initiator.yast">
+   <title>使用 YaST 設定 iSCSI 啟動程式的組態</title>
+   <para>
+    YaST 中的 iSCSI 啟動器綜覽包含三個索引標籤：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>服務:</term>
+     <listitem>
+      <para>
+       <guimenu>服務</guimenu>索引標籤可用來在開機時啟用 iSCSI 啟動器。同時會提供設定用於該探查的唯一<guimenu>啟動程式名稱</guimenu>及 iSNS 伺服器。iSNS 的預設連接埠為 3205。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>連接的目標：</term>
+     <listitem>
+      <para>
+       <guimenu>連接的目標</guimenu>索引標籤會提供目前已連接 iSCSI 目標的綜覽。它與<guimenu>探查的目標</guimenu>索引標籤一樣，也提供為系統新增新目標的選項。
+      </para>
+      <para>
+       在此頁面中，您可以選取目標裝置，然後切換每個 iSCSI 目標裝置的啟動設定：
+      </para>
+      <formalpara>
+       <title>自動：</title>
+       <para>
+        此選項用於 iSCSI 服務自身啟動時要連接的 iSCSI 目標。這是一般組態。
+       </para>
+      </formalpara>
+      <formalpara>
+       <title>開機時：</title>
+       <para>
+        此選項用於開機時要連接的 iSCSI 目標；也就是說，當根目錄 (<filename>/</filename>) 位於 iSCSI 上時。因此，伺服器開機時，iSCSI 目標裝置會從 initrd 進行評估。
+       </para>
+      </formalpara>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>探查的目標：</term>
+     <listitem>
+      <para>
+       <guimenu>探查的目標</guimenu>索引標籤提供了手動探查網路中 iSCSI 目標的途徑。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <sect3 xml:id="sec.iscsi.initiator.yast.configuration">
+    <title>設定 iSCSI 啟動器</title>
+    <procedure>
+     <step>
+      <para>
+       啟動 YaST，然後啟動<menuchoice><guimenu>網路服務</guimenu> <guimenu>iSCSI 啟動器</guimenu></menuchoice>。
+      </para>
+     </step>
+     <step>
+      <para>
+       切換至<guimenu>服務</guimenu>索引標籤。
+      </para>
+      <informalfigure>
+       <mediaobject>
+        <imageobject role="fo">
+         <imagedata fileref="iscsi_init_service_a.png" width="80%" format="PNG"/>
+        </imageobject>
+        <imageobject role="html">
+         <imagedata fileref="iscsi_init_service_a.png" width="100%" format="PNG"/>
+        </imageobject>
+       </mediaobject>
+      </informalfigure>
+     </step>
+     <step>
+      <para>
+       在<guimenu>服務啟動</guimenu>下，指定 iSCSI 啟動器服務的啟動方式︰
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <formalpara>
+         <title>開機時：</title>
+         <para>
+          該服務會在伺服器重新啟動時自動啟動。
+         </para>
+        </formalpara>
+       </listitem>
+       <listitem>
+        <formalpara>
+         <title>自訂：</title>
+         <para>
+          (預設) 伺服器重新啟動之後，您必須執行 <command>sudo systemctl start iscsi iscsid</command> 來手動啟動該服務。
+         </para>
+        </formalpara>
+       </listitem>
+      </itemizedlist>
+     </step>
+     <step>
+      <para>
+       指定或驗證<guimenu>啟動器名稱</guimenu>。
+      </para>
+      <para>
+       為此伺服器上的 iSCSI 啟動器指定一個格式正確的 iSCSI 合格名稱 (IQN)。此啟動器名稱在網路上必須是全域唯一的。IQN 的一般格式如下：
+      </para>
+<screen>iqn.yyyy-mm.com.mycompany:n1:n2</screen>
+      <para>
+       其中，n1 與 n2 為英數字元。例如：
+      </para>
+<screen>iqn.1996-04.de.suse:01:a5dfcea717a</screen>
+      <para>
+       <guimenu>啟動器名稱</guimenu>中會自動填上伺服器上 <filename>/etc/iscsi/initiatorname.iscsi</filename> 檔案中的對應值。
+      </para>
+      <para>
+       如果伺服器支援 iBFT (iSCSI 開機韌體表)，<guimenu>啟動器名稱</guimenu>中會填上 IBFT 中的對應值，並且該名稱無法在此介面上變更，不過，您可以使用 BIOS 設定對此進行修改。iBFT 是指包含對 iSCSI 開機程序有用之各種參數的資訊區塊，包括伺服器的 iSCSI 目標與啟動器描述。
+      </para>
+     </step>
+     <step>
+      <para>
+       使用下列方法之一探查網路上的 iSCSI 目標。
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <formalpara>
+         <title>iSNS：</title>
+         <para>
+          若要使用 iSNS (網際網路儲存名稱服務) 來探查 iSCSI 目標，請繼續<xref linkend="sec.iscsi.initiator.yast.isn" xrefstyle="HeadingOnPage"/>。
+         </para>
+        </formalpara>
+       </listitem>
+       <listitem>
+        <formalpara>
+         <title>探查的目標：</title>
+         <para>
+          若要手動探查 iSCSI 目標裝置，請繼續<xref linkend="sec.iscsi.initiator.yast.discovered" xrefstyle="HeadingOnPage"/>。
+         </para>
+        </formalpara>
+       </listitem>
+      </itemizedlist>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.initiator.yast.isn">
+    <title>使用 iSNS 探查 iSCSI 目標</title>
+    <para>
+     只有在您的環境中安裝並設定了 iSNS 伺服器後，才可以使用此選項。如需更多資訊，請參閱<xref linkend="cha.isns" xrefstyle="ChapTitleOnPage"/>。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       在 YaST 中，選取<guimenu>iSCSI 啟動器</guimenu>，然後選取<guimenu>服務</guimenu>索引標籤。
+      </para>
+     </step>
+     <step>
+      <para>
+       指定 iSNS 伺服器與連接埠的 IP 位址。預設埠為 3205。
+      </para>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>確定</guimenu>以儲存並套用您的變更。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.initiator.yast.discovered">
+    <title>手動探查 iSCSI 目標</title>
+    <para>
+     對要從您目前正設定 iSCSI 啟動器的伺服器存取的所有 iSCSI 目標伺服器重複下列程序。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       在 YaST 中，選取<guimenu>iSCSI 啟動器</guimenu>，然後選取<guimenu>探查的目標</guimenu>索引標籤。
+      </para>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>探查</guimenu>開啟「iSCSI 啟動器探查」對話方塊。
+      </para>
+     </step>
+     <step>
+      <para>
+       輸入 IP 位址，並視需要變更連接埠。預設埠為 3260。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果需要驗證，請取消選取<guimenu>無驗證</guimenu>，然後指定<guimenu>內送</guimenu>或<guimenu>外送</guimenu>驗證的身分證明。
+      </para>
+     </step>
+     <step>
+      <para>
+       按<guimenu>下一步</guimenu>開始探查並連接到 iSCSI 目標伺服器。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果需要身分證明，則在探查成功後使用<guimenu>連接</guimenu>啟動目標。
+      </para>
+      <para>
+       系統會提示您提供驗證身分證明以使用所選的 iSCSI 目標。
+      </para>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>下一步</guimenu>完成組態。
+      </para>
+      <para>
+       該目標現在即會出現在<guimenu>已連線目標</guimenu>中，並且虛擬 iSCSI 裝置現在可用。
+      </para>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>確定</guimenu>以儲存並套用您的變更。
+      </para>
+     </step>
+     <step>
+      <para>
+       您可以使用 <command>lsscsi</command> 指令尋找 iSCSI 目標裝置的本地裝置路徑。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.initiator.yast.startup">
+    <title>設定 iSCSI 目標裝置的啟動優先設定</title>
+    <procedure>
+     <step>
+      <para>
+       在 YaST 中，選取<guimenu>iSCSI 啟動器</guimenu>，然後選取<guimenu>已連接目標</guimenu>索引標籤，以檢視目前連接到伺服器的 iSCSI 目標裝置清單。
+      </para>
+     </step>
+     <step>
+      <para>
+       選取要管理的 iSCSI 目標裝置。
+      </para>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>切換啟動</guimenu>修改設定：
+      </para>
+      <formalpara>
+       <title>自動：</title>
+       <para>
+        此選項用於 iSCSI 服務自身啟動時要連接的 iSCSI 目標。這是一般組態。
+       </para>
+      </formalpara>
+      <formalpara>
+       <title>開機時：</title>
+       <para>
+        此選項用於開機時要連接的 iSCSI 目標；也就是說，當根目錄 (<filename>/</filename>) 位於 iSCSI 上時。因此，伺服器開機時，iSCSI 目標裝置會從 initrd 進行評估。
+       </para>
+      </formalpara>
+     </step>
+     <step>
+      <para>
+       按一下<guimenu>確定</guimenu>以儲存並套用您的變更。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.initiator.manually">
+   <title>手動設定 iSCSI 啟動程式</title>
+   <para>
+    iSCSI 連接的探查和組態都需要執行中的 iscsid。第一次執行探查時，會在 <filename>/etc/iscsi/</filename> 目錄中建立 iSCSI 啟動器的內部資料庫。
+   </para>
+   <para>
+    如果您的探查受到密碼保護，請提供驗證資訊給 iscsid。因為執行第一次搜索時，內部資料庫還不存在，所以這時無法使用該資料庫，而必須編輯 <filename>/etc/iscsid.conf</filename> 組態檔案來提供資訊。若要新增您的搜索密碼資訊，請將下列幾行加到 <filename>/etc/iscsid.conf</filename> 結束處：
+   </para>
+<screen>discovery.sendtargets.auth.authmethod = CHAP
+discovery.sendtargets.auth.username = <replaceable>username</replaceable>
+discovery.sendtargets.auth.password = <replaceable>password</replaceable></screen>
+   <para>
+    探查會將收到的所有值儲存在永久的內部資料庫中。此外，它會顯示所有偵測到的目標。使用下列指令執行此探查：
+   </para>
+<screen>sudo iscsiadm <option>-m discovery --type=st --portal=<replaceable>target_ip</replaceable></option>
+</screen>
+   <para>
+    輸出應如下所示：
+   </para>
+<screen>10.44.171.99:3260,1 iqn.2006-02.com.example.iserv:systems</screen>
+   <para>
+    若要探查 <literal>iSNS</literal> 伺服器上可使用的目標，請使用以下指令︰
+   </para>
+<screen>sudo iscsiadm --mode discovery --type isns --portal <replaceable>target_ip</replaceable></screen>
+   <para>
+    針對 iSCSI 目標上定義的每個目標，會各出現一行。如需已儲存資料的詳細資訊，請參閱<xref linkend="sec.iscsi.initiator.database" xrefstyle="SectTitleOnPage"/>。
+   </para>
+   <para>
+    <command>iscsiadm</command> 特殊的 <option>--login</option> 選項會建立所有需要的裝置：
+   </para>
+<screen>sudo iscsiadm -m node -n iqn.2006-02.com.example.iserv:systems --login</screen>
+   <para>
+    新產生的裝置會顯示在 <command>lsscsi</command> 的輸出中，而且現在可以掛接。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.initiator.database">
+   <title>iSCSI 啟動器資料庫</title>
+   <para>
+    iSCSI 啟動器探查到的所有資訊都儲存在位於 <filename>/etc/iscsi</filename> 的兩個資料庫檔案中。一個資料庫用來探查目標，一個資料庫用於已探查到的節點。存取資料庫時，您必須先選取要從探查資料庫或從節點資料庫中取得資料。使用 <command>iscsiadm</command> 的 <option>-m discovery</option> 和 <option>-m node</option> 參數就可以做到這一點。將 <command>iscsiadm</command> 與其中一個參數配合使用，可提供儲存記錄的概觀：
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo iscsiadm -m discovery
+10.44.171.99:3260,1 iqn.2006-02.com.example.iserv:systems
+</screen>
+   <para>
+    這個範例中的目標名稱為 <literal>iqn.2006-02.com.example.iserv:systems</literal>。與這個特殊資料集相關的所有動作都需要這個名稱。若要檢查 ID <literal>iqn.2006-02.com.example.iserv:systems</literal> 的資料記錄內容，請使用下列指令：
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo iscsiadm -m node --targetname iqn.2006-02.com.example.iserv:systems
+node.name = iqn.2006-02.com.example.iserv:systems
+node.transport_name = tcp
+node.tpgt = 1
+node.active_conn = 1
+node.startup = manual
+node.session.initial_cmdsn = 0
+node.session.reopen_max = 32
+node.session.auth.authmethod = CHAP
+node.session.auth.username = joe
+node.session.auth.password = ********
+node.session.auth.username_in = <replaceable>empty</replaceable>
+node.session.auth.password_in = <replaceable>empty</replaceable>
+node.session.timeo.replacement_timeout = 0
+node.session.err_timeo.abort_timeout = 10
+node.session.err_timeo.reset_timeout = 30
+node.session.iscsi.InitialR2T = No
+node.session.iscsi.ImmediateData = Yes
+....</screen>
+   <para>
+    若要編輯這其中一個變數的值，請使用 <command>iscsiadm</command> 指令搭配 <option>update</option> 操作。例如，如果希望 iscsid 在初始化時登入 iSCSI 目標，請將 <option>node.startup</option> 變數設定為 <option>automatic</option> 值：
+   </para>
+<screen>sudo iscsiadm -m node -n iqn.2006-02.com.example.iserv:systems \
+-p ip:port --op=update --name=node.startup --value=automatic</screen>
+   <para>
+    使用 <literal>delete</literal> 操作移除過時的資料集。如果目標 <literal>iqn.2006-02.com.example.iserv:systems</literal> 不再是有效的記錄，請使用以下指令加以刪除︰
+   </para>
+<screen>sudo iscsiadm -m node -n iqn.2006-02.com.example.iserv:systems \
+-p ip:port --op=delete</screen>
+   <important>
+    <title>無確認</title>
+    <para>
+     請謹慎地使用此選項，因為該選項會刪除記錄，而不提供其他確認提示。
+    </para>
+   </important>
+   <para>
+    若要取得所有探查到的目標清單，請執行 <command>sudo iscsiadm -m node</command> 指令。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.installation">
+  <title>安裝時使用 iSCSI 磁碟</title>
+
+  <para>
+   使用支援 iSCSI 的韌體時，支援從 AMD64/Intel 64 和 IBM POWER 架構上的 iSCSI 磁碟開機。
+  </para>
+
+  <para>
+   若要在安裝期間使用 iSCSI 磁碟，必須將下列參數新增至開機選項行：
+  </para>
+
+<screen>withiscsi=1</screen>
+
+  <para>
+   安裝期間會顯示一個額外的螢幕，可讓您將 iSCSI 磁碟連接至系統，並在安裝過程中使用它們。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.trouble">
+  <title>iSCSI 疑難排解</title>
+
+  <para>
+   本節說明一些已知問題和 iSCSI 目標及 iSCSI 啟動器問題的可能解決方案。
+  </para>
+
+  <sect2 xml:id="sec.iscsi.trouble.no_service">
+   <title>在 iSCSI LIO 目標伺服器上設定目標 LUN 時發生入口錯誤</title>
+   <para>
+    新增或編輯 iSCSI LIO 目標群組時發生錯誤：
+   </para>
+<screen>Problem setting network portal <replaceable>ip_address</replaceable>:3260</screen>
+   <para>
+    <filename>/var/log/YasT2/y2log</filename> 記錄檔案包含下列錯誤：
+   </para>
+<screen>find: `/sys/kernel/config/target/iscsi': No such file or directory</screen>
+   <para>
+    如果 iSCSI LIO 目標伺服器軟體目前未在執行中，則會發生此問題。若要解決此問題，請結束 YaST，在指令行中使用 <command>systemctl start target</command> 指令手動啟動 iSCSI LIO，然後再試一次。
+   </para>
+   <para>
+    您也可以輸入下列指令來檢查 <command>configfs</command>、<command>iscsi_target_mod</command> 和 <command>target_core_mod</command> 是否已載入。隨即會顯示回應範例。
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo lsmod | grep iscsi
+iscsi_target_mod      295015  0
+target_core_mod       346745  4
+iscsi_target_mod,target_core_pscsi,target_core_iblock,target_core_file
+configfs               35817  3 iscsi_target_mod,target_core_mod
+scsi_mod              231620  16
+iscsi_target_mod,target_core_pscsi,target_core_mod,sg,sr_mod,mptctl,sd_mod,
+scsi_dh_rdac,scsi_dh_emc,scsi_dh_alua,scsi_dh_hp_sw,scsi_dh,libata,mptspi,
+mptscsih,scsi_transport_spi</screen>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.not_visible">
+   <title>iSCSI LIO 目標在其他電腦中不可見</title>
+   <para>
+    如果在目標伺服器上使用防火牆，則必須開啟要用於允許其他電腦看到 iSCSI LIO 目標的 iSCSI 連接埠。如需更多資訊，請參閱<xref linkend="sec.iscsi.target.start"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.package_loss">
+   <title>iSCSI 流量中的資料封包被丟棄</title>
+   <para>
+    如果防火牆過於忙碌，就可能會丟棄封包。SUSE 防火牆預設設定為在三分鐘之後丟棄封包。如果您發現 iSCSI 流量封包被丟棄，可以考慮將 SUSE 防火牆設定為在過於忙碌時將封包排入佇列，而不是將其丟棄。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.lvm">
+   <title>將 iSCSI 磁碟區與 LVM 配合使用</title>
+   <para>
+    當在 iSCSI 目標上使用 LVM 時，請使用本節中的疑難排解提示。
+   </para>
+   <sect3 xml:id="sec.iscsi.trouble.lvm.boot_initiator">
+    <title>檢查在開機時 iSCSI 啟動器是否執行探查</title>
+    <para>
+     如果設定了 iSCSI 啟動器，請務必啟用開機時探查功能，以便 udev 可以在開機時探查 iSCSI 裝置並設定 LVM 要使用的裝置。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.iscsi.trouble.lvm.boot_target">
+    <title>檢查在開機時是否執行 iSCSI 目標探查</title>
+    <para>
+     請記住，<filename>udev</filename> 會提供裝置的預設設定。確保建立裝置的所有應用程式在開機時啟動，以使 <command>udev</command> 可以在系統啟動時辨識裝置並為它們指定裝置。如果應用程式或服務直到後來才啟動，<command>udev</command> 便無法在開機時按照設定自動建立裝置。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.iscsi.trouble.mount">
+   <title>組態檔案設定為手動時會掛接 iSCSI 目標</title>
+   <para>
+    如果您之前手動修改了 <literal>/etc/iscsi/iscsid.conf</literal> 組態檔案，那麼，即使將 <filename>node.startup</filename> 選項設定為手動，Open-iSCSI 啟動時也會掛接目標。
+   </para>
+   <para>
+    檢查 <filename>/etc/iscsi/nodes/<replaceable>目標名稱</replaceable>/<replaceable>IP 位址</replaceable>,<replaceable>連接埠</replaceable>/default</filename> 檔案。它包含可以覆寫 <filename>/etc/iscsi/iscsid.conf</filename> 檔案的 <literal>node.startup</literal> 設定。使用 YaST 介面將掛接選項設定為手動，還會在 <filename>/etc/iscsi/nodes/<replaceable>目標名稱</replaceable>/<replaceable>IP 位址</replaceable>,<replaceable>連接埠</replaceable>/default</filename> 檔案中設定 <literal>node.startup = manual</literal>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.terminology">
+  <title>iSCSI LIO 目標術語</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>備援儲存庫</term>
+    <listitem>
+     <para>
+      一個實體儲存物件，可在 iSCSI 端點下提供實際儲存裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>CDB (指令描述子區塊)</term>
+    <listitem>
+     <para>
+      SCSI 指令的標準格式。CDB 的長度通常為 6、10 或 12 個位元組，但也可以達到 16 個位元組或可變長度。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>CHAP (Challenge Handshake 驗證通訊協定)</term>
+    <listitem>
+     <para>
+      一種點對點通訊協定 (PPP) 驗證方法，用於向一台電腦確認另一台電腦的身分。連結控制通訊協定 (LCP) 連接兩台電腦並且協商 CHAP 方法之後，驗證程式會將一個隨機處理安全傳送給對等。對等會根據處理安全和私密金鑰發出以雜湊加密的回應。驗證程式會針對它自己計算所得的預期雜湊值驗證雜湊回應，以確認驗證或終止連接。CHAP 定義於 RFC 1994 中。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>CID (連接識別碼)</term>
+    <listitem>
+     <para>
+      由啟動器產生的 16 位元編號，用於唯一地識別兩個 iSCSI 裝置之間的連接。此編號會在登入階段期間顯示。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>端點</term>
+    <listitem>
+     <para>
+      iSCSI 目標名稱與 iSCSI TPG (IQN + 標記) 的組合。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>EUI (延伸唯一識別碼)</term>
+    <listitem>
+     <para>
+      在全球範圍內唯一識別每個裝置的 64 位元編號。其格式由指定公司的唯一 24 位元編號以及該公司指定給所建置的每個裝置的 40 位元編號組成。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>執行者</term>
+    <listitem>
+     <para>
+      SCSI 工作階段的發出端。一般是控制裝置，例如電腦。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>IPS (網際網路通訊協定儲存)</term>
+    <listitem>
+     <para>
+      使用 IP 通訊協定在儲存網路中移動資料的一類通訊協定或裝置。FCIP (網際網路通訊協定光纖通道)、iFCP (網際網路光纖通道通訊協定) 和 iSCSI (網際網路 SCSI) 都屬於 IPS 通訊協定。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>IQN (iSCSI 合格的名稱)</term>
+    <listitem>
+     <para>
+      在全球範圍內唯一識別每個裝置的 iSCSI 名稱格式 (例如：<filename>iqn.5886.com.acme.tapedrive.sn‐a12345678</filename>)。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ISID (啟動器工作階段識別碼)</term>
+    <listitem>
+     <para>
+      由啟動器產生的一個 48 位元編號，用於唯一識別啟動器與目標之間的工作階段。此值在登入過程中建立，然後將與登入 PDU 一起傳送給目標。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>MCS (每個工作階段多個連接)</term>
+    <listitem>
+     <para>
+      屬於 iSCSI 規格的一部分，它允許在啟動器與目標之間存在多個 TCP/IP 連接。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>MPIO (多重路徑 I/O)</term>
+    <listitem>
+     <para>
+      一種可在伺服器與儲存之間建立多個資料備援路徑的方法。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>網路入口</term>
+    <listitem>
+     <para>
+      iSCSI 端點與 IP 位址及 TCP (傳輸控制通訊協定) 連接埠的組合。按照 IANA (Internet Assigned Numbers Authority) 的定義，TCP 連接埠 3260 是 iSCSI 通訊協定的埠號。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>SAM (SCSI 架構模型)</term>
+    <listitem>
+     <para>
+      使用一般術語說明 SCSI 行為的文件，允許不同類型的裝置透過各種媒體進行通訊。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目標</term>
+    <listitem>
+     <para>
+      SCSI 工作階段的接收端，通常是一個裝置，例如磁碟機、磁帶機或掃描器。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目標群組 (TG)</term>
+    <listitem>
+     <para>
+      在建立檢視窗時視為同等看待的所有 SCSI 目標連接埠的清單。建立檢視窗可便於進行 LUN (邏輯單位編號) 對應。每個檢視項目都會指定一個目標群組、主機群組和一個 LUN。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目標連接埠</term>
+    <listitem>
+     <para>
+      一個 iSCSI 端點與一或多個 LUN 的組合。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目標連接埠群組 (TPG)</term>
+    <listitem>
+     <para>
+      IP 位址和 TCP 埠號的清單，用於決定特定 iSCSI 目標將要監聽的介面。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>目標工作階段識別碼 (TSID)</term>
+    <listitem>
+     <para>
+      由目標產生的一個 16 位元編號，用於唯一識別啟動器與目標之間的工作階段。此值在登入過程中建立，然後將與登入回應 PDU (通訊協定資料單位) 一起傳送給啟動器。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.iscsi.info">
+  <title>其他資訊</title>
+
+  <para>
+   iSCSI 通訊協定已存在多年，因此有許多將 iSCSI 與 SAN 解決方案進行比較、確立效能基準的評論，還有介紹硬體解決方案的文件。以下是 open-iscsi 相關詳細資訊的重要網頁：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <citetitle>Open-iSCSI Project</citetitle> (開放式 iSCSI 專案，網址為 <link xlink:href="http://www.open-iscsi.org/"/>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <citetitle>AppNote: iFolder on Open Enterprise Server Linux Cluster using iSCSI</citetitle> (AppNote：使用 iSCSI 之 Open Enterprise Server Linux 叢集上的 iFolder，網址為 <link xlink:href="http://www.novell.com/coolsolutions/appnote/15394.html"/>)
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   此外也有一些線上文件。請參閱 <command>iscsiadm</command>、<command>iscsid</command>、<filename>ietd.conf</filename> 和 <command>ietd</command> 的線上文件，以及範例組態檔案 <filename>/etc/iscsid.conf</filename>。
+  </para>
+ </sect1>
+</chapter>

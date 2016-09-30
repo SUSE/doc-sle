@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_multitier-caching.xml" version="5.0" xml:id="cha.multitiercache" xml:lang="ja">
+ <title>ブロックデバイス操作の多層キャッシング</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  多層キャッシュは、2つ以上の層で構成される複製/分散キャッシュです。1つは低速であるものの安価な回転方式のブロックデバイス(ハードディスク)に代表され、もう1つは高価であるもののデータ操作を高速に実行します(SSDフラッシュディスクなど)。
+ </para>
+ <para>
+  SUSE Linux Enterprise Serverは、フラッシュデバイスと回転方式のデバイスとの間のキャッシング用に、それぞれ<systemitem class="resource">bcache</systemitem>および<systemitem class="resource">lvmcache</systemitem>という2つの異なるソリューションを実装しています。
+ </para>
+ <sect1 xml:id="sec.multitiercache.terminology">
+  <title>一般的な用語</title>
+
+  <para>
+   本項では、キャッシュ関連機能の説明でよく使用されるいくつかの用語について説明します。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>マイグレーション</term>
+    <listitem>
+     <para>
+      論理ブロックの主コピーをデバイス間で移動すること。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>昇格</term>
+    <listitem>
+     <para>
+      低速なデバイスから高速なデバイスへのマイグレーション。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>降格</term>
+    <listitem>
+     <para>
+      高速なデバイスから低速なデバイスへのマイグレーション。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>起点デバイス</term>
+    <listitem>
+     <para>
+      大容量で低速なブロックデバイス。古いか、キャッシュデバイス上のコピーとの同期が保たれている(ポリシーによります)、論理ブロックのコピーが常に含まれます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>キャッシュデバイス</term>
+    <listitem>
+     <para>
+      小容量で高速なブロックデバイス。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>メタデータデバイス</term>
+    <listitem>
+     <para>
+      キャッシュに入っているブロック、ダーティブロック、およびポリシーオブジェクトが使用する追加のヒントを記録する小容量のデバイス。この情報はキャッシュデバイスに配置することもできますが、別個に保持することにより、ボリュームマネージャで異なった設定にすることができます。たとえば、堅牢性を強化するためのミラーとして設定できます。メタデータデバイスを使用できるキャッシュデバイスは1つだけです。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ダーティブロック</term>
+    <listitem>
+     <para>
+      何らかのプロセスがキャッシュに配置されたデータブロックに書き込みを行う場合、そのキャッシュされているブロックは、キャッシュ内で上書きされていて、元のデバイスにもう一度書き込む必要があるため、「ダーティ」<emphasis/>とマークされます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>キャッシュミス</term>
+    <listitem>
+     <para>
+      I/O操作の要求は、まず、キャッシュされたデバイスのキャッシュを参照します。要求された値が見つからなかった場合、デバイス自体を検索しますが、これは低速です。これを「キャッシュミス」<emphasis/>と呼びます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>キャッシュヒット</term>
+    <listitem>
+     <para>
+      要求された値がキャッシュされたデバイスのキャッシュ内で見つかった場合、その値は高速に提供されます。これを「キャッシュヒット」<emphasis/>と呼びます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>コールドキャッシュ</term>
+    <listitem>
+     <para>
+      値が格納されていない(空の)キャッシュのことで、「キャッシュミス」<emphasis/>を引き起こします。キャッシュされたブロックデバイスの操作が進むにつれて、キャッシュはデータで満たされていき、「ウォーム」<emphasis/>になります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ウォームキャッシュ</term>
+    <listitem>
+     <para>
+      すでに何らかの値が格納されていて、「キャッシュヒット」<emphasis/>になる確立が高いキャッシュ。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.caching_modes">
+  <title>キャッシングモード</title>
+
+  <para>
+   多層キャッシュで使用される基本的なキャッシングモードは、「ライトバック」<emphasis/>、「ライトスルー」<emphasis/>、「ライトアラウンド」<emphasis/>、および「パススルー」<emphasis/>です。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>ライトバック</term>
+    <listitem>
+     <para>
+      キャッシュされているブロックに書き込まれたデータは、キャッシュにのみ書き込まれ、そのブロックはダーティとマークされます。これはデフォルトのキャッシングモードです。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ライトスルー</term>
+    <listitem>
+     <para>
+      キャッシュされているブロックへの書き込みは、起点デバイスとキャッシュデバイスの両方にヒットするまで完了しません。「ライトスルー」<emphasis/>キャッシュでは、クリーンブロックはクリーンな状態のままです。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ライトアラウンド</term>
+    <listitem>
+     <para>
+      ライトスルーキャッシュと同様の手法ですが、書き込みI/Oは、キャッシュをバイパスして永続ストレージに直接書き込まれます。この手法では、直後に再読み込みされない書き込みI/Oによってキャッシュがいっぱいになるのを防ぐことができますが、最近書き込まれたデータの読み込み要求で「キャッシュミス」が発生し、低速なバルクストレージからの読み込みが必要になり、レイテンシが増加するという欠点があります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>パススルー</term>
+    <listitem>
+     <para>
+      「パススルー」<emphasis/>モードを有効にするには、キャッシュがクリーンである必要があります。読み込みは、キャッシュをバイパスして起点デバイスから実行されます。書き込みは起点デバイスに転送され、キャッシュブロックは「無効化」されます。「パススルー」<emphasis/>では、データ整合性が維持されるため、データ整合性を気にすることなくキャッシュデバイスをアクティブ化できます。書き込みが実行されるにつれて、キャッシュは徐々にコールドになります。後でキャッシュの整合性を検証できる場合、または<literal>invalidate_cblocks</literal>メッセージを使用して整合性を保証できる場合は、キャッシュデバイスがまだウォームである間に、デバイスを「ライトスルー」<emphasis/>または「ライトバック」<emphasis/>モードに切り替えることができます。それ以外の場合は、目的のキャッシングモードに切り替える前に、キャッシュの内容を破棄できます。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.bcache">
+  <title><systemitem class="resource">bcache</systemitem></title>
+
+
+
+  <para>
+   <systemitem class="resource">bcache</systemitem>はLinuxカーネルブロック層のキャッシュです。1台以上の高速なディスクドライブ(SSDなど)を1台以上の低速なハードディスクのキャッシュとして動作させることができます。<systemitem class="resource">bcache</systemitem>は、ライトスルーとライトバックをサポートし、使用するファイルシステムから独立しています。デフォルトでは、SSDの強みである、ランダム読み込みとランダム書き込みのみのキャッシュを実行します。デスクトップやサーバのほか、ハイエンドのストレージアレイにも適しています。
+  </para>
+
+  <sect2 xml:id="sec.multitiercache.bcache.features">
+   <title>主な特徴</title>
+   <itemizedlist>
+    <listitem>
+     <para>
+      1つのキャッシュデバイスを使用して、任意の数のバッキングデバイスをキャッシュできます。バッキングデバイスは、マウント中および使用中のランタイムに接続および切断できます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      不正なシャットダウンから回復します。キャッシュがバッキングデバイスと整合性があるようになるまで、書き込みは完了しません。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      輻輳する場合、SSDへのトラフィックを制限します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      非常に効率的なライトバック実装。ダーティデータは常にソートされた順序で書き込まれます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      運用環境での使用における安定性と信頼性。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+
+
+  <sect2 xml:id="sec.multitiercache.bcache.setting_bcache_device">
+   <title><systemitem class="resource">bcache</systemitem>デバイスのセットアプ</title>
+   <para>
+    この項では、<systemitem class="resource">bcache</systemitem>デバイスのセットアップと管理の手順を説明します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      <systemitem>bcache-tools</systemitem>パッケージをインストールします。
+     </para>
+<screen>sudo zypper in bcache-tools</screen>
+    </step>
+    <step>
+     <para>
+      バッキングデバイスを作成します(通常は機械式ドライブ)。デバイス全体、パーティション、またはその他の標準ブロックデバイスをバッキングデバイスにすることができます。
+     </para>
+<screen>sudo make-bcache -B /dev/sdb</screen>
+    </step>
+    <step>
+     <para>
+      キャッシュデバイスを作成します(通常はSSDディスク)。
+     </para>
+<screen>sudo make-bcache -C /dev/sdc</screen>
+     <para>
+      この例では、デフォルトのブロックサイズとバケットサイズである512Bと128KBを使用しています。ブロックサイズはバッキングデバイスのセクタサイズ(通常は512または4k)と一致している必要があります。バケットサイズは、書き込みの増大を防ぐために、キャッシングデバイスの消去ブロックサイズと一している必要があります。たとえば、セクタが4kのハードディスクと消去ブロックサイズが2MBのSSDを使用する場合、このコマンドは次のようになります。
+     </para>
+<screen>sudo make-bcache --block 4k --bucket 2M -C /dev/sdc</screen>
+     <tip>
+      <title>複数デバイスのサポート</title>
+      <para>
+       <command>make-bcache</command>は、複数のバッキングデバイスとキャッシュデバイスを同時に準備および登録できます。この場合、後から手動でキャッシュデバイスをバッキングデバイスに接続する必要はありません。
+      </para>
+<screen>sudo make-bcache -B /dev/sda /dev/sdb -C /dev/sdc</screen>
+     </tip>
+    </step>
+    <step>
+     <para>
+      <systemitem class="resource">bcache</systemitem>デバイスは次のように表示されます。
+     </para>
+<screen>/dev/bcache<replaceable>N</replaceable></screen>
+     <para>
+      さらに、次のようにも表示されます。
+     </para>
+<screen>/dev/bcache/by-uuid/<replaceable>uuid</replaceable>
+/dev/bcache/by-label/<replaceable>label</replaceable></screen>
+     <para>
+      <systemitem class="resource">bcache</systemitem>デバイスは通常の方法で正常にフォーマットおよびマウントできます。
+     </para>
+<screen>mkfs.ext4 /dev/bcache0
+mount /dev/bcache0 /mnt</screen>
+     <para>
+      <systemitem class="resource">bcache</systemitem>デバイスは、<filename>/sys/block/bcache<replaceable>N</replaceable>/bcache</filename>にある<systemitem>sysfs</systemitem>によって制御できます。
+     </para>
+    </step>
+    <step>
+     <para>
+      キャッシュデバイスとバッキングデバイスの両方を登録した後、バッキングデバイスを関連キャッシュセットに接続して、キャッシュを有効にする必要があります。
+     </para>
+<screen>echo <replaceable>cache_set_uuid</replaceable> &gt; /sys/block/bcache0/bcache/attach</screen>
+     <para>
+      <replaceable>cache_set_uuid</replaceable>は<filename>/sys/fs/bcache</filename>で確認できます。
+     </para>
+    </step>
+    <step>
+     <para>
+      デフォルトでは、<systemitem class="resource">bcache</systemitem>はパススルーキャッシングモードを使用します。たとえば、これをライトバックに変更するには、次のコマンドを実行します。
+     </para>
+<screen>echo writeback &gt; /sys/block/bcache0/bcache/cache_mode</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.multitiercache.bcache.sysfs">
+   <title><systemitem>sysfs</systemitem>を使用した<systemitem class="resource">bcache</systemitem>の設定</title>
+   <para>
+    <systemitem class="resource">bcache</systemitem>デバイスは、<systemitem>sysfs</systemitem>インタフェースを使用してランタイム設定値を保存します。このようにして、<systemitem class="resource">bcache</systemitem>バッキングディスクとキャッシュディスクの動作を変更したり、使用状況の統計を表示したりできます。
+   </para>
+   <para>
+    <systemitem class="resource">bcache</systemitem> <systemitem>sysfs</systemitem>の全パラメータのリストについては、<filename>/usr/src/linux/Documentation/bcache.txt</filename>ファイルの説明を参照してください。主に、<literal>SYSFS - BACKING DEVICE</literal>、<literal>SYSFS - BACKING DEVICE STATS</literal>、および<literal>SYSFS - CACHE DEVICE</literal>の各セクションで扱っています。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.lvmcache">
+  <title><systemitem class="resource">lvmcache</systemitem></title>
+
+  <para>
+   <systemitem class="resource">lvmcache</systemitem>は、論理ボリューム(LV)で構成されるキャッシングメカニズムです。<literal>dm-cache</literal>カーネルドライバを使用し、ライトスルー(デフォルト)およびライトバックのキャッシングモードをサポートします。<systemitem class="resource">lvmcache</systemitem>は、データの一部をより高速で小容量のLVに動的に移行することによって、大容量で低速なLVのパフォーマンスを向上させます。LVMの詳細については、<xref linkend="part.lvm"/>を参照してください。
+  </para>
+
+  <para>
+   LVMでは、この小容量で高速なLVを「キャッシュプールLV」<emphasis/>と呼びます。一方、大容量で低速なLVを「起点LV」<emphasis/>と呼びます。dm-cacheの要件があるため、LVMは、キャッシュプールLVをさらに「キャッシュデータLV」<emphasis/>と「キャッシュメタデータLV」<emphasis/>という2つのデバイスに分割します。キャッシュデータLVは、速度の向上を目的として、起点LVからのデータブロックのコピーが保持される場所です。キャッシュメタデータLVには、データブロックが保存されている場所を指定するアカウンティング情報が格納されます。
+  </para>
+
+  <sect2 xml:id="sec.multitiercache.lvmcache.configure">
+   <title><systemitem class="resource">lvmcache</systemitem>の設定</title>
+   <para>
+    この項では、LVMベースのキャッシングの作成と設定の手順を説明します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      起点LVを作成します。<emphasis/>新しいLVを作成するか既存のLVを使用して、起点LVにします。
+     </para>
+<screen>lvcreate -n <replaceable>origin_lv</replaceable> -L 100G vg <replaceable>/dev/slow_dev</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      キャッシュデータLVを作成します。<emphasis/>このLVには、起点LVからのデータブロックが格納されます。このLVのサイズがキャッシュのサイズになり、キャッシュプールLVのサイズとして報告されます。
+     </para>
+<screen>lvcreate -n <replaceable>cache_data_lv</replaceable> -L 10G vg <replaceable>/dev/fast</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      キャッシュメタデータLVを作成します。<emphasis/>このLVには、キャッシュプールメタデータが格納されます。このLVのサイズは、キャッシュデータLVの約1000分の1にする必要があります。最小サイズは8MBです。
+     </para>
+<screen>lvcreate -n <replaceable>cache_metadata_lv</replaceable> -L 12M vg <replaceable>/dev/fast</replaceable></screen>
+     <para>
+      これまでに作成したボリュームの一覧を表示します。
+     </para>
+<screen>lvs -a vg
+LV                VG   Attr        LSize   Pool Origin
+cache_data_lv     vg   -wi-a-----  10.00g
+cache_metadata_lv vg   -wi-a-----  12.00m
+origin_lv         vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      キャッシュプールLVを作成します。<emphasis/>データLVとメタデータLVをキャッシュプールLVに結合します。同時にキャッシュプールLVの動作を設定できます。
+     </para>
+     <para>
+      <replaceable>cache_pool_lv</replaceable>は、<replaceable>cache_data_lv</replaceable>の名前を引き継ぎます。
+     </para>
+     <para>
+      <replaceable>cache_data_lv</replaceable>は、<replaceable>cache_data_lv</replaceable>_cdataという名前に変更されて、非表示になります。
+     </para>
+     <para>
+      <replaceable>cache_meta_lv</replaceable>は、<replaceable>cache_data_lv</replaceable>_cmetaという名前に変更されて、非表示になります。
+     </para>
+<screen>lvconvert --type cache-pool \
+ --poolmetadata vg/cache_metadata_lv vg/cache_data_lv</screen>
+<screen>lvs -a vg
+LV                     VG   Attr       LSize   Pool Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-------  10.00g
+[cache_data_lv_cmeta]  vg   ewi-------  12.00m
+origin_lv              vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      キャッシュLVを作成します。<emphasis/>キャッシュプールLVを起点LVにリンクして、キャッシュLVを作成します。
+     </para>
+     <para>
+      ユーザがアクセス可能なキャッシュLVは起点LVの名前を引き継ぎ、起点LVは非表示LVになって<replaceable>origin_lv</replaceable>_corigという名前に変更されます。
+     </para>
+     <para>
+      キャッシュLVは、<replaceable>origin_lv</replaceable>の名前を引き継ぎます。
+     </para>
+     <para>
+      <replaceable>origin_lv</replaceable>は、<replaceable>origin_lv</replaceable>_corigという名前に変更されて、非表示になります。
+     </para>
+<screen>lvconvert --type cache --cachepool vg/cache_data_lv vg/origin_lv</screen>
+<screen>lvs -a vg
+LV              VG   Attr       LSize   Pool   Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-ao----  10.00g
+[cache_data_lv_cmeta]  vg   ewi-ao----  12.00m
+origin_lv              vg   Cwi-a-C--- 100.00g cache_data_lv [origin_lv_corig]
+[origin_lv_corig]      vg   -wi-ao---- 100.00g</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.multitiercache.lvmcache.remove">
+   <title>キャッシュプールの削除</title>
+   <para>
+    LVキャッシュをオフにする方法はいくつかあります。
+   </para>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.detach">
+    <title>キャッシュLVからキャッシュプールLVを切断</title>
+    <para>
+     キャッシュプールLVをキャッシュLVから接続解除して、未使用キャッシュプールLVとキャッシュされていない起点LVを残すことができます。データは、必要に応じてキャッシュプールから起点LVに書き戻されます。
+    </para>
+<screen>lvconvert --splitcache vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.wo_origin">
+    <title>起点LVを削除せずにキャッシュプールLVを削除</title>
+    <para>
+     この方法では、必要に応じてキャッシュプールから起点LVにデータを書き戻してから、キャッシュプールLVを削除し、キャッシュされていない起点LVを残します。
+    </para>
+<screen>lvremove vg/cache_data_lv</screen>
+    <para>
+     次に示す別のコマンドでも、キャッシュLVからキャッシュプールを接続解除し、キャッシュプールを削除します。
+    </para>
+<screen>lvconvert --uncache vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.both">
+    <title>起点LVとキャッシュプールLVの両方を削除</title>
+    <para>
+     キャッシュLVを削除すると、起点LVとリンクされたキャッシュプールLVの両方が削除されます。
+    </para>
+<screen>lvremove vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.info">
+    <title>その他の情報</title>
+    <para>
+     サポートされるキャッシュモード、冗長なサブ論理ボリューム、キャッシュポリシー、既存のLVからキャッシュタイプへの変換など、<systemitem class="resource">lvmcache</systemitem>に関連するその他のトピックは、<systemitem class="resource">lvmcache</systemitem>のマニュアルページ(<command>man 7 lvmcache</command>)で参照できます。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>

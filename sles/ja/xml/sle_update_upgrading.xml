@@ -1,0 +1,1007 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="sle_update_upgrading.xml" version="5.0" xml:id="cha.update.sle">
+ <title>SUSE Linux Enterpriseのアップグレード</title>
+ <info>
+  <abstract>
+   <para>
+    SUSE® Linux Enterprise (SLE)では、既存のシステムを新しいバージョンにアップデートできます。たとえば、SLE 11 SP4をSLE 12にアップデートできます。新たにインストールする必要はありません。ホームディレクトリ、データディレクトリ、システム設定などの既存のデータは、そのまま保持されます。CD/DVDドライブから、またはネットワーク上にある中央のインストールソースからアップデートできます。
+   </para>
+
+   <para>
+    この章では、DVD、ネットワーク、自動化プロセス、SUSE Managerなどを使用して、SUSE Linux Enterprise システムを手動でアップグレードする方法について説明します。
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <sect1 xml:id="sec.update.prep">
+  <title>一般的な準備</title>
+
+  <para>
+   アップデート手順を開始する前に、システムが正しく準備されていることを確認します。準備内容には、データのバックアップとリリースノートの確認などがあります。
+  </para>
+
+  <sect2 xml:id="sec.update.prep.multiversion">
+   <title>カーネルのマルチバージョンサポートの一時的な無効化</title>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>では、<filename>/etc/zypp/zypp.conf</filename>の各設定を有効にすることで、複数のカーネルバージョンをインストールできます。特定のサービスパックに更新する場合、この機能のサポートを一時的に無効化する必要があります。更新が正常に完了したら、マルチバージョンサポートを再び有効にできます。マルチバージョンサポートを無効にするには、<filename>/etc/zypp/zypp.conf</filename>の各行をコメント化します。結果は次のようになります。
+   </para>
+<screen>#multiversion = provides:multiversion(kernel)
+#multiversion.kernels = latest,running</screen>
+   <para>
+    更新が正常に完了した後にこの機能を再アクティブ化するには、コメント記号を削除します。マルチバージョンサポートの詳細については、<xref linkend="cha.tuning.multikernel.enable"/>を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.update.prep.relnotes">
+   <title>リリースノートの確認</title>
+   <para>
+    リリースノートには、旧リリースのSUSE Linux Enterpriseからの変更点に関する追加情報が記載されています。特定のハードウェアやセットアップについて特別な考慮が必要かどうか、使用している特定のソフトウェアパッケージのどれに大幅な変更があったか、およびこのセクションに示す一般的な推奨事項のほかにどのような予防措置を講じる必要があるかについて、リリースノートで確認してください。リリースノートには、リリース直前になって判明したためマニュアルに記載できなかった情報と既知の問題も記載されています。
+   </para>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>の最新情報を含むリリースノートの最新バージョンのドキュメントは、<link xlink:href="http://www.suse.com/documentation/"/>でオンラインで読むことができます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.update.prep.backup">
+   <title>バックアップの作成</title>
+   <para>
+    更新の前に、既存の設定ファイルを別個のメディア(テープデバイス、リムーバブルハードディスクなど)にコピーして、データをバックアップします。主に、<filename>/etc</filename>に保存されているファイル、および<filename>/var</filename>と<filename>/opt</filename>のディレクトリとファイルの一部に当てはまります。さらに、<filename>/home</filename> (<envar>HOME</envar>ディレクトリ)下のユーザデータをバックアップメディアに書き込むようにします。このデータは、<systemitem class="username">root</systemitem>ユーザでバックアップします。<systemitem class="username">root</systemitem>のみに、すべてのローカルファイルに関する読み込みパーミッションがあります。
+   </para>
+   <para>
+    YaSTのインストールモードとして<guimenu>既存システムの更新</guimenu>を選択している場合は、もっと後の時点で(システム)バックアップを実行することができます。変更されたすべてのファイルと<filename>/etc/sysconfig</filename>ディレクトリにあるファイルを含めることができます。ただし、これは完全なバックアップではありません。前述したその他の重要なディレクトリがすべて含まれていないからです。<filename>/var/adm/backup</filename>ディレクトリでバックアップを見つけます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.update.prep.mariadb">
+   <title>MySQLデータベースの移行</title>
+   <remark>toms 2015-09-03: already reviewed by Ondrej and Kristýna.</remark>
+   <para>
+    SUSE Linux Enterprise 12では、SUSEは、MySQLからMariaDBに切り替えました。アップグレードを開始する前に、データベースのバックアップを取得することを強くお勧めします。
+   </para>
+
+   <para>
+    データベースマイグレーションを実行するには、次の手順を実行します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      ご使用のSUSE Linux Enterprise 11マシンにログインします。
+     </para>
+    </step>
+    <step>
+     <para>
+      ダンプファイルを作成します。
+     </para>
+<screen><prompt>root # </prompt><command>mysqldump</command> -u root -p --all-databases &gt; mysql_backup.sql</screen>
+     <para>
+      デフォルトでは、<command>mysqldump</command>は、<literal>INFORMATION_SCHEMA</literal>、または<literal>performance_schema</literal>データベースをダンプしません。詳細については、<link xlink:href="https://dev.mysql.com/doc/refman/5.5/en/mysqldump.html"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      ダンプファイル、環境設定ファイル、<filename>/etc/my.cnf</filename>、およびディレクトリ、<filename>/etc/mysql/</filename>を後で調べることができるように<emphasis>(インストールのためではありません)</emphasis>安全な場所に保存します。
+     </para>
+    </step>
+    <step>
+     <para>
+      アップグレードを実施します。アップグレードが終わっても、前の環境設定ファイル、<filename>/etc/my.cnf</filename>は前のままです。新しい設定は、<filename>/etc/my.cnf.rpmnew</filename>ファイルで確認できます。
+     </para>
+    </step>
+    <step>
+     <para>
+      必要に応じて、MariaDBデータベースを設定します。以前の設定ファイルとディレクトリを<emphasis>使わないでください</emphasis>。これらは、リマインダとして使用し、活用するだけです。
+     </para>
+    </step>
+    <step>
+     <para>
+      MariaDBサーバを起動して確認してください。
+     </para>
+<screen><prompt>root # </prompt><command>systemctl</command> start mysql</screen>
+     <para>
+      ブートのたびにMariaDBサーバを起動する場合は、そのサービスを有効にします。
+     </para>
+<screen><prompt>root # </prompt><command>systemctl</command> enable mysql</screen>
+
+    </step>
+    <step>
+     <para>
+      MariaDBが適切に稼働していることを、データベースに接続して確認します。
+     </para>
+<screen><prompt>root # </prompt><command>mysql</command> -u root -p</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.update.prep.postgresql">
+   <title>PostgreSQLデータベースの移行</title>
+   <remark>toms 2015-09-09: FATE#319049</remark>
+   <remark>Already reviewd by Reinhard</remark>
+   <para>
+    SLE11 SP3およびSLE12 GAでは、保守アップデートで、PostgreSQLデータベースのバージョンが新しくなっています。データベースのマイグレーション作業が必要であることから、自動アップグレードプロセスはありません。そのため、あるバージョンから別のバージョンへの切り替えは、手動で行わなければなりません。
+   </para>
+   <para>
+    マイグレーションプロセスは、<command>pg_upgrade</command>コマンドで行います。このコマンドは、従来のdumpとreloadコマンドに代わる方式です。<quote>dump とreload</quote>方式と比べると、<command>pg_upgrade</command>の場合、マイグレーションの時間が短縮されます。
+   </para>
+   <para>
+    PostgreSQLのバージョンによって、それぞれ異なるディレクトリにファイルが保存されています。アップデート後、ディレクトリは次のように変わります。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>SLE11 SP3/SP4</term>
+     <listitem>
+      <para>
+       <filename>/usr/lib/postgresql91/</filename>から<filename>/usr/lib/postgresql94/</filename>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>SLE12 GA</term>
+     <listitem>
+      <para>
+       <filename>/usr/lib/postgresql93/</filename>から<filename>/usr/lib/postgresql94/</filename>
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    データベースマイグレーションを実行するには、次の手順を実行します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      以下の前提条件が満たされていることを確認します。
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+        満たされていない場合、保守アップデートで、古いPostgreSQLバージョンを最新リリースにアップグレードします。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        既存のデータベースのバックアップを作成します。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        新規のPostgreSQLのメジャーバージョンのパッケージをインストールします。SLE12の場合、
+        <package>postgresql94-server</package>
+        およびそれが依存するすべてのパッケージのインストールを意味します。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        パッケージ
+        <package>postgresql94-contrib</package>
+        をインストールします。これには、<command>pg_upgrade</command>コマンドが含まれています。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        ご使用のPostgreSQLデータ領域(デフォルトでは<filename>/var/lib/pgsql/data</filename>)に十分な空き容量があることを確認します。容量が厳しい場合、次のSQLコマンドをデータベースごとに実行して、サイズを縮小します(長時間要する場合があります)。
+       </para>
+<screen>VACUUM FULL</screen>
+      </listitem>
+     </itemizedlist>
+    </step>
+    <step>
+     <para>
+      PostgreSQLサーバを停止します。
+     </para>
+<screen><prompt>root # </prompt><command>/usr/sbin/rcpostgresql</command> stop</screen>
+    </step>
+    <step>
+     <para>
+      古いデータディレクトリの名前を変更します。
+     </para>
+<screen><prompt>root # </prompt><command>mv</command> /var/lib/pgsql/data /var/lib/pgsql/data.old</screen>
+    </step>
+    <step>
+     <para>
+      新規のデータディレクトリを作成します。
+     </para>
+<screen><prompt>root # </prompt><command>mkdir</command> -p /var/lib/pgsql/data</screen>
+    </step>
+    <step>
+     <para>
+      旧バージョンで設定ファイルを変更していた場合、<filename>postgresql.conf</filename>ファイルと<filename>pg_hba.conf</filename>ファイルを新規の<filename>データ</filename>ディレクトリにコピーします。
+     </para>
+<screen><prompt>root # </prompt><command>cp</command> /var/lib/pgsql/data.old/*.conf \
+     /var/lib/pgsql/data</screen>
+    </step>
+    <step>
+     <para>
+      新規のデータベースインスタンスを初期化します。<command>initdb</command>を使用して手動で実行するか、PostgreSQLを起動、停止することで自動的に実行します。
+     </para>
+<screen><prompt>root # </prompt><command>/usr/sbin/rcpostgresql</command> start
+<prompt>root # </prompt><command>/usr/sbin/rcpostgresql</command> stop</screen>
+    </step>
+    <step>
+     <para>
+      マイグレーションプロセスを開始し、<replaceable>OLD</replaceable>プレースホルダを古いバージョンに置き換えます。
+     </para>
+<screen><prompt>root # </prompt><command>pg_upgrade</command> \
+   --old-datadir "/var/lib/pgsql/data.old" \
+   --new-datadir "/var/lib/pgsql/data" \
+   --old-bindir "/usr/lib/postgresql<replaceable>OLD</replaceable>/bin/" \
+   --new-bindir "/usr/lib/postgresql94/bin/"</screen>
+    </step>
+    <step>
+     <para>
+      新規の データベースインスタンスを起動します。
+     </para>
+<screen><prompt>root # </prompt><command>/usr/sbin/rcpostgresql</command> start</screen>
+    </step>
+    <step>
+     <para>
+      マイグレーションが成功したかどうか確認します。この手順を自動化する一般的なツールはありません。テストする量と内容は、ユーザの使用状況によって異なります。
+     </para>
+    </step>
+    <step>
+     <para>
+      すべての古いPostgreSQLパッケージと古いデータディレクトリを削除します。
+     </para>
+<screen><prompt>root # </prompt><command>zypper</command> search -s postgresql<replaceable>OLD</replaceable> | xargs zypper rm -u
+<prompt>root # </prompt><command>rm</command> -rf /var/lib/pgsql/data.old</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.update.prep.ssl">
+   <title>JavaアプリケーションのMD5以外のサーバ証明書を作成します。</title>
+   <remark>toms 2016-07-27: from bsc#970153, c#24</remark>
+   <para>
+    SP1からSP2に更新するときに、MD5ベースの証明書はセキュリティ修正の一環として無効にされました。MD5として作成された証明書を持っている場合、次の手順で証明書を再作成してください。
+   </para>
+   
+   <procedure>
+    <step>
+     <para>
+      端末を開いて、<systemitem class="username">root</systemitem>としてログインします。
+     </para>
+    </step>
+    <step>
+     <para>
+      秘密鍵を作成します。
+     </para>
+     <screen><prompt>root # </prompt><command>openssl</command> genrsa -out server.key 1024</screen>
+     <para>
+      より強力な鍵が必要な場合、<literal>1024</literal>を<literal>4096</literal>などの大きい数に置き換えます。
+     </para>
+    </step>
+    <step>
+     <para>
+      証明書署名要求(CSR)を作成します。
+     </para>
+     <screen><prompt>root # </prompt><command>openssl</command> req -new -key server.key -out server.csr</screen>
+    </step>
+    <step>
+     <para>
+      証明書を自己署名します。
+     </para>
+     <screen><prompt>root # </prompt><command>openssl</command> x509 -req -days 365 -in server.csr -signkey server.key -out server.crt</screen>
+    </step>
+    <step>
+     <para>
+      PEMファイルを作成します。
+     </para>
+     <screen><prompt>root # </prompt><command>cat</command> server.key server.crt &gt; server.pem</screen>
+    </step>
+    <step>
+     <para>ファイル<filename>server.crt</filename>、<filename>server.csr</filename>、<filename>server.key</filename>、および<filename>server.pem</filename>を鍵が見つかったそれぞれのディレクトリに配置します。たとえばTomcatの場合、このディレクトリは<filename>/etc/tomcat/ssl/</filename>です。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+  
+  <sect2 xml:id="sec.update.prep.vms">
+   <title>仮想マシンゲストのシャットダウン</title>
+   <para>
+    お使いのマシンがKVMまたはXenのVMホストサーバとして機能している場合、アップデートの前には、実行中のすべてのVMゲストを正しくシャットダウンするようにします。そうでないと、更新後にゲストにアクセスできなくなる可能性があります。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.update.prep.smt">
+   <title>SMTクライアントで<command>clientSetup4SMT.sh</command>スクリプトを確認します。</title>
+   <para>
+    SMTサーバに対して登録されているクライアントOSをマイグレーションしている場合、ホストにある<command>clientSetup4SMT.sh</command>スクリプトのバージョンが最新かどうかを確認する必要があります。古いバージョンのSMTの<command>clientSetup4SMT.sh</command>はSMT 12クライアントを管理できません。SMTサーバにソフトウェアパッチを定期的に適用している場合、常に最新バージョンの<command>clientSetup4SMT.sh</command>を<filename>&lt;SMT_HOSTNAME&gt;/repo/tools/clientSetup4SMT.sh</filename>で見つけることができます。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.update.disk">
+  <title>ディスク容量</title>
+
+  <para>
+   ソフトウェアは、バージョンが上がるたびに<quote>増加する</quote>傾向があります。そのため、更新する前に、使用可能名パーティションの容量を調べてください。ディスク容量が不足する可能性がある場合は、データを保護してから、パーティションのサイズを変更するなどして、使用可能な容量を増やしてください。各パーティションに必要な容量を決定する一般的なルールはありません。必要な容量は、特定のパーティションプロファイルおよび選択したソフトウェアによって異なります。
+  </para>
+
+  <note>
+   <title>YaSTでの十分な容量の自動確認</title>
+   <para>
+    更新プロシージャの実行中に、YaSTは空きディスク容量を確認し、インストールで使用可能な容量を超える可能性がある場合は、ユーザに警告を表示します。その場合、更新を実行すると、「システムが使用できなくなる」<emphasis/>ことがあります。操作の内容を(事前のテストによって)確実に把握している場合にのみ、この警告をスキップして更新を続行できます。
+   </para>
+  </note>
+
+  <sect2 xml:id="sec.update.disk.space">
+   <title>Btrfs以外のファイルシステムにおける空きディスク容量の確認</title>
+   <para>
+    <command>df</command>コマンドを使用して、使用可能なディスク容量を表示できます。たとえば、<xref linkend="aus.update.df"/>では、ルートパーティションは<filename>/dev/hda3</filename>です(<filename>/</filename>としてマウントされています)。
+   </para>
+   <example xml:id="aus.update.df">
+    <title><command>df -h</command>の出力例</title>
+
+<screen os="sles">Filesystem     Size  Used Avail Use% Mounted on
+/dev/sda3       74G   22G   53G  29% /
+tmpfs          506M     0  506M   0% /dev/shm
+/dev/sda5      116G  5.8G  111G   5% /home
+/dev/sda1       44G    4G   40G   9% /data</screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="sec.update.disk.btrfs-on-root">
+   <title>Btrfsファイルシステムの空きディスク容量の確認</title>
+   <para>
+    マシンでBtrfsをルートファイルシステムとして使用している場合、十分な空き容量があることを確認します。ディスク容量は、次の2つのコマンドによって確認できます。
+   </para>
+<screen><prompt>root # </prompt><command>btrfs</command> filesystem df /
+<prompt>root # </prompt><command>df</command> /</screen>
+   <para>
+    2つのコマンドの結果、同じように使用済みのディスク容量の数字が示されます。しかし、Btrfsと空き容量に関して問題となるのは、ユーザには、スナップショットで参照されているものを判別できないことと、変更に必要なディスク容量を計算することができないことです。
+   </para>
+   <para>
+    多くの場合、アップグレードには、現在のルートファイルシステムと同じディスク容量が必要になります(<filename>/.snapshot</filename>がない場合)。Btrfsファイルシステム以外の、他のファイル・システムについても空き容量を確認します。このようなことから以下のような推奨事項が判明します。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Btrfsを含めてすべてのファイルシステムで、大きなRPMをダウンロードし、インストールできるだけの空きディスク容量が必要です。古いRPMが使用している容量は、新しいRPMのインストール後にのみ解放されます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      スナップショットがあるBtrfsの場合、現在のインストールで使用している容量と同じだけの空き容量が最低でも必要です。現在のインストール環境の2倍の空き容量を確保することが推奨されます。
+     </para>
+     <para>
+      十分な空き容量がない場合、次のように<command>snapper</command>を使用して古いスナップショットを削除することができます。
+     </para>
+<screen><prompt>root # </prompt><command>snapper</command> list
+<prompt>root # </prompt><command>snapper</command> delete NUMBER</screen>
+     <para>
+      しかし、すべてのケースでこの方法が役立つとは限りません。マイグレーションの前には、大半のスナップショットが占めている容量はごくわずかです。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.update.proc.prep.paths">
+  <title>サポートされているSLEへのアップグレードパス</title>
+
+  <important>
+   <title>クロスアーキテクチャアップグレードはサポートされない</title>
+   <para>
+    クロスアーキテクチャアップグレードは「サポートされません」。<emphasis/>たとえば、32ビットバージョンの<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>から64ビットバージョンへのアップグレードや、ビッグエンディアンからリトルエンディアンへのアップグレードなどがこれに該当します。
+   </para>
+   <para>
+    具体的には、POWER版のSLE 11(ビッグエンディアン)からPOWER版のSLE 12 SP1(新規: リトルエンディアン)は<emphasis>サポートされません</emphasis>。
+   </para>
+   <para>
+    同様に、SUSE Linux Enterprise 12は、64ビット専用であるため、32ビットのSUSE Linux Enterprise 11システムからSUSE Linux Enterprise 12以降へのアップグレードも<emphasis>サポートされません</emphasis>。
+   </para>
+  </important>
+
+  <para>
+   マイグレーションを実行する前に、<xref linkend="sec.update.prep"/>をご覧ください。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>SUSE Linux Enterprise 10 (任意のサービスパック)からのアップグレード</term>
+    <listitem>
+     <para>
+      SUSE Linux Enterprise 12への直接的なマイグレーションパスはサポートされていません。代わりにフレッシュインストールをお勧めします。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>SUSE Linux Enterprise 11 GA、SP1またはSP2からのアップグレード</term>
+    <listitem>
+     <para>
+      SUSE Linux Enterprise 12への直接的なマイグレーションパスはサポートされていません。SLE 12に進むには、まずSLE 11 SP3が必要です。
+     </para>
+     <para>
+      フレッシュインストールを実行できない場合、まずSLE 11 GAからSP1にアップデートし、次にSLE 11 SP1から SP2にアップデートし、それからSLE 11 SP2からSP3にアップデートする必要があります。最初のステップについては、『<link xlink:href="https://www.suse.com/documentation/sles11/">SUSE Linux Enterprise 11導入ガイド</link>』で説明されています。
+     </para>
+     <para>
+      次に、<xref linkend="sec.update.sle12"/>に進みます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>SUSE Linux Enterprise 11 SP3またはSP4からのアップグレード</term>
+    <listitem>
+     <para>
+      詳細については、<xref linkend="sec.update.sle12"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>SUSE Linux Enterprise 12からSP1へのアップグレード</term>
+    <listitem>
+     <para>
+      詳細については、<xref linkend="cha.update.spmigration"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.update.sle12">
+  <title>SUSE Linux Enterpriseのアップグレードでサポートされる方式</title>
+
+  <remark>toms 2014-02-11: See FATEs #315969 and #313189</remark>
+
+  <para>
+   SUSE Linux Enterprise 11 SP3からSUSE Linux Enterprise 12、SUSE Linux Enterprise 11 SP3からSUSE Linux Enterprise 12 SP1、またはSUSE Linux Enterprise 11 SP4からSUSE Linux Enterprise 12 SP1へのアップグレードは、以下の方式の1つを使用してサポートされています。
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <xref linkend="sec.update.sle12.manual" xrefstyle="HeadingOnPage"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="sec.update.sle12.automated" xrefstyle="HeadingOnPage"/>
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+ <sect1 xml:id="sec.update.sle12.manual">
+  <title>SLE 11 SP3からSLE 12 SP1への手動アップグレード。インストールソースを使用</title>
+
+  <para>
+   ご使用のシステムをアップグレードする前に、最初に<xref linkend="sec.update.prep"/>をご覧ください。
+  </para>
+
+  <para>
+   この方法でご使用のシステムをアップグレードするには、フレッシュインストールと同じように、インストールソースからブートする必要があります。ただし、ブート画面が表示されたときに、<guimenu>アップグレード</guimenu>を選択します(<guimenu>インストール</guimenu>ではありません)。ブート元のインストールソースは、以下のいずれかです。
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     ローカルインストールメディア(DVD、USB大容量ストレージデバイス上のISOイメージなど)。詳細については、<xref linkend="sec.update.sle12.manual.dvd"/>を参照してください。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ネットワークインストールソース。ローカルメディアからブートして、それぞれのネットワークインストールタイプを選択することも、PXEを介してブートすることもできます。詳細については、<xref linkend="sec.update.sle12.manual.network"/>を参照してください。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 xml:id="sec.update.sle12.manual.dvd">
+   <title>インストールメディアからのアップグレード</title>
+   <para>
+    次の例では、DVDからブートする手順を説明していますが、USB大容量ストレージデバイス上のISOイメージなど、他のローカルインストールメディアを使用することもできます。ブート方式の選択し、メディアからシステムを起動する方法は、システムアーキテクチャ、およびマシンに従来型のBIOSまたはUEFIが装備されているかどうかによって異なります。詳しくは、以下のリンクを参照してください。
+   </para>
+   <procedure xml:id="pro.update.sle12.manual.dvd">
+    <title>SLE 11 SP3からSLE 12 SP1への手動アップグレード、DVDを使用</title>
+    <step>
+     <para>
+      SUSE Linux Enterprise 12 SP1インストールメディアのDVDを挿入し、マシンをブートします。<guimenu>ようこそ</guimenu>画面が表示され、続けてブート画面が表示されます。
+     </para>
+    </step>
+    <step>
+     <para>
+      システムをメディアから起動するための、該当するブート方法を選択します(<xref linkend="sec.i.yast2.method"/>を参照してください)。
+     </para>
+    </step>
+    <step>
+     <para>
+      システムをメディアから起動します(<xref linkend="sec.i.yast2.startup"/>を参照してください)。
+     </para>
+    </step>
+    <step>
+     <para>
+      <xref linkend="sec.update.sle12.start.upgr.after.boot"/>の説明に従って、アップグレードプロセスを進めます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.update.sle12.manual.network">
+   <title>ネットワークインストールソースからのアップグレード</title>
+   <para>
+    ネットワークインストールソースからアップグレードを開始する場合、以下の要件を満たしていることを確認してください。
+   </para>
+   <variablelist>
+    <title>ネットワークインストールソースからのアップグレードの要件</title>
+    <varlistentry>
+     <term>ネットワークインストールソース</term>
+     <listitem>
+      <para>
+       ネットワークインストールソースが<xref linkend="cha.deployment.instserver"/>の記述どおりにセットアップされていること。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ネットワーク接続およびネットワークサービス</term>
+     <listitem>
+      <para>
+       インストールサーバとターゲットマシンの両方で、ネットワーク接続が正常に動作すること。ネットワークが次のサービスを提供していること:ネームサービス、DHCP(オプションですが、PXEを介したブートに必要)、およびOpenSLP(オプション)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>インストールメディア</term>
+     <listitem>
+      <para>
+       ターゲットシステムのブートに使用する、SUSE Linux Enterprise DVD 1 (またはローカルISOイメージ)を保有していること。<emphasis>または</emphasis><xref linkend="sec.deployment.prep_boot.pxeprep" xrefstyle="HeadingOnPage"/>の説明のとおり、PXEを介したブート用に設定されたターゲットシステムがあること。リモートサーバからのアップグレードの詳細については、<xref linkend="cha.deployment.remoteinst"/>を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    ネットワークインストールソースからアップグレードする場合、ローカルメディアからブートして、それぞれのネットワークインストールタイプを選択することも、PXEを介してブートすることもできます。希望する方式を選択し、<xref linkend="pro.update.sle12.manual.network.boot-from-dvd" xrefstyle="select:label"/>または<xref linkend="pro.update.sle12.manual.network.pxe-boot" xrefstyle="select:label"/>の説明に従って進めます。
+   </para>
+   <procedure xml:id="pro.update.sle12.manual.network.boot-from-dvd">
+    <title>ネットワークインストールソースを使用したSLE 11 SP3またはSP4からSLE 12 SP1へのアップグレード—DVDからのブート</title>
+    <para>
+     次の例では、DVDからブートする手順を説明していますが、USB大容量ストレージデバイス上のISOイメージなど、他のローカルインストールメディアを使用することもできます。ブート方式の選択し、メディアからシステムを起動する方法は、システムアーキテクチャ、およびマシンに従来型のBIOSまたはUEFIが装備されているかどうかによって異なります。詳しくは、以下のリンクを参照してください。
+    </para>
+    <step>
+     <para>
+      SUSE Linux Enterprise 12 SP1インストールメディアのDVDを挿入し、マシンをブートします。<guimenu>ようこそ</guimenu>画面が表示され、続けてブート画面が表示されます。
+     </para>
+    </step>
+    <step>
+     <para>
+      使用するネットワークインストールソースのタイプ(FTP、HTTP、NFS、SMB、またはSLP)を選択します。通常、選択肢は<keycap>F4</keycap>キーを押すと表示されますが、ご使用のマシンに従来型のBIOSではなくUEFIが搭載されている場合は、パラメータを手動で調整しなければならない場合があります。詳細については、<xref linkend="sec.i.yast2.source.net"/>内の<xref linkend="cha.inst"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      <xref linkend="sec.update.sle12.start.upgr.after.boot"/>の説明に従って、アップグレードプロセスを進めます。
+     </para>
+    </step>
+   </procedure>
+   <procedure xml:id="pro.update.sle12.manual.network.pxe-boot">
+    <title>ネットワークインストールソースを使用したSLE 11 SP3またはSP4からSLE 12 SP1へのアップグレード—PXEを介したブート</title>
+    <para>
+     PXEブートを使用して、ネットワークインストールソースからアップグレードを実行するには、以下のようにします。
+    </para>
+    <step>
+     <para>
+      DHCPサーバの設定を調整してPXEブートに必要なアドレス情報を指定します。詳細については、<xref linkend="sec.deployment.prep_boot.pxeprep"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      PXEブートに必要なブートイメージを保管するTFTPサーバを設定します。これを行うには、SUSE Linux Enterprise 12 SP1インストールメディアのDVDを使用するか、<xref linkend="sec.deployment.prep_boot.tftp"/>の説明に従います。
+     </para>
+    </step>
+    <step>
+     <para>
+      ターゲットマシンにPXEブートとWake-on-LANを準備します。
+     </para>
+    </step>
+    <step>
+     <para>
+      ターゲットシステムのブートを開始し、VNCを使用してこのコンピュータで実行中のインストールルーチンにリモートで接続します。詳細については、<xref linkend="sec.deployment.remoteinst.monitor.vnc"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      <xref linkend="sec.update.sle12.start.upgr.after.boot"/>の説明に従って、アップグレードプロセスを進めます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.update.sle12.automated">
+  <title>SLE 11 SP3またはSP4からSLE 12 SP1への自動マイグレーション</title>
+
+  <para>
+   システムのアップグレード前に、<xref linkend="sec.update.prep"/>をご覧ください。自動マイグレーションを実行するには、次の手順に従います。
+  </para>
+
+  <procedure xml:id="pro.update.sle12.automated">
+   <title>SUSE Linux Enterprise 11 SP3からSUSE Linux Enterprise 12への自動マイグレーションSP1</title>
+   <remark>toms 2014-03-19: See FATE#315037</remark>
+   <remark role="future">toms 2014-03-20: From SLE12 SP1 on, we should probably base
+    this example on GRUB2, but not for GA.</remark>
+   <remark>jsrain 2015-09-02: This is still the old system; at some point
+       of time we should switch to GRUB2, but as long as amjority of
+       customers still runs SLE11, I would stay with legacy GRUB. Anyway, we
+       could include both op6tions, that would be probably best solution</remark>
+   <step>
+    <para>
+     1枚目のインストールDVDの<filename>/boot/x86__64/loader/</filename>からインストールカーネル<filename>linux</filename>およびファイル<filename>initrd</filename>をシステムの<filename>/boot</filename>ディレクトリにコピーします。
+    </para>
+<screen><command>cp</command> -vi <replaceable>DVDROOT</replaceable>/boot/x86_64/loader/linux /boot/linux.upgrade
+<command>cp</command> -vi <replaceable>DVDROOT</replaceable>/boot/x86_64/loader/initrd /boot/initrd.upgrade</screen>
+    <para>
+     <replaceable>DVDROOT</replaceable>はシステムがDVDをマウントするパスを示します。通常は、<filename>/run/media/$USER/$DVDNAME</filename>です。
+    </para>
+   </step>
+   <step>
+    <para>
+     既存のGRUB環境設定ファイル<filename>/boot/grub/menu.lst</filename>を開き、別のセクションを追加します。他のブートローダについて、対応する環境設定ファイルを編集します。デバイス名と <parameter>root</parameter> パラメータを必要に応じて調整します。次に例を示します。
+    </para>
+<screen>title Linux Upgrade Kernel
+kernel (hd0,0)/boot/linux.upgrade root=/dev/sda1 upgrade=1 <replaceable>OPTIONAL_PARAMETERS</replaceable>
+initrd (hd0,0)/boot/initrd.upgrade</screen>
+    <para>
+     <replaceable>OPTIONAL_PARAMETERS</replaceable>は、システムをブートしてアップグレードを実行するために必要な追加のブートパラメータを示します。ここに、ご使用のシステムで必要なカーネルパラメータを指定できます。カーネルパラメータを確認して既存のGRUBエントリからコピーしなければならない場合があります。SUSEの<link xlink:href="http://en.opensuse.org/Linuxrc">linuxrcパラメータ(オンラインで説明されています)</link>を指定することもできます。
+    </para>
+   </step>
+   <step>
+    <para>
+
+     アップグレードを自動で実行する場合は、GRUB環境設定の<literal>kernel</literal>という行の末尾に<option>autoupgrade=1</option>を追加します。
+    </para>
+   </step>
+   <step>
+    <para>
+     マシンを再起動し、ブートメニューから、新しく追加したセクションを選択します(ここでは、［<emphasis>Linux Upgrade Kernel (Linuxアップグレードカーネル)</emphasis>］)。<command>grubonce</command>を使用すると、新しく作成したGRUBエントリを事前に選択し、新しく作成したエントリで自動的に無人で再起動できます。<command>reboot</command>を使用してコマンドラインから再起動を実行することもできます。
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec.update.sle12.start.upgr.after.boot"/>の説明に従って、通常のアップグレードプロセスを進めます。
+    </para>
+   </step>
+   <step>
+    <para>
+     アップグレードプロセスが正常に完了したら、インストールカーネルおよびinitrdファイル(<filename>/boot/linux.upgrade</filename>および<filename>/boot/initrd.upgrade</filename>)を削除します。これらはもう必要ありません。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.update.sle12.start.upgr.after.boot">
+  <title>ブート後のアップグレードプロセスの開始</title>
+
+  <para>
+   <remark>taroth 2014-11-13: argh, the following is terminology hell regarding
+     the software strings: "upgrade"/"update" are used intermittently and
+     without clear differentiation...</remark>
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     ブートした後(インストールメディアまたはネットワーク、いずれかの方法による)、ブート画面の<guimenu>アップグレード</guimenu>エントリを選択します。
+    </para>
+    <warning>
+     <title>選択を間違えるとデータを失う場合があります。</title>
+     <para>
+      <guimenu>アップグレード</guimenu>ではなく<guimenu>インストール</guimenu>を選択すると、データが失われる可能性があります。フレッシュインストールを実行してデータパーティションを壊さないよう十分に注意してください。たとえば、ディスクを再パーティション化すると既存のパーティションが破壊されるおそれがあり、データパーティションを再フォーマットするとパーティション上のすべてのデータが消去されます。
+     </para>
+     <para>
+      ここでは、必ず<guimenu>アップグレード</guimenu>を選択してください。
+     </para>
+    </warning>
+    <para>
+     YaSTはインストールシステムを起動します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>ようこそ</guimenu>画面で、<guimenu>言語</guimenu>および<guimenu>キーボード</guimenu>を選択し、ライセンス契約に同意します。<guimenu>次へ</guimenu>で続行します。
+    </para>
+    <para>
+     YaSTは、インストール済みのSUSE Linux Enterpriseシステムのパーティションをチェックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>Select for Upgrade(アップグレードの選択)</guimenu>画面で、アップグレードするパーティションを選択して、<guimenu>次へ</guimenu>をクリックします。
+    </para>
+    <para>
+     YaSTは、選択したパーティションをマウントし、アップグレードするパーティション上の検出されたすべてのリポジトリを表示します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>Previously Used Repositories(前に使用していたリポジトリ)</guimenu>画面で、リポジトリのステータスを調整します。アップグレードプロセスに組み込むリポジトリは有効にして、必要のないリポジトリは無効にします。<guimenu>次へ</guimenu>で続行します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>登録</guimenu>画面で、アップグレードしたシステムを今すぐに登録するか(登録データを入力して、<guimenu>次へ</guimenu>をクリック)、または<guimenu>Skip Registration(登録をスキップ)</guimenu>します。ご使用のシステムの登録について詳しくは、<xref linkend="sec.update.registersystem"/>を参照してください。
+    </para>
+   </step>
+   <step>
+    <para>
+     アップグレードでの<guimenu>インストール設定</guimenu>を確認します(特に<guimenu>アップグレードオプション</guimenu>を確認します)。次のオプションから選択します。
+    </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       <guimenu>Only Update Installed Packages(インストール済みパッケージの更新のみ)</guimenu>。この場合、最新のSUSE Linux Enterpriseバージョンに付属している新機能が欠落する可能性があります。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <guimenu>Update with Installation of New Software(新しいソフトと機能を含むアップデート)</guimenu>有効、無効にするパターンおよびパッケージを選択したい場合は、<guimenu>Select Patterns(パターンの選択)</guimenu>をクリックします。
+      </para>
+     </listitem>
+    </itemizedlist>
+
+    <note>
+     <title>デスクトップの選択</title>
+     <para>
+      SUSE Linux Enterprise 12へのアップグレード前にKDEを使用していた場合 (<varname>DEFAULT_WM</varname> (<filename>/etc/sysconfig/windowmanager</filename>内)が<literal>kde*</literal>に設定)、デスクトップ環境は、アップグレード後、自動的にGNOMEに置き換わります。デフォルトでは、KDM表示のマネージャはGDMに置き換わります。
+     </para>
+     <para>
+      デスクトップ環境またはウィンドウマネージャの選択を変更するには、<guimenu>Select Patterns(パターンの選択)</guimenu>をクリックして、ソフトウェア選択を調整します。
+     </para>
+    </note>
+   </step>
+   <step>
+    <para>
+     すべての設定を希望どおりに完了したら、<guimenu>アップデート</guimenu>をクリックして、インストールおよび削除の手順を開始します。
+    </para>
+   </step>
+   <step>
+    <para>
+     アップグレードプロセスが正常に完了したら、<quote>孤立したパッケージ</quote>がないかどうかを確認します。孤立したパッケージとは、どのアクティブなリポジトリにも属していないパッケージのことです。次のコマンドで、それらのリストを表示できます。
+    </para>
+<screen>zypper packages --orphaned</screen>
+    <para>
+     このリストを使用して、パッケージが引き続き必要か、それともアンインストールしても安全かを判断できます。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.update.sle12.manager">
+  <title>SUSE Managerによるアップデート</title>
+
+  <para>
+   SUSE Managerは、SUSE Linux Enterpriseクライアントに対するアップデート、パッチ、およびセキュリティ修正を提供するためのサーバソリューションです。これには、一連のツールと、管理タスク用のWebベースのユーザインタフェースが付属しています。詳細については、<link xlink:href="https://www.suse.com/products/suse-manager/"/>を参照してください。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.update.reg.status.after.rollback">
+  <title>ロールバック後の登録状態の更新</title>
+
+  <para>
+   サービスパックのマイグレーションを実行する場合は、登録サーバで設定を変更して、新しいリポジトリへのアクセスを提供する必要があります。マイグレーションプロセスが中断されたり、(バックアップまたはスナップショットからの復元によって)取り消されたりすると、登録サーバ上の情報とシステムの状態との一貫性が損なわれます。これにより、更新ポジトリにアクセスできなくなったり、クライアントで間違ったリポジトリが使用されたりすることがあります。
+  </para>
+
+  <para>
+   Snapperによってロールバックが実行される場合、システムは登録サーバに通知し、ブートプロセス中に正しいリポジトリへのアクセスが設定されるようにします。システムがその他の方法で復元された場合や、登録サーバとの通信が何らかの理由で(たとえば、ネットワークに問題があるためサーバにアクセスできないなど)失敗した場合には、次のコマンドを呼び出して、クライアント上でロールバックを手動でトリガします。
+  </para>
+
+<screen><command>snapper</command> rollback</screen>
+
+  <para>
+   次のコマンドを使用して、システムに正しいリポジトリが設定されていることを常に確認することをお勧めします。特にサービスの更新後は必ず確認してください。
+  </para>
+
+<screen><command>zypper</command> ref -s</screen>
+
+  <para>
+   この機能は
+   <package>rollback-helper</package>
+   パッケージで利用できます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.update.registersystem">
+
+
+  <title>システムの登録</title>
+
+  <para>
+   インストールの際に登録のステップを省略していても、YaSTで<guimenu>製品登録</guimenu>モジュールを使用すれば、いつでもシステムを登録できます。
+  </para>
+
+  <para>
+   ご使用のシステムを登録すると以下の利点があります。
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     サポートの取得
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     セキュリティ更新とバグの修正
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     SUSEカスタマーセンターへのアクセス
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動し、<menuchoice> <guimenu>ソフトウェア</guimenu> <guimenu>製品登録</guimenu> </menuchoice>を選択して、<guimenu>登録</guimenu>ダイアログを開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     各自または各自の組織が登録の管理に使用しているSUSEアカウントに関連付けられた電子メールアドレスを指定します。SUSEアカウントをまだ作成していない場合は、SUSEのカスタマセンターのホームページ(<link xlink:show="new" xlink:href="https://scc.suse.com/"/>)でアカウントを作成します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>に添付されている登録コードを入力します。
+    </para>
+   </step>
+   <step xml:id="step.y2.register.final">
+    <para>
+     <guimenu>次へ</guimenu>で続行して登録プロセスを開始します。ネットワーク上で1台または複数台のローカル登録サーバが使用可能な場合は、リストに示されたサーバのうちいずれかを選択できます。<guimenu>キャンセル</guimenu>を選択してローカルの登録サーバを無視し、デフォルトであるSUSEの登録サーバに登録することもできます。
+    </para>
+    <para>
+     登録時にオンラインの更新リポジトリがアップグレードのセットアップに追加されます。登録を完了すると、使用可能な最新バージョンのパッケージをその更新リポジトリからインストールするかどうかを選択できます。これにより、すべてのパッケージにクリーンアップグレードパスが提供され、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>は使用可能な最新のセキュリティアップデートによってアップグレードされるようになります。<guimenu>いいえ</guimenu>を選択すると、インストールメディアからすべてのパッケージがインストールされます。<guimenu>次へ</guimenu>で続行します。
+    </para>
+    <para>
+     正常に登録されると、YaSTにより、システムで使用可能な拡張機能、アドオン、およびモジュールが表示されます。これらを選択してインストールするには、<xref linkend="sec.add-ons.extensions"/>に進みます。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.update.sle12.multiversion">
+  <title>カーネルパッケージの保持</title>
+
+  <remark>toms 2015-08-26: bsc#753809</remark> <remark>toms 2015-08-26: some parts are taken ("stolen") from the
+      wiki at https://en.opensuse.org/SDB:Keep_multiple_kernel_versions
+      and adapted
+    </remark> <indexterm> <primary>複数バージョンのカーネル</primary> </indexterm>
+
+  <para>
+   YaSTまたはZypperで新規カーネルをインストールする際、SUSE Linux Enterpriseは、最新の2つのバージョンのカーネルと稼働中のバージョンのカーネルを保持します。通常はこれで十分です。
+  </para>
+
+  <para>
+   しかし、より多くのカーネルのバージョンを保持したい場合もあります(テスト用など)。これを可能にするために、SUSE Linux Enterpriseは、<emphasis>複数バージョンのカーネル機能</emphasis>をサポートしています。この機能を有効にして設定すると、デフォルトの動作を次のように変更し、設定できます。
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     新規カーネルを使用してシステムが正常に再起動できて初めて古いカーネルを削除する
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     指定された数の古いカーネルをフォールバックとして保持する
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     特定のバージョンのカーネルを保持する
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   再起動が成功すると、スクリプトは、インストール済みのカーネルと<filename>/etc/zypp/zypp.conf</filename>の設定を比較し、必要のないカーネルを削除します。
+  </para>
+
+  <sect2 xml:id="sec.update.sle12.multiversion.enable">
+   <title>複数バージョンのカーネルの機能の有効化</title>
+   <para>
+    デフォルトの動作は、環境設定ファイル、<filename>/etc/zypp/zypp.conf</filename>に定義されています。
+   </para>
+<screen><prompt>root # </prompt><command>grep</command> ^multiversion /etc/zypp/zypp.conf
+multiversion = provides:multiversion(kernel)
+multiversion.kernels = latest,latest-1,running</screen>
+   <para>
+    この機能を有効にするには、上記の<literal>multiversion</literal> 行の前にあるハッシュマーク(#)を削除します(すでにそうなっている場合もあります)。2行目を使用して、保持する必要がある<emphasis>カーネル</emphasis>を設定します。2行ともに有効にする必要があります。そうでないと、システムは<emphasis>すべての</emphasis>カーネルを保持してしまい、ハードディスクが一杯になってしまいます。
+   </para>
+   <para>
+    <literal>multiversion.kernels</literal>行には、さまざまな組み合わせや順序で、いくつかのキーワードを含むことができます。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><option>latest</option>
+     </term>
+     <listitem>
+      <para>
+       最新のバージョン番号のカーネルを保持します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><option>latest-<replaceable>N</replaceable></option>
+     </term>
+     <listitem>
+      <para>
+       <replaceable>N</replaceable>番目に新しいバージョン番号のカーネルを保持します。<replaceable>N</replaceable>は1から始まる番号です。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><option>running</option>
+     </term>
+     <listitem>
+      <para>
+       現在実行しているカーネルを保持します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><option>oldest</option>
+     </term>
+     <listitem>
+      <para>
+       最も小さいバージョン番号のカーネルを保持します(リリース済み製品のカーネル).
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><option>oldest-<replaceable>N</replaceable></option>
+     </term>
+     <listitem>
+      <para>
+       <replaceable>N</replaceable>番目に小さいバージョン番号のカーネルを保持します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><option>3.12.28-4.6</option>
+     </term>
+     <listitem>
+      <para>
+       この番号に正確に一致するバージョンのカーネルを保持します。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.update.sle12.multiversion.deleteoldkernel">
+   <title>使用事例: 再起動後にのみ古いカーネルを削除する</title>
+   <para>
+    新規カーネルを使用して正常にシステムを再起動できてから、古いカーネルを削除するようにします。
+   </para>
+   <para>
+    <filename>/etc/zypp/zypp.conf</filename>内の以下の行を変更します。
+   </para>
+<screen>multiversion.kernels = latest,running</screen>
+   <para>
+    前のパラメータは、最新のカーネル、および実行中のカーネル(最新でない場合のみ)を保持するようにシステムに指示します。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.update.sle12.multiversion.fallback">
+   <title>使用事例:古いカーネルをフォールバックとして保持する</title>
+   <para>
+    1つ以上のバージョンのカーネルを保持し、<quote>スペア</quote>として保有しておきます。
+   </para>
+   <para>
+    テストで使用する場合などで、この使用事例は役立ちます。マシンが起動しないなど、何らかの問題が生じたとき、正常に動作していた1つ以上のバージョンのカーネルをまだ使用することができるためです。
+   </para>
+   <para>
+    <filename>/etc/zypp/zypp.conf</filename>内の以下の行を変更します。
+   </para>
+<screen>multiversion.kernels = latest,latest-1,latest-2,running</screen>
+   <para>
+    新規カーネルのインストール後にシステムを再起動するときに、システムは3つのカーネルを保存します。新規の実行中のカーネル(<literal>latest,running</literal>と設定)、新規カーネルより1つ前のバージョンのカーネル(<literal>latest-1</literal>と設定)、およびさらに1つ前のバージョンのカーネル(<literal>latest-2</literal>と設定)の3つです。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.update.sle12.multiversion.specificversion">
+   <title>使用事例: 特定のバージョンのカーネルの保持</title>
+   <para>
+    通常、定期的にシステムアップデートを行い、新規バージョンのカーネルをインストールします。しかし、さまざまな理由で独自のバージョンのカーネルをコンパイルして、システムに保持させたい場合があります。
+   </para>
+   <para>
+    <filename>/etc/zypp/zypp.conf</filename>内の以下の行を変更します。
+   </para>
+<screen>multiversion.kernels = latest,3.12.28-4.20,running</screen>
+   <para>
+    新規カーネルのインストール後にシステムを再起動するときに、システムは2つのカーネルを保存します。新規の実行中のカーネル（<literal>latest,running</literal>と設定)および独自でコンパイルしたカーネルl(<literal>3.12.28-4.20</literal>と設定)の2つです。
+   </para>
+  </sect2>
+ </sect1>
+</chapter>
