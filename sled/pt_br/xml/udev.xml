@@ -1,0 +1,764 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="udev.xml" version="5.0" xml:id="cha.udev">
+ <title>Gerenciamento dinâmico de dispositivos do Kernel com <systemitem class="service">udev</systemitem></title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes (sim)</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  O kernel pode adicionar ou remover praticamente qualquer dispositivo em um sistema em execução. Mudanças no estado do dispositivo (se um dispositivo foi conectado ou removido) precisam ser propagadas ao espaço do usuário. Os dispositivos deverão ser configurados assim que forem conectados e reconhecidos. Os usuários de um determinado dispositivo precisam ser informados sobre qualquer mudança no estado reconhecido desse dispositivo. <systemitem class="service"/>O udev fornece a infraestrutura necessária para manter dinamicamente os arquivos dos nós de dispositivo e os links simbólicos no diretório <filename>/dev</filename>. As regras do <systemitem class="service">udev</systemitem> fornecem uma maneira de conectar ferramentas externas ao processamento de evento do dispositivo de kernel. Permite personalizar o gerenciamento de dispositivos do <systemitem class="service">udev</systemitem>; por exemplo, adicionando determinados scripts para execução como parte do gerenciamento de dispositivos do kernel ou para solicitação e importação de dados adicionais para avaliar durante o gerenciamento de dispositivos.
+ </para>
+ <sect1 xml:id="sec.udev.devdir">
+  <title>O diretório <filename>/dev</filename></title>
+
+  <para>
+   Os nós de dispositivo no diretório <filename>/dev</filename> fornecem acesso aos dispositivos de kernel correspondentes. Com <systemitem class="service">udev</systemitem>, o diretório <filename>/dev</filename> reflete o estado atual do kernel. Cada dispositivo de kernel tem um arquivo de dispositivo correspondente. Se um dispositivo for desconectado do sistema, o nó de dispositivo será removido.
+  </para>
+
+  <para>
+   O conteúdo do diretório <filename>/dev</filename> será mantido em um sistema de arquivos temporário, e todos os arquivos serão renderizados a cada inicialização do sistema. Arquivos criados ou modificados manualmente por definição não resistem a uma reinicialização. Os diretórios e arquivos estáticos que sempre devem estar no diretório <filename>/dev</filename>, independentemente do estado do dispositivo de kernel correspondente, podem ser criados com systemd-tmpfiles. Os arquivos de configuração estão em <filename>/usr/lib/tmpfiles.d/</filename> e em <filename>/etc/tmpfiles.d/</filename>. Para obter mais informações, consulte a página de manual <systemitem>systemd-tmpfiles(8)</systemitem>.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.kernel">
+  <title><systemitem class="service">uevents</systemitem> e <systemitem class="service">udev</systemitem> do Kernel</title>
+
+  <para>
+   As informações de dispositivo necessárias são exportadas pelo sistema de arquivos <systemitem class="filesystem">sysfs</systemitem>. Para cada dispositivo detectado e inicializado pelo kernel, um diretório com o nome do dispositivo é criado. Ele contém arquivos de atributos com propriedades específicas do dispositivo.
+  </para>
+
+  <para>
+   Sempre que um dispositivo é adicionado ou removido, o kernel envia um uevent para notificar o <systemitem class="service">udev</systemitem> sobre a mudança. O daemon <systemitem class="service">udev</systemitem> lê e analisa todas as regras especificadas nos arquivos <filename>/etc/udev/rules.d/*.rules</filename> uma vez na inicialização e as mantém na memória. Se os arquivos de regras são mudados, adicionados ou removidos, o daemon pode recarregar a representação na memória de todas as regras com o comando <command>udevadm control reload_rules</command>. Para obter mais detalhes sobre as regras do <systemitem class="service">udev</systemitem> e sua sintaxe, consulte a <xref linkend="sec.udev.rules"/>.
+  </para>
+
+  <para>
+   Cada evento recebido é comparado com o conjunto de regras fornecido. As regras podem adicionar ou modificar chaves de ambiente de eventos, solicitar um nome específico a ser criado pelo nó do dispositivo, adicionar links simbólicos apontando para o nó ou adicionar programas a serem executados após a criação do nó do dispositivo. Os <systemitem class="service">uevents</systemitem> de núcleo do driver são recebidos de um soquete netlink do kernel.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.drivers">
+  <title>Drivers, módulos de kernel e dispositivos</title>
+
+  <para>
+   Os drivers de barramento de kernel pesquisam dispositivos. Para cada dispositivo detectado, o kernel cria uma estrutura de dispositivo interna enquanto o núcleo do driver envia um uevent ao daemon <systemitem class="service">udev</systemitem>. Dispositivos de barramento se identificam através de um ID formatado especialmente, que informa o tipo de dispositivo. Geralmente esses IDs consistem em IDs de produto e fornecedor, além de outros valores específicos do subsistema. Cada barramento tem seu próprio esquema para esses IDs, chamados <envar>MODALIAS</envar>. O kernel toma as informações do dispositivo, compõe uma string de ID <envar>MODALIAS</envar> a partir dele e envia essa string junto com o evento. Para um mouse USB, a string tem a seguinte aparência:
+  </para>
+
+<screen>MODALIAS=usb:v046DpC03Ed2000dc00dsc00dp00ic03isc01ip02</screen>
+
+  <para>
+   Cada driver de dispositivo carrega uma lista de álias conhecidos para os dispositivos que pode tratar. A lista está contida no próprio arquivo de módulo de kernel. O programa depmod lê as listas de ID e cria o arquivo <filename>modules.alias</filename> no diretório <filename>/lib/modules</filename> do kernel para todos os módulos disponíveis atualmente. Com essa infraestrutura, carregar o módulo é fácil como chamar <command>modprobe</command> para cada evento com uma chave <literal>MODALIAS</literal>. Se <command>modprobe $MODALIAS</command> for chamado, ele corresponderá o álias do dispositivo composto para o dispositivo com os álias fornecidos pelos módulos. Se uma entrada correspondente for encontrada, o módulo será carregado. Tudo isso é acionado automaticamente pelo <systemitem class="service">udev</systemitem>.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.boot">
+  <title>Inicialização e configuração do dispositivo inicial</title>
+
+  <para>
+   Todos os eventos de dispositivo que ocorrem durante o processo de boot antes da execução do daemon <systemitem class="service">udev</systemitem> são perdidos, pois a infraestrutura para gerenciar esses eventos reside no sistema de arquivos raiz e não está disponível naquele momento. Para cobrir essa perda, o kernel fornece um arquivo <filename>uevent</filename> localizado no diretório de dispositivo de cada dispositivo no sistema de arquivos sysfs. <systemitem class="filesystem"/> Ao gravar <literal>add</literal> para esse arquivo, o kernel envia novamente o mesmo evento como o evento perdido durante a inicialização. Um loop simples em todos os arquivos <filename>uevent</filename> em <filename>/sys</filename> aciona todos os eventos novamente para criar os nós de dispositivo e executar a configuração do dispositivo.
+  </para>
+
+  <para>
+   Por exemplo, durante o boot, um mouse USB talvez não seja inicializado pela lógica de boot anterior, pois o driver não está disponível nesse momento. O evento para a descoberta do dispositivo foi perdido e não encontrou um módulo de kernel para o dispositivo. Em vez de pesquisar manualmente pelos dispositivos que podem estar conectados, o <systemitem class="service">udev</systemitem> solicita todos os eventos de dispositivo do kernel após a disponibilização do sistema de arquivos raiz, dessa forma, o evento para o dispositivo de mouse USB é executado novamente. Então ele encontra o módulo de kernel no sistema de arquivos raiz montado e o mouse USB pode ser inicializado.
+  </para>
+
+  <para>
+   No espaço do usuário, não há diferença visível entre a sequência coldplug do dispositivo e a descoberta de dispositivo durante o tempo de execução. Em ambos os casos, as mesmas regras são usadas para correspondência e os mesmos programas configurados são executados.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.debug">
+  <title>Monitorando o daemon <systemitem class="service">udev</systemitem> em execução</title>
+
+  <para>
+   O programa <command>udevadm monitor</command> pode ser usado para visualizar os eventos centrais do driver e a temporização dos processos de eventos do udev.<systemitem class="service"/>
+  </para>
+
+<screen>UEVENT[1185238505.276660] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UDEV  [1185238505.279198] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UEVENT[1185238505.279527] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UDEV  [1185238505.285573] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UEVENT[1185238505.298878] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UDEV  [1185238505.305026] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UEVENT[1185238505.305442] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)
+UEVENT[1185238505.306440] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.325384] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.342257] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)</screen>
+
+  <para>
+   As linhas <literal>UEVENT</literal> mostram os eventos que o kernel enviou através de netlink. As linhas <literal>UDEV</literal> mostram os handlers de evento do udev concluídos. <systemitem class="service"/> A temporização é impressa em microssegundos. O tempo entre <literal>UEVENT</literal> e <literal>UDEV</literal> é o tempo que udev levou para processar esse evento ou que o daemon udev atrasou sua execução para sincronizar esse evento com eventos relacionados e já em execução. <systemitem class="service"/><systemitem class="service"/> Por exemplo, eventos para partições de disco rígido sempre esperam pela conclusão do evento do dispositivo de disco principal, pois os eventos de partição podem se basear nos dados que o evento de disco principal consultou do hardware.
+  </para>
+
+  <para>
+   <command>udevadm monitor --env</command> mostra o ambiente de evento completo:
+  </para>
+
+<screen>ACTION=add
+DEVPATH=/devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10
+SUBSYSTEM=input
+SEQNUM=1181
+NAME="Logitech USB-PS/2 Optical Mouse"
+PHYS="usb-0000:00:1d.2-1/input0"
+UNIQ=""
+EV=7
+KEY=70000 0 0 0 0
+REL=103
+MODALIAS=input:b0003v046DpC03Ee0110-e0,1,2,k110,111,112,r0,1,8,amlsfw</screen>
+
+  <para>
+   O <systemitem class="service">udev</systemitem> também envia mensagens para o syslog. A prioridade syslog padrão que controla as mensagens que são enviadas ao syslog é especificada no arquivo de configuração do <systemitem class="service">udev</systemitem> <filename>/etc/udev/udev.conf</filename>. A prioridade de registro do daemon em execução pode ser modificada com <command>udevcontrol log_priority=</command><replaceable>level/number</replaceable>.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.rules">
+  <title>Influenciando o gerenciamento de eventos de dispositivo do Kernel com as regras do <systemitem class="service">udev</systemitem></title>
+
+  <para>
+   Uma regra do <systemitem class="service">udev</systemitem> pode corresponder a qualquer propriedade que o kernel adiciona ao evento propriamente dito ou a qualquer informação que o kernel exporta para <filename>sysfs</filename>. A regra também pode solicitar informações adicionais de programas externos. Cada evento é correspondido com as regras fornecidas. Essas regras estão localizadas no diretório <filename>/etc/udev/rules.d</filename>.
+  </para>
+
+  <para>
+   Cada linha no arquivo de regras contém pelo menos um par de valores de chave. Há dois tipos de chaves, de atribuição e correspondência. Se todas as chaves de correspondência corresponderem aos valores, a regra será aplicada e as chaves de atribuição serão atribuídas ao valor especificado. Uma regra correspondente pode especificar o nome do nó do dispositivo, adicionar links simbólicos apontando para o nó ou executar um programa especificado como parte do gerenciamento de eventos. Se nenhuma regra de correspondência for encontrada, o nome do nó de dispositivo padrão será usado para criar o nó de dispositivo. As informações detalhadas sobre a sintaxe da regra e as chaves fornecidas para corresponder ou importar os dados estão descritas na página de manual do <systemitem class="service">udev</systemitem>. As regras de exemplo a seguir apresentam uma introdução básica à sintaxe da regra do <systemitem class="service">udev</systemitem>. As regras de exemplo foram todas tiradas do conjunto de regras padrão do <systemitem class="service">udev</systemitem> localizado em <filename>/etc/udev/rules.d/50-udev-default.rules</filename>.
+  </para>
+
+  <example xml:id="ex.rules">
+   <title>Regras do <systemitem class="service">udev</systemitem> de exemplo</title>
+<screen># console
+KERNEL=="console", MODE="0600", OPTIONS="last_rule"
+
+# serial devices
+KERNEL=="ttyUSB*", ATTRS{product}=="[Pp]alm*Handheld*", SYMLINK+="pilot"
+
+# printer
+SUBSYSTEM=="usb", KERNEL=="lp*", NAME="usb/%k", SYMLINK+="usb%k", GROUP="lp"
+
+# kernel firmware loader
+SUBSYSTEM=="firmware", ACTION=="add", RUN+="firmware.sh"</screen>
+  </example>
+
+  <para>
+   A regra do <systemitem>console</systemitem> consiste em três chaves: uma chave de correspondência (<literal>KERNEL</literal>) e duas chaves de atribuição (<literal>MODE</literal>, <literal>OPTIONS</literal>). A regra de correspondência <literal>KERNEL</literal> pesquisa qualquer item do tipo <literal>console</literal> na lista de dispositivos. Apenas correspondências exatas são válidas e acionam essa regra para que seja executada. A chave <literal>MODE</literal> atribui permissões especiais ao nó de dispositivo, neste caso, permissões de leitura e gravação apenas ao proprietário desse dispositivo. A chave <literal>OPTIONS</literal> torna esta a última regra a ser aplicada a qualquer dispositivo desse tipo. Qualquer regra posterior que corresponda a esse tipo de dispositivo em particular não terá nenhum efeito.
+  </para>
+
+  <para>
+   A regra dos <systemitem>dispositivos seriais</systemitem> não está mais disponível em <filename>50-udev-default.rules</filename>, mas ainda vale a pena ser considerada. Consiste em duas chaves de correspondência (<literal>KERNEL</literal> e <literal>ATTRS</literal>) e uma de atribuição (<literal>SYMLINK</literal>). A chave <literal>KERNEL</literal> procura todos os dispositivos do tipo <literal>ttyUSB</literal>. Usando o curinga <literal>*</literal>, essa chave corresponde a diversos desses dispositivos. A segunda chave de correspondência, <literal>ATTRS</literal>, verifica se o arquivo de atribuição do <filename>produto</filename> em <literal>sysfs</literal> para qualquer dispositivo <literal>ttyUSB</literal> contém uma determinada string. A chave de atribuição (<literal>SYMLINK</literal>) aciona a adição de um link simbólico para esse dispositivo em <filename>/dev/pilot</filename>. O operador usado nessa chave (<literal>+=</literal>) diz ao udev para executar essa ação adicionalmente, mesmo se regras anteriores ou posteriores adicionarem outros links simbólicos. <systemitem class="service"/> Como essa regra contém duas chaves de correspondência, ela é aplicada apenas se ambas as condições são cumpridas.
+  </para>
+
+  <para>
+   A regra da <systemitem>impressora</systemitem> lida com impressoras USB e contém duas chaves de correspondência que devem ser aplicadas para que a regra inteira seja aplicada (<literal>SUBSYSTEM</literal> e <literal>KERNEL</literal>). Três chaves de atribuição lidam com a nomeação desse tipo de dispositivo (<literal>NAME</literal>), a criação dos links de dispositivo simbólicos (<literal>SYMLINK</literal>) e a participação no grupo desse tipo de dispositivo (<literal>GROUP</literal>). O uso do curinga <literal>*</literal> na chave <literal>KERNEL</literal> faz com que ela corresponda a diversos dispositivos de impressora <literal>lp</literal>. Substituições são usadas pelo nome do dispositivo interno tanto na chave <literal>NAME</literal> quanto na <literal>SYMLINK</literal> para estender essas strings. Por exemplo, o link simbólico para a primeira impressora USB <literal>lp</literal> seria <filename>/dev/usblp0</filename>.
+  </para>
+
+  <para>
+   A regra do <systemitem>carregador de firmware do kernel</systemitem> faz o udev carregar firmware adicional por um script de assistente externo durante o tempo de execução. <systemitem class="service"/> A chave de correspondência <literal>SUBSYSTEM</literal> procura o subsistema de <literal>firmware</literal>. A chave <literal>ACTION</literal> verifica se algum dispositivo pertencente ao subsistema de <literal>firmware</literal> foi adicionado. A chave <literal>RUN+=</literal> aciona a execução do script <literal>firmware.sh</literal> para localizar o firmware a ser carregado.
+  </para>
+
+  <para>
+   Algumas características são comuns a todas as regras:
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     Cada regra é composta por um ou mais pares de valores de chaves separados por vírgula.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     A operação de uma chave é determinada pelo operador. As regras do <systemitem class="service">udev</systemitem> suportam diversos operadores diferentes.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Cada valor dado deve estar entre aspas.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Cada linha do arquivo de regras representa uma regra. Se a regra for maior do que uma linha, use <literal>\</literal> para unir as linhas diferentes como se faz na sintaxe do shell.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service"/>As regras do udev suportam um padrão no estilo do shell que corresponde aos padrões de <literal>*</literal>, <literal>?</literal> e <literal>[]</literal>.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     As regras do <systemitem class="service">udev</systemitem> suportam substituições.
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 xml:id="sec.udev.rules.ops">
+   <title>Usando operadores nas regras do <systemitem class="service">udev</systemitem></title>
+   <para>
+    Ao criar chaves, você pode escolher dentre vários operadores, dependendo do tipo de chave que deseja criar. Normalmente, as chaves de correspondência são usadas para localizar um valor que corresponda ou explicitamente não corresponda ao valor da pesquisa. As chaves de correspondência contêm um dos seguintes operadores:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>==</literal>
+     </term>
+     <listitem>
+      <para>
+       Comparar para igualdade. Se a chave contém um padrão de pesquisa, todos os resultados correspondentes a esse padrão são válidos.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>!=</literal>
+     </term>
+     <listitem>
+      <para>
+       Comparar para não igualdade. Se a chave contém um padrão de pesquisa, todos os resultados correspondentes a esse padrão são válidos.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    Qualquer um dos operadores a seguir também pode ser usado com chaves de atribuição:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>=</literal>
+     </term>
+     <listitem>
+      <para>
+       Atribuir um valor a uma chave. Se a chave consistia anteriormente em uma lista de valores, ela é redefinida e apenas o valor único é atribuído.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>+=</literal>
+     </term>
+     <listitem>
+      <para>
+       Adicionar um valor a uma chave que contenha uma lista de entradas.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>:=</literal>
+     </term>
+     <listitem>
+      <para>
+       Atribuir um valor final. Não permitir nenhuma mudança posterior por regras posteriores.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.subst">
+   <title>Usando substituições nas regras do <systemitem class="service">udev</systemitem></title>
+   <para>
+    As regras do <systemitem class="service">udev</systemitem> suportam o uso de marcadores e substituições. Use-as como faria em qualquer outro script. É possível usar as seguintes substituições com as regras do <systemitem class="service">udev</systemitem>:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>%r</literal>, <literal>$root</literal>
+     </term>
+     <listitem>
+      <para>
+       O diretório do dispositivo, <filename>/dev</filename> por padrão.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%p</literal>, <literal>$devpath</literal>
+     </term>
+     <listitem>
+      <para>
+       O valor de <envar>DEVPATH</envar>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%k</literal>, <literal>$kernel</literal>
+     </term>
+     <listitem>
+      <para>
+       O valor de <envar>KERNEL</envar> ou o nome do dispositivo interno.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%n</literal>, <literal>$number</literal>
+     </term>
+     <listitem>
+      <para>
+       O nome do dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%N</literal>, <literal>$tempnode</literal>
+     </term>
+     <listitem>
+      <para>
+       O nome temporário do arquivo de dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%M</literal>, <literal>$major</literal>
+     </term>
+     <listitem>
+      <para>
+       O número maior do dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%m</literal>, <literal>$minor</literal>
+     </term>
+     <listitem>
+      <para>
+       O número menor do dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%s{<replaceable>attribute</replaceable>}</literal>, <literal>$attr{<replaceable>attribute</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       O valor de um atributo <filename>sysfs</filename> (especificado por <replaceable>attribute</replaceable>).
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%E{<replaceable>variable</replaceable>}</literal>, <literal>$attr{<replaceable>variable</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       O valor de uma variável do ambiente (especificado por <replaceable>variable</replaceable>).
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%c</literal>, <literal>$result</literal>
+     </term>
+     <listitem>
+      <para>
+       A saída de <envar>PROGRAM</envar>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%%</literal>
+     </term>
+     <listitem>
+      <para>
+       O caractere <literal>%</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>$$</literal>
+     </term>
+     <listitem>
+      <para>
+       O caractere <literal>$</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.match">
+   <title>Usando as chaves de correspondência do <systemitem class="service">udev</systemitem></title>
+   <para>
+    As chaves de correspondência descrevem as condições que devem ser atendidas para aplicar uma regra do <systemitem class="service">udev</systemitem>. As seguintes chaves de correspondência estão disponíveis:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>ACTION</literal>
+     </term>
+     <listitem>
+      <para>
+       O nome da ação do evento, por exemplo, <literal>add</literal> ou <literal>remove</literal> na adição ou remoção de um dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DEVPATH</literal>
+     </term>
+     <listitem>
+      <para>
+       O caminho do dispositivo do evento, por exemplo, <literal>DEVPATH=/bus/pci/drivers/ipw3945</literal> para procurar todos os eventos relacionados ao driver ipw3945.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNEL</literal>
+     </term>
+     <listitem>
+      <para>
+       O nome interno (do kernel) do dispositivo do evento.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEM</literal>
+     </term>
+     <listitem>
+      <para>
+       O subsistema do dispositivo do evento, por exemplo, <literal>SUBSYSTEM=usb</literal> para todos os eventos relacionados a dispositivos USB.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>nome de arquivo</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       Atributos <systemitem class="filesystem">sysfs</systemitem> do dispositivo do evento. Para corresponder a uma string contida no nome de arquivo do atributo <filename>vendor</filename>, você poderia usar <literal>ATTR{vendor}=="On[sS]tream"</literal>, por exemplo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNELS</literal>
+     </term>
+     <listitem>
+      <para>
+       Permitem que o <systemitem class="service">udev</systemitem> pesquise o caminho do dispositivo para encontrar um nome de dispositivo correspondente.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEMS</literal>
+     </term>
+     <listitem>
+      <para>
+       Permitem que o <systemitem class="service">udev</systemitem> pesquise o caminho do dispositivo para encontrar um nome de subsistema do dispositivo correspondente.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DRIVERS</literal>
+     </term>
+     <listitem>
+      <para>
+       Permitem que o <systemitem class="service">udev</systemitem> pesquise o caminho do dispositivo para encontrar um nome de driver do dispositivo correspondente.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTRS{<replaceable>nome de arquivo</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       Permitem que o <systemitem class="service">udev</systemitem> pesquise o caminho do dispositivo para encontrar um com valores de atributo <systemitem class="filesystem">sysfs</systemitem> correspondentes.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>chave</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       O valor de uma variável de ambiente, por exemplo, <literal>ENV{ID_BUS}="ieee1394</literal> para procurar todos os eventos relacionados ao ID do barramento FireWire.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>PROGRAM</literal>
+     </term>
+     <listitem>
+      <para>
+       Permite que o <systemitem class="service">udev</systemitem> execute um programa externo. Para ser bem-sucedido, o programa deve retornar com código de saída zero. A saída do programa, impressa em STDOUT, está disponível para a chave <literal>RESULT</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RESULT</literal>
+     </term>
+     <listitem>
+      <para>
+       Corresponder à string de saída da última chamada de <literal>PROGRAM</literal>. Incluir esta chave na mesma regra que a chave <literal>PROGRAM</literal> ou em uma posterior.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.assign">
+   <title>Usando as chaves de atribuição do <systemitem class="service">udev</systemitem></title>
+   <para>
+    Em contraste com as chaves de correspondência descritas anteriormente, as chaves de atribuição não descrevem condições que devem ser cumpridas. Elas atribuem valores, nomes e ações aos nós do dispositivo mantidos pelo <systemitem class="service">udev</systemitem>.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>NAME</literal>
+     </term>
+     <listitem>
+      <para>
+       O nome do nó de dispositivo a ser criado. Depois que uma regra definir o nome de um nó, todas as outras regras com a chave <literal>NAME</literal> referente a esse nó serão ignoradas.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SYMLINK</literal>
+     </term>
+     <listitem>
+      <para>
+       O nome de um link simbólico relacionado ao nó a ser criado. Várias regras de correspondência podem adicionar links simbólicos a serem criados com o nó do dispositivo. Você também pode especificar vários links simbólicos para um nó em uma regra usando o caractere de espaço para separar os nomes dos links simbólicos.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OWNER, GROUP, MODE</literal>
+     </term>
+     <listitem>
+      <para>
+       As permissões do novo nó de dispositivo. Os valores especificados aqui sobregravam qualquer coisa que tenha sido compilada.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>chave</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       Especifica um valor para ser gravado no atributo <systemitem class="filesystem">sysfs</systemitem> do dispositivo de evento. Se o operador <literal>==</literal> é usado, essa chave também é usada para corresponder com o valor de um atributo sysfs.<systemitem class="filesystem"/>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>chave</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       Indica ao <systemitem class="service">udev</systemitem> para exportar uma variável para o ambiente. Se o operador <literal>==</literal> é usado, essa chave também é usada para corresponder com uma variável de ambiente.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RUN</literal>
+     </term>
+     <listitem>
+      <para>
+       Indica ao <systemitem class="service">udev</systemitem> para adicionar um programa à lista de programas a serem executados neste dispositivo. Lembre-se de restringir isso a tarefas muito curtas, a fim de evitar o bloqueio de outros eventos para esse dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>LABEL</literal>
+     </term>
+     <listitem>
+      <para>
+       Adicionar um rótulo para onde um <literal>GOTO</literal> possa ir.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>GOTO</literal>
+     </term>
+     <listitem>
+      <para>
+       Indica ao <systemitem class="service">udev</systemitem> para ignorar uma quantidade de regras e continuar com uma que inclua o rótulo citado pela chave <literal>GOTO</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>IMPORT{<replaceable>tipo</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       Carregar variáveis para o ambiente do evento, como a saída de um programa externo. O <systemitem class="service">udev</systemitem> importa variáveis de diversos tipos. Se nenhum tipo for especificado, o <systemitem class="service">udev</systemitem> tentará determinar o tipo sozinho, com base na parte executável das permissões do arquivo.
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>program</literal> diz ao <systemitem class="service">udev</systemitem> para executar um programa externo e importar sua saída.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>file</literal> diz ao <systemitem class="service">udev</systemitem> para importar um arquivo texto.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>parent</literal> diz ao <systemitem class="service">udev</systemitem> para importar as chaves armazenadas do dispositivo pai.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>WAIT_FOR_SYSFS</literal>
+     </term>
+     <listitem>
+      <para>
+       Indica ao <systemitem class="service">udev</systemitem> para aguardar a criação do arquivo <systemitem class="filesystem">sysfs</systemitem> especificado para determinado dispositivo. Por exemplo, <literal>WAIT_FOR_SYSFS="ioerr_cnt"</literal><systemitem class="service"/> informa o udev para aguardar até que o arquivo <filename>ioerr_cnt</filename> seja criado.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OPTIONS</literal>
+     </term>
+     <listitem>
+      <para>
+       A chave <literal>OPTION</literal> pode ter vários valores:
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>last_rule</literal> diz ao <systemitem class="service">udev</systemitem> para ignorar todas as regras posteriores.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_device</literal> diz ao <systemitem class="service">udev</systemitem> para ignorar esse evento completamente.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_remove</literal> diz ao <systemitem class="service">udev</systemitem> para ignorar todos os eventos de remoção posteriores para o dispositivo.
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>all_partitions</literal> diz ao <systemitem class="service">udev</systemitem> para criar nós de dispositivo para todas as partições disponíveis em um dispositivo de bloco.
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.udev.persdev">
+  <title>Nomeação de dispositivo persistente</title>
+
+  <para>
+   O diretório do dispositivo dinâmico e a infraestrutura de regras do <systemitem class="service">udev</systemitem> possibilitam especificar nomes estáveis para todos os dispositivos de disco, independentemente da ordem de reconhecimento ou da conexão usada para o dispositivo. Cada dispositivo de bloco apropriado criado pelo kernel é examinado por ferramentas com conhecimento especial sobre determinados barramentos, tipos de unidade ou sistemas de arquivos. Com o nome do nó do dispositivo fornecido pelo kernel dinâmico, o <systemitem class="service">udev</systemitem> mantém as classes de links persistentes apontando para o dispositivo:
+  </para>
+
+<screen>/dev/disk
+|-- by-id
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B -&gt; ../../sda
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part1 -&gt; ../../sda1
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part6 -&gt; ../../sda6
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part7 -&gt; ../../sda7
+|   |-- usb-Generic_STORAGE_DEVICE_02773 -&gt; ../../sdd
+|   `-- usb-Generic_STORAGE_DEVICE_02773-part1 -&gt; ../../sdd1
+|-- by-label
+|   |-- Photos -&gt; ../../sdd1
+|   |-- SUSE10 -&gt; ../../sda7
+|   `-- devel -&gt; ../../sda6
+|-- by-path
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0 -&gt; ../../sda
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part1 -&gt; ../../sda1
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part6 -&gt; ../../sda6
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part7 -&gt; ../../sda7
+|   |-- pci-0000:00:1f.2-scsi-1:0:0:0 -&gt; ../../sr0
+|   |-- usb-02773:0:0:2 -&gt; ../../sdd
+|   |-- usb-02773:0:0:2-part1 -&gt; ../../sdd1
+`-- by-uuid
+    |-- 159a47a4-e6e6-40be-a757-a629991479ae -&gt; ../../sda7
+    |-- 3e999973-00c9-4917-9442-b7633bd95b9e -&gt; ../../sda6
+    `-- 4210-8F8C -&gt; ../../sdd1</screen>
+ </sect1>
+ <sect1 xml:id="sec.udev.files">
+  <title>Arquivos usados pelo <systemitem class="service">udev</systemitem></title>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/sys/*</filename>
+    </term>
+    <listitem>
+     <para>
+      Sistema de arquivos virtual fornecido pelo kernel do Linux, exportando todos os dispositivos conhecidos atualmente. Essas informações são usadas pelo <systemitem class="service">udev</systemitem> para criar nós de dispositivo em <filename>/dev</filename>
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/dev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      Nós de dispositivo criados dinamicamente e conteúdo estático criado com systemd-tmpfiles. Para obter mais informações, consulte a página de manual <systemitem>systemd-tmpfiles(8)</systemitem>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Os arquivos e os diretórios a seguir incluem elementos cruciais da infraestrutura do <systemitem class="service">udev</systemitem>:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/etc/udev/udev.conf</filename>
+    </term>
+    <listitem>
+     <para>
+      Arquivo de configuração principal do <systemitem class="service">udev</systemitem>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/udev/rules.d/*</filename>
+    </term>
+    <listitem>
+     <para>
+      Regras de correspondência de evento do <systemitem class="service">udev</systemitem>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/tmpfiles.d/</filename> e <filename>/etc/tmpfiles.d/</filename>
+    </term>
+    <listitem>
+     <para>
+      Responsáveis pelo conteúdo do <filename>/dev</filename> estático.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/udev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      Programas ajudantes chamados de regras do <systemitem class="service">udev</systemitem>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.udev.moreinfo">
+  <title>Para obter mais informações</title>
+
+  <para>
+   Para obter mais informações sobre a infraestrutura do <systemitem class="service">udev</systemitem>, consulte as seguintes páginas de manual:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><systemitem class="service">udev</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Informações importantes sobre <systemitem class="service">udev</systemitem>, chaves, regras e outras questões essenciais de configuração.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>udevadm</command>
+    </term>
+    <listitem>
+     <para>
+      É possível usar o <command>udevadm</command> para controlar o comportamento de tempo de execução do <systemitem class="service">udev</systemitem>, solicitar eventos do kernel, gerenciar a fila de eventos e fornecer mecanismos simples de depuração.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem class="daemon">udevd</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Informações sobre o daemon de gerenciamento de eventos do <systemitem class="daemon">udev</systemitem>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+</chapter>
