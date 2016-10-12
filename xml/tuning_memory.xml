@@ -576,6 +576,148 @@ dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100))
    </variablelist>
   </sect2>
 
+  <sect2 xml:id="cha.tuning.memory.vm.thp">
+   <title>Transparent Huge Page Parameters</title>
+    <para>
+     Transparent Huge Pages (THP) provide a way to dynamically allocate huge
+     pages either on-demand by the process or deferring the allocation until
+     later via the <command>khugepaged</command> kernel thread. This method
+     is distinct from the use of <literal>hugetlbfs</literal> to manually
+     manage their allocation and use. Workloads with contiguous memory
+     access patterns can benefit greatly from THP. A 1000 fold decrease
+     in page faults can be observed when running synthetic workloads with
+     contiguous memory access patterns.
+   </para>
+   <para>
+     There are cases when THP may be undesirable. Workloads with sparse
+     memory access patterns may perform poorly with THP due to excessive
+     memory usage. For example, 2 MB of memory may be used at fault time
+     instead of 4 KB for each fault and ultimately lead to premature page
+     reclaim. On releases older then &sle; 12 SP2, it was possible for an
+     application to stall for long periods of time trying to allocate a
+     THP which frequently led to a recommendation of disabling THP. Such
+     recommendations should be re-evaluated for &sle; 12 SP2.
+   </para>
+   <para>
+     The behaviour of THP may be configured via the
+     <option>transparent_hugepage=</option> kernel parameter or via
+     sysfs. For example, it may be disabled by adding the kernel parameter
+     <option>transparent_hugepage=never</option>, rebuild your grub2
+     configuration, and reboot. Verify if THP is disabled with:
+
+    </para>
+    <screen>&prompt.root;cat /sys/kernel/mm/transparent_hugepage/enabled
+always madvise [never]</screen>
+     <para>
+      If disabled, the value <literal>never</literal> is shown
+      in square brackets like in the example above. A value of
+      <literal>always</literal> will always try and use THP at fault
+      time but defer to <command>khugepaged</command> if the allocation
+      fails. A value of <literal>madvise</literal> will only allocate THP
+      for address spaces explicitly specified by an application.
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><filename>/sys/kernel/mm/transparent_hugepage/defrag</filename>
+       </term>
+       <listitem>
+        <para>
+         This parameter controls how much effort an application commits
+         when allocating a THP. A value of <literal>always</literal> is
+         the default for &sle; 12 SP1 and earlier releases that supported
+         THP. If a THP is not available, the application will try to
+         defragment memory. It potentially ncurs large stalls in an
+         application if the memory is fragmented and a THP is not available.
+        </para>
+        <para>
+         A value of <literal>madvise</literal> means that THP allocation
+         requests will only defragment if the application explicitly requests
+	 it. This is the default for &sle; 12 SP2.
+        </para>
+        <para>
+         <literal>defer</literal> is only available on &sle; 12 SP2 and later
+         releases. If a THP is not available, the application will
+         fallback to using small pages if a THP is not available. It will
+	 wake the <command>kswapd</command> and <command>kcompactd</command>
+         kernel threads to defragment memory in the background and a THP
+         will be allocated later <command>khugepaged</command>.
+       </para>
+       <para>
+         The final option <literal>never</literal> will use small pages if
+	 a THP is unavailable but no other action will take place.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+  </sect2>
+  <sect2 xml:id="cha.tuning.memory.vm.khugepaged">
+   <title>khugepaged Parameters</title>
+   <para>
+    khugepaged will be automatically started when
+    <literal>transparent_hugepage</literal> is set to
+    <literal>always</literal> or <literal>madvise</literal>, and it'll be
+    automatically shutdown if it's set to <literal>never</literal>. Normally
+    this runs at low frequency but the behaviour can be tuned.
+   </para>
+   <variablelist>
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/defrag</filename> </term>
+      <listitem>
+       <para>
+        A value of 0 will disable <command>khugepaged</command> even though
+        THP may still be used at fault time. This may be important for
+        latency-sensitive applications that benefit from THP but cannot
+        tolerate a stall if <command>khugepaged</command> tries update an
+        applications memory usage.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/pages_to_scan</filename></term>
+      <listitem>
+      <para>
+        This parameter controls how many pages are scanned by
+        <command>khugepaged</command> in a single pass. A scan identifies
+        small pages that can be reallocated as THP. Increasing this value
+         will allocate THP in the background faster at the cost of CPU
+         usage.
+       </para>
+      </listitem>
+    </varlistentry>
+
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/scan_sleep_millisecs</filename></term>
+      <listitem>
+      <para>
+       <command>khugepaged</command> sleeps for a short interval specified
+       by this parameter after each pass to limit how much CPU usage is
+       used. Reducing this value will allocate THP in the background faster
+       at the cost of CPU usage. A value of 0 will force continual scanning.
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/alloc_sleep_millisecs</filename>
+      </term>
+      <listitem>
+       <para>
+         This parameter controls how long <command>khugepaged</command> will
+         sleep in the event it fails to allocate a THP in the background waiting
+         for <command>kswapd</command> and <command>kcompactd</command> to
+         take action.
+       </para>
+      </listitem>
+    </varlistentry>
+   </variablelist>
+
+   <para>
+     The remaining parameters for <command>khugepaged</command> are rarely
+     useful for performance tuning but are fully documented in
+     <filename>/usr/src/linux/Documentation/vm/transhuge.txt</filename>
+   </para>
+  </sect2>
   <sect2 xml:id="cha.tuning.memory.vm.more">
    <title>Further VM Parameters</title>
    <para>
