@@ -273,51 +273,34 @@
     tree</link>.
    </para>
    <para>
-    When a task enters into the <emphasis>run queue</emphasis> (a planned
-    time line of processes to be executed next), the scheduler records the
-    current time. While the process waits for processor time, its
-    <quote>wait</quote> value gets incremented by an amount derived from the
-    total number of tasks currently in the run queue and the process
-    priority. As soon as the processor runs the task, its
-    <quote>wait</quote> value gets decremented. If the value drops below a
-    certain level, the task is preempted by the scheduler and other tasks
-    get closer to the processor. By this algorithm, CFS tries to reach the
-    ideal state where the <quote>wait</quote> value is always zero.
+    When CFS schedules a task it accumulates <quote>virtual
+    runtime</quote> or <emphasis>vruntime</emphasis>. The next task picked
+    to run is always the task with the minimum accumulated vruntime so
+    far. By balancing the red-black tree when tasks are inserted into the
+    <emphasis>run queue</emphasis> (a planned time line of processes to be
+    executed next), the task with the mininum vruntime is always the first
+    entry in the red-black tree.
+   </para>
+   <para>
+    The amount of vruntime a task accrues is related to its priority.
+    High priority tasks gain vruntime at a slower rate than low priority
+    tasks, which results in high priority tasks being picked to run on the
+    processor more often.
    </para>
   </sect2>
 
   <sect2 xml:id="sec.tuning.taskscheduler.cfs.grouping">
    <title>Grouping Processes</title>
    <para>
-    Since the Linux kernel version 2.6.24, CFS can be tuned to be fair to
-    users or groups rather than to tasks only. Runnable tasks are then
-    grouped to form entities, and CFS tries to be fair to these entities
-    instead of individual runnable tasks. The scheduler also tries to be
-    fair to individual tasks within these entities.
+    Since the Linux kernel version 2.6.24, CFS can be tuned to be fair
+    to groups rather than to tasks only. Runnable tasks are then grouped
+    to form entities, and CFS tries to be fair to these entities instead
+    of individual runnable tasks. The scheduler also tries to be fair to
+    individual tasks within these entities.
    </para>
    <para>
-    Tasks can be grouped in two mutually exclusive ways:
-   </para>
-   <itemizedlist mark="bullet" spacing="normal">
-    <listitem>
-     <para>
-      By user IDs
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      By kernel control groups.
-     </para>
-    </listitem>
-   </itemizedlist>
-   <para>
-    The way the kernel scheduler lets you group the runnable tasks depends
-    on setting the kernel compile-time options
-    <literal>CONFIG_FAIR_USER_SCHED</literal> and
-    <literal>CONFIG_FAIR_CGROUP_SCHED</literal>. The default setting in
-    &productnamereg; &productnumber; is to use control groups, which
-    lets you create groups as needed. For more information, see
-    <xref linkend="cha.tuning.cgroups"/>.
+    The kernel scheduler lets you group runnable tasks using control
+    groups. For more information, see <xref linkend="cha.tuning.cgroups"/>.
    </para>
   </sect2>
 
@@ -452,11 +435,11 @@ pid 16244's current scheduling priority: 0
     algorithm:
    </para>
 <screen>&prompt.root;chrt -m
-SCHED_OTHER min/max priority : 0/0
-SCHED_FIFO min/max priority : 1/99
-SCHED_RR min/max priority : 1/99
-SCHED_BATCH min/max priority : 0/0
-SCHED_IDLE min/max priority : 0/0
+SCHED_SCHED_OTHER min/max priority : 0/0
+SCHED_SCHED_FIFO min/max priority : 1/99
+SCHED_SCHED_RR min/max priority : 1/99
+SCHED_SCHED_BATCH min/max priority : 0/0
+SCHED_SCHED_IDLE min/max priority : 0/0
 </screen>
    <para>
     In the above example, SCHED_OTHER, SCHED_BATCH, SCHED_IDLE polices only
@@ -502,17 +485,18 @@ pid 16244's current scheduling priority: 0
 kernel.sched_cfs_bandwidth_slice_us = 5000
 kernel.sched_child_runs_first = 0
 kernel.sched_compat_yield = 0
-kernel.sched_latency_ns = 6000000
+kernel.sched_latency_ns = 24000000
 kernel.sched_migration_cost_ns = 500000
-kernel.sched_min_granularity_ns = 2000000
+kernel.sched_min_granularity_ns = 8000000
 kernel.sched_nr_migrate = 32
 kernel.sched_rr_timeslice_ms = 25
 kernel.sched_rt_period_us = 1000000
 kernel.sched_rt_runtime_us = 950000
+kernel.sched_schedstats = 0
 kernel.sched_shares_window_ns = 10000000
 kernel.sched_time_avg_ms = 1000
 kernel.sched_tunable_scaling = 1
-kernel.sched_wakeup_granularity_ns = 2500000</screen>
+kernel.sched_wakeup_granularity_ns = 10000000</screen>
    <para>
     Note that variables ending with <quote>_ns</quote> and
     <quote>_us</quote> accept values in nanoseconds and microseconds,
@@ -534,6 +518,20 @@ kernel.sched_wakeup_granularity_ns = 2500000</screen>
    </para>
    <variablelist>
     <varlistentry>
+     <term><systemitem>sched_cfs_bandwidth_slice_us</systemitem>
+     </term>
+     <listitem>
+      <para>
+       When CFS bandwidth control is in use, this parameter controls
+       the amount of run-time (bandwidth) transfered to a run queue from the
+       task's control group bandwidth pool. Small values allow the global
+       bandwidth to be shared in a fine-grained manner among tasks, larger
+       values reduce transfer overhead. See
+       <link xlink:href="https://www.kernel.org/doc/Documentation/scheduler/sched-bwc.txt"/>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
      <term><systemitem>sched_child_runs_first</systemitem>
      </term>
      <listitem>
@@ -553,14 +551,15 @@ kernel.sched_wakeup_granularity_ns = 2500000</screen>
      </term>
      <listitem>
       <para>
-       Enables the aggressive yield behavior of the old 0(1) scheduler. Java
-       applications that use synchronization extensively perform better with
-       this value set to <literal>1</literal>. Only use it when you see a
-       drop in performance. The default value is <literal>0</literal>.
-      </para>
-      <para>
-       Expect applications that depend on the sched_yield() syscall behavior
-       to perform better with the value set to <literal>1</literal>.
+       Enables the aggressive CPU yielding behavior of the old <emphasis>O(1)</emphasis>
+       scheduler by moving the relinquishing task to the end of the runnable queue
+       (right most position in the red-black tree). Applications that depend on the
+       <option>sched_yield(2)</option> syscall behavior may see performance
+       improvements by giving other processes a chance to run when there are
+       highly contended resources (such as locks). On the other hand, given
+       that this call incurs in context switching, misusing the call can hurt
+       the workload. Only use it when you see a drop in performance. The default
+       value is <literal>0</literal>.
       </para>
      </listitem>
     </varlistentry>
@@ -571,8 +570,8 @@ kernel.sched_wakeup_granularity_ns = 2500000</screen>
       <para>
        Amount of time after the last execution that a task is considered to
        be <quote>cache hot</quote> in migration decisions. A
-       <quote>hot</quote> task is less likely to be migrated, so increasing
-       this variable reduces task migrations. The default value is
+       <quote>hot</quote> task is less likely to be migrated to another CPU,
+       so increasing this variable reduces task migrations. The default value is
        <literal>500000</literal> (ns).
       </para>
       <para>
@@ -654,6 +653,16 @@ kernel.sched_wakeup_granularity_ns = 2500000</screen>
      </listitem>
     </varlistentry>
     <varlistentry>
+     <term><systemitem>sched_rr_timeslice_ms</systemitem>
+     </term>
+     <listitem>
+      <para>
+       Quantum that SCHED_RR tasks are allowed to run before they are
+       preempted and put to the end of the task list.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
      <term><systemitem>sched_rt_period_us</systemitem>
      </term>
      <listitem>
@@ -681,12 +690,30 @@ kernel.sched_wakeup_granularity_ns = 2500000</screen>
      </term>
      <listitem>
       <para>
-       Controls how many tasks can be moved across processors through
-       migration software interrupts (softirq). If a large number of tasks
-       is created by SCHED_OTHER policy, they will all be run on the same
-       processor. The default value is <literal>32</literal>. Increasing
-       this value gives a performance boost to large SCHED_OTHER threads at
-       the expense of increased latencies for real-time tasks.
+       Controls how many tasks can be migrated across processors for
+       load-balancing purposes. Because balancing iterates the runqueue
+       with interrupts disabled (softirq), it can incur in irq-latency
+       penalties for real-time tasks.  Therefore increasing this value
+       may give a performance boost to large SCHED_OTHER threads at the
+       expense of increased irq-latencies for real-time tasks. The default
+       value is <literal>32</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem>sched_time_avg_ms</systemitem>
+     </term>
+     <listitem>
+      <para>
+      This parameter sets the period over which the time spent running
+      real-time tasks is averaged. That average assists CFS in making
+      load-balancing decisions and gives an indication of how busy a CPU is
+      with high-priority real-time tasks.
+      </para>
+      <para>
+      The optimal setting for this parameter is highly workload
+      dependent and depends, among other things, on how frequently
+      real-time tasks are running and for how long.
       </para>
      </listitem>
     </varlistentry>
@@ -739,10 +766,22 @@ kernel.sched_wakeup_granularity_ns = 2500000</screen>
        Contains the current values of all tunable variables (see
        <xref linkend="sec.tuning.taskscheduler.cfs.tuning"/>) that affect
        the task scheduler behavior, CFS statistics, and information about
-       the run queue on all available processors.
+       the run queues (CFS, RT and deadline) on all available processors.
+       A summary of the task running on each processor is also shown, with
+       the task name and PID, along with a number of scheduler specific
+       statistics. The first being <option>tree-key</option> column, it
+       indicates the task's virtual runtime, and its name comes from the kernel
+       sorting all runnable tasks by this key in a red-black tree. The
+       <option>switches</option> column indicates the number total number
+       of switches (involuntary or not), naturally the <option>prio</option>
+       refers to the process priority. The <option>wait-time</option> value
+       indicates the amount of time the task waited to be scheduled. Finally
+       both <option>sum-exec</option> and <option>sum-sleep</option> account
+       for the total amount of time (in nanoseconds) the task was running on
+       the processor or asleep, respectively.
       </para>
 <screen>&prompt.root;cat /proc/sched_debug
-Sched Debug Version: v0.11, 3.12.24-7-default #1
+Sched Debug Version: v0.11, 4.4.21-64-default #1
 ktime                                   : 23533900.395978
 sched_clk                               : 23543587.726648
 cpu_clk                                 : 23533900.396165
@@ -762,22 +801,26 @@ cpu#0, 2666.762 MHz
   .load                          : 1024
   .nr_switches                   : 1918946
 [...]
+
 cfs_rq[0]:/
   .exec_clock                    : 170176.383770
   .MIN_vruntime                  : 0.000001
   .min_vruntime                  : 347375.854324
   .max_vruntime                  : 0.000001
 [...]
+
 rt_rq[0]:/
   .rt_nr_running                 : 0
   .rt_throttled                  : 0
   .rt_time                       : 0.000000
   .rt_runtime                    : 950.000000
 
-runnable tasks:
-  task   PID      tree-key switches prio  exec-runtime  sum-exec sum-sleep
------------------------------------------------------------------------------
-R  cat 21772 347375.854324        2  120 347375.854324  0.488560 0.000000 0 /</screen>
+dl_rq[0]:
+  .dl_nr_running                 : 0
+
+  task   PID         tree-key  switches  prio     wait-time        [...]
+------------------------------------------------------------------------
+R  cc1 63477     98876.717832       197   120      0.000000         ...</screen>
      </listitem>
     </varlistentry>
     <varlistentry>
