@@ -17,8 +17,7 @@
   I/O scheduling controls how input/output operations will be submitted to
   storage. &productname; offers various I/O algorithms&mdash;called
   <literal>elevators</literal>&mdash;suiting different workloads.
-  Elevators can help to reduce seek operations, can prioritize I/O requests,
-  or make sure, and I/O request is carried out before a given deadline.
+  Elevators can help to reduce seek operations and can prioritize I/O requests.
  </para>
  <para>
   Choosing the best suited I/O elevator not only depends on the workload,
@@ -30,16 +29,19 @@
   <title>Switching I/O Scheduling</title>
 
   <para>
-   &productname; lets you set a default I/O scheduler at boot-time, which
-   can be changed on the fly per block device. This makes it possible to set
-   different algorithms, for example, for the device hosting the system partition
-   and the device hosting a database.
+   &productname; picks a default I/O scheduler at boot-time, which can be
+   changed on the fly per block device. This makes it possible to set different
+   algorithms, for example, for the device hosting the system partition and the
+   device hosting a database.
   </para>
 
   <para>
-   By default the <systemitem class="resource">CFQ</systemitem> (Completely
-   Fair Queuing) scheduler is used. To change this default, use the
-   following boot parameter:
+   The default I/O scheduler is chosen for each device based on whether the
+   device reports to be rotational disk or not. For non-rotational disks
+   <systemitem class="resource">DEADLINE</systemitem> I/O scheduler is picked.
+   Other devices default to
+   <systemitem class="resource">CFQ</systemitem> (Completely Fair Queuing).
+   To change this default, use the following boot parameter:
   </para>
 
 <screen>elevator=<replaceable>SCHEDULER</replaceable></screen>
@@ -62,7 +64,13 @@
    Here, <replaceable>SCHEDULER</replaceable> is one of
    <option>cfq</option>, <option>noop</option>, or <option>deadline</option>.
    <replaceable>DEVICE</replaceable> is the block device
-   (<systemitem>sda</systemitem> for example).
+   (<systemitem>sda</systemitem> for example). Note that this change will not
+   persist during reboot. For permanent I/O scheduler change for a particular
+   device either place the command switching the I/O scheduler into init
+   scripts or add appropriate udev rule into
+   <filename>/lib/udev/rules.d/</filename>. See
+   <filename>/lib/udev/rules.d/60-ssd-scheduler.rules</filename> for an example
+   of such tuning.
   </para>
 
   <note os="sles" arch="zseries">
@@ -98,6 +106,13 @@
 <screen>&wsI;:~ # cat /sys/block/sda/queue/scheduler
 noop deadline [cfq]</screen>
 
+  <para>
+  This file can also contain string <literal>none</literal> meaning that
+  I/O scheduling does not happen for this device. This is usually because
+  the device uses multi-queue queueing mechanism (refer to
+  <xref linkend="cha.tuning.io.scsimq"/>.
+  </para>
+
   <sect2 xml:id="sec.tuning.io.schedulers.cfq">
    <title><systemitem class="resource">CFQ</systemitem> (Completely Fair Queuing)</title>
    <para>
@@ -106,30 +121,34 @@ noop deadline [cfq]</screen>
     assigns each thread a time slice in which it is allowed to submit I/O to
     disk. This way each thread gets a fair share of I/O throughput. It also
     allows assigning tasks I/O priorities which are taken into account
-    during scheduling decisions (see <command>man 1 ionice</command>). The
+    during scheduling decisions (see
+    <xref linkend="cha.tuning.resources.disk.ionice"/>). The
     <systemitem class="resource">CFQ</systemitem> scheduler has the
     following tunable parameters:
    </para>
    <variablelist>
     <varlistentry>
      <term><filename>
-      /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/slice_idle
+      /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/slice_idle_us
      </filename>
      </term>
      <listitem>
       <para>
        When a task has no more I/O to submit in its time slice, the I/O
-       scheduler waits for a while before scheduling the next thread to
-       improve locality of I/O.
-       Additionally, the I/O scheduler avoids starving processes doing
-       dependent I/O.
+       scheduler waits for a while before scheduling the next thread.
+       The <filename>slice_idle_us</filename> is
+       the time in microseconds the I/O scheduler waits. File
+       <filename>slice_idle</filename> controls the same tunable but in
+       millisecond units. The waiting for more I/O from a thread can
+       improve locality of I/O. Additionally, it avoids starving processes
+       doing dependent I/O.
        A process does dependent I/O if it needs a result of one I/O in order
        to submit another I/O. For example, if you first need to read an index
        block in order to find out a data block to read, these two reads form
        a dependent I/O.
       </para>
       <para>For media where locality does not play a big role (SSDs, SANs
-        with lots of disks) setting  <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/slice_idle</filename>
+       with lots of disks) setting  <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/slice_idle_us</filename>
        to <literal>0</literal> can improve the throughput considerably.
       </para>
      </listitem>
@@ -183,17 +202,19 @@ noop deadline [cfq]</screen>
      </listitem>
     </varlistentry>
      <varlistentry>
-       <term><filename>/sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/group_idle</filename></term>
+       <term><filename>/sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/group_idle_us</filename></term>
        <listitem>
          <para>To avoid starving of blkio cgroups doing dependent I/O, CFQ
            waits a bit after completion of I/O for one blkio cgroup before
            scheduling I/O for a different blkio cgroup. When
-           <literal>slice_idle</literal> is set, this parameter does not
+           <literal>slice_idle_us</literal> is set, this parameter does not
            have a big impact. However, for fast media, the overhead of
-           <literal>slice_idle</literal> is generally undesirable.
-           Disabling <literal>slice_idle</literal> and setting
-           <literal>group_idle</literal> is a method to avoid starvation
-           of blkio cgroups doing dependent I/O with lower overhead.
+           <literal>slice_idle_us</literal> is generally undesirable.
+           Disabling <literal>slice_idle_us</literal> and setting
+           <literal>group_idle_us</literal> is a method to avoid starvation
+           of blkio cgroups doing dependent I/O with lower overhead. Note that
+           the file <filename>group_idle</filename> controls the same tunable
+           however with millisecond granularity.
          </para>
        </listitem>
      </varlistentry>
@@ -458,8 +479,7 @@ sys     0m1.516s</screen>
 
   <para>
    Sending write barriers can be disabled using the
-   <option>barrier=0</option> mount option (for Ext3, Ext4, and reiserfs),
-   or using the <option>nobarrier</option> mount option (for XFS).
+   <option>nobarrier</option> mount option.
   </para>
 
   <warning>
@@ -470,5 +490,33 @@ sys     0m1.516s</screen>
     corruption and data loss.
    </para>
   </warning>
+ </sect1>
+
+ <sect1 xml:id="cha.tuning.io.scsimq">
+  <title>Enable blk-mq I/O path for SCSI by default</title>
+
+  <para>
+   Block multiqueue (blk-mq) is a multi-queue block I/O queueing
+   mechanism. Blk-mq uses per-cpu software queues to queue I/O
+   requests. The software queues are mapped to one or more hardware
+   submission queues. Blk-mq significantly reduces lock contention. In
+   particular blk-mq improves performance for devices that support a
+   high number of input/output operations per second (IOPS).  Blk-mq
+   is already the default for some devices, e.g. NVM Express devices.
+  </para>
+
+  <para>
+   Currently blk-mq has no I/O scheduling support (no CFQ, no deadline
+   I/O scheduler). This lack of I/O scheduling can cause significant
+   performance degradation when spinning disks are used. Therefore
+   blk-mq is not enabled by default for SCSI devices.
+  </para>
+
+  <para>
+   If you have fast SCSI devices (e.g. SSDs) instead of spinning SCSI
+   devices attached to your system you might consider to switch to
+   blk-mq for SCSI. This is done using the kernel command line option
+   <literal>scsi_mod.use_blk_mq=1</literal>.
+  </para>
  </sect1>
 </chapter>
