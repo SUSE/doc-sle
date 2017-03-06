@@ -165,10 +165,10 @@
     </listitem>
     <listitem>
      <para>
-      After you modify the <filename>/etc/multipath.conf</filename> file, you
-      must run <command>dracut</command> <option>-f</option> to re-create the
-      <systemitem>initrd</systemitem> on your system, then reboot for the
-      changes to take effect.
+      After each modification of the <filename>/etc/multipath.conf</filename>
+      file, you must run <command>dracut</command> <option>-f</option> to
+      re-create the <systemitem>initrd</systemitem> on your system. Reboot
+      afterwards for the changes to take effect.
      </para>
     </listitem>
    </itemizedlist>
@@ -321,16 +321,6 @@
    </itemizedlist>
   </sect2>
 
-  <sect2 xml:id="sec.multipath.planning.lvm">
-   <title>Volume Managers</title>
-   <para>
-    Volume managers such as LVM2 and Clustered LVM2 run on top of multipathing.
-    You must configure multipathing for a device before you use LVM2 or cLVM2
-    to create segment managers and file systems on it. For information, see
-    <xref linkend="sec.multipath.lvm" xrefstyle="SectTitleOnPage"/>.
-   </para>
-  </sect2>
-
   <sect2 xml:id="sec.multipath.planning.raid">
    <title>Software RAIDs</title>
    <para>
@@ -367,6 +357,29 @@
     configure DRBD.
    </para>
   </sect2>
+
+  <sect2 xml:id="sec.multipath.planning.initrd">
+   <title>
+    Always Keep the <filename>initrd</filename> in Synchronization with the
+    System Configuration
+   </title>
+   <para>
+    One of the most important requirements when using Multipath is to make sure
+    that the <filename>initrd</filename> and the installed system behave the
+    same regarding the root file system and all other file systems required to
+    boot the system. If Multipath is enabled in the system, it also needs to be
+    enabled in the <filename>initrd</filename> and vice versa. See <xref
+    linkend="sec.multipath.configuration.start"/> for details.
+   </para>
+   <para>
+    In case the <filename>initrd</filename> and the system are not
+    synchronized, the system will not properly boot and the start-up procedure
+    will result in an emergency shell. See <xref
+    linkend="sec.multipath.trouble.root"/> for instructions on how to avoid or
+    repair such a scenario.
+   </para>
+  </sect2>
+
  </sect1>
  <sect1 xml:id="sec.multipath.mpiotools">
   <title>Multipath Management Tools</title>
@@ -693,7 +706,7 @@
     manage multipathed devices. The general syntax for the command looks like
     the following:
    </para>
-<screen>multipath [-v verbosity_level] [-b bindings_file] [-d] [-h|-l|-ll|-f|-F|-B|-c|-q|-r|-w|-W] [-p failover|multibus|group_by_serial|group_by_prio|group_by_node_name] [<replaceable>devicename</replaceable>]</screen>
+<screen>multipath [-v verbosity_level] [-b bindings_file] [-d] [-h|-l|-ll|-f|-F|-B|-c|-q|-r|-w|-W|-t] [-p failover|multibus|group_by_serial|group_by_prio|group_by_node_name] [<replaceable>devicename</replaceable>]</screen>
    <para>
     Refer to <command>man 8 multipath</command> for details.
    </para>
@@ -961,6 +974,16 @@
       </table>
      </listitem>
     </varlistentry>
+    <varlistentry>
+     <term>multipath -t</term>
+     <listitem>
+      <para>
+       Shows internal hardware table and active configuration of
+       multipath. Refer to <command>man multipath</command> for details
+       about the configuration parameters.
+      </para>
+     </listitem>
+    </varlistentry>
    </variablelist>
   </sect2>
 
@@ -1018,7 +1041,7 @@
      </listitem>
     </varlistentry>
     <varlistentry>
-     <term>mpathpersisst -i -k -d /dev/mapper/mpath9</term>
+     <term>mpathpersist -i -k -d /dev/mapper/mpath9</term>
      <listitem>
       <para>
        Read the Service Action Reservation Key for the
@@ -1053,19 +1076,50 @@
   <para/>
 
   <sect2 xml:id="sec.multipath.configuration.start">
-   <title>Enabling and Starting Multipath I/O Services</title>
+   <title>Enabling, Disabling, Starting and Stopping Multipath I/O Services</title>
    <para>
     To enable multipath services to start at boot time, run the following
     command:
    </para>
 <screen>sudo systemctl enable multipathd</screen>
    <para>
-    To manually start and stop the service in the running system or to check
+    To manually start the service in the running system or to check
     its status, enter one of the following commands:
    </para>
-<screen>sudo systemctl start multipathd
-sudo systemctl stop multipathd
+   <screen>sudo systemctl start multipathd
 sudo systemctl status multipathd</screen>
+   <para>
+    To stop the multipath services in the current session and to disable it, so
+    it will not be started next time the system is booted, run the following
+    commands:
+   </para>
+   <screen>sudo systemctl stop multipathd
+sudo systemctl disable multipathd</screen>
+
+   <important xml:id="ann.multipath.configuration.initrd">
+    <title>Rebuilding the <systemitem>initrd</systemitem></title>
+    <para>
+     Whenever you enable or disable the multipath services it is also required
+     to rebuild the <systemitem>initrd</systemitem>, otherwise the system may
+     not boot anymore. When enabling the multipath services, also run the
+     following command to rebuild the initrd:
+    </para>
+    <screen>dracut --force --add multipath</screen>
+    <para>
+     When disabling the services, then run the following command to rebuild the
+     initrd:
+    </para>
+    <screen>dracut --force -o multipath</screen>
+    <para>
+     Additionally and optionally, if you also want to make sure multipath
+     devices do not get set up at all, even when starting multipath manually,
+     add the following lines to the end of
+     <filename>/etc/multipath.conf</filename> before rebuilding the initrd:
+    </para>
+    <screen>blacklist {
+    wwid ".*"
+}</screen>
+   </important>
   </sect2>
 
   <sect2 xml:id="sec.multipath.configuration.sandevs">
@@ -1165,95 +1219,6 @@ sudo systemctl status multipathd</screen>
     to the server.
    </para>
   </sect2>
-
-  <sect2 xml:id="sec.multipath.configuration.initrd">
-   <title>Configuring the Device Drivers in initrd for Multipathing</title>
-   <para>
-    The server must be manually configured to automatically load the device
-    drivers for the controllers to which the multipath I/O devices are
-    connected within the <literal>initrd</literal>. You need to add the
-    necessary driver module to the variable <envar>force_drivers</envar> in the
-    file <filename>/etc/dracut.conf.d/01-dist.conf</filename>.
-   </para>
-   <para>
-    For example, if your system contains a RAID controller accessed by the
-    <filename>hpsa</filename> driver and multipathed devices connected to a
-    QLogic controller accessed by the driver qla23xx, this entry would look
-    like:
-   </para>
-<screen>force_drivers+="hpsa qla23xx"</screen>
-   <para>
-    After changing <filename>/etc/dracut.conf.d/01-dist.conf</filename>, you
-    must re-create the <literal>initrd</literal> on your system with the
-    <command>dracut</command> <option>-f</option> command, then reboot for the
-    changes to take effect.
-   </para>
-   <para>
-    There are four SCSI hardware handlers available in the SCSI layer that can
-    be used with DM-Multipath:
-   </para>
-   <simplelist>
-    <member><filename>scsi_dh_alua</filename>
-    </member>
-    <member><filename>scsi_dh_rdac</filename>
-    </member>
-    <member><literal>scsi_dh_hp_sw</literal>
-    </member>
-    <member><literal>scsi_dh_emc</literal>
-    </member>
-   </simplelist>
-   <para>
-    Add the modules to the <filename>initrd</filename> image, then specify them
-    in the <filename>/etc/multipath.conf</filename> file as hardware handler
-    types <literal>alua</literal>, <literal>rdac</literal>,
-    <literal>hp_sw</literal>, and <literal>emc</literal>. For example, add one
-    of these lines for a device definition:
-   </para>
-<screen>hardware_handler "1 alua"
-hardware_handler "1 rdac"
-hardware_handler "1 hp_sw"
-hardware_handler "1 emc"</screen>
-   <para>
-    To include the modules in the <filename>initrd</filename> image:
-   </para>
-   <procedure>
-    <step>
-     <para>
-      Add the device handler modules to the <envar>force_drivers</envar>
-      variable in <filename>/etc/dracut.conf.d/01-dist.conf</filename>:
-     </para>
-<screen>force_drivers+="alua rdac hp_sw emc"</screen>
-    </step>
-    <step>
-     <para>
-      Create a new <filename>initrd</filename>:
-     </para>
-<screen>sudo dracut /boot/initrd-<replaceable>kernelversion</replaceable>-scsi-dh \
-<replaceable>kernelversion</replaceable></screen>
-     <para>
-      Replace <replaceable>KERNEL_VERSION</replaceable> with the version of the
-      Kernel you want to use for the initrd, for example:
-     </para>
-<screen>sudo dracut /boot/initrd-3.12.28-4-default-scsi-dh 3.12.28-4-default</screen>
-    </step>
-    <step>
-     <para>
-      Make the initrd generated in the previous step the default initrd that is
-      used for booting:
-     </para>
-<screen>cd /boot &amp;&amp; sudo ln -sf initrd-<replaceable>kernelversion</replaceable>-scsi-dh  initrd</screen>
-     <para>
-      For example:
-     </para>
-<screen>cd /boot &amp;&amp; sudo ln -sf initrd-3.12.28-4-default-scsi-dh initrd</screen>
-    </step>
-    <step>
-     <para>
-      Restart the server.
-     </para>
-    </step>
-   </procedure>
-  </sect2>
  </sect1>
  <sect1 xml:id="sec.multipath.conf_file">
   <title>Creating or Modifying the /etc/multipath.conf File</title>
@@ -1262,101 +1227,74 @@ hardware_handler "1 emc"</screen>
    The <filename>/etc/multipath.conf</filename> file does not exist unless you
    create it. Default multipath device settings are applied automatically when
    the <command>multipathd</command> daemon runs unless you create the
-   multipath configuration file and personalize the settings. The
-   <filename>/usr/share/doc/packages/multipath-tools/</filename> file contains
-   sample <filename>/etc/multipath.conf</filename> files that you can use as a
-   template.
+   multipath configuration file and personalize the settings.
   </para>
 
   <important>
-   <title>Permanently Applying Changes from <filename>/etc/multipath.conf</filename></title>
+   <title>
+    Testing and Permanently Applying Changes from
+    <filename>/etc/multipath.conf</filename>
+   </title>
    <para>
-    Whenever you create or modify <filename>/etc/multipath.conf</filename>
-    changes are not permanently applied by saving the file. Follow the
-    instructions in <xref
-     linkend="sec.multipath.conf_file.apply"/> to
-    apply them and to update the multipath maps.
+    Whenever you create or modify the <filename>/etc/multipath.conf</filename>
+    file, the changes are not automatically applied when you save the
+    file. This allows you to perform a dry run to verify your changes
+    before they are committed. When you are satisfied with the revised
+    settings, you can update the multipath maps as described in <xref
+    linkend="sec.multipath.conf_file.apply"/>.
    </para>
   </important>
-
-  <para>
-   Whenever you create or modify the <filename>/etc/multipath.conf</filename>
-   file, the changes are not automatically applied when you save the file. This
-   allows you time to perform a dry run to verify your changes before they are
-   committed. When you are satisfied with the revised settings, you can update
-   the multipath maps for the running
-   <systemitem class="daemon">multipathd</systemitem> daemon to use, or the
-   changes will be applied the next time that the
-   <systemitem class="daemon">multipathd</systemitem> daemon is restarted, such
-   as on a system restart.
-  </para>
 
   <sect2 xml:id="sec.multipath.conf_file.create">
    <title>Creating the /etc/multipath.conf File</title>
    <procedure>
     <step>
      <para>
-      Open a terminal console.
+      Create an empty <filename>/etc/multipath.conf</filename> file with an
+      editor of your choice.
      </para>
     </step>
     <step>
      <para>
-      Copy one of the template files located in
-      <filename>/usr/share/doc/packages/multipath-tools/</filename> to
-      <filename>/etc/multipath.conf</filename>. Three different versions are
-      available:
-     </para>
-     <variablelist>
-      <varlistentry>
-       <term><filename>multipath.conf.synthetic</filename>
-       </term>
-       <listitem>
-        <para>
-         Skeleton file that contains the general structure and example values.
-        </para>
-       </listitem>
-      </varlistentry>
-      <varlistentry>
-       <term><filename>multipath.conf.annotated</filename>
-       </term>
-       <listitem>
-        <para>
-         Skeleton file that contains the general structure and example values
-         and detailed comments.
-        </para>
-       </listitem>
-      </varlistentry>
-      <varlistentry>
-       <term><filename>multipath.conf.defaults</filename>
-       </term>
-       <listitem>
-        <para>
-         This file contains the complete default settings, including the
-         settings for all devices that are automatically detected. Using this
-         file as a template is not recommended.
-        </para>
-       </listitem>
-      </varlistentry>
-     </variablelist>
-    </step>
-    <step>
-     <para>
-      Ensure that there is an appropriate <command>device</command> entry for
+      Ensure to add an appropriate <literal>device</literal> section for
       your SAN. Most vendors provide documentation on the proper setup of the
-      <command>device</command> section.
+      <command>device</command> section. Note that different SANs require
+      individual <literal>device</literal> sections.
      </para>
      <para>
-      The <filename>/etc/multipath.conf</filename> file requires a different
-      <command>device</command> section for different SANs. If you are using a
-      storage subsystem that is automatically detected (see
-      <xref linkend="sec.multipath.hardware.autodetect" xrefstyle="HeadingOnPage"/>),
-      the default entry for that device can be used; no further configuration
-      of the <filename>/etc/multipath.conf</filename> file is required.
+      If you are using a storage subsystem that is automatically detected (see
+      <xref linkend="sec.multipath.hardware.autodetect"
+      xrefstyle="HeadingOnPage"/>), adding a <literal>device</literal> is not
+      required&mdash;the default settings for this device will be applied in
+      this case.
      </para>
     </step>
     <step>
      <para>
-      Save the file.
+      Create a <literal>blacklist</literal> section containing all non-multpath
+      devices of your machine. Refer to <xref
+      linkend="sec.multipath.blacklist"/> for details.
+     </para>
+    </step>
+    <step>
+     <para>
+      If required, add more sections to the configuration file. Refer to <xref
+      linkend="sec.multipath.conf_file.sections"/> for a brief
+      introduction. More details are available when running <command>man 5
+      multipath.conf</command>.
+     </para>
+    </step>
+    <step>
+     <para>
+      When finished, save <filename>/etc/multipath.conf</filename> and test
+      your settings as described in <xref
+      linkend="sec.multipath.conf_file.verify"/>.
+     </para>
+    </step>
+    <step>
+     <para>
+      When you have successfully verified the configuration, apply it as
+      described in <xref linkend="sec.multipath.conf_file.apply"/>.
      </para>
     </step>
    </procedure>
@@ -1366,10 +1304,8 @@ hardware_handler "1 emc"</screen>
    <title>Sections in the <filename>/etc/multipath.conf</filename> File</title>
    <para>
     The <filename>/etc/multipath.conf</filename> file is organized into the
-    following sections. See
-    <filename>/usr/share/doc/packages/multipath-tools/multipath.conf.annotated</filename>
-    for a template with extensive comments for each of the attributes and their
-    options.
+    following sections. See <command>man 5 multipath.conf</command> for
+    details.
    </para>
    <variablelist>
     <varlistentry>
@@ -1710,16 +1646,18 @@ sdf: state = 2
   </itemizedlist>
 
   <para>
-   If you modify the settings in the <literal>defaults</literal> section, the
-   changes are not applied until you update the multipath maps, or until the
-   multipathd daemon is restarted, such as at system restart.
+   After you have modified the <filename>/etc/multipath.conf</filename> file,
+   you must run <command>dracut</command> <option>-f</option> to re-create the
+   <filename>initrd</filename> on your system, then restart the server for the
+   changes to take effect.See <xref linkend="sec.multipath.conf_file.apply"/>
+   for details.
   </para>
  </sect1>
  <sect1 xml:id="sec.multipath.blacklist">
   <title>Blacklisting Non-Multipath Devices</title>
 
   <para>
-   The <filename>/etc/multipath.conf</filename> file should contain a
+   The <filename>/etc/multipath.conf</filename> file can contain a
    <command>blacklist</command> section where all non-multipath devices are
    listed. You can blacklist devices by WWID (<literal>wwid</literal> keyword),
    device name (<literal>devnode</literal> keyword), or device type
@@ -1729,10 +1667,22 @@ sdf: state = 2
    <literal>blacklist</literal> section.
   </para>
 
+  <warning>
+   <title>Regular Expressions in multipath.conf</title>
+   <para>Regular expressions in the <filename>/etc/multipath.conf</filename> do
+    <emphasis>not</emphasis> work in general. They only work if they are
+    matched against common strings. However, the standard configuration
+    of multipath already contains regular expressions for many devices
+    and vendors. Matching regular expressions with other regular
+    expressions does not work. Make sure, that you are only matching
+    against strings shown with <command>multipath -t</command>.
+   </para>
+  </warning>
+
   <para>
    You typically ignore non-multipathed devices, such as hpsa, fd, hd, md, dm,
-   sr, scd, st, ram, raw, and loop. For example, local IDE hard disks and flash
-   disks do not normally have multiple paths. If you want
+   sr, scd, st, ram, raw, and loop. For example, local SATA hard disks and flash
+   disks do not have multiple paths. If you want
    <command>multipath</command> to ignore single-path devices, put them in the
    <command>blacklist</command> section.
   </para>
@@ -1836,17 +1786,62 @@ blacklist_exceptions {
         wwid "3600d0230000000000e13955cc3751235"
 }</screen>
 
+
   <para>
-   After you modify the <filename>/etc/multipath.conf</filename> file, you must
-   run <command>dracut</command> <option>-f</option> to re-create the
+   After you have modified the <filename>/etc/multipath.conf</filename> file,
+   you must run <command>dracut</command> <option>-f</option> to re-create the
    <filename>initrd</filename> on your system, then restart the server for the
-   changes to take effect.
+   changes to take effect.See <xref linkend="sec.multipath.conf_file.apply"/>
+   for details.
   </para>
 
   <para>
-   After you do this, the local devices should no longer be listed in the
+   Following the reboot, the local devices should no longer be listed in the
    multipath maps when you issue the <command>multipath -ll</command> command.
   </para>
+
+  <note>
+   <title>Using the <literal>find_multipaths</literal> Option</title>
+   <para>
+    Starting with &productname; 12 SP2, the multipath tools support the option
+    <literal>find_multipaths</literal> in the <literal>defaults</literal>
+    section of <filename>/etc/multipath.conf</filename>. Simply put, this
+    option prevents multipath and <systemitem
+    class="daemon">multipathd</systemitem> from setting up multipath maps for
+    devices with just a single path (see the <command>man 5
+    multipath.conf</command> for details). In certain configurations, this may
+    save the administrator from the effort of creating blacklist entries, for
+    example for local SATA disks.
+   </para>
+   <para>
+    Convenient as it seems to be in the first place, using the
+    <literal>find_multipaths</literal> option also has disadvantages. It
+    complicates and slows down the system boot, because for every device found,
+    the boot logic needs to wait until all devices have been discovered to see
+    whether a second path exists for the device. Additionally, problems can
+    arise when some paths are down or otherwise invisible at boot time&mdash;a
+    device can be falsely detected as a single-path device and activated,
+    causing later addition of more paths to fail.
+   </para>
+   <para>
+    <literal>find_multipaths</literal> considers all devices that are listed in
+    <filename>/etc/multipath/wwids</filename> with matching WWIDs as being
+    multipath devices. This is important when
+    <literal>find_multipaths</literal> is first activated: unless
+    <filename>/etc/multipath/wwids</filename> is deleted or edited, activating
+    this option has no effect, because all previously existing multipath maps
+    (including single-path ones) are listed in the wwids file. On SAN-boot
+    systems with a multipathed root file system, care has to be taken to keep
+    <filename>/etc/multipath/wwids</filename> synchronized between the initial
+    RAM disk and the file system.
+   </para>
+   <para>
+    Summarizing, using <literal>find_multipaths</literal> may be convenient in
+    certain use cases, but &suse; still recommends the default configuration
+    with a properly configured blacklist and blacklist exceptions.
+   </para>
+  </note>
+
  </sect1>
  <sect1 xml:id="sec.multipath.names">
   <title>Configuring User-Friendly Names or Alias Names</title>
@@ -2061,6 +2056,7 @@ defaults {
      </orderedlist>
     </listitem>
    </varlistentry>
+
    <varlistentry>
     <term>Multipath Is in the initrd:</term>
     <listitem>
@@ -2087,7 +2083,7 @@ defaults {
       See <xref linkend="sec.multipath.names.ha"/> for details.
      </para>
     </listitem>
-   </varlistentry>
+    </varlistentry>
   </variablelist>
 
   <para>
@@ -2205,10 +2201,14 @@ multipaths {
     <para>
      Save your changes, then close the file.
     </para>
+   </step>
+   <step>
     <para>
-     The changes are not applied until you update the multipath maps, or until
-     the <systemitem class="daemon">multipathd</systemitem> daemon is
-     restarted.
+     After you have modified the <filename>/etc/multipath.conf</filename> file,
+     you must run <command>dracut</command> <option>-f</option> to re-create
+     the <filename>initrd</filename> on your system, then restart the server
+     for the changes to take effect.See <xref
+     linkend="sec.multipath.conf_file.apply"/> for details.
     </para>
    </step>
   </procedure>
@@ -2277,8 +2277,8 @@ multipaths {
       <para>
        In the <filename>/etc/multipath.conf</filename> file on one node:
       </para>
-      <substeps>
-       <step>
+      <orderedlist>
+       <listitem>
         <para>
          Set the <literal>user_friendly_names</literal> configuration option to
          <literal>yes</literal> to enable it.
@@ -2289,8 +2289,8 @@ multipaths {
          of <filename>mpath&lt;<replaceable>n</replaceable>&gt;</filename> in
          the <filename>/dev/mapper </filename>directory.
         </para>
-       </step>
-       <step>
+       </listitem>
+       <listitem>
         <para>
          (Optional) Set the <literal>bindings_file</literal> option in the
          <literal>defaults</literal> section of the
@@ -2301,8 +2301,8 @@ multipaths {
          The default location is
          <filename>/var/lib/multipath/bindings</filename>.
         </para>
-       </step>
-      </substeps>
+       </listitem>
+      </orderedlist>
      </step>
      <step>
       <para>
@@ -2321,6 +2321,16 @@ multipaths {
        Copy the <filename>bindings</filename> file from the node to the
        <filename>bindings_file</filename> path on all of the other nodes in the
        cluster.
+      </para>
+     </step>
+     <step>
+      <para>
+       After you have modified the <filename>/etc/multipath.conf</filename>
+       file, you must run <command>dracut</command> <option>-f</option> to
+       re-create the <filename>initrd</filename> on your system, then restart
+       the node for the changes to take effect. See <xref
+       linkend="sec.multipath.conf_file.apply"/> for details. This applies to
+       all affected nodes.
       </para>
      </step>
     </procedure>
@@ -2346,10 +2356,12 @@ multipaths {
 
   <para>
    This section describes how to specify policies for failover and configure
-   priorities for the paths. Note that changes to
-   <filename>/etc/multipath.conf</filename> are not applied until you update
-   the multipath maps, or until the
-   <systemitem class="daemon">multipathd</systemitem> daemon is restarted.
+   priorities for the paths. Note that after you have modified the
+   <filename>/etc/multipath.conf</filename> file, you must run
+   <command>dracut</command> <option>-f</option> to re-create the
+   <filename>initrd</filename> on your system, then restart the server for the
+   changes to take effect. See <xref linkend="sec.multipath.conf_file.apply"/>
+   for details.
   </para>
 
   <sect2 xml:id="sec.multipath.policies_failover.path">
@@ -3660,126 +3672,6 @@ umount /mnt</screen>
    </para>
   </sect2>
  </sect1>
- <sect1 xml:id="sec.multipath.lvm">
-  <title>Using LVM2 on Multipath Devices</title>
-
-  <para>
-   Ensure that the configuration file for <filename>lvm.conf</filename> points
-   to the multipath-device names instead of fixed path names. This should
-   happen automatically if <filename>boot.multipath</filename> is enabled and
-   loads before <filename>boot.lvm</filename>.
-  </para>
-
-  <sect2 xml:id="sec.multipath.lvm.filter">
-   <title>Adding a Multipath Device Filter in the /etc/lvm/lvm.conf File</title>
-   <para>
-    By default, LVM2 does not recognize multipathed devices. To make LVM2
-    recognize the multipathed devices as possible physical volumes, you must
-    modify <filename>/etc/lvm/lvm.conf</filename> to scan multipathed devices
-    through the multipath I/O layer.
-   </para>
-   <para>
-    Adding a multipath filter prevents LVM from scanning and using the physical
-    paths for raw device nodes that represent individual paths to the SAN
-    (/dev/sd*). Ensure that you specify the filter path so that LVM scans only
-    the device mapper names for the device
-    (<filename>/dev/disk/by-id/dm-uuid-.*-mpath-.*</filename>) after
-    multipathing is configured.
-   </para>
-   <para>
-    To modify<filename> /etc/lvm/lvm.conf</filename> for multipath use:
-   </para>
-   <procedure>
-    <step>
-     <para>
-      Open the <filename>/etc/lvm/lvm.conf</filename> file in a text editor.
-     </para>
-     <para>
-      If <filename>/etc/lvm/lvm.conf</filename> does not exist, you can create
-      one based on your current LVM configuration by entering the following at
-      a terminal console prompt:
-     </para>
-<screen>sudo lvm dumpconfig &gt; /etc/lvm/lvm.conf</screen>
-    </step>
-    <step>
-     <para>
-      Change the <literal>filter</literal> and <literal>types</literal> entries
-      in <filename>/etc/lvm/lvm.conf</filename> as follows:
-     </para>
-<screen>filter = [ "a|/dev/disk/by-id/.*|", "r|.*|" ]
-types = [ "device-mapper", 1 ]</screen>
-     <para>
-      This allows LVM2 to scan only the by-id paths and reject everything else.
-     </para>
-     <para>
-      If you are using user-friendly names, specify the filter path so that
-      only the Device Mapper names are scanned after multipathing is
-      configured. The following filter path accepts only partitions on a
-      multipathed device:
-     </para>
-<screen>filter = [ "a|/dev/disk/by-id/dm-uuid-.*-mpath-.*|", "r|.*|" ]</screen>
-     <para>
-      To accept both raw disks and partitions for Device Mapper names, specify
-      the path as follows, with no hyphen (-) before
-      <filename>mpath</filename>:
-     </para>
-<screen>filter = [ "a|/dev/disk/by-id/dm-uuid-.*mpath-.*|", "r|.*|" ]</screen>
-    </step>
-    <step>
-     <para>
-      If you are also using LVM2 on non-multipathed devices, make the necessary
-      adjustments in the <literal>filter</literal> and <literal>types</literal>
-      entries to suit your setup. Otherwise, the other LVM devices are not
-      visible with a <command>pvscan</command> after you modify the
-      <filename>lvm.conf</filename> file for multipathing.
-     </para>
-     <para>
-      You want only those devices that are configured with LVM to be included
-      in the LVM cache, so ensure that you are specific about which other
-      non-multipathed devices are included by the filter.
-     </para>
-     <para>
-      For example, if your local disk is <filename>/dev/sda</filename> and all
-      SAN devices are <filename>/dev/sdb</filename> and above, specify the
-      local and multipathing paths in the filter as follows:
-     </para>
-<screen>filter = [ "a|/dev/sda.*|", "a|/dev/disk/by-id/.*|", "r|.*|" ]
-types = [ "device-mapper", 253 ]</screen>
-    </step>
-    <step>
-     <para>
-      Save the file.
-     </para>
-    </step>
-    <step>
-     <para>
-      Add dm-multipath to <filename>/etc/dracut.conf.d/01-dist.conf</filename>
-      by adding the following line:
-     </para>
-<screen>force_drivers+="dm-multipath"</screen>
-    </step>
-    <step>
-     <para>
-      Make a new <filename>initrd</filename> to ensure that the Device Mapper
-      Multipath services are loaded with the changed settings. Running
-      <command>dracut</command> is needed only if the root (/) device or any
-      parts of it (such as <filename>/var</filename>,
-      <filename>/etc</filename>, <filename>/log</filename>) are on the SAN and
-      multipath is needed to boot.
-     </para>
-     <para>
-      Enter the following at a terminal console prompt:
-     </para>
-<screen>dracut -f --add-drivers multipath</screen>
-    </step>
-    <step>
-     <para>
-      Reboot the server to apply the changes.
-     </para>
-    </step>
-   </procedure>
-  </sect2>
- </sect1>
  <sect1 xml:id="sec.multipath.raid">
   <title>Configuring Multipath I/O for an Existing Software RAID</title>
 
@@ -3920,20 +3812,15 @@ sudo multipath -v0</screen>
    </step>
    <step>
     <para>
-     Make a new <filename>initrd</filename> to ensure that the Device Mapper
-     Multipath services are loaded before the RAID services on reboot. Running
-     <command>dracut</command> is needed only if the root (/) device or any
-     parts of it (such as <filename>/var</filename>, <filename>/etc</filename>,
-     <filename>/log</filename>) are on the SAN and multipath is needed to boot.
+     In case the root (<filename>/</filename>) device or any
+     parts of it (such as <filename>/var</filename>, <filename>/etc</filename>, <filename>/log</filename>) are on the SAN and
+     multipath is needed to boot, rebuild the <systemitem>initrd</systemitem>:
     </para>
-    <para>
-     Enter
-    </para>
-<screen>dracut -f --add-drivers multipath</screen>
+    <screen>dracut -f --add-multipath</screen>
    </step>
    <step>
     <para>
-     Reboot the server to apply these post-install configuration settings.
+     Reboot the server to apply the changes.
     </para>
    </step>
    <step>
@@ -3966,6 +3853,19 @@ sudo multipath -v0</screen>
     <xref linkend="sec.multipath.mpiotools.mdadm"/> for details.
    </para>
   </note>
+ </sect1>
+ <sect1 xml:id="sec.multipath.lvm">
+  <title>Using LVM2 on Multipath Devices</title>
+  <para>By default LVM is configured to ignore components of multipath
+   devices. This is most likely desired behavior, but it can be changed
+   in the <filename>/etc/lvm/lvm.conf</filename>. When 
+   multipath_component_detection is set to 0, LVM is scanning multipath
+   component devices. The default entry in the lvm.conf is:
+  </para>
+<screen>    # By default, LVM2 will ignore devices used as component paths
+    # of device-mapper multipath devices.
+    # 1 enables; 0 disables.
+    multipath_component_detection = 1</screen>
  </sect1>
  <sect1 xml:id="sec.multipath.best_practice">
   <title>Best Practice</title>
@@ -4629,17 +4529,41 @@ Welcome to emergency shell
 Give root password for maintenance
 (or press Control-D to continue):</screen>
    <para>
-    This issue is a logical consequence of the multipath integration in systemd
-    and occurs if the root file system is not on multipath but multipath is
-    enabled. In such a setup, multipath tries to set its paths for all devices
-    that are not blacklisted. Since the device with the root file system is
-    already mounted, it is inaccessible for multipath and causes it to fail.
+    This issue occurs in the following situations:
    </para>
-   <para>
-    Fix this issue by configuring multipath correctly by blacklisting the root
-    device in <filename>/etc/multipath.conf</filename>:
-   </para>
-   <procedure>
+   <itemizedlist>
+     <listitem>
+      <para>
+       A non-multipath root file system is not blacklisted when multipath is
+       enabled. See <xref linkend="pro.multipath.trouble.root.blacklist"
+       xrefstyle="HeadingOnPage"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       On a system with a multipath root file system multipath has been
+       enabled/disabled without rebuilding the <filename>initrd</filename>. See
+       <xref linkend="pro.multipath.trouble.root.initrd"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       Network-storage drivers are missing in the <filename>initrd</filename>
+       on a system with network-attached storage and multipath enabled
+      </para>
+     </listitem>
+   </itemizedlist>
+
+   <procedure xml:id="pro.multipath.trouble.root.blacklist">
+    <title>Emergency Shell: Blacklist File Systems </title>
+    <para>
+     This fix is required if the root file system is not on multipath but
+     multipath is enabled. In such a setup, multipath tries to set its paths
+     for all devices that are not blacklisted. Since the device with the root
+     file system is already mounted, it is inaccessible for multipath and
+     causes it to fail. Fix this issue by configuring multipath correctly by
+     blacklisting the root device in <filename>/etc/multipath.conf</filename>:
+    </para>
     <step>
      <para>
       Run <command>multipath -v2</command> in the emergency shell and identify
@@ -4673,68 +4597,74 @@ Dec 18 10:10:03 | 3600508b1001030343841423043300400: ignoring map</screen>
      </para>
     </step>
    </procedure>
-  </sect2>
 
-  <sect2 xml:id="sec.multipath.lvm.boot">
-   <title>Enabling boot.multipath</title>
-   <para>
-    Multipath must be loaded before LVM to ensure that multipath maps are built
-    correctly. Loading multipath after LVM can result in incomplete device maps
-    for a multipath device because LVM locks the device, and MPIO cannot create
-    the maps properly.
-   </para>
-   <para>
-    If the system device is a local device that does not use MPIO and LVM, you
-    can disable both <filename>boot.multipath</filename> and
-    <filename>boot.lvm</filename>. After the server starts, you can manually
-    start multipath before you start LVM, then run a <command>pvscan</command>
-    command to recognize the LVM objects.
-   </para>
-  </sect2>
+   <procedure xml:id="pro.multipath.trouble.root.initrd">
+    <title>Emergency Shell: Rebuild the <filename>initrd</filename></title>
+    <para>
+     This fix is required if the Multipath status (enabled or disabled) differs
+     between <filename>initrd</filename> and system. To fix this, rebuild the
+     <filename>initrd</filename>:
+    </para>
+    <step>
+     <para>
+      In case Multipath has been <emphasis>enabled</emphasis> in the system,
+      rebuild the initrd with Multipath support with this command:
+     </para>
+     <screen>dracut --force --add multipath</screen>
+     <para>
+      In case Multipath has been <emphasis>disabled</emphasis> in the system,
+      rebuild the initrd with Multipath support with this command:
+     </para>
+     <screen>dracut --force -o multipath</screen>
+    </step>
+    <step>
+     <para>
+      Exit the emergency shell and reboot the server by pressing <keycombo>
+      <keycap function="control"/> <keycap>D</keycap> </keycombo>.
+     </para>
+    </step>
+   </procedure>
 
-  <sect2 xml:id="sec.multipath.trouble.lvm">
-   <title>Troubleshooting MPIO Mapping for LVM Devices</title>
-   <para>
-    Timing is important for starting the LVM process. If LVM starts before MPIO
-    maps are done, LVM might use a fixed path for the device instead of its
-    multipath. The device works, so you might not be aware that the device’s
-    MPIO map is incomplete until that fixed path fails. You can help prevent
-    the problem by enabling <filename>boot.multipath</filename> and following
-    the instructions in
-    <xref linkend="sec.multipath.lvm.boot" xrefstyle="HeadingOnPage"/>.
-   </para>
-   <para>
-    To troubleshoot a mapping problem, you can use <command>dmsetup</command>
-    to check that the expected number of paths are present for each multipath
-    device. As the &rootuser; user, enter the following at a command prompt:
-   </para>
-<screen>sudo dmsetup ls --tree</screen>
-   <para>
-    In the following sample response, the first device has four paths. The
-    second device is a local device with a single path. The third device has
-    two paths. The distinction between active and passive paths is not reported
-    through this tool.
-   </para>
-<screen>&prompt.user;sudo dmsetup ls --tree
-  vg910-lv00 (253:23)
-    └─ 360a980006465576657346d4b6c593362 (253:10)
-      |- (65:96)
-      |- (8:128)
-      |- (8:240)
-      └─ (8:16)
-  vg00-lv08 (253:9)
-    └─ (8:3)
-  system_vg-data_lv (253:1)
-    └─36006016088d014007e0d0d2213ecdf11 (253:0)
-      ├─ (8:32)
-      └─ (8:48)</screen>
-   <para>
-    An incorrect mapping typically returns too few paths and does not have a
-    major number of 253. For example, the following shows what an incorrect
-    mapping looks like for the third device:
-   </para>
-<screen>  system_vg-data_lv (8:31)
-     └─ (8:32)</screen>
+   <procedure xml:id="pro.multipath.trouble.root.drivers">
+    <title>Emergency Shell: Rebuild the <filename>initrd</filename></title>
+    <para>
+     This fix is required if the initrd does not contain drivers to access
+     network attached storage. This may, for example, be the case when the
+     system was installed without multipath or when the respective hardware is
+     added or exchanged.
+    </para>
+    <step>
+     <para>
+      Add the required driver(s) to the variable <envar>force_drivers</envar>
+      in the file <filename>/etc/dracut.conf.d/01-dist.conf</filename>. For
+      example, if your system contains a RAID controller accessed by the
+      <filename>hpsa</filename> driver and multipathed devices connected to a
+      QLogic controller accessed by the driver qla23xx, this entry would look
+      like:
+     </para>
+     <screen>force_drivers+="hpsa qla23xx"</screen>
+    </step>
+    <step>
+     <para>
+      Rebuild the <systemitem>initrd</systemitem> using the following command:
+     </para>
+     <screen>dracut -f --add-multipath</screen>
+    </step>
+    <step>
+     <para>
+      To prevent the system from booting into emergency mode in case attaching
+      the network storage fails, it is recommended to add the mount option
+      <literal>_netdev</literal> to the respective entries in
+      <filename>/etc/fstab</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Exit the emergency shell and reboot the server by pressing <keycombo>
+      <keycap function="control"/> <keycap>D</keycap> </keycombo>.
+     </para>
+    </step>
+   </procedure>
   </sect2>
 
   <sect2 xml:id="sec.multipath.trouble.prio_fail">
