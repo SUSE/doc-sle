@@ -1323,11 +1323,10 @@ calls      retrans    authrefrsh
       The CPU model and topology can be specified individually for each
       &vmguest;. Configuration options range from selecting specific CPU models
       to excluding certain CPU features. Predefined CPU models are listed in
-      the <filename>/usr/share/libvirt/cpu_map.xml</filename>. Multiple sockets
-      with a single core and a single thread generally provide the best
-      performance. The list of available CPUs and topologies depends on the
-      host system and can be displayed by running <command>virsh
-      capabilities</command>.
+      the <filename>/usr/share/libvirt/cpu_map.xml</filename>. A CPU model and
+      topology that is similar to the host generally provides the best
+      performance. The host system CPU model and topology can be displayed by
+      running <command>virsh capabilities</command>.
      </para>
      <para>
       Note that changing the default virtual CPU configuration will require a
@@ -1343,30 +1342,52 @@ calls      retrans    authrefrsh
      <screen>&lt;cpu mode='custom' match='exact'&gt;
   &lt;model&gt;Broadwell&lt;/model&gt;
   &lt;feature name='invtsc'/&gt;
-&lt;/cpu&gt;</screen>
+  &lt;/cpu&gt;</screen>
+     <para>
+      For a virtual CPU that most closely resembles the host physical CPU,
+      <literal>&lt;cpu mode='host-passthrough'&gt;</literal> can be used.
+      Note that a <literal>host-passthrough</literal> CPU model may not
+      exactly resemble the host physical CPU, since by default KVM will
+      mask any non-migratable features. For example invtsc is not included
+      in the virtual CPU feature set. Changing the default KVM behavior is
+      not directly supported through libvirt, although it does allow arbitrary
+      passthough of KVM command line arguments. Continuing with the invtsc
+      example, passthough of the host CPU, including invtsc would be
+      achieved by using the following command line passthough in &vmguest;
+      configuration file
+     </para>
+     <screen>&lt;domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'&gt;
+     &lt;qemu:commandline&gt;
+     &lt;qemu:arg value='-cpu'/&gt;
+     &lt;qemu:arg value='host,migratable=off,+invtsc'/&gt;
+     &lt;/qemu:commandline&gt;
+     ...
+     &lt;/domain&gt;
+     </screen>
      <note>
       <title>The <literal>host-passthrough</literal> Mode</title>
       <para>
-       With <literal>&lt;cpu mode='host-passthrough'&gt;</literal> the virtual
-       CPU will be identical to the host CPU. Using this method makes it
-       impossible to reproduced the &vmguest; on different hardware.
+       Since <literal>host-passthrough</literal> exposes the physical
+       CPU details to the virtual CPU, migration to dissimilar hardware
+       is not possible. See
+       <xref linkend="sec.vt.best.perf.cpu.guests.vcpumigration"/> for more
       </para>
      </note>
     </sect4>
     <sect4 xml:id="sec.vt.best.perf.cpu.guests.vcpupin">
      <title>Virtual CPU Pinning</title>
      <para>
-      Virtual CPU pinning is used to constrain vCPU threads to a set of
-      physical CPUs. The <literal>vcpupin</literal> element specifies to which
-      physical host CPU a virtual CPU will be pinned to. If this element is not
-      set and the attribute <literal>cpuset</literal> of the element
-      <literal>vcpu</literal> is not specified, the virtual CPU is pinned to
-      all the physical CPUs by default.
+      Virtual CPU pinning is used to constrain virtual CPU threads to a set of
+      physical CPUs. The <literal>vcpupin</literal> element specifies the
+      physical host CPUs that a virtual CPU can use. If this element is not
+      set and the attribute <literal>cpuset</literal> of the
+      <literal>vcpu</literal> element is not specified, the virtual CPU is
+      free to use any of the physical CPUs.
      </para>
      <para>
       CPU intensive workloads can benefit from virtual CPU pinning by
-      increasing the physical CPU cache hit ratio. To pin a vCPU to a specific
-      CPU run the following commands:
+      increasing the physical CPU cache hit ratio. To pin a virtual CPU to a
+      specific physical CPU run the following commands:
      </para>
      <screen>&prompt.user;virsh vcpupin <replaceable>DOMAIN_ID</replaceable> --vcpu <replaceable>vCPU_NUMBER</replaceable>
 VCPU: CPU Affinity
@@ -1391,16 +1412,49 @@ VCPU: CPU Affinity
      <warning>
       <title>Virtual CPU pinning and Live Migration</title>
       <para>
-       Even though <literal>vcpupin</literal> can improve performance, keep in
-       mind that live migration of a pinned &vmguest; can be problematic. If,
-       for example, the requested physical resources are not be available on
-       the destination host, or the source and destination hosts have different
-       NUMA topologies, the migration will fail. For more recommendations about
-       Live Migration see <link
+       Even though <literal>vcpupin</literal> can improve performance, it can
+       complicate live migration. See
+       <xref linkend="sec.vt.best.perf.cpu.guests.vcpumigration"/> for more
+       information on virtual CPU migration considerations.
+      </para>
+     </warning>
+    </sect4>
+    <sect4 xml:id="sec.vt.best.perf.cpu.guests.vcpumigration">
+     <title>Virtual CPU Migration Considerations</title>
+     <para>
+      Selecting a virtual CPU model that contains all the latest features
+      may improve performance of a &vmguest; workload, but often at
+      the expense of migratability. Unless all hosts in the cluster contain
+      the latest CPU features, migration can fail when a destination host
+      lacks the new features. If migratability of a virtual CPU is preferred
+      over the latest CPU features, a normalized CPU model and feature set
+      should be used. The <command>virsh cpu-baseline</command> command can
+      help define a normalized virtual CPU that can be migrated across all
+      hosts. The following command, when run on each host in the migration
+      cluster, illustrates collection of all hosts CPU capabilities in
+      <literal>all-hosts-cpu-caps.xml</literal>
+     </para>
+     <screen>&prompt.user;&sudo; virsh capabilities | virsh cpu-baseline /dev/stdin >> all-hosts-cpu-caps.xml</screen>
+     <para>
+      With the CPU capabilities from each host collected in
+      all-hosts-cpu-caps.xml, use <command>virsh cpu-baseline</command> to
+      create a virtual CPU definition that will be compatible across all hosts.
+     </para>
+     <screen>&prompt.user;&sudo; virsh cpu-baseline all-hosts-cpu-caps.xml</screen>
+     <para>
+      The resulting virtual CPU definition can be used as the
+      <literal>cpu</literal> element in &vmguest; configuration file.
+     </para>
+     <para>
+      At a logical level, virtual CPU pinning is a form of hardware passthrough.
+      Pinning couples physical resources to virtual resources, and can also be
+      problematic for migration. For example, if the requested physical resources
+      are not be available on the destination host, or the source and destination
+      hosts have different NUMA topologies, the migration will fail. For more
+      recommendations about Live Migration see <link
        xlink:href="https://www.suse.com/documentation/sles-12/book_virt/data/sec_libvirt_admin_migrate.html#libvirt_admin_live_migration_requirements">Virtualization
        Live Migration Requirements</link>.
       </para>
-     </warning>
     </sect4>
    </sect3>
   </sect2>
