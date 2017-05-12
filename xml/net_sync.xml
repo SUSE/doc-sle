@@ -143,10 +143,8 @@
     <varlistentry>
      <term><option>-a</option></term>
      <listitem>
-      <para>
-       Archive mode; copy files recursively and perserves timestamps, user
-       and group ownership, file permissions, symbolic links.
-      </para>
+      <para> Archive mode; copy files recursively and preserves timestamps,
+       user/group ownership, file permissions, and symbolic links. </para>
      </listitem>
     </varlistentry>
     <varlistentry>
@@ -219,52 +217,161 @@
   </sect2>
 
   <sect2 xml:id="sec.net.sync.rsync.server">
-   <title>Configuring and Using a Rsyncd Server</title>
-   <para>
-    Rsync can be operated as a daemon listing on port 873 for incoming
+   <title>Configuring and Using a Rsync Server</title>
+   <para> Rsync can be operated as a daemon (<systemitem class="daemon"
+     >rsyncd</systemitem>) listing on default port 873 for incoming
     connections. This daemon can receive <quote>copying targets</quote>.
    </para>
    <para>
     The following procedure creates a Rsync server on
     <systemitem>&wsI;</systemitem> with a <emphasis>backup</emphasis> target.
-    This target can be read from and written to:
+    This target can be used to store your backups. To create a Rsync server,
+    do the following:
    </para>
    <procedure>
     <title>Setting Up the Rsync Server</title>
     <step>
      <para>
-      Create a directory where you want to store all your backup files.
+      Create a directory to store all your backup files.
       In this example, we use <filename>/var/backup</filename>:
      </para>
      <screen>&prompt.root;<command>mkdir</command> /var/backup</screen>
     </step>
     <step>
-     <para>Decide of the ownership, we use in this case the backup for a single
-     user, so the directory should be owned by user &exampleuser; in group
-     <systemitem class="groupname">users</systemitem>:</para>
+     <para>Decide of the ownership. In this case, the directory is owned by
+      user &exampleuser; in group <systemitem class="groupname"
+       >users</systemitem>:</para>
      <screen>&prompt.root;<command>chown</command> &exampleuser_plain;.users /var/backup</screen>
     </step>
     <step>
-     <para>
-      On &wsI;, configure the rsyncd daemon in the configuration file
-      <filename>/etc/rsyncd.conf</filename>:
-     </para>
-     <screen>
-use chroot = true
-transfer logging = true
-log format = %h %o %f %l %b
-log file = /var/log/rsyncd.log
+     <para>On &wsI;, configure the rsyncd daemon.</para>
+     <para>We will separate the configuration file into a main file and some
+       <quote>modules</quote> which holds your backup target. This makes it
+      easier to add additional targets later. Global values can be stored in
+       <filename>/etc/rsyncd.d/*.inc</filename> files, whereas your modules are
+      placed in <filename>/etc/rsyncd.d/*.conf</filename> files: </para>
+     <substeps>
+      <step>
+       <para>Create a directory <filename>/etc/rsyncd.d/</filename>:</para>
+       <screen>&prompt.root;<command>mkdir</command> /etc/rsyncd.d/</screen>
+      </step>
+      <step>
+       <para>
+        In the main configuration file
+        <filename>/etc/rsyncd.conf</filename> add the following lines:
+       </para>
+       <screen># rsyncd.conf main configuration file
+log file = /var/log/rsync.log
+pid file = /var/lock/rsync.lock
 
-[backup]
-   uid = &exampleuser_plain;
-   gid = users
-   path = /var/backup
+&amp;merge /etc/rsyncd.d <co xml:id="co.rsync.conf.merge"/>
+&amp;include /etc/rsyncd.d <co xml:id="co.rsync.conf.include"/></screen>
+       <calloutlist>
+        <callout arearefs="co.rsync.conf.merge">
+         <para> Merge global values from
+           <filename>/etc/rsyncd.d/*.inc</filename> files into the main
+          configuration file. </para>
+        </callout>
+        <callout arearefs="co.rsync.conf.include">
+         <para> Loads any modules (or targets) from
+           <filename>/etc/rsyncd.d/*.conf</filename> files. These files should
+          not contain any references to global values. </para>
+        </callout>
+       </calloutlist>
+      </step>
+      <step>
+       <para> Create your module (your backup target) in the file
+         <filename>/etc/rsyncd.d/backup.conf</filename> with the following
+        lines: </para>
+       <screen># backup.conf: backup module
+[backup] <co xml:id="co.rsync.conf.target"/>
+   uid = &exampleuser_plain; <co xml:id="co.rsync.conf.uid-gid"/>
+   gid = users <xref linkend="co.rsync.conf.uid-gid"/>
+   path = /var/backup <co xml:id="co.rsync.conf.path"/>
+   auth users = &exampleuser_plain;  <co xml:id="co.rsync.conf.authusers"/>
+   secrets file = /etc/rsyncd.secrets <co xml:id="co.rsync.conf.secretfiles"/>
    comment = Our backup target</screen>
+       <calloutlist>
+        <!--<callout arearefs="co.rsync.conf.usechroot">
+         <para>
+          Set protection against security holes. Before starting the transfer,
+          the Rsync daemon will change to this path (<quote>change root</quote>).
+         </para>
+        </callout>-->
+        <!--<callout arearefs="co.rsync.conf.logging">
+         <para>
+          Enables logging and store it in <filename>/var/log/rsyncd.log</filename>
+          with the format of <varname>log&nbsp;format</varname>.
+         </para>
+        </callout>-->
+        <callout arearefs="co.rsync.conf.target">
+         <para>
+          The <emphasis>backup</emphasis> target. You can invent any name you
+          like. However, it is a good idea to name a target according to its
+          purpose and store it in the <filename>*.conf</filename> file
+          respectively.
+         </para>
+        </callout>
+        <callout arearefs="co.rsync.conf.uid-gid">
+         <para>
+          Specifies the user name or group name that is used when the file
+          transfer takes place.
+         </para>
+        </callout>
+        <callout arearefs="co.rsync.conf.path">
+         <para>
+          Defines the path to store your backups.
+         </para>
+        </callout>
+        <callout arearefs="co.rsync.conf.authusers">
+         <para>
+          Specifies a comma separated list of allowed users. In its simplest
+          form, it lists the user names that are allowed to connect to this
+          module.
+         </para>
+        </callout>
+        <callout arearefs="co.rsync.conf.secretfiles">
+         <para>
+          Specifies the path of a file that contains lines with user names
+          and plain passwords.
+         </para>
+        </callout>
+       </calloutlist>
+      </step>
+      <step>
+       <para>
+        Create the file <filename>/etc/rsyncd.secrets</filename> with the
+        following content and replace <replaceable>PASSPHRASE</replaceable>:
+       </para>
+       <screen># user:passwd
+&exampleuser_plain;:<replaceable>PASSPHRASE</replaceable></screen>
+      </step>
+      <step>
+       <para>
+        Make sure the file is only readable by &rootuser;:
+       </para>
+       <screen>&prompt.root;<command>chmod</command> 0600 /etc/rsyncd.secrets</screen>
+      </step>
+     </substeps>
+
+     <!--<screen># rsyncd.conf configuration file
+use chroot = true <co xml:id="co.rsync.conf.usechroot"/>
+transfer logging = true <co xml:id="co.rsync.conf.logging"/>
+log format = %h %o %f %l %b <xref linkend="co.rsync.conf.logging"/>
+log file = /var/log/rsyncd.log <xref linkend="co.rsync.conf.logging"/>
+
+[backup] <co xml:id="co.rsync.conf.target"/>
+   uid = &exampleuser_plain; <co xml:id="co.rsync.conf.uid-gid"/>
+   gid = users <xref linkend="co.rsync.conf.uid-gid"/>
+   path = /var/backup <co xml:id="co.rsync.conf.path"/>
+   auth users = &exampleuser_plain;  <co xml:id="co.rsync.conf.authusers"/>
+   secret files = /etc/rsyncd.secrets <co xml:id="co.rsync.conf.secretfiles"/>
+   comment = Our backup target</screen>-->
     </step>
-    <step>
+    <!--<step>
      <para>Create the directory <filename>/var/backup</filename> belonging
       to &rootuser;.</para>
-    </step>
+    </step>-->
     <step>
      <para>
       Start and enable the rsyncd daemon with:
@@ -292,12 +399,12 @@ log file = /var/log/rsyncd.log
      <para>If not, check your configuration file, firewall and network settings.</para>
     </step>
    </procedure>
-   
    <para>
-    The above steps created a Rsync server which can now be used to store
+    The above steps create a Rsync server which can now be used to store
     backups.
     The example also creates a log file listing all connections. This file is
-    stored in <filename>/var/log/rsyncd.log</filename>.
+    stored in <filename>/var/log/rsyncd.log</filename>. This is useful if you
+    want to debug your transfers.
    </para>
    <para>
     To list all the content of your backup target, use the following command:
@@ -305,9 +412,9 @@ log file = /var/log/rsyncd.log
 <screen>rsync -avz &wsI;::backup</screen>
    <para>
     This command lists all files present in the directory
-    <filename>/var/backup</filename> of the server. This request is also logged in
+    <filename>/var/backup</filename> on the server. This request is also logged in
     the log file <filename>/var/log/rsyncd.log</filename>. To start an actual
-    transfer, provide a target directory. Use <literal>.</literal> for the
+    transfer, provide a source directory. Use <literal>.</literal> for the
     current directory. For example, the following command copies the current
     directory to your Rsync backup server:
    </para>
