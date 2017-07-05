@@ -1,0 +1,524 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="uefi.xml" version="5.0" xml:id="cha.uefi">
+
+ <title>UEFI (Unified Extensible Firmware Interface)</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes (sim)</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  UEFI (Unified Extensible Firmware Interface) é a interface entre o firmware que vem com o hardware do sistema, todos os componentes do hardware do sistema e o sistema operacional.
+ </para>
+ <para>
+  A UEFI está se tornando cada vez mais disponível em sistemas PC e substituindo o PC-BIOS tradicional. Por exemplo, a UEFI suporta apropriadamente sistemas de 64 bits e oferece inicialização segura (<quote>Boot Seguro</quote>, firmware versão 2.3.1c ou superior necessário), que é um dos recursos mais importantes. Por fim, com a UEFI, um firmware padrão estará disponível em todas as plataformas x86.
+ </para>
+ <para>
+  A UEFI oferece também as seguintes vantagens:
+ </para>
+ <itemizedlist mark="bullet" spacing="normal">
+  <listitem>
+   <para>
+    Inicialização de discos grandes (mais de 2 TiB) com GPT (Tabela de Partição GUID).
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    Drivers e arquitetura independente da CPU.
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    Ambiente pré-OS flexível com recursos de rede.
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    CSM (Módulo de Suporte de Compatibilidade) para suportar inicialização de sistemas operacionais legados por emulação do tipo PC-BIOS.
+   </para>
+  </listitem>
+ </itemizedlist>
+ <para>
+  Para obter mais informações, consulte <link xlink:href="http://en.wikipedia.org/wiki/Unified_Extensible_Firmware_Interface"/>. As seguintes seções não são uma visão geral da UEFI, são apenas dicas sobre como alguns recursos são implementados no SUSE Linux Enterprise.
+ </para>
+ <sect1 xml:id="sec.uefi.secboot">
+  <title>Boot seguro</title>
+
+
+
+  <para>
+   Para a UEFI, proteger o processo de boot significa estabelecer uma cadeia de confiança. A <quote>plataforma</quote> é a raiz da cadeia de confiança; no contexto do SUSE Linux Enterprise, a placa-mãe e o firmware on-board podem ser considerados a <quote>plataforma</quote>. Explicando de uma maneira um pouco diferente, imagine o fornecedor do hardware e a cadeia de confiança que parte desse fornecedor para os fabricantes dos componentes, os fornecedores de OS, etc.
+  </para>
+
+  <para>
+   A confiança é expressada através da criptografia de chave pública. O fornecedor do hardware coloca a chamada PK (Chave de Plataforma) no firmware, representando a base da confiança. A relação de confiança com os fornecedores do sistema operacional e os outros é documentada pela assinatura das chaves usando a Chave de Plataforma.
+  </para>
+
+  <para>
+   Por fim, a segurança é estabelecida exigindo que nenhum código seja executado pelo firmware, exceto se tiver sido assinado por uma das chaves <quote>confiáveis</quote>, seja um carregador de boot de OS, algum driver localizado na memória flash de uma placa PCI Express ou no disco, seja uma atualização do próprio firmware.
+  </para>
+
+  <para>
+   Basicamente, para usar o Boot Seguro, o carregador de OS deve ser assinado com uma chave de confiança do firmware, e você precisa que o carregador de OS verifique se o kernel que ele carrega é confiável.
+  </para>
+
+  <para>
+
+   É possível adicionar Chaves de Troca de Chave (KEK) ao banco de dados de chaves UEFI. Dessa forma, é possível usar outros certificados, desde que sejam assinados com a parte privada da PK.
+
+  </para>
+
+  <sect2 xml:id="sec.uefi.secboot.sle">
+   <title>Implementação no <phrase role="productname"> <phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase></title>
+   <para>
+    A Chave de Troca de Chave (KEK) da Microsoft é instalada por padrão.
+   </para>
+   <note>
+    <title>GPT (Tabela de Partição GUID) obrigatória</title>
+    <para>
+     Por padrão, o recurso Boot Seguro está habilitado nas instalações UEFI/x86_64. Você encontra a opção <guimenu>Habilitar Suporte a Boot Seguro</guimenu> na guia <guimenu>Opções de Código de Boot</guimenu> da caixa de diálogo <guimenu>Configurações do Carregador de Boot</guimenu>. Ela suporta a inicialização quando o boot seguro está ativado no firmware, tornando possível inicializar mesmo quando está desativada.
+    </para>
+    <figure>
+     <title>Suporte a boot seguro</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_bootloader_boot_code_efi.png" width="70%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_bootloader_boot_code_efi.png" width="70%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+    <para>
+     O recurso Boot Seguro requer que a GPT (Tabela de Partição GUID) substitua o particionamento antigo por um MBR (Master Boot Record). Se o YaST detectar o modo EFI durante a instalação, ele tentará criar uma partição GPT. A UEFI espera encontrar os programas EFI na ESP (Partição de Sistema EFI) formatada por FAT.
+    </para>
+   </note>
+
+   <para>
+    O suporte a Boot Seguro UEFI requer basicamente um carregador de boot com assinatura digital que o firmware reconheça como uma chave confiável. Para ser útil aos clientes do SUSE Linux Enterprise, a chave precisa ser, antes de tudo, de confiança do firmware, sem exigir intervenção manual.
+   </para>
+   <para>
+    Há duas formas de conseguir isso. Uma é trabalhar com os fornecedores do hardware para que eles endossem uma chave do SUSE, que o SUSE usará para assinar o carregador de boot. A outra é utilizar o programa de Certificação de Logotipo do Windows da Microsoft para certificar o carregador de boot e para a Microsoft reconhecer a chave de assinatura do SUSE (isto é, assiná-lo com sua KEK). Até agora, o SUSE assinava o carregador pelo Serviço de Assinatura UEFI (que é a Microsoft, neste caso).
+   </para>
+
+   <figure xml:id="fig.uefi.secure.boot.mok2">
+    <title>UEFI: processo de boot seguro</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="uefi-secure-boot-mok2.png" width="50%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="uefi-secure-boot-mok2.png" width="80%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    Na camada de implementação, o SUSE usa o carregador <systemitem>shim</systemitem>, que é instalado por padrão. Trata-se de uma solução inteligente que evita problemas legais e simplifica consideravelmente as etapas de certificação e assinatura. A tarefa do carregador <systemitem>shim</systemitem> é carregar um carregador de boot, como GRUB 2, e verificá-lo; por sua vez, o carregador de boot carrega os kernels assinados apenas por uma chave do SUSE. <phrase os="sles;sled">O SUSE oferece esta funcionalidade desde o SLE11 SP3 em instalações novas que tenham o Boot Seguro UEFI habilitado.</phrase>
+   </para>
+   <para>
+    Há dois tipos de usuários confiáveis:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      Primeiro, os que detêm as chaves. A Chave de Plataforma (PK) permite quase tudo. A Chave de Troca de Chave (KEK) permite tudo o que pode uma PK, exceto modificar a PK.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Segundo, qualquer pessoa com acesso físico à máquina. Um usuário com acesso físico pode reinicializar a máquina e configurar a UEFI.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    A UEFI oferece dois tipos de variáveis para atender às necessidades desses usuários:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      A primeira são as chamadas <quote>Variáveis Autenticadas</quote>, que podem ser atualizadas tanto do processo de boot (o chamado Ambiente de Serviços de Boot) quanto do OS em execução, mas apenas quando o novo valor da variável é assinado com a mesma chave que assinou o valor antigo da variável. E elas só podem ser anexadas ou modificadas para um valor com número de série maior.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      A segunda são as chamadas <quote>Variáveis Apenas de Serviços de Boot</quote>. Essas variáveis estão acessíveis a qualquer código executado durante o processo de boot. Após o término do processo de boot e antes de iniciar o OS, o carregador de boot deve chamar <literal>ExitBootServices</literal>. Depois disso, essas variáveis não estarão mais acessíveis, e o OS não poderá usá-las.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    As várias listas de chaves UEFI são do primeiro tipo, já que permitem atualização online, adição e lista negra de chaves, drivers e impressões digitais do firmware. É o segundo tipo de variável, a <quote>Variável Apenas de Serviços de Boot</quote>, que ajuda a implementar o Boot Seguro de forma segura, pronta para código-fonte aberto e também compatível com GPLv3.
+   </para>
+   <para>
+    O SUSE começa com o <systemitem>shim</systemitem>, um carregador de boot EFI pequeno e simples, que foi originalmente desenvolvido pela Fedora. Ele é assinado por um certificado assinado pela KEK do SUSE e um certificado emitido pela Microsoft, com base nas KEKs disponíveis no banco de dados de chaves UEFI do sistema.
+   </para>
+   <para>
+    Dessa forma, o <systemitem>shim</systemitem> pode ser carregado e executado.
+   </para>
+   <para>
+    O <systemitem>shim</systemitem> continua para verificar se o carregador de boot que deseja carregar é confiável. Em uma situação padrão, o <systemitem>shim</systemitem> usa um certificado do SUSE independente incorporado. Além disso, o <systemitem>shim</systemitem> permite <quote>inscrever</quote> outras chaves, anulando a chave padrão do SUSE. A seguir, nós as chamamos de <quote>Chaves do Proprietário da Máquina</quote> ou MOKs, para abreviar.
+   </para>
+   <para>
+    Em seguida, o carregador de boot verifica e inicializa o kernel, e o kernel faz o mesmo com os módulos.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.mok">
+   <title>MOK (Chave do Proprietário da Máquina)</title>
+
+   <para>
+    Se o usuário (<quote>proprietário da máquina</quote>) deseja substituir algum componente do processo de boot, as Chaves do Proprietário da Máquina (MOKs) deverão ser usadas. A ferramenta <systemitem>mokutils</systemitem> ajuda com a assinatura dos componentes e o gerenciamento das MOKs.
+   </para>
+   <para>
+    O processo de inscrição começa com a reinicialização da máquina e a interrupção do processo de boot (por exemplo, pressionando uma tecla) quando o <systemitem>shim</systemitem> é carregado. O <systemitem>shim</systemitem> entra no modo de inscrição, permitindo ao usuário substituir a chave padrão do SUSE pelas chaves de um arquivo na partição de boot. Se o usuário quiser, o <systemitem>shim</systemitem> calculará um hash desse arquivo e colocará o resultado em uma variável <quote>Apenas de Serviços de Boot</quote>. Dessa forma, o <systemitem>shim</systemitem> pode detectar qualquer mudança no arquivo feita fora dos Serviços de Boot e evitar assim uma violação da lista de MOKs aprovadas pelo usuário.
+   </para>
+   <para>
+    Tudo isso acontece durante a inicialização, apenas o código verificado é executado agora. Portanto, apenas um usuário presente no console pode utilizar o conjunto de chaves do proprietário da máquina. Não é possível que seja um malware ou um invasor com acesso remoto ao OS, pois invasores ou malware só podem mudar o arquivo, mas não o hash armazenado na variável <quote>Apenas de Serviços de Boot</quote>.
+   </para>
+   <para>
+    O carregador de boot, após ser carregado e verificado pelo <systemitem>shim</systemitem>, chamará de novo o <systemitem>shim</systemitem> para verificar o kernel, evitando a duplicação do código de verificação. O <systemitem>shim</systemitem> usa a mesma lista de MOKs para isso e avisa o carregador de boot se ele pode carregar o kernel.
+   </para>
+   <para>
+    Dessa forma, você pode instalar seu próprio kernel ou carregador de boot. Só é necessário instalar um novo conjunto de chaves e autorizá-las estando fisicamente presente durante a primeira reinicialização. Como as MOKs são uma lista, e não apenas uma única MOK, é possível fazer com que o <systemitem>shim</systemitem> confie nas chaves de vários fornecedores, permitindo dual-boot e multi-boot do carregador de boot.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.custom">
+   <title>Inicializando um kernel personalizado</title>
+   <para>
+    As informações a seguir são baseadas no <link xlink:href="http://en.opensuse.org/openSUSE:UEFI#Booting_a_custom_kernel"/>.
+   </para>
+   <para>
+    O Boot Seguro não impede você de usar um kernel autocompilado. Você deve assiná-lo com seu próprio certificado e tornar esse certificado reconhecível para o firmware ou a MOK.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Crie uma chave X.509 personalizada e um certificado usados para assinatura:
+     </para>
+<screen>openssl req -new -x509 -newkey rsa:2048 -keyout key.asc \
+  -out cert.pem -nodes -days 666 -subj "/CN=$USER/"</screen>
+     <para>
+
+      Para obter mais informações sobre como criar certificados, consulte <link xlink:href="http://en.opensuse.org/openSUSE:UEFI_Image_File_Sign_Tools#Create_Your_Own_Certificate"/>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Empacote a chave e o certificado como uma estrutura PKCS#12:
+     </para>
+<screen>openssl pkcs12 -export -inkey key.asc -in cert.pem \
+  -name kernel_cert -out cert.p12</screen>
+    </step>
+    <step>
+     <para>
+      Gere um banco de dados NSS para usar com o comando <command>pesign</command>:
+     </para>
+<screen>certutil -d . -N</screen>
+    </step>
+    <step>
+     <para>
+      Importe a chave e o certificado incluídos no PKCS#12 para o banco de dados NSS:
+     </para>
+<screen>pk12util -d . -i cert.p12</screen>
+    </step>
+    <step>
+     <para>
+      <quote>Proteja</quote> o kernel com a nova assinatura usando o comando <command>pesign</command>:
+     </para>
+<screen>pesign -n . -c kernel_cert -i arch/x86/boot/bzImage \
+  -o vmlinuz.signed -s</screen>
+    </step>
+    <step>
+     <para>
+      Liste as assinaturas na imagem do kernel:
+     </para>
+<screen>pesign -n . -S -i vmlinuz.signed</screen>
+     <para>
+      Neste momento, é possível instalar o kernel em <filename>/boot</filename>, como de costume. Como o kernel agora tem uma assinatura personalizada, o certificado usado para a assinatura deve ser importado para o firmware ou a MOK UEFI.
+     </para>
+    </step>
+    <step>
+     <para>
+      Converta o certificado no formato DER para importá-lo para o firmware ou a MOK:
+     </para>
+<screen>openssl x509 -in cert.pem -outform der -out cert.der</screen>
+    </step>
+    <step>
+     <para>
+      Copie o certificado para o ESP para facilitar o acesso:
+     </para>
+<screen>sudo cp cert.der /boot/efi/</screen>
+    </step>
+    <step>
+     <para>
+      Use <command>mokutil</command> para iniciar a lista de MOKs automaticamente.
+     </para>
+     <stepalternatives>
+      <step>
+       <substeps>
+        <step>
+         <para>
+          Importe o certificado para o MOK:
+         </para>
+<screen>mokutil --root-pw --import cert.der</screen>
+         <para>
+          A opção <option>--root-pw</option> habilita a utilização do usuário <systemitem class="username">root</systemitem> diretamente.
+         </para>
+        </step>
+        <step>
+         <para>
+          Consulte a lista dos certificados preparados para inscrição:
+         </para>
+<screen>mokutil --list-new</screen>
+        </step>
+        <step>
+         <para>
+          Reinicialize o sistema. O <systemitem>shim</systemitem> deve iniciar o MokManager. É necessário digitar a senha de <systemitem class="username">root</systemitem> para confirmar a importação do certificado para a lista da MOK.
+         </para>
+        </step>
+        <step>
+         <para>
+          Verifique se a chave recém-importada foi inscrita:
+         </para>
+<screen>mokutil --list-enrolled</screen>
+        </step>
+       </substeps>
+      </step>
+      <step>
+       <substeps>
+        <step>
+         <para>
+          Se preferir, este é o procedimento para iniciar a MOK manualmente:
+         </para>
+         <para>
+          Reinicialize
+         </para>
+        </step>
+        <step>
+         <para>
+          No menu do GRUB 2, pressione a tecla "<literal>c</literal>".
+         </para>
+        </step>
+        <step>
+         <para>
+          Tipo:
+         </para>
+<screen>chainloader $efibootdir/MokManager.efi
+boot</screen>
+        </step>
+        <step>
+         <para>
+          Selecione <guimenu>Enroll key from disk</guimenu> (Inscrever chave do disco).
+         </para>
+        </step>
+        <step>
+         <para>
+          Navegue até o arquivo <filename>cert.der</filename> e pressione <keycap function="enter"/>.
+         </para>
+        </step>
+        <step>
+         <para>
+          Siga as instruções para inscrever a chave. Normalmente, você pressiona '<literal>0</literal>' e '<literal>y</literal>' para confirmar.
+         </para>
+         <para>
+          Se preferir, o menu do firmware pode oferecer maneiras de adicionar uma nova chave ao Banco de Dados de Assinatura.
+         </para>
+        </step>
+       </substeps>
+      </step>
+     </stepalternatives>
+    </step>
+   </procedure>
+
+
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.non-inbox">
+   <title>Usando drivers que não são de caixa de entrada</title>
+   <para>
+    Não há suporte para adição de drivers que não são de caixa de entrada (isto é, drivers que não vêm com o <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase>) durante a instalação com o Boot Seguro habilitado. Por padrão, a chave de assinatura usada para SolidDriver/PLDP não é confiável.
+   </para>
+   <para>
+    É possível instalar drivers de terceiros durante a instalação, com o Boot Seguro habilitado de duas formas diferentes. Nos dois casos:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      Adicionar as chaves necessárias ao banco de dados do firmware usando as ferramentas de gerenciamento do firmware/sistema antes da instalação. Essa opção depende do hardware específico que você usa. Fale com o fornecedor do hardware para obter mais informações.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Usar uma ISO do driver inicializável em <link xlink:href="https://drivers.suse.com/"/> ou pedir ao fornecedor do hardware para inscrever as chaves necessárias na lista MOK na primeira inicialização.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Para usar a ISO do driver inicializável para inscrever as chaves do driver na lista MOK, siga estas etapas:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Grave a imagem ISO acima em um meio de CD/DVD vazio.
+     </para>
+    </step>
+    <step>
+     <para>
+      Inicie a instalação usando o novo meio de CD/DVD, com a mídia padrão do SUSE Linux Enterprise em mãos ou um URL para um servidor de instalação de rede.
+     </para>
+     <para>
+      Ao fazer uma instalação de rede, digite o URL da fonte de instalação de rede na linha de comando de boot usando a opção <option>install=</option>.
+     </para>
+     <para>
+      Ao instalar de uma mídia ótica, o instalador inicializará primeiro do kit do driver e, em seguida, solicitará para inserir o primeiro disco do produto SUSE Linux Enterprise.
+     </para>
+    </step>
+    <step>
+     <para>
+      Um initrd com os drivers atualizados será usado para instalação.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    Para obter mais informações, consulte <link xlink:href="https://drivers.suse.com/doc/Usage/Secure_Boot_Certificate.html"/>. 
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.uefi.secboot.feats">
+
+   <title>Recursos e limitações</title>
+   <para>
+    Ao inicializar no modo Boot Seguro, os seguintes recursos se aplicam:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      Instalação no local do carregador de boot padrão UEFI, um mecanismo para manter ou restaurar a entrada de boot EFI.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Reinicialização por UEFI.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O hipervisor do Xen inicializará com UEFI quando não houver nenhum BIOS legado para o qual fazer fallback.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Suporte a boot PXE IPv6 da UEFI.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Suporte ao modo de vídeo da UEFI. O kernel pode recuperar o modo de vídeo da UEFI para configurar o modo KMS com os mesmos parâmetros.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      A inicialização UEFI de dispositivos USB é suportada.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Ao inicializar no modo Boot Seguro, as seguintes limitações se aplicam:
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      Para que o Boot Seguro não seja facilmente desviado, alguns recursos do kernel são desabilitados durante a execução no modo Boot Seguro.
+     </para>
+    </listitem>
+
+    <listitem>
+     <para>
+      O carregador de boot, o kernel e os módulos do kernel devem ser assinados.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Kexec e Kdump estão desabilitados.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      A hibernação (suspensão no disco) é desabilitada.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O acesso a <filename>/dev/kmem</filename> e <filename>/dev/mem</filename> não é possível, nem mesmo como usuário root.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O acesso à porta de E/S não é possível, nem mesmo como usuário root. Todos os drivers gráficos X11 devem usar um driver do kernel.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O acesso a PCI BAR por sysfs não é possível.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O <literal>custom_method</literal> em ACPI não está disponível.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Debugfs para o módulo asus-wmi não está disponível.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O parâmetro <literal>acpi_rsdp</literal> não tem nenhum efeito sobre o kernel.
+     </para>
+    </listitem>
+   </itemizedlist>
+
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.uefi.moreinfo">
+  <title>Para obter mais informações</title>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="http://www.uefi.org"/>: Home page da UEFI onde você encontra as especificações atuais da UEFI.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Publicações no blog por Olaf Kirch e Vojtěch Pavlík (o capítulo acima é quase todo baseado nessas publicações):
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       <link xlink:href="http://www.suse.com/blogs/uefi-secure-boot-plan/"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <link xlink:href="http://www.suse.com/blogs/uefi-secure-boot-overview/"/>
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <link xlink:href="http://www.suse.com/blogs/uefi-secure-boot-details/"/>
+      </para>
+     </listitem>
+    </itemizedlist>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://en.opensuse.org/openSUSE:UEFI"/>: UEFI com openSUSE.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+
+</chapter>

@@ -1,0 +1,640 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_wicked.xml" version="5.0" xml:id="sec.basicnet.manconf">
+ <title>Configurando uma conexão de rede manualmente</title>
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes (sim)</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  A configuração manual do software de rede deve ser a última alternativa. É recomendável usar o YaST. Entretanto, essas informações de base sobre a configuração de rede também podem ajudar você na utilização do YaST.
+ </para>
+
+ <sect2 xml:id="sec.basicnet.manconf.wicked">
+
+  <title>Configuração de rede com o <command>wicked</command></title>
+  <para>
+   A ferramenta e biblioteca chamada <command>wicked</command> dispõe de uma nova estrutura para configuração de rede.
+  </para>
+  <para>
+   Um dos desafios do gerenciamento de interface de rede tradicional é a mistura das diversas camadas de gerenciamento de rede em um único script ou, no máximo, em dois scripts diferentes, que interagem entre si de uma forma não muito bem definida, com efeitos colaterais difíceis de prever, limites e convenções obscuros, etc. Diversas camadas de soluções alternativas especiais para uma variedade de cenários diferentes aumentam a carga de manutenção. Estão sendo usados protocolos de configuração de endereço que são implementados por meio de daemons como o dhcpcd, que pouco se interagem com o restante da infraestrutura. Esquemas de nomeação de interface ruins que exigem suporte pesado a udev são introduzidos para obter identificação persistente das interfaces.
+  </para>
+  <para>
+   A ideia do wicked é analisar o problema de várias maneiras. Nenhuma delas é totalmente inovadora, mas esperamos que, ao tentar reunir ideias de diferentes projetos, seja criada uma solução global melhor.
+  </para>
+  <para>
+   Uma abordagem é usar um modelo de cliente/servidor. Dessa forma, o wicked pode definir recursos padronizados para ações como configuração de endereço que se integrem bem à estrutura geral. Por exemplo, na configuração de endereço, o administrador pode solicitar que uma interface seja configurada por DHCP ou IPv4 zeroconf, e tudo o que o serviço de configuração de endereço faz é obter o aluguel de seu servidor e passá-lo adiante para o processo do servidor do wicked, que instala os endereços e as rotas solicitadas.
+  </para>
+  <para>
+   A outra abordagem para analisar o problema é impor o aspecto de organização em camadas. Para qualquer tipo de interface de rede, é possível definir um serviço dbus que configure a camada do dispositivo da interface de rede: VLAN, ponte, ligação ou dispositivo paravirtualizado. Uma funcionalidade comum, como a configuração de endereço, é implementada por serviços de junção, que são colocados em camadas sobre esses serviços específicos do dispositivo, sem ter que implementá-los especificamente.
+  </para>
+  <para>
+   A estrutura do wicked implementa esses dois aspectos usando uma variedade de serviços dbus, que são anexados a uma interface de rede de acordo com o seu tipo. Veja a seguir uma visão geral simples da hierarquia de objeto no wicked.
+  </para>
+  <para>
+   Cada interface de rede é representada por um objeto filho de <systemitem>/org/opensuse/Network/Interfaces</systemitem>. O nome do objeto filho é dado por seu ifindex. Por exemplo, a interface de loopback, que geralmente possui ifindex 1, é <systemitem>/org/opensuse/Network/Interfaces/1</systemitem>, a primeira interface Ethernet registrada é <systemitem>/org/opensuse/Network/Interfaces/2</systemitem>.
+  </para>
+  <para>
+   Cada interface de rede tem uma <quote>classe</quote> associada, que é usada para selecionar as interfaces dbus suportadas. Por padrão, cada interface de rede pertence à classe <literal>netif</literal>, e o wickedd anexa automaticamente todas as interfaces compatíveis com essa classe. <systemitem class="daemon"/> Na implementação atual, isso inclui as seguintes interfaces:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>org.opensuse.Network.Interface</term>
+    <listitem>
+     <para>
+      Funções de interface de rede genéricas, como mover o link para cima ou para baixo, atribuir uma MTU, etc.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>org.opensuse.Network.Addrconf.ipv4.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv6.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv4.auto</term>
+
+    <listitem>
+     <para>
+      Serviços de configuração de endereço para DHCP, IPv4 zeroconf, etc.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+  <para>
+   Além disso, as interfaces de rede podem exigir ou oferecer mecanismos de configuração especiais. Por exemplo, em um dispositivo Ethernet, convém ter recursos para controlar a velocidade do link, o descarregamento de checksum, etc. Para isso, os dispositivos Ethernet têm uma classe própria chamada <literal>netif-ethernet</literal>, que é uma subclasse de <literal>netif</literal>. Como consequência, as interfaces dbus atribuídas a uma interface Ethernet incluem todos os serviços relacionados anteriormente e mais o <systemitem>org.opensuse.Network.Ethernet</systemitem>, que é um serviço disponível apenas para os objetos pertencentes à classe <literal>netif-ethernet</literal>.
+  </para>
+  <para>
+   Semelhantemente, existem classes para tipos de interface como pontes, VLANs, ligações ou infinibands.
+  </para>
+  <para>
+   O modo como você interage com a interface que precisa ser criada primeiro, como a VLAN, que é, na verdade, uma interface de rede virtual que fica acima de um dispositivo Ethernet. Para isso tudo, o wicked define interfaces de fábrica, como <systemitem>org.opensuse.Network.VLAN.Factory</systemitem>. Esse tipo de interface de fábrica oferece uma única função que permite criar uma interface do tipo solicitado. Essas interfaces de fábrica são anexadas ao nó da lista <systemitem>/org/opensuse/Network/Interfaces</systemitem>.
+  </para>
+  <sect3 xml:id="sec.basicnet.manconf.supported">
+   <title>Arquitetura e recursos do <literal>wicked</literal></title>
+   <para>
+    O serviço <literal>wicked</literal> é composto por várias partes, conforme mostrado em <xref linkend="wicked.architecture"/>.
+   </para>
+   <figure xml:id="wicked.architecture">
+    <title>Arquitetura do <literal>wicked</literal></title>
+    <mediaobject>
+     <imageobject role="html">
+      <imagedata fileref="wicked_scheme.png" format="PNG"/>
+     </imageobject>
+     <imageobject role="fo">
+      <imagedata fileref="wicked_scheme.png" format="PNG" width="80%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    O <literal>wicked</literal> suporta o seguinte:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Back ends de arquivo de configuração para analisar os arquivos <filename>/etc/sysconfig/network</filename> no estilo SUSE.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Um back end de configuração interno para representar a configuração da interface de rede em XML.
+
+
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Ativação e encerramento de interfaces de rede <quote>normais</quote>, como Ethernet ou InfiniBand, VLAN, ponte, ligações, tun, tap, dummy, macvlan, macvtap, hsi, qeth, iucv e dispositivos wireless (com limite de uma rede wpa-psk/eap).
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Um cliente DHCPv4 e um cliente DHCPv6 incorporados.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O daemon nanny (habilitado por padrão) ajuda a ativar automaticamente as interfaces configuradas quando o dispositivo está disponível (hot plug de interface) e definir a configuração de IP quando um link (operadora) é detectado. Consulte <xref linkend="sec.basicnet.manconf.using_nanny"/> para obter mais informações.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      O <literal>wicked</literal> foi implementado como um grupo de serviços DBus que estão integrados ao systemd. Dessa forma, os comandos comuns do <command>systemctl</command> são aplicados ao <literal>wicked</literal>.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect3>
+  <sect3 xml:id="sec.basicnet.manconf.using_wicked">
+   <title>Usando o <literal>wicked</literal></title>
+   <para>
+    No SUSE Linux Enterprise, o <literal>wicked</literal> é executado por padrão. Para saber o que está habilitado no momento e se está em execução, chame:
+   </para>
+<screen>systemctl status network</screen>
+   <para>
+    Se o <literal>wicked</literal> estiver habilitado, você verá alguma indicação nestas linhas:
+   </para>
+
+<screen>wicked.service - wicked managed network interfaces
+    Loaded: loaded (/usr/lib/systemd/system/wicked.service; enabled)
+    ...</screen>
+   <para>
+    Se algo diferente estiver em execução (por exemplo, o NetworkManager) e você quiser alterar para o <literal>wicked</literal>, primeiro interrompa o que estiver em execução e, em seguida, habilite o <literal>wicked</literal>:
+   </para>
+<screen>systemctl is-active network &amp;&amp; \
+systemctl stop      network
+systemctl enable --force wicked</screen>
+   <para>
+    Isso habilita os serviços do wicked, cria o link do álias <filename>network.service</filename> com o álias <filename>wicked.service</filename> e inicia a rede na próxima inicialização.
+   </para>
+   <para>
+    Iniciando o processo do servidor:
+   </para>
+<screen>systemctl start wickedd</screen>
+   <para>
+    Esse procedimento inicia o <command>wickedd</command> (o servidor principal) e os suplicantes associados:
+   </para>
+<screen>/usr/lib/wicked/bin/wickedd-auto4 --systemd --foreground
+/usr/lib/wicked/bin/wickedd-dhcp4 --systemd --foreground
+/usr/lib/wicked/bin/wickedd-dhcp6 --systemd --foreground
+/usr/sbin/wickedd --systemd --foreground
+/usr/sbin/wickedd-nanny --systemd --foreground</screen>
+   <para>
+    Em seguida, ative a rede:
+   </para>
+<screen>systemctl start wicked</screen>
+   <para>
+    Se preferir, use o álias <filename>network.service</filename>:
+   </para>
+<screen>systemctl start network</screen>
+   <para>
+    Estes comandos usam as fontes de configuração padrão ou do sistema, conforme definido em <filename>/etc/wicked/client.xml</filename>.
+   </para>
+   <para>
+    Para habilitar a depuração, defina <literal>WICKED_DEBUG</literal> em <filename>/etc/sysconfig/network/config</filename>, por exemplo:
+   </para>
+<screen>WICKED_DEBUG="all"</screen>
+   <para>
+    Ou para omiti-la:
+   </para>
+<screen>WICKED_DEBUG="all,-dbus,-objectmodel,-xpath,-xml"</screen>
+   <para>
+    Use o utilitário cliente para exibir as informações da interface para todas as interfaces ou para a interface especificada com <replaceable>ifname</replaceable>:
+   </para>
+<screen>wicked show all
+wicked show <replaceable>ifname</replaceable></screen>
+   <para>
+    Na saída XML:
+   </para>
+<screen>wicked show-xml all
+wicked show-xml <replaceable>ifname</replaceable></screen>
+   <para>
+    Ativando uma interface:
+   </para>
+<screen>wicked ifup eth0
+wicked ifup wlan0
+...</screen>
+   <para>
+    Como não há nenhuma fonte de configuração especificada, o cliente do wicked verifica suas fontes de configuração padrão definidas em <filename>/etc/wicked/client.xml</filename>:
+   </para>
+   <orderedlist>
+    <listitem>
+
+     <para>
+      <literal>firmware:</literal> iBFT (iSCSI Boot Firmware Table)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>compat:</literal> arquivos <literal>ifcfg</literal>, implementados para compatibilidade
+     </para>
+    </listitem>
+   </orderedlist>
+   <para>
+    O que o <literal>wicked</literal> obtiver destas fontes para determinada interface será aplicado. A ordem de importância desejada é <literal>firmware</literal> e depois <literal>compat</literal>, o que pode ser mudado no futuro.
+   </para>
+
+   <para>
+    Para obter mais informações, consulte a página de manual de <command>wicked</command>.
+   </para>
+  </sect3>
+  <sect3 xml:id="sec.basicnet.manconf.using_nanny">
+   <title>Nanny</title>
+   <para>
+    Nanny é um daemon orientado por eventos e políticas que é responsável por cenários assíncronos ou não solicitados, como dispositivos de hot plug. Portanto, o daemon nanny ajuda a iniciar ou reiniciar dispositivos atrasados ou temporariamente ausentes. O Nanny monitora as mudanças em dispositivos e links e integra novos dispositivos definidos pelo conjunto de políticas atual. O Nanny continua a configuração, mesmo que o <command>ifup</command> já tenha saído por causa das restrições de tempo de espera especificadas.
+   </para>
+   <para>
+    Por padrão, o daemon nanny está ativo no sistema. Ele é habilitado no arquivo de configuração <filename>/etc/wicked/common.xml</filename>:
+   </para>
+<screen>&lt;config&gt;
+  ...
+  &lt;use-nanny&gt;true&lt;/use-nanny&gt;
+&lt;/config&gt;</screen>
+   <para>
+    Essa configuração faz com que o ifup e o ifreload apliquem uma política com a configuração efetiva ao daemon nanny; em seguida, o nanny configura o <systemitem class="daemon">wickedd</systemitem> e, dessa forma, garante o suporte a hot plug. Ele aguarda por eventos ou mudanças (como novos dispositivos ou ativação de operadora) em segundo plano.
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.multiple">
+   <title>Ativando várias interfaces</title>
+   <para>
+    Para ligações e pontes, convém definir a topologia inteira do dispositivo em um arquivo (ifcfg-bondX) e ativá-la de uma vez. Na sequência, o wicked poderá ativar a configuração inteira, se você especificar os nomes das interfaces de nível superior (da ponte ou da ligação):
+   </para>
+<screen>wicked ifup br0</screen>
+   <para>
+    Esse comando configura automaticamente a ponte e suas dependências na ordem apropriada, sem necessidade de listar as dependências (portas, etc.) separadamente.
+   </para>
+   <para>
+    Para ativar várias interfaces em um comando:
+   </para>
+<screen>wicked ifup bond0 br0 br1 br2</screen>
+   <para>
+    Ou também todas as interfaces:
+   </para>
+<screen>wicked ifup all</screen>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.tunnel">
+   <title>Usando túneis com o Wicked</title>
+   <para>
+    O <envar>TUNNEL_DEVICE</envar> é aplicado quando você precisa usar túneis com Wicked. Ele permite especificar um nome de dispositivo opcional para vincular o túnel ao dispositivo. Os pacotes tunneled apenas são roteados por meio desse dispositivo.
+   </para>
+   <para>
+    Para obter mais informações, consulte <command>man 5 ifcfg-tunnel</command>.
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.incremental">
+   <title>Administrando mudanças incrementais</title>
+   <para>
+    Com o <command>wicked</command>, não há necessidade de desativar uma interface para reconfigurá-la (exceto se exigido pelo kernel). Por exemplo, para adicionar outro endereço IP ou rota a uma interface de rede estaticamente configurada, adicione o endereço IP à definição da interface e execute outra operação <quote>ifup</quote>. O servidor tentará de tudo para atualizar apenas as configurações que foram mudadas. Isso vale para as opções no nível do link, como a MTU do dispositivo ou o endereço MAC, e para as configurações no nível da rede, como endereços, rotas ou até mesmo o modo de configuração de endereço (por exemplo, ao mover de uma configuração estática para DHCP).
+   </para>
+   <para>
+    Claro que as coisas se tornam mais complicadas quando há interfaces virtuais combinadas a vários dispositivos reais, como pontes ou ligações. Para dispositivos acoplados, é impossível mudar determinados parâmetros enquanto o dispositivo está ativado. Se você fizer isso, haverá erro.
+   </para>
+   <para>
+    No entanto, o que ainda deve funcionar é a adição ou remoção dos dispositivos filho de uma ligação ou ponte, ou a escolha de uma interface principal da ligação.
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.address_config">
+   <title>Extensões do wicked: configuração de endereço</title>
+   <para>
+    O <command>wicked</command> foi desenvolvido para ser extensível com scripts shell. É possível definir as extensões no arquivo <filename>config.xml</filename>.
+   </para>
+   <para>
+    Atualmente, há várias classes de extensões suportadas:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      configuração de link: são scripts responsáveis por configurar a camada de link do dispositivo de acordo com a configuração fornecida pelo cliente e por desconfigurá-la novamente.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      configuração de endereço: são scripts responsáveis por gerenciar a configuração de endereço de um dispositivo. Geralmente, a configuração de endereço e o DHCP são gerenciados pelo próprio <command>wicked</command>, mas podem ser implementados por meio de extensões.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      extensão de firewall: estes scripts podem aplicar regras de firewall.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Normalmente, as extensões possuem um comando de início e parada, um <quote>arquivo pid</quote> opcional e um conjunto de variáveis de ambiente que são passadas para o script.
+   </para>
+   <para>
+    Para ilustrar como isso deve funcionar, observe a extensão de firewall definida em <filename>etc/server.xml</filename>:
+   </para>
+<screen>&lt;dbus-service interface="org.opensuse.Network.Firewall"&gt;
+ &lt;action name="firewallUp"   command="/etc/wicked/extensions/firewall up"/&gt;
+ &lt;action name="firewallDown" command="/etc/wicked/extensions/firewall down"/&gt;
+
+ &lt;!-- default environment for all calls to this extension script --&gt;
+ &lt;putenv name="WICKED_OBJECT_PATH" value="$object-path"/&gt;
+ &lt;putenv name="WICKED_INTERFACE_NAME" value="$property:name"/&gt;
+ &lt;putenv name="WICKED_INTERFACE_INDEX" value="$property:index"/&gt;
+&lt;/dbus-service&gt;</screen>
+   <para>
+    A extensão está anexada à tag
+    <tag class="starttag">dbus-service</tag>
+    e define comandos a serem executados para as ações dessa interface. Além disso, a declaração pode definir e inicializar as variáveis de ambiente passadas para as ações.
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.configuration_files">
+   <title>Extensões do wicked: arquivos de configuração</title>
+   <para>
+    É possível estender a administração de arquivos de configuração também com scripts. Por exemplo, as atualizações DNS dos aluguéis são definitivamente administradas pelo script <filename>extensions/resolver</filename>, com o comportamento configurado em <filename>server.xml</filename>:
+   </para>
+<screen>&lt;system-updater name="resolver"&gt;
+ &lt;action name="backup" command="/etc/wicked/extensions/resolver backup"/&gt;
+ &lt;action name="restore" command="/etc/wicked/extensions/resolver restore"/&gt;
+ &lt;action name="install" command="/etc/wicked/extensions/resolver install"/&gt;
+ &lt;action name="remove" command="/etc/wicked/extensions/resolver remove"/&gt;
+&lt;/system-updater&gt;</screen>
+   <para>
+    Quando uma atualização chega ao <systemitem>wickedd</systemitem>, as rotinas do atualizador do sistema analisam o aluguel e chamam os comandos apropriados (<literal>backup</literal>, <literal>install</literal>, etc.) no script do resolver. Isso, por sua vez, define as configurações DNS usando <command>/sbin/netconfig</command> ou manualmente, gravando <filename>/etc/resolv.conf</filename> como fallback.
+   </para>
+  </sect3>
+ </sect2>
+
+ <xi:include href="net_config_files.xml"/>
+
+ <sect2 xml:id="sec.basicnet.manconf.testing">
+  <title>Testando a configuração</title>
+  <para>
+   Antes de gravar sua configuração nos arquivos de configuração, você pode testá-la. Para definir uma configuração de teste, use o comando <command>ip</command>. Para testar a conexão, use o comando <command>ping</command>. 
+  </para>
+  <para>
+   O comando <command>ip</command> muda a configuração de rede diretamente, sem gravá-la no arquivo de configuração. A menos que você insira a configuração nos arquivos de configuração corretos, a configuração de rede mudada será perdida na reinicialização.
+  </para>
+  <note>
+   <title><command>ifconfig</command> e <command>route</command> obsoletos</title>
+   <para>
+    As ferramentas <command>ifconfig</command> e <command>route</command> estão obsoletas. Em vez disso, use <command>ip</command>. O <command>ifconfig</command>, por exemplo, limita os nomes de interface a 9 caracteres.
+   </para>
+  </note>
+  <sect3 xml:id="sec.basicnet.manconf.ip">
+   <title>Configurando uma interface de rede com <command>ip</command></title><indexterm> <primary>comandos</primary> <secondary>ip</secondary> </indexterm><remark>
+From: Marius Tomaschewski mt@suse.de&gt;
+Subject: Re: Manual Network Config
+To: Karl Eichwalder ke@suse.de&gt;
+Date: Mon, 24 Aug 2009 14:21:44 +0200
+
+Das ifconfig utility ist obsolete und unterstützt nur Interface-
+Namen bis 9 Zeichen, z.B. "foo012345". Die restlichen Zeichen
+werden abgeschnitten und nicht angezeigt.
+Das "ip" utility unterstützt hingegen die derzeit volle Länge von
+15 Zeichen, z.B. "foo012345678901".
+
+Statt "ifconfig" sollte "ip addr" und "ip link" verwendet werden,
+um routing zu konfigurieren, sollte nicht "route", sondern "ip route"
+verwendendet werden.
+
+...
+
+IMO besser wäre es die Beispiel-Ausgaben von route und ifconfig zu
+entfernen und stattdessen Beispiel-Ausgaben von:
+
+"ip link show", "ip addr show",
+"ip -4 route show", "ip -6 route show"
+(und ggf. auch "ip rule show")
+
+im "Configuring a Network Interface with ip" zu bringen. Eventuell
+mit ein Paar Beispielen als eine Art Kurzanleitung, in etwa:
+
+ip link set up dev eth0
+
+ip addr add 192.168.0.100/24 dev eth0
+ip addr add 2001:DB8:cafe::dead/64 dev eth0
+
+ip route add 192.168.1.0/24 via 192.168.0.200 dev eth0
+ip route add 2001:DB8:cafe:1::/64 via 2001:DB8:cafe::feed dev eth0
+
+ip route add default via 192.168.0.254 dev eth0
+ip route add default via 2001:DB8:cafe::beef dev eth0
+
+ip addr show dev eth0
+ip -4 route show # dev eth0
+ip -6 route show # dev eth0
+
+ip route del 192.168.1.0/24 via 192.168.0.200 dev eth0
+ip route del 2001:DB8:cafe:1::/64 via 2001:DB8:cafe::feed dev eth0
+
+ip route del default via 192.168.0.254 dev eth0
+ip route del default via 2001:DB8:cafe::beef dev eth0
+
+ip addr del 192.168.0.100/24 dev eth0
+ip addr del 2001:DB8:cafe::dead/64 dev eth0
+
+ip link set down dev eth0
+</remark><remark>
+ ke 2014-05-15: ifconfig and route is removed sind quite some time.
+ Maybe, we should add more ip examples as Marius proposes...
+</remark>
+   <para>
+    <command>ip</command> é uma ferramenta para mostrar e configurar dispositivos de rede, roteamentos, roteamento de políticas e túneis.
+   </para>
+   <para>
+    <command>ip</command> é uma ferramenta muito complexa. Sua sintaxe comum é <command>ip</command> <option><replaceable>opções</replaceable> <replaceable>objeto</replaceable> <replaceable>comando</replaceable></option>. Você pode trabalhar com os seguintes objetos:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>link</term>
+     <listitem>
+      <para>
+       Este objeto representa um dispositivo de rede.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>address</term>
+     <listitem>
+      <para>
+       Este objeto representa o endereço IP do dispositivo.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>neighbor</term>
+     <listitem>
+      <para>
+       Este objeto representa uma entrada de cache ARP ou NDISC.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>route</term>
+     <listitem>
+      <para>
+       Este objeto representa a entrada da tabela de roteamento.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>rule</term>
+     <listitem>
+      <para>
+       Este objeto representa uma regra no banco de dados de políticas de roteamento.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>maddress</term>
+     <listitem>
+      <para>
+       Este objeto representa um endereço multicast.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mroute</term>
+     <listitem>
+      <para>
+       Este objeto representa uma entrada de cache de roteamento multicast.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>tunnel</term>
+     <listitem>
+      <para>
+       Este objeto representa um túnel sobre IP.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    Se nenhum comando for fornecido, será usado o comando padrão (normalmente <command>list</command>).
+   </para>
+   <para>
+    Mude o estado de um dispositivo com o comando <command>ip link set</command> <option><replaceable>nome_do_dispositivo</replaceable></option> <command/> . Por exemplo, para desativar o dispositivo eth0, digite <command>ip link set</command> <option>eth0 down</option>. Para ativá-lo novamente, use <command>ip link set</command> <option>eth0 up</option>.
+   </para>
+   <para>
+    Após ativar um dispositivo, você poderá configurá-lo. Para definir o endereço IP, use <command>ip addr add</command> <option><replaceable>endereço_ip</replaceable> + dev <replaceable>nome_do_dispositivo</replaceable></option>. Por exemplo, para definir o endereço da interface eth0 como 192.168.12.154/30 com o broadcast padrão (opção <option>brd</option>), digite <command>ip addr</command> <option>add 192.168.12.154/30 brd + dev eth0</option>.
+   </para>
+   <para>
+    Para ter uma conexão ativa, você também precisa configurar o gateway padrão. Para definir um gateway para o sistema, digite <command>ip route add</command> <option>endereço_ip_do_gateway</option>. Para traduzir um endereço IP para outro, use <command>nat</command>: <command>ip route add nat</command> <option>endereço_ip</option> <command>via</command> <option>outro_endereço_ip</option>.
+   </para>
+   <para>
+    Para exibir todos os dispositivos, use <command>ip link ls</command>. Para exibir apenas as interfaces em execução, use <command>ip link ls up</command>. Para imprimir as estatísticas de interface de um dispositivo, digite <command>ip -s link ls</command> <option>nome_do_dispositivo</option>. Para ver os endereços dos dispositivos, digite <command>ip addr</command>. Na saída do comando <command>ip addr</command>, você também pode encontrar informações sobre os endereços MAC dos dispositivos. Para mostrar todas as rotas, use <command>ip route show</command>.
+   </para>
+   <para>
+    Para obter mais informações sobre como usar o <command>ip</command>, digite <command>ip</command> <option>help</option> ou consulte a página de manual de <systemitem>ip(8)</systemitem>. A opção <option>help</option> também está disponível para todos os subcomandos <command>ip</command>. Se, por exemplo, você precisar de ajuda para <command>ip</command> <option>addr</option>, digite <command>ip</command> <option>addr help</option>. Encontre o manual do <command>ip</command> em <filename>/usr/share/doc/packages/iproute2/ip-cref.pdf</filename>.
+   </para>
+  </sect3>
+  <sect3 xml:id="sec.basicnet.manconf.testingping">
+   <title>Testando uma conexão com o comando ping</title><indexterm> <primary>comandos</primary> <secondary>ping</secondary> </indexterm> <indexterm> <primary>ping</primary> </indexterm>
+   <para>
+    O comando <command>ping</command> é a ferramenta padrão para testar o funcionamento de uma conexão TCP/IP. Ele usa o protocolo ICMP para enviar um pequeno pacote de dados, o datagrama ECHO_REQUEST, para o host de destino, solicitando uma resposta imediata. Se isso funcionar, o <command>ping</command> exibirá uma mensagem nesse sentido. Isso indica que o link da rede está funcionando.
+   </para>
+   <para>
+    O <command>ping</command> vai além de simplesmente testar a função da conexão entre dois computadores; ele também fornece algumas informações básicas sobre a qualidade da conexão. No <xref linkend="ex.basicnet.manconf.ping"/>, você pode ver um exemplo da saída do <command>ping</command>. A penúltima linha contém informações sobre o número de pacotes transmitidos, o número de pacotes perdidos e o tempo total da execução do <command>ping</command>.
+   </para>
+   <para>
+    Como destino, é possível usar um nome de host ou endereço IP, por exemplo, <command>ping</command> <option>exemplo.com</option> ou <command>ping</command> <option>192.168.3.100</option>. O programa enviará pacotes até que você pressione <keycombo><keycap function="control"/><keycap>C</keycap></keycombo>.
+   </para>
+   <para>
+    Se você só precisar verificar a funcionalidade da conexão, poderá limitar o número dos pacotes com a opção <option>-c</option>. Por exemplo, para limitar o ping a três pacotes, digite <command>ping</command> <option>-c 3 exemplo.com</option>.
+   </para>
+   <example xml:id="ex.basicnet.manconf.ping">
+    <title>Saída do comando ping</title>
+<screen>ping -c 3 example.com
+PING example.com (192.168.3.100) 56(84) bytes of data.
+64 bytes from example.com (192.168.3.100): icmp_seq=1 ttl=49 time=188 ms
+64 bytes from example.com (192.168.3.100): icmp_seq=2 ttl=49 time=184 ms
+64 bytes from example.com (192.168.3.100): icmp_seq=3 ttl=49 time=183 ms
+--- example.com ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2007ms
+rtt min/avg/max/mdev = 183.417/185.447/188.259/2.052 ms</screen>
+   </example>
+   <para>
+    O intervalo padrão entre dois pacotes é um segundo. Para mudar o intervalo, o ping fornece a opção <option>-i</option>. Por exemplo, para aumentar o intervalo do ping para dez segundos, digite <command>ping</command> <option>-i 10 exemplo.com</option>.
+   </para>
+   <para>
+    Em um sistema com vários dispositivos de rede, às vezes é útil enviar o ping através de um endereço de interface específico. Para isso, use a opção <option>-I</option> com o nome do dispositivo selecionado, por exemplo, <command>ping</command> <option>-I wlan1 exemplo.com</option>.
+   </para>
+   <para>
+    Para obter mais opções e informações sobre como usar o ping, digite <command>ping</command> <option>-h</option> ou consulte a página de manual de <systemitem>ping (8)</systemitem>.
+   </para>
+   <tip>
+    <title>Executando ping em endereços IPv6</title>
+    <para>
+     Para endereços IPv6, use o comando <command>ping6</command>. Observe que, para executar ping em endereços locais de link, deve-se especificar a interface com <option>-I</option>. O comando a seguir funcionará se o endereço for acessível via <literal>eth1</literal>:
+    </para>
+<screen>ping6 -I eth1 fe80::117:21ff:feda:a425</screen>
+   </tip>
+  </sect3>
+
+ </sect2>
+
+ <sect2 xml:id="sec.basicnet.manconf.scripts">
+  <title>Arquivos unit e scripts de inicialização</title><indexterm> <primary>scripts</primary> <secondary>init.d</secondary> </indexterm>
+  <para>
+   Além dos arquivos de configuração descritos anteriormente, há os arquivos unit do systemd e vários scripts que carregam os serviços de rede durante a inicialização da máquina. Eles são iniciados quando o sistema é alternado para o destino <systemitem>multi-user.target</systemitem>. Alguns desses arquivos unit e scripts estão descritos em <xref linkend="var.net.start.scripts"/>. Para obter mais informações sobre o <systemitem>systemd</systemitem>, consulte o <xref linkend="cha.systemd"/>, e para obter mais informações sobre os destinos do <systemitem>systemd</systemitem>, consulte a página de manual de <systemitem>systemd.special</systemitem> (<command>man systemd.special</command>). <remark>taroth 2014-02-13: FIXME: SYSTEMD, WICKED</remark>
+  </para>
+  <variablelist xml:id="var.net.start.scripts">
+   <title>Alguns arquivos unit e scripts de inicialização para programas de rede</title>
+   <varlistentry>
+    <term><systemitem>network.target</systemitem> <indexterm> <primary>arquivo unit</primary> <secondary>network.target</secondary></indexterm>
+
+    </term>
+    <listitem>
+     <para>
+      <systemitem>network.target</systemitem> é o destino do systemd para projeto de rede, mas seu significado depende das configurações fornecidas pelo administrador do sistema.
+     </para>
+     <para>
+      Para obter mais informações, consulte <link xlink:href="http://www.freedesktop.org/wiki/Software/systemd/NetworkTarget/"/>. 
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>multi-user.target</systemitem>
+    </term>
+    <listitem>
+     <para>
+
+      <indexterm> <primary>arquivo unit</primary> <secondary>multi-user.target</secondary> </indexterm> <systemitem>multi-user.target</systemitem> é o destino do systemd para um sistema multiusuário com todos os serviços de rede necessários.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>xinetd</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inicia o xinetd. O xinetd pode ser usado para disponibilizar os serviços do servidor no sistema. Por exemplo, ele pode iniciar o vsftpd sempre que uma conexão FTP for inicializada.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>rpcbind</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inicia o utilitário rpcbind, que converte os números de programa RPC em endereços universais. Necessário para os serviços RPC, como um servidor NFS.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>ypserv</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inicia o servidor NIS.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>ypbind</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Inicia o cliente NIS.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/init.d/nfsserver</filename>
+    </term>
+    <listitem>
+     <para>
+      Inicia o servidor NFS.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/init.d/postfix</filename>
+    </term>
+    <listitem>
+     <para>
+      Controla o processo de postfix.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+ </sect2>
+</sect1>

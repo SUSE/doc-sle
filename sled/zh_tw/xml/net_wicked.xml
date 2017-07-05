@@ -1,0 +1,659 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_wicked.xml" version="5.0" xml:id="sec.basicnet.manconf">
+ <title>手動設定網路連接</title>
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  手動設定網路軟體應為最後採取的替代方案。建議使用 YaST。不過，這個有關網路組態的背景資訊也可協助您使用 YaST。
+ </para>
+
+ <sect2 xml:id="sec.basicnet.manconf.wicked">
+
+  <title><command>wicked</command> 網路組態</title>
+  <para>
+   名為 <command>wicked</command> 的工具和程式庫提供了一個新的架構用於設定網路。
+  </para>
+  <para>
+   傳統網路介面管理的難題之一在於，不同的網路管理層同時混雜在單個程序檔或者最多兩個不同的程序檔中，而這些層之間的互動方式並不真正有序，這就造成難以察覺的負面影響，並帶來一些無謂的約束和慣例，或其他諸如此類的不利。針對各種不同的情境部署多個特殊入侵層增大了維護負擔。所用的位址組態通訊協定透過 dhcpcd 等精靈來實作，而這些精靈與基礎架構中其他元件的互動相當不通暢。為了持續識別介面，引入了新潮的介面命名規劃，這一規劃需要繁重的 udev 支援。
+  </para>
+  <para>
+   wicked 的構想是透過多種方法分解問題。它沒有採用任何全新的理念，而是嘗試將不同專案中的想法集中在一起，以期形成一個更好的整體解決方案。
+  </para>
+  <para>
+   實現此目的的方法之一是使用用戶端/伺服器模型。此方法可讓 wicked 為位址組態等項目定義能夠很好地整合到整個架構中的標準化功能。例如，在設定位址組態時，管理員可以要求透過 DHCP 或 IPv4 zeroconf 設定介面，則位址組態服務所有工作就是從其伺服器取得租用，然後將租用傳遞給 wicked 伺服器程序，再由後者安裝所要求的位址和路由。
+  </para>
+  <para>
+   分解問題的另一個方法是強制執行分層機製。對於任何類型的網路介面，都可以定義一個 dbus 服務，用於設定網路介面的裝置層 — VLAN、橋接器、結合或半虛擬化裝置。位址組態等常用功能將透過在這些裝置專屬服務頂層的接合服務來執行，而無需專門執行。
+  </para>
+  <para>
+   wicked 架構使用各種 dbus 服務來實現這兩個方面的功能，這些服務將根據其類型連接至網路介面。本文提供了 wicked 中當前物件階層的簡要綜覽。
+  </para>
+  <para>
+   每個網路介面以 <systemitem>/org/opensuse/Network/Interfaces</systemitem> 的子物件表示。子物件的名稱由其 ifindex 指定。例如，通常 ifindex 為 1 的迴路介面是 <systemitem>/org/opensuse/Network/Interfaces/1</systemitem>，註冊的第一個乙太網路介面是 <systemitem>/org/opensuse/Network/Interfaces/2</systemitem>。
+  </para>
+  <para>
+   每個網路介面都有一個關聯的<quote>類別</quote>，用於選取該介面支援的 dbus 介面。依預設，每個網路介面的類別為 <literal>netif</literal>，wickedd 將自動連接與此類別相容的所有介面。<systemitem class="daemon"/>在目前實作中，包括以下介面：
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>org.opensuse.Network.Interface</term>
+    <listitem>
+     <para>
+      一般網路介面功能，例如，開啟或關閉連結、指定 MTU 等
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>org.opensuse.Network.Addrconf.ipv4.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv6.dhcp</term>
+    <term>org.opensuse.Network.Addrconf.ipv4.auto</term>
+
+    <listitem>
+     <para>
+      適用於 DHCP、IPv4 zeroconf 等的位址組態服務
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+  <para>
+   除此之外，網路介面可能還需要或者提供特殊的組態機制。例如，對於某個乙太網路裝置，您應該能夠控制連結速度和檢查總數卸載等。為了實現此目的，乙太網路裝置都有一個名為 <literal>netif-ethernet</literal> 的自己的類別，該類別屬於 <literal>netif</literal> 的子類別。因此，指定給乙太網路介面的 dbus 介面包括上面列出的所有服務，以及 <systemitem>org.opensuse.Network.Ethernet</systemitem>，後者只適用於屬於 <literal>netif-ethernet</literal> 類別的物件。
+  </para>
+  <para>
+   同樣，橋接器、VLAN、結合裝置或 infiniband 等介面類型也存在適用類別。
+  </para>
+  <para>
+   您要如何與某個需要首先建立的介面互動呢？例如 VLAN，它實際上是位於乙太網路裝置頂層的虛擬網路介面。對於這些情況，wicked 會定義出廠介面，例如 <systemitem>org.opensuse.Network.VLAN.Factory</systemitem>。這種出廠介面只提供一個功能，就是讓您建立所需類型的介面。這些出廠介面將連接至 <systemitem>/org/opensuse/Network/Interfaces</systemitem> 清單節點。
+  </para>
+  <sect3 xml:id="sec.basicnet.manconf.supported">
+   <title><literal>wicked</literal> 架構與功能</title>
+   <para>
+    <literal>wicked</literal> 服務包含多個部份，如<xref linkend="wicked.architecture"/>中所述。
+   </para>
+   <figure xml:id="wicked.architecture">
+    <title><literal>wicked</literal> 架構</title>
+    <mediaobject>
+     <imageobject role="html">
+      <imagedata fileref="wicked_scheme.png" format="PNG"/>
+     </imageobject>
+     <imageobject role="fo">
+      <imagedata fileref="wicked_scheme.png" format="PNG" width="80%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    <literal>wicked</literal> 目前支援以下內容︰
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      使用組態檔案後端來剖析 SUSE 樣式的 <filename>/etc/sysconfig/network</filename> 檔案。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用內部組態後端以 XML 格式表示網路介面組態。
+
+
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      開啟和關閉<quote>一般</quote>網路介面，例如乙太網路或 InfiniBand、VLAN、橋接器、結合裝置、tun、tap、虛構裝置、macvlan、macvtap、hsi、qeth、iucv 和無線 (目前限制為一個 wpa-psk/eap 網路) 裝置。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      內建 DHCPv4 用戶端和內建 DHCPv6 用戶端。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      預設啟用的 nanny 精靈有助於在裝置可用 (介面熱插入) 時自動啟動設定的介面，以及在偵測到連結 (載體) 時設定 IP 組態。如需相關資訊，請參閱<xref linkend="sec.basicnet.manconf.using_nanny"/>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>wicked</literal> 實作為一組與 systemd 相整合的 DBus 服務。因此，常用的 <command>systemctl</command> 指令都將適用於 <literal>wicked</literal>。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect3>
+  <sect3 xml:id="sec.basicnet.manconf.using_wicked">
+   <title>使用 <literal>wicked</literal></title>
+   <para>
+    在 SUSE Linux Enterprise 上，預設會執行 <literal>wicked</literal>。如果您想要檢查目前啟用了哪個元件以及該元件是否正在執行中，請呼叫：
+   </para>
+<screen>systemctl status network</screen>
+   <para>
+    如果已啟用 <literal>wicked</literal>，則會看到類似下面的行：
+   </para>
+
+<screen>wicked.service - wicked managed network interfaces
+    Loaded: loaded (/usr/lib/systemd/system/wicked.service; enabled)
+    ...</screen>
+   <para>
+    如果執行的是其他元件 (例如 NetworkManager) 並且您想要切換到 <literal>wicked</literal>，請先停止正在執行的元件，然後啟用 <literal>wicked</literal>：
+   </para>
+<screen>systemctl is-active network &amp;&amp; \
+systemctl stop      network
+systemctl enable --force wicked</screen>
+   <para>
+    如此可啟用 wicked 服務、建立從 <filename>network.service</filename> 到 <filename>wicked.service</filename> 的別名連結，並在下次開機時啟動網路。
+   </para>
+   <para>
+    啟動伺服器程序：
+   </para>
+<screen>systemctl start wickedd</screen>
+   <para>
+    這會啟動 <command>wickedd</command> (主要伺服器) 和關聯的要求者：
+   </para>
+<screen>/usr/lib/wicked/bin/wickedd-auto4 --systemd --foreground
+/usr/lib/wicked/bin/wickedd-dhcp4 --systemd --foreground
+/usr/lib/wicked/bin/wickedd-dhcp6 --systemd --foreground
+/usr/sbin/wickedd --systemd --foreground
+/usr/sbin/wickedd-nanny --systemd --foreground</screen>
+   <para>
+    然後開啟網路：
+   </para>
+<screen>systemctl start wicked</screen>
+   <para>
+    或者使用 <filename>network.service</filename> 別名：
+   </para>
+<screen>systemctl start network</screen>
+   <para>
+    這些指令使用 <filename>/etc/wicked/client.xml</filename> 中定義的預設組態來源或系統組態來源。
+   </para>
+   <para>
+    若要啟用除錯，請在 <filename>/etc/sysconfig/network/config</filename> 中設定 <literal>WICKED_DEBUG</literal>，例如：
+   </para>
+<screen>WICKED_DEBUG="all"</screen>
+   <para>
+    或者，若要省略一些資訊：
+   </para>
+<screen>WICKED_DEBUG="all,-dbus,-objectmodel,-xpath,-xml"</screen>
+   <para>
+    使用用戶端公用程式顯示所有介面的介面資訊，或者顯示以 <replaceable>ifname</replaceable> 指定之介面的介面資訊：
+   </para>
+<screen>wicked show all
+wicked show <replaceable>ifname</replaceable></screen>
+   <para>
+    XML 格式的輸出：
+   </para>
+<screen>wicked show-xml all
+wicked show-xml <replaceable>ifname</replaceable></screen>
+   <para>
+    開啟一個介面：
+   </para>
+<screen>wicked ifup eth0
+wicked ifup wlan0
+...</screen>
+   <para>
+    由於未指定組態來源，wicked 用戶端將會檢查 <filename>/etc/wicked/client.xml</filename> 中為它定義的預設組態來源：
+   </para>
+   <orderedlist>
+    <listitem>
+
+     <para>
+      <literal>firmware：</literal>iSCSI 開機韌體表 (iBFT)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <literal>compat：</literal> <literal>ifcfg</literal> 檔案 — 為相容性而實作
+     </para>
+    </listitem>
+   </orderedlist>
+   <para>
+    將會套用 <literal>wicked</literal> 從指定介面的這些來源中取得的任何設定。預期的重要性順序為 <literal>firmware</literal>、<literal>compat</literal> - 將來這種順序可能會發生變更。
+   </para>
+
+   <para>
+    如需詳細資訊，請參閱 <command>wicked</command> 的 man 頁面。
+   </para>
+  </sect3>
+  <sect3 xml:id="sec.basicnet.manconf.using_nanny">
+   <title>Nanny</title>
+   <para>
+    Nanny 是一個由事件與規則驅動的精靈，負責熱插拔裝置等非同步或被動性案例。因此，nanny 精靈可幫助啟動或者重新啟動延遲的裝置，或臨時消失的裝置。Nanny 會監視裝置和連結的變化，並整合目前規則集定義的新裝置。由於指定的逾時條件約束的原因，即使 <command>ifup</command> 已結束，Nanny 仍會繼續設定。
+   </para>
+   <para>
+    依預設，nanny 精靈在系統上處於使用中狀態。可以在 <filename>/etc/wicked/common.xml</filename> 組態檔案中啟用該精靈：
+   </para>
+<screen>&lt;config&gt;
+  ...
+  &lt;use-nanny&gt;true&lt;/use-nanny&gt;
+&lt;/config&gt;</screen>
+   <para>
+    如果使用此設定，ifup 和 ifreload 會將包含有效組態的規則套用至 nanny 精靈；然後，nanny 將會設定 <systemitem class="daemon">wickedd</systemitem>，從而確定支援熱插拔。nanny 將在背景中等待事件或變更 (例如，開啟新的裝置或載體)。
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.multiple">
+   <title>開啟多個介面</title>
+   <para>
+    對於結合裝置和橋接器，有效的做法是在一個檔案 (ifcfg-bondX) 中定義整個裝置拓撲，並一次性將它開啟。然後，當您指定 (橋接器或結合裝置的) 頂層介面名稱時，wicked 可以開啟整個組態：
+   </para>
+<screen>wicked ifup br0</screen>
+   <para>
+    此指令會依適當的順序自動設定橋接器及其相依項，而無需分別列出相依項 (連接埠等)。
+   </para>
+   <para>
+    若要在一個指令中開啟多個介面：
+   </para>
+<screen>wicked ifup bond0 br0 br1 br2</screen>
+   <para>
+    若要開啟所有介面：
+   </para>
+<screen>wicked ifup all</screen>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.tunnel">
+   <title>通道與 Wicked 配合使用</title>
+   <para>
+    如果需要將通道與 Wicked 配合使用，可以使用 <envar>TUNNEL_DEVICE</envar>。它可用於指定可選的裝置名稱，讓通道繫結到該裝置。通道式封包只會透過此裝置進行路由。
+   </para>
+   <para>
+    如需詳細資訊，請參閱 <command>man 5 ifcfg-tunnel</command>。
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.incremental">
+   <title>處理增量變更</title>
+   <para>
+    有了 <command>wicked</command>，當您要重新設定某個介面時，並不需要真正將它關閉 (除非核心有此要求)。例如，若要將另一個 IP 位址或路由新增到靜態設定的網路介面，請將該 IP 位址新增到介面定義，然後再次執行<quote>ifup</quote>操作。伺服器會儘量做到只更新那些已變更的設定。這適用于連結級別的選項，例如裝置 MTU 或 MAC 位址；也適用於網路級別的設定，例如位址、路由，甚至位址組態模式 (例如，從靜態組態轉到 DHCP 時)。
+   </para>
+   <para>
+    當然，對於合併了多個真實裝置 (例如橋接器或結合裝置) 的虛擬介面，事情會變得有些棘手。對於結合裝置，當裝置運作時，您無法變更某些參數，否則會導致出錯。
+   </para>
+   <para>
+    但是，您仍可以新增或移除結合裝置或橋接器的子裝置，或者選擇結合裝置的主要介面。
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.address_config">
+   <title>Wicked 延伸：位址組態</title>
+   <para>
+    <command>wicked</command> 設計為可使用外圍程序檔延伸。這些延伸可在 <filename>config.xml</filename> 檔案中定義。
+   </para>
+   <para>
+    目前支援數種類別的延伸：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      連結組態：這些程序檔負責根據用戶端提供的組態來設定裝置的連結層，以及負責將連結層再次拆開。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      位址組態：這些程序檔負責管理裝置的位址組態。通常，位址組態和 DHCP 由 <command>wicked</command> 自身管理，但是，可借助延伸來執行。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      防火牆延伸：這些程序檔可以套用防火牆規則。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    通常，延伸中包含一個啟動指令和一個停止指令、一個選擇性的<quote>pid 檔案</quote>，以及要傳遞給程序檔的一組環境變數。
+   </para>
+   <para>
+    為了說明此延伸的工作原理，請查看 <filename>etc/server.xml</filename> 中定義的防火牆延伸：
+   </para>
+<screen>&lt;dbus-service interface="org.opensuse.Network.Firewall"&gt;
+ &lt;action name="firewallUp"   command="/etc/wicked/extensions/firewall up"/&gt;
+ &lt;action name="firewallDown" command="/etc/wicked/extensions/firewall down"/&gt;
+
+ &lt;!-- default environment for all calls to this extension script --&gt;
+ &lt;putenv name="WICKED_OBJECT_PATH" value="$object-path"/&gt;
+ &lt;putenv name="WICKED_INTERFACE_NAME" value="$property:name"/&gt;
+ &lt;putenv name="WICKED_INTERFACE_INDEX" value="$property:index"/&gt;
+&lt;/dbus-service&gt;</screen>
+   <para>
+    此延伸會附加至 
+    <tag class="starttag">dbus-service</tag>
+     標記，並定義針對此介面的動作而要執行的指令。此外，宣告可以定義並啟始化傳遞給動作的環境變數。
+   </para>
+  </sect3>
+
+  <sect3 xml:id="sec.basicnet.manconf.configuration_files">
+   <title>Wicked 延伸：組態檔案</title>
+   <para>
+    您也可以使用程序檔來延伸組態檔案的處理。例如，<filename>extensions/resolver</filename> 程序檔根據 <filename>server.xml</filename> 中設定的行為來最終處理租用中的 DNS 更新：
+   </para>
+<screen>&lt;system-updater name="resolver"&gt;
+ &lt;action name="backup" command="/etc/wicked/extensions/resolver backup"/&gt;
+ &lt;action name="restore" command="/etc/wicked/extensions/resolver restore"/&gt;
+ &lt;action name="install" command="/etc/wicked/extensions/resolver install"/&gt;
+ &lt;action name="remove" command="/etc/wicked/extensions/resolver remove"/&gt;
+&lt;/system-updater&gt;</screen>
+   <para>
+    當 <systemitem>wickedd</systemitem> 中收到更新時，系統更新程式常式將剖析租用，並呼叫解析程式程序檔中的適當指令 (<literal>backup</literal>、<literal>install</literal>等)。此後便可使用 <command>/sbin/netconfig</command> 或者透過手動寫入 <filename>/etc/resolv.conf</filename> (做為錯誤回復) 來設定 DNS 設定。
+   </para>
+  </sect3>
+ </sect2>
+
+ <xi:include href="net_config_files.xml"/>
+
+ <sect2 xml:id="sec.basicnet.manconf.testing">
+  <title>測試與組態</title>
+  <para>
+   將組態寫入您的組態檔案之前，可先進行測試。若要設定測試組態，請使用 <command>ip</command> 指令。若要測試連接，請使用 <command>ping</command> 指令。
+  </para>
+  <para>
+   <command>ip</command> 指令會直接變更網路組態，而不會將其儲存到組態檔案中。除非您將組態輸入正確的組態檔案，否則重新開機之後網路組態的變更就會遺失。
+  </para>
+  <note>
+   <title><command>ifconfig</command> 和 <command>route</command> 已過時</title>
+   <para>
+    <command>ifconfig</command> 和 <command>route</command> 工具已過時。請改用 <command>ip</command>。例如，<command>ifconfig</command> 會將介面名稱限制為 9 個字元。
+   </para>
+  </note>
+  <sect3 xml:id="sec.basicnet.manconf.ip">
+   <title>使用 <command>ip</command> 設定網路介面</title><indexterm>
+   <primary> 指令</primary>
+   <secondary> ip</secondary></indexterm>
+   <remark>
+From: Marius Tomaschewski mt@suse.de&gt;
+Subject: Re: Manual Network Config
+To: Karl Eichwalder ke@suse.de&gt;
+Date: Mon, 24 Aug 2009 14:21:44 +0200
+
+Das ifconfig utility ist obsolete und unterstützt nur Interface-
+Namen bis 9 Zeichen, z.B. "foo012345". Die restlichen Zeichen
+werden abgeschnitten und nicht angezeigt.
+Das "ip" utility unterstützt hingegen die derzeit volle Länge von
+15 Zeichen, z.B. "foo012345678901".
+
+Statt "ifconfig" sollte "ip addr" und "ip link" verwendet werden,
+um routing zu konfigurieren, sollte nicht "route", sondern "ip route"
+verwendendet werden.
+
+...
+
+IMO besser wäre es die Beispiel-Ausgaben von route und ifconfig zu
+entfernen und stattdessen Beispiel-Ausgaben von:
+
+"ip link show", "ip addr show",
+"ip -4 route show", "ip -6 route show"
+(und ggf. auch "ip rule show")
+
+im "Configuring a Network Interface with ip" zu bringen. Eventuell
+mit ein Paar Beispielen als eine Art Kurzanleitung, in etwa:
+
+ip link set up dev eth0
+
+ip addr add 192.168.0.100/24 dev eth0
+ip addr add 2001:DB8:cafe::dead/64 dev eth0
+
+ip route add 192.168.1.0/24 via 192.168.0.200 dev eth0
+ip route add 2001:DB8:cafe:1::/64 via 2001:DB8:cafe::feed dev eth0
+
+ip route add default via 192.168.0.254 dev eth0
+ip route add default via 2001:DB8:cafe::beef dev eth0
+
+ip addr show dev eth0
+ip -4 route show # dev eth0
+ip -6 route show # dev eth0
+
+ip route del 192.168.1.0/24 via 192.168.0.200 dev eth0
+ip route del 2001:DB8:cafe:1::/64 via 2001:DB8:cafe::feed dev eth0
+
+ip route del default via 192.168.0.254 dev eth0
+ip route del default via 2001:DB8:cafe::beef dev eth0
+
+ip addr del 192.168.0.100/24 dev eth0
+ip addr del 2001:DB8:cafe::dead/64 dev eth0
+
+ip link set down dev eth0
+</remark>
+   <remark>
+ ke 2014-05-15: ifconfig and route is removed sind quite some time.
+ Maybe, we should add more ip examples as Marius proposes...
+</remark> 
+   <para>
+    <command>ip</command> 是一項可顯示及設定網路裝置、路由、規則路由和通道的工具。
+   </para>
+   <para>
+    <command>ip</command> 是非常複雜的工具。其一般語法是 <command>ip</command> <option><replaceable>options</replaceable>
+    <replaceable> object</replaceable>
+    <replaceable> command</replaceable></option>。您可使用下列物件：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>link</term>
+     <listitem>
+      <para>
+       此物件代表網路裝置。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>address</term>
+     <listitem>
+      <para>
+       此物件代表裝置的 IP 位址。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>鄰接</term>
+     <listitem>
+      <para>
+       此物件代表 ARP 或 NDISC 快取項目。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>route</term>
+     <listitem>
+      <para>
+       此物件代表路由表格項目。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>rule</term>
+     <listitem>
+      <para>
+       此物件代表路由原則資料庫中的規則。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>maddress</term>
+     <listitem>
+      <para>
+       此物件代表多重廣播位址。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mroute</term>
+     <listitem>
+      <para>
+       此物件代表多重廣播路由快取項目。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>tunnel</term>
+     <listitem>
+      <para>
+       此物件表示 IP 上的通道。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    若未提供指令，會使用預設指令 (通常是 <command>list</command>)。
+   </para>
+   <para>
+    使用指令 <command>ip link set</command> <option><replaceable>device_name</replaceable></option><command/> 變更裝置的狀態。例如，若要停用裝置 eth0，請輸入 <command>ip link set</command> <option> eth0 down</option>。若要重新啟用，請使用 <command>ip link set</command> <option> eth0 up</option>。
+   </para>
+   <para>
+    啟用裝置之後，就可加以設定。若要設定 IP 位址，請使用 <command>ip addr add</command> <option><replaceable>ip_address</replaceable> + dev <replaceable>device_name</replaceable></option>。例如，若要將介面 eth0 的 IP 位址以標準廣播 (選項 <option>brd</option>) 設定為 192.168.12.154/30，請輸入 <command>ip addr</command> <option>add 192.168.12.154/30 brd + dev eth0</option>。
+   </para>
+   <para>
+    若要具備作用中連接，必須設定預設閘道。若要為您的系統設定閘道，請輸入 <command>ip route add</command> <option>閘道 IP 位址</option>。若要轉換某個 IP 位址，請使用 <command>nat</command>: <command>ip route add nat</command> <option>ip_address</option> <command>via</command> <option>other_ip_address</option>。
+   </para>
+   <para>
+    若要顯示所有裝置，請使用 <command>ip link ls</command>。若只希望顯示運作中介面，請使用 <command>ip link ls up</command>。若要列印裝置的介面統計值，請輸入 <command>ip -s link ls</command> <option>device_name</option>。若要檢是您裝置的位址，請輸入 <command>ip addr</command>。在 <command>ip addr</command> 的輸出中同時也可找到您裝置的 MAC 位址相關資訊。若要顯示所有路由，請使用 <command>ip route show</command>。
+   </para>
+   <para>
+    如需有關使用 <command>ip</command> 的詳細資訊，請輸入 <command>ip</command> <option>help</option> 或參閱 <systemitem>ip(8)</systemitem> man 頁面。<option>help</option> 選項也適用於所有 <command>ip</command> 子指令。例如，如果您需要 <command>ip</command> <option>addr</option> 的說明，請輸入 <command>ip</command> <option>addr help</option>。<filename>/usr/share/doc/packages/iproute2/ip-cref.pdf</filename> 中提供了有關 <command>ip</command> 的說明。
+   </para>
+  </sect3>
+  <sect3 xml:id="sec.basicnet.manconf.testingping">
+   <title>以 ping 測試連接</title><indexterm>
+   <primary>指令</primary>
+   <secondary>ping</secondary></indexterm><indexterm>
+   <primary>ping</primary></indexterm>
+   <para>
+    <command>ping</command> 指令是測試 TCP/IP 連接運作的標準工具。其使用 ICMP 通訊協定，將小型資料封包 ECHO_REQUEST 傳送至目的地主機，要求立即回應。如果成功，<command>ping</command> 將顯示表示這一結果的訊息。這表示網路連結正在作用。
+   </para>
+   <para>
+    <command>ping</command> 不僅會測試兩台電腦之間能否連接，還會提供一些關於連接品質的基本資訊。您可在 <xref linkend="ex.basicnet.manconf.ping"/> 中看到 <command>ping</command> 輸出的一些範例。倒數第二行包含送出的封包數、封包遺失率以及執行 <command>ping</command> 總共花費的時間等資訊。
+   </para>
+   <para>
+    因此，可使用主機名稱或 IP 位址，例如 <command>ping</command> <option>example.com</option> 或 <command>ping</command> <option>192.168.3.100</option>。程式會持續傳送封包，直到您按下 <keycombo><keycap function="control"/><keycap> C</keycap></keycombo> 為止。
+   </para>
+   <para>
+    若您只需要檢查連接功能性，您可以 <option>-c</option> 選項限定封包數量。例如，若要將 ping 限制於三個封包，請輸入 <command>ping</command> <option>-c 3 example.com</option>。
+   </para>
+   <example xml:id="ex.basicnet.manconf.ping">
+    <title>指令 ping 的輸出</title>
+<screen>ping -c 3 example.com
+PING example.com (192.168.3.100) 56(84) bytes of data.
+64 bytes from example.com (192.168.3.100): icmp_seq=1 ttl=49 time=188 ms
+64 bytes from example.com (192.168.3.100): icmp_seq=2 ttl=49 time=184 ms
+64 bytes from example.com (192.168.3.100): icmp_seq=3 ttl=49 time=183 ms
+--- example.com ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2007ms
+rtt min/avg/max/mdev = 183.417/185.447/188.259/2.052 ms</screen>
+   </example>
+   <para>
+    兩個封包之間的預設間隔為一秒。若要變更間隔，可以使用 ping 提供的選項 <option>-i</option>。例如，若要將 ping 間隔增加到十秒，請輸入 <command>ping</command> <option>-i 10 example.com</option>。
+   </para>
+   <para>
+    在具備多網路裝置的系統中，透過特定介面位址傳送 ping 非常實用。若要執行此動作，請使用 <option>-I</option> 選項以及所選裝置的名稱，例如 <command>ping</command> <option>-I wlan1 example.com</option>。
+   </para>
+   <para>
+    如需使用 ping 的選項與詳細資訊，請輸入 <command>ping</command> <option>-h</option> 或參閱 <systemitem>ping (8)</systemitem> man 頁面。
+   </para>
+   <tip>
+    <title>Ping IPv6 位址</title>
+    <para>
+     對於 IPv6 位址，請使用 <command>ping6</command> 指令。請注意，若要 ping 連結-本機位址，必須使用 <option>-I</option> 指定介面。如果該位址可透過 <literal>eth1</literal> 存取，則可以使用以下指令實現目的：
+    </para>
+<screen>ping6 -I eth1 fe80::117:21ff:feda:a425</screen>
+   </tip>
+  </sect3>
+
+ </sect2>
+
+ <sect2 xml:id="sec.basicnet.manconf.scripts">
+  <title>單位檔案和啟動程序檔</title><indexterm>
+  <primary> 程序檔</primary>
+  <secondary> init.d</secondary></indexterm> 
+  <para>
+   除了上述的組態檔案之外，還有一些在機器開機時載入網路服務的 systemd 單位檔案和各種程序檔。當系統切換為 <systemitem>multi-user.target</systemitem> 目標時，會啟動這些單位檔案和程序檔。<xref linkend="var.net.start.scripts"/>中介紹了一些單位檔案和程序檔。如需有關 <systemitem>systemd</systemitem> 的詳細資訊，請參閱<xref linkend="cha.systemd"/>；如需有關 <systemitem>systemd</systemitem> 目標的詳細資訊，請參閱 <systemitem>systemd.special</systemitem> 的 man 頁面 (<command>man systemd.special</command>)。 <remark>taroth 2014-02-13: FIXME: SYSTEMD, WICKED</remark>
+  </para>
+  <variablelist xml:id="var.net.start.scripts">
+   <title>網路程式的一些單位檔案和啟動程序檔</title>
+   <varlistentry>
+    <term><systemitem>network.target</systemitem>
+<indexterm>
+     <primary>  單位檔案</primary>
+     <secondary> network.target</secondary></indexterm>
+
+    </term>
+    <listitem>
+     <para>
+      <systemitem>network.target</systemitem> 是網路的 systemd 目標，但其具體含義取決於系統管理員提供的設定。
+     </para>
+     <para>
+      如需詳細資訊，請參閱<link xlink:href="http://www.freedesktop.org/wiki/Software/systemd/NetworkTarget/"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>multi-user.target</systemitem>
+    </term>
+    <listitem>
+     <para>
+
+      <indexterm>
+      <primary> 單位檔案</primary>
+      <secondary> multi-user.target</secondary>
+      </indexterm>
+
+      <systemitem>  multi-user.target</systemitem> 是包含全部所需網路服務之多使用者系統的 systemd 目標。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>xinetd</systemitem>
+    </term>
+    <listitem>
+     <para>
+      啟動 xinetd。xinetd 可以用來讓伺服器服務能夠在系統上使用。例如，只要開啟 FTP 連接，它即可啟動 vsftpd。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>rpcbind</systemitem>
+    </term>
+    <listitem>
+     <para>
+      啟動可將 RPC 程式號碼轉換為通用位址的 rpcbind 公用程式。NFS 伺服器等 RPC 服務需要用到。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>ypserv</systemitem>
+    </term>
+    <listitem>
+     <para>
+      啟動 NIS 伺服器。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem>ypbind</systemitem>
+    </term>
+    <listitem>
+     <para>
+      啟動 NIS 用戶端。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/init.d/nfsserver</filename>
+    </term>
+    <listitem>
+     <para>
+      啟動 NFS 伺服器。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/init.d/postfix</filename>
+    </term>
+    <listitem>
+     <para>
+      控制後置程序。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+ </sect2>
+</sect1>

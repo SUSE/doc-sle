@@ -1,0 +1,524 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="adm_sudo.xml" version="5.0" xml:id="cha.adm.sudo">
+ <title>sudo
+</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  许多命令和系统实用程序都需要以 <systemitem class="username">root</systemitem> 身份运行才能修改文件和/或执行只有超级用户方能执行的任务。为了确保安全和避免发生意外运行危险命令的情况，通常建议不要直接以 <systemitem class="username">root</systemitem> 身份登录。建议的做法是以非特权的普通用户身份工作，并使用 <command>sudo</command> 命令来运行需要较高特权的命令。
+ </para>
+ <para>
+  在 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上，<command>sudo</command> 默认配置为以与 su 类似的方式工作。但是，<command>sudo</command> 可让用户以高度可配置的方式使用任何其他用户的特权来运行命令。这样，便可为某些用户和组指派具有特定特权的角色。举例来说，可以允许组 <systemitem class="groupname">users</systemitem> 的成员使用 <systemitem class="username">wilber</systemitem> 的特权运行命令。例如，通过禁止指定任何命令选项，可以进一步限制对命令的权限。虽然 su 始终需要 <systemitem class="username">root</systemitem> 口令才能使用 PAM 进行身份验证，但是您可以将 <command>sudo</command> 配置为使用您自己的身份凭证进行身份验证。这样就不需要共享 <systemitem class="username">root</systemitem> 口令，从而提高了安全性。例如，您可以允许组 <systemitem class="groupname">users</systemitem> 的成员以 <systemitem class="username">wilber</systemitem> 身份运行命令 <command>frobnicate</command>，但限制其不能指定自变量。这样，便可为某些用户和组指派具有特定能力的角色。
+ </para>
+ <sect1 xml:id="sec.adm.sudo.usage">
+  <title><command>sudo</command> 基本用法</title>
+
+  <para>
+   虽然 <command>sudo</command> 简单易用，功能却十分强大。
+  </para>
+
+  <sect2 xml:id="sec.adm.sudo.usage.cmd">
+   <title>运行单个命令</title>
+   <para>
+    以普通用户身份登录后，您可以在命令前加上 <command>sudo</command> 以 <systemitem class="username">root</systemitem> 身份运行任何命令。按照提示输入 root 口令后，如果身份验证成功，您便能以 <systemitem class="username">root</systemitem> 身份运行命令：
+   </para>
+<screen>
+<prompt>tux &gt; </prompt><command>id -un</command><co xml:id="co.sudo.usage.id"/>
+tux
+<prompt>tux &gt; </prompt><command>sudo id -un</command>
+root's password:<co xml:id="co.sudo.usage.pw"/>
+root
+<prompt>tux &gt; </prompt><command>id -un</command>
+tux<co xml:id="co.sudo.usage.after"/>
+<prompt>tux &gt; </prompt><command>sudo id -un</command>
+<co xml:id="co.sudo.usage.nopw"/>
+root
+</screen>
+   <calloutlist>
+    <callout arearefs="co.sudo.usage.id">
+     <para>
+      <command>id -un</command> 命令会打印当前用户的登录名。
+     </para>
+    </callout>
+    <callout arearefs="co.sudo.usage.pw">
+     <para>
+      在输入过程中不会显示口令，无论是明文还是密文均不显示。
+     </para>
+    </callout>
+    <callout arearefs="co.sudo.usage.after">
+     <para>
+      只有以 <command>sudo</command> 开头的命令才会使用较高的特权运行。如果是不带 <command>sudo</command> 前缀的相同命令，仍会使用当前用户的特权运行。
+     </para>
+    </callout>
+    <callout arearefs="co.sudo.usage.nopw">
+     <para>
+      在限定时间内，您无需再次输入 <systemitem class="username">root</systemitem> 口令。
+     </para>
+    </callout>
+   </calloutlist>
+   <tip>
+    <title>I/O 重定向</title>
+    <para>
+     I/O 重定向的工作方式与您预期的可能不同：
+    </para>
+<screen>
+<prompt>tux &gt; </prompt> sudo echo s &gt; /proc/sysrq-trigger
+bash: /proc/sysrq-trigger: Permission denied
+<prompt>tux &gt; </prompt> sudo cat &lt; /proc/1/maps
+bash: /proc/1/maps: Permission denied
+</screen>
+    <para>
+     只有 <command>echo</command>/<command>cat</command> 二进制会使用较高特权运行，重定向则由用户外壳使用用户特权执行。您可以按<xref linkend="sec.sudo.shell"/>中所述启动外壳，也可以使用 <command>dd</command> 实用程序来启动：
+    </para>
+<screen>
+echo s | sudo dd of=/proc/sysrq-trigger
+sudo dd if=/proc/1/maps | cat 
+</screen>
+   </tip>
+  </sect2>
+
+  <sect2 xml:id="sec.sudo.shell">
+   <title>启动外壳</title>
+   <para>
+    必须在每条命令前加上 <command>sudo</command> 可能很繁琐。虽然可以将外壳指定为命令 <command>sudo bash</command>，但还是建议您使用以下其中一种内置机制来启动外壳：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>sudo -s (&lt;命令&gt;)</literal>
+     </term>
+     <listitem>
+      <para>
+       启动 <envar>SHELL</envar> 环境变量所指定的外壳或目标用户的默认外壳。如果给定了命令，则会将该命令传递给外壳（使用 <option>-c</option> 选项），否则外壳会以交互模式运行。
+      </para>
+<screen>
+<prompt>tux:~ &gt; </prompt>sudo -i
+root's password:
+<prompt>root:/home/tux # </prompt>exit
+<prompt>tux:~ &gt; </prompt>
+</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>sudo -i (&lt;命令&gt;)</literal>
+     </term>
+     <listitem>
+      <para>
+       与 <option>-s</option> 类似，但是会将外壳启动为登录外壳。也就是说，系统会对外壳的启动文件（<filename>.profile</filename> 等）进行处理，并会将当前的工作目录设置为目标用户的主目录。
+      </para>
+<screen>
+<prompt>tux:~ &gt; </prompt>sudo -i
+root's password:
+<prompt>root:~ # </prompt>exit
+<prompt>tux:~ &gt; </prompt>
+            </screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.adm.sudo.usage.env">
+   <title>环境变量</title>
+   <para>
+    默认情况下，<command>sudo</command> 不会传播环境变量：
+   </para>
+<screen>
+<prompt>tux &gt; </prompt>ENVVAR=test env | grep ENVVAR
+ENVVAR=test
+<prompt>tux &gt; </prompt>ENVVAR=test sudo env | grep ENVVAR
+root's password:
+<co xml:id="co.sudo.env.novar"/>
+<prompt>tux &gt; </prompt>
+      </screen>
+   <calloutlist>
+    <callout arearefs="co.sudo.env.novar">
+     <para>
+      输出为空即表明在使用 <command>sudo</command> 运行的命令的环境中不存在环境变量 <envar>ENVVAR</envar>。
+     </para>
+    </callout>
+   </calloutlist>
+   <para>
+    此行为可通过 <literal>env_reset</literal> 选项进行更改，请参见<xref linkend="tab.adm.sudo.options"/>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.sudo.conf">
+  <title>配置 <command>sudo</command></title>
+
+  <para>
+   <command>sudo</command> 是一个非常灵活的工具，提供各种配置选项。
+  </para>
+
+  <note>
+   <title>无法使用 sudo</title>
+   <para>
+    如果您不小心使自己处于无法使用 <command>sudo</command> 的状况，您可以使用 <command>su -</command> 及 <systemitem class="username">root</systemitem> 口令获取 root 外壳，然后运行 <command>visudo</command> 来修复这个错误。
+   </para>
+  </note>
+
+  <sect2 xml:id="sec.sudo.conf.edit">
+   <title>编辑配置文件</title>
+   
+   <para>
+    <command>sudo</command> 的主要策略配置文件为 <filename>/etc/sudoers</filename>。如果该文件中存在任何错误，您可能便无法使用系统，因此强烈建议使用 <command>visudo</command> 来编辑配置文件。该命令可以防止同时对打开的该文件进行更改，并会在保存之前检查语法错误。
+   </para>
+   <para>
+    您还可以通过设置 <envar>EDITOR</envar> 环境变量来使用除 vi 以外的编辑器（不论名字如何），例如：
+   </para>
+<screen>sudo EDITOR=<replaceable>/usr/bin/nano</replaceable> visudo</screen>
+   <para>
+    不过，<filename>/etc/sudoers</filename> 文件本身是由系统包提供的，更新时这些修改可能会取消。因此，建议您将自定义配置放到 <filename>/etc/sudoers.d/</filename> 目录下的文件中。该目录下的任何文件都会自动纳入系统中。要在该子目录下创建或编辑文件，请运行：
+   </para>
+<screen>sudo visudo -f /etc/sudoers.d/<replaceable>NAME</replaceable></screen>
+   <para>
+    或者，使用其他编辑器（例如 <command>nano</command>）：
+   </para>
+<screen>sudo EDITOR=<replaceable>/usr/bin/nano</replaceable> visudo -f /etc/sudoers.d/<replaceable>NAME</replaceable></screen>
+   <note>
+    <title><filename>/etc/sudoers.d</filename> 中忽略的文件</title>
+    <para>
+     <filename>/etc/sudoers</filename> 中的 <literal>#includedir</literal> 命令（用于 <filename>/etc/sudoers.d</filename>）会忽略以 <literal>~</literal>（波浪号）结尾或包含 <literal>.</literal>（点）的文件。
+    </para>
+   </note>
+   <para>
+    关于 <command>visudo</command> 命令的详细信息，请运行 <command>man 8 visudo</command>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.sudo.conf.syntax">
+   <title>sudoers 基本配置语法</title>
+   <para>
+    在 sudoers 配置文件中，有两种类型的选项：字符串和标志。字符串可以包含任何值，而标志则只能在“ON”或“OFF”之间切换。sudoers 配置文件最重要的语法构造为：
+   </para>
+<screen>
+# Everything on a line after a # gets ignored <co xml:id="co.sudo.syntax.comment"/>
+Defaults !insults # Disable the insults flag <co xml:id="co.sudo.syntax.flag"/>
+Defaults env_keep += "DISPLAY HOME" # Add DISPLAY and HOME to env_keep
+tux ALL = NOPASSWD: /usr/bin/frobnicate, PASSWD: /usr/bin/journalctl <co xml:id="co.sudo.syntax.rule"/>
+</screen>
+   <calloutlist>
+    <callout arearefs="co.sudo.syntax.comment">
+     <para>
+      <literal>#include</literal> 和 <literal>#includedir</literal> 这两个普通命令例外。其后跟数字，用于指定 UID。
+     </para>
+    </callout>
+    <callout arearefs="co.sudo.syntax.flag">
+     <para>
+      去除 <literal>!</literal> 可将指定的标志设置为“ON”。
+     </para>
+    </callout>
+    <callout arearefs="co.sudo.syntax.rule">
+     <para>
+      请参见<xref linkend="sec.sudo.conf.rule"/>。
+     </para>
+    </callout>
+   </calloutlist>
+   <table xml:id="tab.adm.sudo.options">
+    <title>有用的标志和选项</title>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         选项名称
+        </para>
+       </entry>
+       <entry>
+        <para>
+         说明
+        </para>
+       </entry>
+       <entry>
+        <para>
+         示例
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry><literal>targetpw</literal>
+       </entry>
+       <entry>
+        <para>
+         此标志控制调用用户是需要输入目标用户（例如 <systemitem class="username">root</systemitem>）的口令 (ON) 还是需要输入调用用户的口令 (OFF)。
+        </para>
+       </entry>
+       <entry>
+<screen>Defaults targetpw # Turn targetpw flag ON</screen>
+       </entry>
+      </row>
+      <row>
+       <entry><literal>rootpw</literal>
+       </entry>
+       <entry>
+        <para>
+         如果设置了该选项，<command>sudo</command> 会提示输入 <systemitem class="username">root</systemitem> 口令，而非目标用户或调用者的口令。默认值为“OFF”。
+        </para>
+       </entry>
+       <entry>
+<screen>Defaults !rootpw # Turn rootpw flag OFF</screen>
+       </entry>
+      </row>
+      <row>
+       <entry><literal>env_reset</literal>
+       </entry>
+       <entry>
+        <para>
+         如果设置了该选项，<command>sudo</command> 会构造一个仅包含 <envar>TERM</envar>、<envar>PATH</envar>、<envar>HOME</envar>、 <envar>MAIL</envar>、<envar>SHELL</envar>、 <envar>LOGNAME</envar>、<envar>USER</envar>、<envar>USERNAME</envar> 和 <envar>SUDO_*</envar> 集的最小环境。此外，会从调用环境导入 <literal>env_keep</literal> 中列出的变量。默认值为“ON”。
+        </para>
+       </entry>
+       <entry>
+<screen>Defaults env_reset # Turn env_reset flag ON</screen>
+       </entry>
+      </row>
+      <row>
+       <entry><literal>env_keep</literal>
+       </entry>
+       <entry>
+        <para>
+         <literal>env_reset</literal> 标志设为“ON”时要保留的环境变量列表。
+        </para>
+       </entry>
+       <entry>
+<screen>
+# Set env_keep to contain EDITOR and PROMPT
+Defaults env_keep = "EDITOR PROMPT"
+Defaults env_keep += "JRE_HOME" # Add JRE_HOME
+Defaults env_keep -= "JRE_HOME" # Remove JRE_HOME
+</screen>
+       </entry>
+      </row>
+      <row>
+       <entry><literal>env_delete</literal>
+       </entry>
+       <entry>
+        <para>
+         <literal>env_reset</literal> 标志设为“OFF”时要去除的环境变量列表。
+        </para>
+       </entry>
+       <entry>
+<screen>
+# Set env_delete to contain EDITOR and PROMPT
+Defaults env_delete = "EDITOR PROMPT"
+Defaults env_delete += "JRE_HOME" # Add JRE_HOME
+Defaults env_delete -= "JRE_HOME" # Remove JRE_HOME
+</screen>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <para>
+    还可以使用 <literal>Defaults</literal> 令牌为用户、主机和命令集合创建别名。并且，可以仅将选项应用到特定用户集。
+   </para>
+   <para>
+    关于 <filename>/etc/sudoers</filename> 配置文件的详细信息，请参见 <command>man 5 sudoers</command>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.sudo.conf.rule">
+   <title>sudoers 中的规则</title>
+   <para>
+    sudoers 配置中的规则可能会非常复杂，因此本节仅涉及基本内容。每个规则都遵循基本模式（<literal>[]</literal> 标记的是可选部分）：
+   </para>
+<screen>
+#Who      Where         As whom      Tag                What
+User_List Host_List = [(User_List)] [NOPASSWD:|PASSWD:] Cmnd_List
+</screen>
+   <variablelist>
+    <title>sudoers 规则的语法</title>
+    <varlistentry>
+     <term><literal>User_List</literal>
+     </term>
+     <listitem>
+      <para>
+       一个或多个（用 <literal>,</literal> 分隔）标识符：用户名、格式为 <literal>%GROUPNAME</literal> 的组或格式为 <literal>#UID</literal> 的用户 ID。可以使用 <literal>!</literal> 前缀来取反。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Host_List</literal>
+     </term>
+     <listitem>
+      <para>
+       一个或多个（用 <literal>,</literal> 分隔）标识符：（完全限定的）主机名或 IP 地址。可以使用 <literal>!</literal> 前缀来取反。<literal>Host_List</literal> 的惯常选项为 <literal>ALL</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>NOPASSWD:|PASSWD:</literal>
+     </term>
+     <listitem>
+      <para>
+       如果用户在 <literal>NOPASSWD:</literal> 后面运行的命令与 <literal>CMDSPEC</literal> 匹配，系统不会提示用户输入口令。
+      </para>
+      <para>
+       <literal>PASSWD</literal> 为默认选项，仅当两个选项位于同一行时才需要指定它：
+      </para>
+<screen>tux ALL = PASSWD: /usr/bin/foo, NOPASSWD: /usr/bin/bar</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>Cmnd_List</literal>
+     </term>
+     <listitem>
+      <para>
+       一个或多个（用 <literal>,</literal> 分隔）区分符：可执行文件的路径，后跟允许使用的自变量或什么也不跟。
+      </para>
+<screen>
+/usr/bin/foo     # Anything allowed
+/usr/bin/foo bar # Only "/usr/bin/foo bar" allowed
+/usr/bin/foo ""  # No arguments allowed
+</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    <literal>ALL</literal> 可以用作 <literal>User_List</literal>、<literal>Host_List</literal> 和 <literal>Cmnd_List</literal>。
+   </para>
+   <para>
+    允许 <systemitem class="username">tux</systemitem> 在无需输入口令的情况下以 root 身份运行所有命令的规则：
+   </para>
+<screen>tux ALL = NOPASSWD: ALL</screen>
+   <para>
+    允许 <systemitem class="username">tux</systemitem> 运行 <command>systemctl restart apache2</command> 的规则：
+   </para>
+<screen>tux ALL = /usr/bin/systemctl restart apache2</screen>
+   <para>
+    允许 <systemitem class="username">tux</systemitem> 在不带自变量的情况下以 <systemitem>admin</systemitem> 身份运行 <command>wall</command> 的规则：
+   </para>
+<screen>tux ALL = (admin) /usr/bin/wall ""</screen>
+   <warning>
+    <title>危险构造</title>
+    <para>
+     以下类型的构造
+    </para>
+<screen>ALL ALL = ALL</screen>
+    <para>
+     在没有 <literal>Defaults targetpw</literal> 的情况下<emphasis>切勿</emphasis>使用，否则任何人都能以 <systemitem class="username">root</systemitem> 身份运行命令。
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.sudo.usecases">
+  <title>常见使用情况</title>
+
+  <para>
+   尽管默认配置对于简单的设置和桌面环境通常已经够用，但是自定义配置非常有用。
+  </para>
+
+  <sect2 xml:id="sec.sudo.usecases.userpw">
+   <title>在无需 <systemitem class="username">root</systemitem> 口令的情况下使用 <command>sudo</command></title>
+   <para>
+    在具有特殊限制（<quote>用户 X 只能以 <systemitem class="username">root</systemitem></quote> 身份运行命令 Y）的情况下，无法实现此目的。在其他情况下，还是建议进行某种分隔。按照惯例，组 <systemitem class="groupname">wheel</systemitem> 的成员能以 root 身份运行所有带有 <command>sudo</command> 的命令。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      将自己添加到 <systemitem class="groupname">wheel</systemitem> 组
+     </para>
+     <para>
+      如果您自己的用户帐户尚不是 <systemitem class="groupname">wheel</systemitem> 组的成员，请添加该帐户，具体做法是运行 <command>sudo usermod -a -G wheel <replaceable>用户名</replaceable></command>然后注销并再次登录。运行 <command>groups <replaceable>用户名</replaceable></command>以确认更改是否成功。
+     </para>
+    </step>
+    <step>
+     <para>
+      将使用调用用户的口令进行身份验证的选项设为默认设置。
+     </para>
+     <para>
+      使用 <command>visudo</command> 创建文件 <filename>/etc/sudoers.d/userpw</filename>（请参见<xref linkend="sec.sudo.conf.edit"/>）并添加：
+     </para>
+<screen>Defaults !targetpw</screen>
+    </step>
+    <step>
+     <para>
+      选择新默认规则。
+     </para>
+     <para>
+      根据是否想要用户重新输入口令，取消对 <filename>/etc/sudoers</filename> 中特定行的注释，并将默认规则注释掉。
+     </para>
+<screen>
+## Uncomment to allow members of group wheel to execute any command
+# %wheel ALL=(ALL) ALL
+
+## Same thing without a password
+# %wheel ALL=(ALL) NOPASSWD: ALL
+</screen>
+    </step>
+    <step>
+     <para>
+      提高默认规则的限制性
+     </para>
+     <para>
+      将 <filename>/etc/sudoers</filename> 中允许一切操作的规则注释掉或去除：
+     </para>
+<screen>ALL     ALL=(ALL) ALL   # WARNING! Only use this together with 'Defaults targetpw'!</screen>
+     <warning>
+      <title>sudoers 中的危险规则</title>
+      <para>
+       切勿漏掉这一步，否则<emphasis>任何</emphasis>用户都能以 <systemitem class="username">root</systemitem> 身份执行<emphasis>任何</emphasis>命令。
+      </para>
+     </warning>
+    </step>
+    <step>
+     <para>
+      测试配置
+     </para>
+     <para>
+      尝试以 <systemitem class="groupname">wheel</systemitem> 的成员和非成员身份运行 <command>sudo</command>。
+     </para>
+<screen>
+<prompt>tux:~ &gt; </prompt>groups
+users wheel
+<prompt>tux:~ &gt; </prompt>sudo id -un
+tux's password:
+root
+<prompt>wilber:~ &gt; </prompt>groups
+users
+<prompt>wilber:~ &gt; </prompt>sudo id -un
+wilber is not in the sudoers file.  This incident will be reported.
+          </screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.sudo.usecases.xorg">
+   <title>对 X.Org 应用程序使用 <command>sudo</command></title>
+   <para>
+    在使用 <command>sudo</command> 启动图形应用程序时，可能会出现以下错误：
+   </para>
+<screen>
+<prompt>tux &gt; </prompt>sudo xterm
+xterm: Xt error: Can't open display: %s
+xterm: DISPLAY is not set
+      </screen>
+   <para>
+    YaST 会选择 ncurses 界面而非图形界面。
+   </para>
+   <para>
+    要在通过 <command>sudo</command> 启动的应用程序中使用 X.Org，需要传播环境变量 <envar>DISPLAY</envar> 和 <envar>XAUTHORITY</envar>。要进行此项配置，请创建文件 <filename>/etc/sudoers.d/xorg</filename>（请参见<xref linkend="sec.sudo.conf.edit"/>）并添加下面一行：
+   </para>
+<screen>Defaults env_keep += "DISPLAY XAUTHORITY"</screen>
+   <para>
+    如尚未设置 <envar>XAUTHORITY</envar> 变量，请按如下方式设置：
+   </para>
+<screen>export XAUTHORITY=~/.Xauthority</screen>
+   <para>
+    现在，X.Org 应用程序便可正常运行：
+   </para>
+<screen>sudo yast2</screen>
+
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.adm.sudo.moreinfo">
+  <title>更多信息</title>
+
+  <para>
+   使用 <command>sudo --help</command> 可检索有关可用命令行开关的简要概述。如需说明和其他重要信息，请参见手册页：<command>man 8 sudo</command>，配置相关信息详见 <command>man 5 sudoers</command>。
+  </para>
+ </sect1>
+</chapter>

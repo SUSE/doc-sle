@@ -1,0 +1,1948 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="snapper.xml" version="5.0" xml:id="cha.snapper">
+ <title>使用 Snapper 進行系統復原和快照管理</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    在 Linux 上建立檔案系統快照以執行復原的功能是過去使用者常常要求的一項功能。現在，Snapper 與 <literal>Btrfs</literal> 檔案系統或簡易佈建的 LVM 磁碟區合用，填補了這個空白。
+   </para>
+
+   <para>
+    <literal>Btrfs</literal> 是一個適用於 Linux 的全新寫時複製檔案系統，它支援子磁碟區 (每個實體分割區中的一或多個可獨立掛接的檔案系統) 的檔案系統快照 (子磁碟區於特定時間點之狀態的副本)。快照在使用 XFS、Ext4 或 Ext3 格式化之簡易佈建的 LVM 磁碟區上同樣受支援。Snapper 可讓您建立和管理這些快照。它包含一個指令行和一個 YaST 介面。自 SUSE Linux Enterprise Server 12 開始，還可以從 <literal>Btrfs</literal> 快照進行開機。如需詳細資訊，請參閱<xref linkend="sec.snapper.snapshot-boot"/>。
+   </para>
+  </abstract>
+ </info>
+ <para>
+  您可以使用 Snapper 執行以下任務︰
+ </para>
+ <itemizedlist mark="bullet" spacing="normal">
+  <listitem>
+   <para>
+    復原 <command>zypper</command> 和 YaST 所做的系統變更。如需詳細資料，請參閱<xref linkend="sec.snapper.auto"/>。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    從之前的快照還原檔案。如需詳細資料，請參閱<xref linkend="sec.snapper.backup"/>。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    透過從快照開機來復原系統。如需詳細資料，請參閱<xref linkend="sec.snapper.snapshot-boot"/>。
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    手動建立即時快照並管理現有的快照。如需詳細資料，請參閱<xref linkend="sec.snapper.manage"/>。
+   </para>
+  </listitem>
+ </itemizedlist>
+ <sect1 xml:id="sec.snapper.setup">
+  <title>預設設定</title>
+
+  <para>
+   <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上的 Snapper 設定為充當系統變更的<quote>恢復與復原工具</quote>。依預設，<filename>SUSE Linux Enterprise Desktop</filename> 的根分割區 (<phrase role="productname"><phrase os="sled">/</phrase></phrase>) 使用 <literal>Btrfs</literal> 格式。如果根分割區 (<filename>/</filename>) 足夠大 (大約超過 16GB)，則會自動啟用快照建立功能。預設不會在 <filename>/</filename> 外的分割區上建立快照。
+  </para>
+
+  <tip>
+   <title>在已安裝系統中啟用 Snapper</title>
+   <para>
+    如果您在安裝期間停用了 Snapper，可以在以後的任何時間啟用它。若要進行此操作，請執行以下指令以建立根檔案系統的預設 Snapper 組態︰
+   </para>
+   <screen><prompt>tux &gt; </prompt>sudo snapper -c root create-config /</screen>
+   <para>
+    之後，依<xref linkend="sec.snapper.setup.customize.auto_snapshots"/>所述啟用不同的快照類型。
+   </para>
+   <para>
+    請記住，若要使用快照，需依照安裝程式的建議設定一個包含子磁碟區的 Btrfs 根檔案系統，並且需有一個大小至少為 16 GB 的分割區。
+   </para>
+  </tip>
+
+
+  <para>
+   建立快照時，快照和原件都會指向檔案系統中的同一區塊。因此，快照最初並不佔用額外的磁碟空間。如果原始檔案系統中的資料經過修改，則會複製變更後的資料區塊，同時保留快照的舊資料區塊。因此，快照便會佔用與已修改資料相同的空間。這樣，經過一段時間之後，快照配置的空間不斷增大。因而，從包含快照的 <literal>Btrfs</literal> 檔案系統刪除檔案可能<emphasis>無法</emphasis>釋放磁碟空間！
+  </para>
+
+  <note>
+   <title>快照位置</title>
+   <para>
+    快照始終位於建立快照所在的同一分割區或子磁碟區上。而無法儲存到其他分割區或子磁碟區上。
+   </para>
+  </note>
+
+  <para>
+   因此，包含快照的分割區必須比<quote>一般</quote>分割區更大。確切大小很大程度上取決於保留的快照數和資料修改量。一般來說，您應該考慮使用比平常大兩倍的大小。為了防止磁碟上的空間耗盡，系統會自動清理舊快照。如需詳細資訊，請參閱<xref linkend="sec.snapper.setup.customize.archiving"/>。
+  </para>
+
+  <sect2 xml:id="snapper.snapshot-type">
+   <title>快照類型</title>
+   <para>
+    雖然快照本身在技術上並無不同，但是我們會根據建立的場合將快照分成三類。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>時間軸快照</term>
+     <listitem>
+      <para>
+       每小時建立一個快照。系統會自動刪除舊快照。依預設，系統會保留過去十天、十個月或十年的第一個快照。時間軸快照預設已停用。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>安裝快照</term>
+     <listitem>
+      <para>
+       每當使用 YaST 或 Zypper 安裝一個或多個套件時，均會建立一對快照︰安裝開始前建立一個 (<quote>前</quote>)，安裝結束後建立另一個 (<quote>後</quote>)。如果重要系統元件 (如核心) 已經安裝，則快照對會標示為重要 (<literal>important=yes</literal>)。系統會自動刪除舊快照。依預設，系統會保留最近十個重要快照以及最近十個<quote>一般</quote>快照 (包括管理快照)。預設系統會啟用安裝快照。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>管理快照</term>
+     <listitem>
+      <para>
+       每當您使用 YaST 管理系統時，均會建立一對快照︰啟動 YaST 模組時建立一個 (<quote>前</quote>)，關閉模組時建立另一個 (<quote>後</quote>)。系統會自動刪除舊快照。依預設，系統會保留最近十個重要快照以及最近十個<quote>一般</quote>快照 (包括安裝快照)。預設系統會啟用管理快照。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="snapper.dir-excludes">
+   <title>從快照中排除的目錄</title>
+   <para>
+    出於不同原因，需要將一些目錄從快照中排除。下列清單顯示排除的所有目錄︰
+   </para>
+   <xi:include href="snapshot_excludes_i.xml"/>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.setup.customize">
+   <title>自訂設定</title>
+   <para>
+    <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 隨附合理的預設設定，該設定適合大多數使用案例。不過，您可以根據自己的需求對建立自動快照以及快照保留的方方面面進行設定。
+   </para>
+   <sect3 xml:id="sec.snapper.setup.customize.auto_snapshots">
+    <title>停用/啟用快照</title>
+    <para>
+     三種快照類型 (時間軸、安裝、管理) 均可獨立啟用或停用。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>停用/啟用時間軸快照</term>
+      <listitem>
+       <formalpara>
+        <title>啟用</title>
+        <para>
+         <command>snapper-c root set-config "TIMELINE_CREATE=yes"</command>
+        </para>
+       </formalpara>
+       <formalpara>
+        <title>停用</title>
+        <para>
+         <command>snapper -c root set-config "TIMELINE_CREATE=no"</command>
+        </para>
+       </formalpara>
+       <para>
+        預設會啟用時間軸快照，根分割區除外。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>停用/啟用安裝快照</term>
+      <listitem>
+       <formalpara>
+        <title>啟用</title>
+        <para>
+         安裝套件 <systemitem class="resource">snapper-zypp-plugin</systemitem>
+        </para>
+       </formalpara>
+       <formalpara>
+        <title>停用</title>
+        <para>
+         解除安裝套件 <systemitem class="resource">snapper-zypp-plugin</systemitem>
+        </para>
+       </formalpara>
+       <para>
+        預設系統會啟用安裝快照。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>停用/啟用管理快照</term>
+      <listitem>
+       <formalpara>
+        <title>啟用</title>
+        <para>
+         在 <filename>/etc/sysconfig/yast2</filename> 中將 <envar>USE_SNAPPER</envar> 設定為 <literal>yes</literal>。
+        </para>
+       </formalpara>
+       <formalpara>
+        <title>停用</title>
+        <para>
+         在 <filename>/etc/sysconfig/yast2</filename> 中將 <envar>USE_SNAPPER</envar> 設定為 <literal>no</literal>。
+        </para>
+       </formalpara>
+       <para>
+        預設系統會啟用管理快照。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+   <sect3 xml:id="sec.snapper.setup.customize.inst_snapshots">
+    <title>控制安裝快照</title>
+    <para>
+     使用 YaST 或 Zypper 安裝套件時所建立的快照對由 <systemitem class="resource">snapper-zypp-plugin</systemitem> 處理。何時建立快照由 XML 組態檔案 <filename>/etc/snapper/zypp-plugin.conf</filename> 定義。依預設，該檔案如下所示︰
+    </para>
+<screen> 1 &lt;?xml version="1.0" encoding="utf-8"?&gt;
+ 2 &lt;snapper-zypp-plugin-conf&gt;
+ 3  &lt;solvables&gt;
+ 4   &lt;solvable match="w"<co xml:id="zypp-conf.match"/> important="true"<co xml:id="zypp-conf.important"/>&gt;kernel-*<co xml:id="zypp-conf.kernel"/>&lt;/solvable&gt;
+ 5   &lt;solvable match="w" important="true"&gt;dracut&lt;/solvable&gt;
+ 6   &lt;solvable match="w" important="true"&gt;glibc&lt;/solvable&gt;
+ 7   &lt;solvable match="w" important="true"&gt;systemd*&lt;/solvable&gt;
+ 8   &lt;solvable match="w" important="true"&gt;udev&lt;/solvable&gt;
+ 9   &lt;solvable match="w"&gt;*&lt;/solvable&gt;<co xml:id="zypp-conf.packages"/>
+10  &lt;/solvables&gt;
+11 &lt;/snapper-zypp-plugin-conf&gt;</screen>
+    <calloutlist>
+     <callout arearefs="zypp-conf.match">
+      <para>
+       match 屬性定義模式是 Unix 外圍程序樣式的萬用字元 (<literal>w</literal>) 還是 Python正規表示式 (<literal>re</literal>)。
+      </para>
+     </callout>
+     <callout arearefs="zypp-conf.important">
+      <para>
+       如果符合指定模式且對應的套件標示為 important (例如核心套件)，則快照也會標示為 important。
+      </para>
+     </callout>
+     <callout arearefs="zypp-conf.kernel">
+      <para>
+       用於比對套件名稱的模式。根據 <literal>match</literal> 屬性的設定，特殊字元也可能會被解譯為外圍程序萬用字元或正規表示式。此模式符合所有以 <literal>kernel-</literal> 開頭的套件名稱。
+      </para>
+     </callout>
+     <callout arearefs="zypp-conf.packages">
+      <para>
+       此行無條件符合所有套件。
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     使用此組態時，只要安裝套件即會建立快照對 (第 9 行)。如果標示為 important 的核心、dracut、glibc、systemd 或 udev 套件已安裝，快照對也會標示為 important (第 4 行至第 8 行)。系統會評估所有規則。
+    </para>
+    <para>
+     要停用規則，請使用 XML 備註將其刪除或停用。若想避免系統在每次安裝套件時都建立快照對，可將第 9 行設為備註︰
+    </para>
+<screen> 1 &lt;?xml version="1.0" encoding="utf-8"?&gt;
+ 2 &lt;snapper-zypp-plugin-conf&gt;
+ 3  &lt;solvables&gt;
+ 4   &lt;solvable match="w" important="true"&gt;kernel-*&lt;/solvable&gt;
+ 5   &lt;solvable match="w" important="true"&gt;dracut&lt;/solvable&gt;
+ 6   &lt;solvable match="w" important="true"&gt;glibc&lt;/solvable&gt;
+ 7   &lt;solvable match="w" important="true"&gt;systemd*&lt;/solvable&gt;
+ 8   &lt;solvable match="w" important="true"&gt;udev&lt;/solvable&gt;
+ 9   &lt;!-- &lt;solvable match="w"&gt;*&lt;/solvable&gt; --&gt;
+10  &lt;/solvables&gt;
+11 &lt;/snapper-zypp-plugin-conf&gt;</screen>
+   </sect3>
+   <sect3 xml:id="sec.snapper.setup.customizing.new_subvolume">
+    <title>建立和掛接新子磁碟區</title>
+    <para>
+     支援在 <filename>/</filename> 階層下建立新的子磁碟區並永久掛接該磁碟區。此類子磁碟區將從快照中排除。切勿在現有快照中建立此類子磁碟區，因為在復原之後，您將無法再刪除快照。
+    </para>
+    <para>
+     <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上設定了 <filename>/@/</filename> 子磁碟區，該子磁碟區用做永久子磁碟區 (例如 <filename>/opt</filename>、<filename>/srv</filename>、<filename>/home</filename> 等) 的獨立根目錄。您建立和永久掛接的任何新子磁碟區都需要在這個初始根檔案系統中建立。
+    </para>
+    <para>
+     若要這樣做，請執行以下指令。在此範例中，從 <filename>/dev/sda2</filename> 建立了一個新子磁碟區 <filename>/usr/important</filename>。
+    </para>
+<screen><prompt>tux &gt; </prompt>sudo mount /dev/sda2 -o subvol=@ /mnt
+<prompt>tux &gt; </prompt>sudo btrfs subvolume create /mnt/usr/important
+<prompt>tux &gt; </prompt>sudo umount /mnt</screen>
+    <para>
+     <filename>/etc/fstab</filename> 中的相應項目需類似於：
+    </para>
+    <screen>/dev/sda2 /usr/important btrfs subvol=@/usr/important 0 0</screen>
+
+    <tip>
+     <title>停用寫入時複製 (cow)</title>
+     <para>
+      子磁碟區可能包含經常變更的檔案，例如虛擬化磁碟影像、資料庫檔案或記錄檔案。如果是這樣，可考慮對此磁碟區停用寫入時複製功能，以免複製磁碟區塊。在 <filename>/etc/fstab</filename> 中使用 <option>nodatacow</option> 掛接選項可實現此目的︰
+     </para>
+     <screen>/dev/sda2 /usr/important btrfs nodatacow,subvol=@/usr/important 0 0</screen>
+     <para>
+      或者，若要為單個檔案或目錄停用寫入時複製功能，請使用指令 <command>chattr +C <replaceable>路徑</replaceable></command>。
+     </para>
+    </tip>
+
+   </sect3>
+   <sect3 xml:id="sec.snapper.setup.customize.archiving">
+    <title>控制快照歸檔</title>
+    <para>
+     快照會佔用磁碟空間。為了防止磁碟用盡而導致系統中斷，會自動刪除舊快照。預設會保留最多 10 個重要的安裝快照與管理快照，以及最多 10 個普通的安裝快照與管理快照。如果這些快照佔用的空間超過根檔案系統大小的 50%，則會刪除其他快照。永遠會至少保留 4 個重要快照和 2 個普通快照。
+    </para>
+    <para>
+     如需如何變更這些值的指示，請參閱<xref linkend="sec.snapper.config.modify"/>。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec.snapper.lvm">
+    <title>對簡易佈建的 LVM 磁碟區使用 Snapper</title>
+    <para>
+     除了針對 <literal>Btrfs</literal> 檔案系統建立快照之外，Snapper 還支援針對使用 XFS、Ext4 或 Ext3 格式化之簡易佈建的 LVM 磁碟區建立快照 (但<emphasis>不</emphasis>支援對一般 LVM 磁碟區建立快照)。如需 LVM 磁碟區的詳細資訊以及設定指示，請參閱<xref linkend="sec.yast2.system.lvm"/>。
+    </para>
+    <para>
+     若要對簡易佈建的 LVM 磁碟區使用 Snapper，您需要為它建立一個 Snapper 組態。在 LVM 上，需要使用 <option>--fstype=lvm(<replaceable>檔案系統</replaceable>)</option> 指定檔案系統。<replaceable>檔案系統</replaceable> 的有效值有 <literal>ext3</literal>、<literal>etx4</literal> 或 <literal>xfs</literal>。範例：
+    </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c lvm create-config --fstype="lvm(xfs)" /thin_lvm</screen>
+    <para>
+     您可以依<xref linkend="sec.snapper.config.modify"/> 中所述根據需求調整此組態。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.snapper.auto">
+  <title>使用 Snapper 復原變更</title>
+
+  <para>
+   <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上的 Snapper 已預先設定為充當復原 <command>zypper</command> 和 YaST 所做變更的工具。要充當復原工具，Snapper 設定為在每次執行 <command>zypper</command> 和 YaST 的前後建立一對快照。此外，Snapper 還可讓您還原遭意外刪除或修改的系統檔案。出於此目的需要啟用根分割區的時間軸快照 — 如需詳細資訊，請參閱<xref linkend="sec.snapper.setup.customize.auto_snapshots"/>。
+  </para>
+
+  <para>
+   預設會為根分割區及其子磁碟區設定上述的自動快照。為了讓這些快照可供其他分割區 (例如 <filename>/home</filename>) 使用，您可以建立自訂組態。
+  </para>
+
+  <important>
+   <title>復原變更與復原的比較</title>
+   <para>
+    使用快照還原資料時，您必須知道 Snapper 可以處理兩種完全不同的案例。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>復原變更</term>
+     <listitem>
+      <para>
+       當如下文所述復原變更時，系統會比較兩個快照，並復原這兩個快照之間的變更。使用此方法還允許明確選取要還原的檔案。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>復原</term>
+     <listitem>
+      <para>
+       當如<xref linkend="sec.snapper.snapshot-boot"/>中所述執行復原時，系統會重設回建立快照當時的狀態。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    復原變更時，還可以將快照與目前系統進行比較。根據此類比較還原<emphasis>全部</emphasis>檔案時，其效果等同於執行復原。但是，還是建議使用<xref linkend="sec.snapper.snapshot-boot"/>中所述的方法復原，因為它的速度更快並且可讓您在執行復原之前複查系統。
+   </para>
+  </important>
+
+  <warning>
+   <title>資料一致性</title>
+   <para>
+    在建立快照時，沒有任何一種機制可確保資料的一致性。如果在建立快照的同時寫入檔案 (如資料庫)，則將導致檔案損毀或部分寫入。還原此類檔案將會導致問題。此外，有些系統檔案 (例如 <filename>/etc/mtab</filename>) 是絕對不能還原的。因此，強烈建議您<emphasis>始終</emphasis>仔細檢閱已變更檔案及其差異的清單。請只還原真正屬於您要執行回復的檔案。
+   </para>
+  </warning>
+
+  <sect2 xml:id="sec.snapper.yast">
+   <title>復原 YaST 和 Zypper 變更</title>
+   <para>
+    如果您在安裝期間使用 <literal>Btrfs</literal> 設定根分割區，系統將會自動安裝 Snapper (已預先設定為用於復原 YaST 或 Zypper 所做的變更)。每當您啟動 YaST 模組或 Zypper 交易時，都會建立兩個快照：擷取啟動模組之前檔案系統狀態的<quote>前快照</quote>，以及完成模組之後的<quote>後快照</quote>。
+   </para>
+   <para>
+    您可以使用 YaST Snapper 模組或 <command>snapper</command> 指令行工具，透過從<quote>前快照</quote>還原檔案來復原 YaST/Zypper 所做的變更。比較兩個快照時，這些工具還可讓您查看哪些檔案已經過變更。此外，您還可以顯示某檔案的兩個版本之間的差異 (diff)。
+   </para>
+   <procedure xml:id="proc.snapper.undo.yast">
+    <title>使用 YaST <guimenu>Snapper</guimenu> 模組復原變更</title>
+    <step>
+     <para>
+      從 YaST 的<guimenu>其他</guimenu>區段或透過輸入 <command>yast2 snapper </command> 啟動<guimenu>Snapper</guimenu>模組。
+     </para>
+    </step>
+    <step>
+     <para>
+      請確定<guimenu>目前組態</guimenu>設為<guimenu>根</guimenu>。除非您手動新增了自己的 Snapper 組態，否則應始終如此設定。
+     </para>
+    </step>
+    <step>
+     <para>
+      從清單中選擇一對前快照和後快照。YaST 與 Zypper 快照對都屬於<guimenu>前與後</guimenu>類型。在<guimenu>描述</guimenu>欄中，YaST 快照標示為 <literal>zypp(y2base)</literal>，Zypper 快照標示為 <literal>zypp(zypper)</literal>。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="snapper_yast2_list.png" width="75%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="snapper_yast2_list.png" width="75%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>顯示變更</guimenu>以開啟兩個快照之間不同的檔案清單。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="snapper_yast2_changes.png" width="75%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="snapper_yast2_changes.png" width="75%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      檢閱檔案清單。若要顯示檔案的前版本與後版本之間的<quote>差異</quote>，請從清單中選取它。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="snapper_yast2_diff.png" width="65%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="snapper_yast2_diff.png" width="75%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      要還原一個或多個檔案，請勾選相應的核取方塊來選取相關的檔案或目錄。按一下<guimenu>還原選定項目</guimenu>，然後按一下<guimenu>是</guimenu>確認該動作。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="snapper_yast2_restore.png" width="75%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="snapper_yast2_restore.png" width="75%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+     <para>
+      要還原單個檔案，請按一下其名稱以啟動差異比對檢視。按一下<guimenu>從第一個還原</guimenu>，然後按一下<guimenu>是</guimenu>確認您的選擇。
+     </para>
+    </step>
+   </procedure>
+   <procedure xml:id="proc.snapper.yast.cmdline">
+    <title>使用 <command>snapper</command> 指令復原變更</title>
+    <step>
+     <para>
+      執行 <command>snapper list -t pre-post</command> 取得 YaST 和 Zypper 快照的清單。在「<literal>描述<replaceable>」欄中，YaST 快照標示為 </replaceable></literal>yast <guimenu>模組名稱</guimenu>；Zypper 快照標示為 <literal>zypp(zypper)</literal>。
+     </para>
+<screen><?dbsuse-fo font-size="0.60em"?>
+
+<prompt>tux &gt; </prompt>sudo snapper list -t pre-post
+Pre # | Post # | Pre Date                      | Post Date                     | Description
+------+--------+-------------------------------+-------------------------------+--------------
+311   | 312    | Tue 06 May 2014 14:05:46 CEST | Tue 06 May 2014 14:05:52 CEST | zypp(y2base)
+340   | 341    | Wed 07 May 2014 16:15:10 CEST | Wed 07 May 2014 16:15:16 CEST | zypp(zypper)
+342   | 343    | Wed 07 May 2014 16:20:38 CEST | Wed 07 May 2014 16:20:42 CEST | zypp(y2base)
+344   | 345    | Wed 07 May 2014 16:21:23 CEST | Wed 07 May 2014 16:21:24 CEST | zypp(zypper)
+346   | 347    | Wed 07 May 2014 16:41:06 CEST | Wed 07 May 2014 16:41:10 CEST | zypp(y2base)
+348   | 349    | Wed 07 May 2014 16:44:50 CEST | Wed 07 May 2014 16:44:53 CEST | zypp(y2base)
+350   | 351    | Wed 07 May 2014 16:46:27 CEST | Wed 07 May 2014 16:46:38 CEST | zypp(y2base) </screen>
+    </step>
+    <step>
+     <para>
+      使用下列指令取得快照對的已變更檔案清單：<command>snapper status </command>
+      <replaceable>前</replaceable>..<replaceable>後</replaceable>。含有內容變更的檔案以 <guimenu>c</guimenu> 標示，新增的檔案以 <guimenu>+</guimenu> 標示，刪除的檔案以 <guimenu>-</guimenu> 標示。
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper status 350..351
++..... /usr/share/doc/packages/mikachan-fonts
++..... /usr/share/doc/packages/mikachan-fonts/COPYING
++..... /usr/share/doc/packages/mikachan-fonts/dl.html
+c..... /usr/share/fonts/truetype/fonts.dir
+c..... /usr/share/fonts/truetype/fonts.scale
++..... /usr/share/fonts/truetype/みかちゃん-p.ttf
++..... /usr/share/fonts/truetype/みかちゃん-pb.ttf
++..... /usr/share/fonts/truetype/みかちゃん-ps.ttf
++..... /usr/share/fonts/truetype/みかちゃん.ttf
+c..... /var/cache/fontconfig/7ef2298fde41cc6eeb7af42e48b7d293-x86_64.cache-4
+c..... /var/lib/rpm/Basenames
+c..... /var/lib/rpm/Dirnames
+c..... /var/lib/rpm/Group
+c..... /var/lib/rpm/Installtid
+c..... /var/lib/rpm/Name
+c..... /var/lib/rpm/Packages
+c..... /var/lib/rpm/Providename
+c..... /var/lib/rpm/Requirename
+c..... /var/lib/rpm/Sha1header
+c..... /var/lib/rpm/Sigmd5</screen>
+    </step>
+    <step>
+     <para>
+      若要顯示特定檔案的差異，請執行 <command>snapper diff </command>
+      <replaceable>前</replaceable>..<replaceable>後</replaceable>
+      <replaceable> 檔案名稱</replaceable>。如果不指定<replaceable>檔案名稱</replaceable>，將會顯示所有檔案的差異。
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper diff 350..351 /usr/share/fonts/truetype/fonts.scale
+--- /.snapshots/350/snapshot/usr/share/fonts/truetype/fonts.scale       2014-04-23 15:58:57.000000000 +0200
++++ /.snapshots/351/snapshot/usr/share/fonts/truetype/fonts.scale       2014-05-07 16:46:31.000000000 +0200
+@@ -1,4 +1,4 @@
+-1174
++1486
+ ds=y:ai=0.2:luximr.ttf -b&amp;h-luxi mono-bold-i-normal--0-0-0-0-c-0-iso10646-1
+ ds=y:ai=0.2:luximr.ttf -b&amp;h-luxi mono-bold-i-normal--0-0-0-0-c-0-iso8859-1
+[...]</screen>
+    </step>
+    <step>
+     <para>
+      若要還原一或多個檔案，請執行 <command>snapper -v undochange </command>
+      <replaceable>前</replaceable>..<replaceable>後</replaceable>
+      <replaceable> 檔案名稱</replaceable>。如果不指定<replaceable>檔案名稱</replaceable>，將會還原所有已變更的檔案。
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -v undochange 350..351
+     create:0 modify:13 delete:7
+     undoing change...
+     deleting /usr/share/doc/packages/mikachan-fonts
+     deleting /usr/share/doc/packages/mikachan-fonts/COPYING
+     deleting /usr/share/doc/packages/mikachan-fonts/dl.html
+     deleting /usr/share/fonts/truetype/みかちゃん-p.ttf
+     deleting /usr/share/fonts/truetype/みかちゃん-pb.ttf
+     deleting /usr/share/fonts/truetype/みかちゃん-ps.ttf
+     deleting /usr/share/fonts/truetype/みかちゃん.ttf
+     modifying /usr/share/fonts/truetype/fonts.dir
+     modifying /usr/share/fonts/truetype/fonts.scale
+     modifying /var/cache/fontconfig/7ef2298fde41cc6eeb7af42e48b7d293-x86_64.cache-4
+     modifying /var/lib/rpm/Basenames
+     modifying /var/lib/rpm/Dirnames
+     modifying /var/lib/rpm/Group
+     modifying /var/lib/rpm/Installtid
+     modifying /var/lib/rpm/Name
+     modifying /var/lib/rpm/Packages
+     modifying /var/lib/rpm/Providename
+     modifying /var/lib/rpm/Requirename
+     modifying /var/lib/rpm/Sha1header
+     modifying /var/lib/rpm/Sigmd5
+     undoing change done</screen>
+    </step>
+   </procedure>
+   <warning>
+    <title>回復使用者新增</title>
+    <para>
+     不建議透過使用 Snapper 回復變更的方式回復使用者新增。因為快照中排除了某些目錄，屬於這些使用者的檔案將保留在檔案系統中。如果使用已刪除使用者的使用者 ID 建立使用者，則此使用者將繼承這些檔案。因此，強烈建議您使用 YaST<guimenu>使用者和群組管理</guimenu>工具來移除使用者。
+    </para>
+   </warning>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.backup">
+   <title>使用 Snapper 還原檔案</title>
+   <para>
+    除了安裝與管理快照之外，Snapper 還會建立時間軸快照。您可以使用這些備份快照來還原不小心刪除的檔案或還原舊版檔案。利用 Snapper 的差異比對功能，您還可以瞭解在特定時間點執行了哪些修改。
+   </para>
+   <para>
+    還原檔案功能對於預設不會建立快照的子磁碟區或分割區上的資料尤其有用。例如，要從主目錄還原檔案，可以為自動建立時間軸快照的 <filename>/home</filename> 建立單獨的 Snapper 組態。如需指示，請參閱<xref linkend="sec.snapper.config"/>。
+   </para>
+   <warning>
+    <title>還原檔案與復原的比較</title>
+    <para>
+     從根檔案系統 (由 Snapper 的根組態定義) 建立的快照可用於執行系統復原。建議您使用從快照開機然後執行復原的方式執行此復原。如需詳細資料，請參閱<xref linkend="sec.snapper.snapshot-boot"/>。
+    </para>
+    <para>
+     也可使用從根檔案系統快照還原所有檔案的方式執行復原 (如下文所述)。但我們不建議採用這種方法。您可以還原單個檔案 (如 <systemitem>/etc</systemitem> 目錄中的組態檔案)，但不能從快照還原整份檔案清單中的檔案。
+    </para>
+    <para>
+     此限制僅影響從根檔案系統建立的快照！
+    </para>
+   </warning>
+   <procedure xml:id="proc.snapper.restore.yast">
+    <title>使用 YaST <guimenu>Snapper</guimenu> 模組還原檔案</title>
+    <step>
+     <para>
+      從 YaST 的<guimenu>其他</guimenu>區段或透過輸入 <command>yast2 snapper </command> 啟動<guimenu>Snapper</guimenu>模組。
+     </para>
+    </step>
+    <step>
+     <para>
+      選擇要從中選擇快照的<guimenu>目前組態</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      選取要從中還原檔案的時間軸快照，並選擇<guimenu>顯示變更</guimenu>。時間軸快照屬於<guimenu>單一</guimenu>類型，以<guimenu>時間軸</guimenu>描述。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下檔案名稱，從文字方塊中選取一個檔案。隨即顯示快照版本與目前系統之間的差異。勾選該核取方塊以選取要還原的檔案。對所有您要還原的檔案執行此操作。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>還原選定項目</guimenu>，然後按一下<guimenu>是</guimenu>確認該動作。
+     </para>
+    </step>
+   </procedure>
+   <procedure xml:id="proc.snapper.restore.cmdl">
+    <title>使用 <command>snapper</command> 指令還原檔案</title>
+    <step>
+     <para>
+      執行以下指令獲取特定組態之時間軸快照的清單︰
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> list -t single | grep timeline</screen>
+     <para>
+      <replaceable>CONFIG</replaceable> 需要以現有的 Snapper 組態取代。使用 <command>snapper list-configs</command> 顯示清單。
+     </para>
+    </step>
+    <step>
+     <para>
+      執行以下指令獲取指定快照之已變更檔案的清單︰
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> status <replaceable>SNAPSHOT_ID</replaceable>..0</screen>
+     <para>
+      以您要從中還原檔案之快照的 ID 取代 <replaceable>SNAPSHOT_ID</replaceable>。
+     </para>
+    </step>
+    <step>
+     <para>
+      (選擇性)透過執行以下指令，列出目前檔案版本與快照中之檔案的差異
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> diff <replaceable>SNAPSHOT_ID</replaceable>..0 <replaceable>FILE NAME</replaceable></screen>
+     <para>
+      如果您未指定 <replaceable>&lt;檔案名稱&gt;</replaceable>，則會顯示所有檔案的差異。
+     </para>
+    </step>
+    <step>
+     <para>
+      要還原一或多個檔案，請執行
+     </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> -v undochange <replaceable>SNAPSHOT_ID</replaceable>..0 <replaceable>FILENAME1</replaceable> <replaceable>FILENAME2</replaceable></screen>
+     <para>
+      如果未指定檔案名稱，將會還原所有已變更的檔案。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.snapper.snapshot-boot">
+  <title>透過從快照開機來執行系統復原</title>
+
+  <para>
+   <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上包含的 GRUB 2 版本能夠從 Btrfs 快照開機。除 Snapper 的復原功能外，它還可復原設定有誤的系統。只有針對預設 Snapper 組態 (<literal>root</literal>) 建立的快照才可開機。
+  </para>
+
+  <important>
+   <title>支援的組態</title>
+   <para>
+
+    從 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled;slerte"> 12 SP3</phrase></phrase> 開始，僅當根分割區的預設子磁碟區組態未變更時，才支援系統復原。
+   </para>
+  </important>
+
+  <para>
+   將快照開機時，該快照中包含之檔案系統的部分會以唯讀模式掛接，而從快照中排除的所有其他檔案系統以及該檔案系統的排除部分會以讀寫模式掛接並且可修改。
+  </para>
+
+  <important>
+   <title>復原變更與復原的比較</title>
+   <para>
+    使用快照還原資料時，您必須知道 Snapper 可以處理兩種完全不同的案例。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>復原變更</term>
+     <listitem>
+      <para>
+       如<xref linkend="sec.snapper.auto"/>中所述復原變更時，系統會比較兩個快照並回復這兩個快照之間的變更。使用此方法還可以將選取的檔案明確排除在還原之外。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>復原</term>
+     <listitem>
+      <para>
+       如下文所述執行復原時，系統會重設回建立快照當時的狀態。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </important>
+
+  <para>
+   若要從可開機快照執行復原，必須符合以下要求。執行預設安裝時，系統會進行相應設定。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <title>從可開機快照執行復原的要求</title>
+   <listitem>
+    <para>
+     根檔案系統必須是 Btrfs。不支援從 LVM 磁碟區快照開機。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     根檔案系統必須位於單一裝置、單一分割區以及單一子磁碟區上。如 <filename>/srv</filename> 之類從快照中排除的目錄 (如需完整的清單，請參閱<xref linkend="snapper.dir-excludes"/>) 可以位於單獨的分割區上。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     系統必須能透過已安裝的開機載入程式開機。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   要從可開機的快照執行復原，請按如下步驟執行︰
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     將系統開機。在開機功能表中，選擇<guimenu>可開機快照</guimenu>並選取您要開機的快照。系統會按日期列出快照清單，最近的快照最先列出。
+    </para>
+   </step>
+   <step>
+    <para>
+     登入系統。仔細檢查是否一切都如預期般運作。請注意，您無法對快照中包含的任何目錄執行寫入。但無論您接下來執行什麼操作，您寫入到其他目錄的資料都<emphasis>不</emphasis>會遺失。
+    </para>
+   </step>
+   <step>
+    <para>
+     根據您是否要執行復原操作，選擇下一步動作︰
+    </para>
+    <substeps performance="required">
+     <step>
+      <para>
+       如果系統處於您不想執行復原的狀態，請重新開機以開機到目前系統狀態，然後選擇其他快照或啟動救援系統。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果您要執行復原，請執行
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper rollback</screen>
+      <para>
+       並在之後重新開機。在開機螢幕上，選擇預設開機項目以重新開機到已恢復的系統。系統即會建立復原前檔案系統狀態的快照。如需詳細資料，請參閱<xref linkend="sec.snapper.snapshot-boot.rollback"/>。
+      </para>
+     </step>
+    </substeps>
+   </step>
+  </procedure>
+  <tip>
+   <title>復原至特定的安裝狀態</title>
+   <para>
+    如果安裝期間未停用快照，將在初始系統安裝結束時建立初始可開機快照。您隨時可以透過將此快照開機，返回到該狀態。<literal>安裝後</literal>可依描述識別該快照。
+   </para>
+   <para>
+    開始對 Service Pack 或新的主要版本進行系統升級時，也會建立可開機快照 (前提是快照未停用)。
+   </para>
+  </tip>
+  <sect2 xml:id="sec.snapper.snapshot-boot.rollback">
+   <title>復原後的快照</title>
+   <para>
+    在執行復原之前，將會建立一個執行中檔案系統的快照。快照描述會參考復原中所還原快照的 ID。
+   </para>
+   <para>
+    對於透過復原建立的快照，其 <literal>Cleanup</literal> 屬性的值會設為 <literal>number</literal>。因此，復原快照會在達到設定的快照數後自動刪除。如需詳細資訊，請參閱<xref linkend="sec.snapper.clean-up"/>。如果快照包含重要資料，請在系統移除快照之前從快照中擷取資料。
+   </para>
+   <sect3 xml:id="sec.snapper.snapshot-boot.rollback.example">
+    <title>復原快照範例</title>
+    <para>
+     例如，在全新安裝之後，系統上存在以下可用的快照︰
+    </para>
+<screen>
+<prompt role="root">root # </prompt><command>snapper</command> --iso list
+Type   | # |     | Cleanup | Description           | Userdata
+-------+---+ ... +---------+-----------------------+--------------
+single | 0 |     |         | current               |
+single | 1 |     |         | first root filesystem |
+single | 2 |     | number  | after installation    | important=yes
+</screen>
+    <para>
+     執行 <command>sudo snapper rollback</command> 之後，將會建立快照 <literal>3</literal>，它包含在執行復原之前系統的狀態。快照 <literal>4</literal> 是新的預設 btrfs 子磁碟區，因此也是重新開機之後的系統。
+    </para>
+<screen>
+<prompt role="root">root # </prompt><command>snapper</command> --iso list
+Type   | # |     | Cleanup | Description           | Userdata
+-------+---+ ... +---------+-----------------------+--------------
+single | 0 |     |         | current               |
+single | 1 |     | number  | first root filesystem |
+single | 2 |     | number  | after installation    | important=yes
+single | 3 |     | number  | rollback backup of #1 | important=yes
+single | 4 |     |         |                       |
+</screen>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.snapshot-boot.identify">
+   <title>存取和識別快照開機項目</title>
+   <para>
+    若要從快照開機，請重新開機並選擇<guimenu>從唯讀快照啟動開機載入程式</guimenu>。此時會開啟一個螢幕，其中列出了所有可開機的快照。最近的快照列在最前面，最舊的快照列在最後面。使用 <keycap function="down"/> 和 <keycap function="up"/> 導覽，然後按 <keycap function="enter"/> 啟動所選的快照。從開機功能表啟動快照不會立即重新開機，而是開啟所選快照的開機載入程式。
+   </para>
+   <figure xml:id="fig.snapper.snapshot-boot.identify">
+    <title>開機載入程式：快照</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="boot_snapshots.png" width="75%" format="png"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="boot_snapshots.png" width="75%" format="png"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    開機載入程式中的每個快照項目遵循一種可方便您識別快照的命名規劃：
+   </para>
+<screen>[*]<co xml:id="snapper.boot.important"/><replaceable>OS</replaceable><co xml:id="snapper.boot.os"/> (<replaceable>KERNEL</replaceable><co xml:id="snapper.boot.kernel"/>,<replaceable>DATE</replaceable><co xml:id="snapper.boot.date"/>T<replaceable>TIME</replaceable><co xml:id="snapper.boot.time"/>,<replaceable>DESCRIPTION</replaceable><co xml:id="snapper.boot.description"/>)</screen>
+   <calloutlist>
+    <callout arearefs="snapper.boot.important">
+     <para>
+      如果快照標示為<literal>重要</literal>，該項將帶有 <literal>*</literal> 標記。
+     </para>
+    </callout>
+    <callout arearefs="snapper.boot.os">
+     <para>
+      作業系統標籤。
+     </para>
+    </callout>
+    <callout arearefs="snapper.boot.date">
+     <para>
+      採用 <literal>YYYY-MM-DD</literal> 格式的日期。
+     </para>
+    </callout>
+    <callout arearefs="snapper.boot.time">
+     <para>
+      採用 <literal>HH:MM</literal> 格式的時間。
+     </para>
+    </callout>
+    <callout arearefs="snapper.boot.description">
+     <para>
+      此欄位包含快照的描述。對於手動建立的快照，這是使用選項 <option>--description</option> 建立的字串，或自訂字串 (請參閱<xref linkend="tip.snapper.snapshot-boot.custom_descr"/>)。對於自動建立的快照，這是呼叫的工具，例如 <literal>zypp(zypper)</literal> 或 <literal>yast_sw_single</literal>。根據開機螢幕的大小，可能會截斷較長的描述。
+     </para>
+    </callout>
+   </calloutlist>
+   <tip xml:id="tip.snapper.snapshot-boot.custom_descr">
+    <title>為開機載入程式快照項目設定自訂描述</title>
+    <para>
+     可以用自訂字串來取代快照描述欄位中的預設字串。例如，如果自動建立的描述不能充分描述快照，或者使用者提供的描述太長，則這種做法會很有用。若要為快照<replaceable>編號</replaceable>設定自訂字串<replaceable>字串</replaceable>，請使用以下指令：
+    </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper modify --userdata "bootloader=<replaceable>STRING</replaceable>" <replaceable>NUMBER</replaceable></screen>
+    <para>
+     描述的長度不應超過 25 個字元 - 超過此大小的內容無法在開機畫面上正常顯示。
+    </para>
+   </tip>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.snapshot-boot.limits">
+   <title>限制</title>
+   <para>
+    無法進行<emphasis>完整</emphasis>系統復原，即將整個系統還原到與建立快照時完全相同的狀態。
+   </para>
+   <sect3 xml:id="sec.snapper.limits.snapshot-boot.excludes">
+    <title>從快照中排除的目錄</title>
+    <para>
+     根檔案系統快照並不包含所有目錄。如需詳細資料和原因，請參閱<xref linkend="snapper.dir-excludes"/>。因此，這些目錄中的資料不會還原，也就形成以下限制。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>
+       執行復原之後，附加產品和協力廠商軟體可能回無法使用。
+      </term>
+      <listitem>
+       <para>
+        如果從快照中排除的子磁碟區 (如 <filename>/opt</filename>) 中的應用程式還有其他部分資料安裝在該快照中包含的子磁碟區中，則應用程式及附加產品的安裝資料在復原後可能無法使用。重新安裝應用程式或附加產品可解決此問題。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>檔案存取問題</term>
+      <listitem>
+       <para>
+        如果應用程式在快照以及目前系統之間變更了檔案許可權和/或擁有權，則復原後該應用程式可能無法存取這些檔案。請在復原之後重設受影響檔案的許可權和/或擁有權。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>不相容的資料格式</term>
+      <listitem>
+       <para>
+        如果服務或應用程式在快照和目前系統之間建立了新的資料格式，則復原之後該應用程式可能無法讀取受影響的資料檔案。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>混合代碼和資料的子磁碟區</term>
+      <listitem>
+       <para>
+        <filename>/srv</filename> 等子磁碟區可能同時包含代碼和資料。復原可能導致代碼不起作用。例如，降級 PHP 版本可能導致該 Web 伺服器之 PHP 程序檔損毀。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>使用者資料</term>
+      <listitem>
+       <para>
+        如果復原從系統移除了使用者，但這些使用者所擁有的資料存在於快照排除的目錄中，則這些資料不會予以移除。如果使用相同使用者 ID 建立使用者，則此使用者將繼承這些檔案。使用 <command>find</command> 等工具尋找並移除孤立的檔案。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+   <sect3 xml:id="sec.snapper.limits.snapshot-boot.grub">
+    <title>不復原開機載入程式資料</title>
+    <para>
+     無法復原開機載入程式，因為開機載入程式的所有<quote>階段</quote>必須組合在一起共同作用。而執行 <filename>/boot</filename> 復原則無法保證這一要求。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.snapper.config">
+  <title>建立和修改 Snapper 組態</title>
+
+  <para>
+   每個分割區或 <literal>Btrfs</literal> 子磁碟區都有一個專用的組態檔案用於定義 Snapper 的行為方式。這些組態檔案位於 <filename>/etc/snapper/configs/</filename> 下。
+  </para>
+
+  <para>
+   如果根檔案系統足夠大 (大約有 12 GB)，則安裝會自動為根檔案系統 <filename>/</filename> 啟用快照。相應的預設組態命名為 <filename>root</filename>。該組態可建立和管理 YaST 及 Zypper 快照。如需預設值清單，請參閱<xref linkend="sec.snapper.config.modify.values"/>。
+  </para>
+
+
+  <note>
+   <title>啟用快照所需的最小根檔案系統大小</title>
+   <para>
+    如<xref linkend="sec.snapper.setup"/>所述，若要啟用快照，根檔案系統上需要有額外的可用空間。所需空間取決於所安裝的套件數量以及快照中包括的磁碟區變更量，另外還取決於快照頻率和歸檔的快照數。
+   </para>
+   <para>
+    若要在安裝期間自動啟用快照，需要符合最小根檔案系統大小。到 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 12 SP3 為止，此大小約為 12 GB。將來，依據基礎系統的架構和大小的不同，此值可能會發生變化。它取決於安裝媒體內 <filename>/control.xml</filename> 檔案中以下標記的值︰
+   </para>
+   <screen>&lt;root_base_size&gt;
+&lt;btrfs_increase_percentage&gt;</screen>
+   <para>
+    該值透過下面的公式計算得出︰<replaceable>ROOT_BASE_SIZE</replaceable> * (1 + <replaceable>BTRFS_INCREASE_PERCENTAGE</replaceable>/100)
+   </para>
+   <para>
+    請記住，此值是最小大小。請考慮分給根檔案系統更多空間。一般而言，兩倍於未啟用快照時所需的大小即可。
+   </para>
+  </note>
+
+  <para>
+   您可以為其他格式為 <literal>Btrfs</literal> 的分割區或 <literal>Btrfs</literal> 分割區上的現有子磁碟區建立您自己的組態。在下面的範例中，我們將設定 Snapper 組態以用於備份掛接於 <filename>/srv/www</filename> 且採用 <literal>Btrfs</literal> 格式之獨立分割區上的 Web 伺服器資料。
+  </para>
+
+  <para>
+   建立組態後，您可以使用 <command>snapper</command> 自身或 YaST <guimenu>Snapper</guimenu> 模組從這些快照中還原檔案。在 YaST 中，您需要選取<guimenu>目前組態</guimenu>，同時還需要使用全域參數 <command>-c</command> 指定 <option>snapper</option> 的組態 (例如 <command>snapper -c myconfig list</command>)。
+  </para>
+
+  <para>
+   若要建立新的 Snapper 組態，請執行 <command>snapper create-config</command>：
+  </para>
+
+<screen><prompt>tux &gt; </prompt>sudo snapper -c www-data<co xml:id="snapper.create.name"/> create-config /srv/www<co xml:id="snapper.create.volume"/></screen>
+
+  <calloutlist>
+   <callout arearefs="snapper.create.name">
+    <para>
+     組態檔案的名稱。
+    </para>
+   </callout>
+   <callout arearefs="snapper.create.volume">
+    <para>
+     要建立快照之分割區或 <literal>Btrfs</literal> 子磁碟區的掛接點。
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   此指令將會使用 <filename>/etc/snapper/config-templates/default</filename> 中的合理預設值建立一個新的組態檔案 <filename>/etc/snapper/configs/www-data</filename>。如需如何調整這些預設值的指示，請參閱<xref linkend="sec.snapper.config.modify"/>。
+  </para>
+
+  <tip>
+   <title>組態預設值</title>
+   <para>
+    新組態的預設值取自 <filename>/etc/snapper/config-templates/default</filename>。若要使用您自己的一組預設值，請在同一目錄中建立此檔案的副本，然後根據您的需求進行調整。若要使用該副本，請使用 create-config 指令指定 <option>-t</option> 選項：
+   </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c www-data create-config -t <replaceable>my_defaults</replaceable> /srv/www</screen>
+  </tip>
+
+  <sect2 xml:id="sec.snapper.config.modify">
+   <title>管理現有的組態</title>
+   <para>
+    <command>snapper</command> 提供多個用於管理現有組態的子指令。您可以列出、顯示、刪除及修改它們︰
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>列出組態</term>
+     <listitem>
+      <para>
+       使用指令 <command>snapper list-configs</command> 可獲取所有現有組態︰
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper list-configs
+Config | Subvolume
+-------+----------
+root   | /
+usr    | /usr
+local  | /local</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>顯示組態</term>
+     <listitem>
+      <para>
+       使用子指令 <command>snapper -c <replaceable>CONFIG</replaceable></command> get-config 可顯示指定的組態。<replaceable>Config</replaceable> 需要使用 <command>snapper list-configs</command> 所顯示的組態名稱取代。如需有關組態選項的詳細資訊，請參閱<xref linkend="sec.snapper.config.modify.values"/>。
+      </para>
+      <para>
+       若要顯示預設組態，請執行
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c root get-config</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>修改組態</term>
+     <listitem>
+      <para>
+       使用子指令 <command>snapper -c <replaceable>CONFIG</replaceable> set-config <replaceable>OPTION</replaceable>=<replaceable>VALUE</replaceable></command> 可修改指定組態中的選項。<replaceable>Config</replaceable> 需要使用 <command>snapper list-configs</command> 所顯示的組態名稱取代。<replaceable>OPTION</replaceable> 及 <replaceable>VALUE</replaceable> 的可能的值列於<xref linkend="sec.snapper.config.modify.values"/>中。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>刪除組態</term>
+     <listitem>
+      <para>
+       使用子指令 <command>snapper -c <replaceable>CONFIG</replaceable></command> delete-config 可刪除組態。<replaceable>Config</replaceable> 需要使用 <command>snapper list-configs</command> 所顯示的組態名稱取代。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <sect3 xml:id="sec.snapper.config.modify.values">
+    <title>組態資料</title>
+    <para>
+     每個組態都包含可以從指令行修改的選項清單。以下清單提供每個選項的詳細資料。若要變更某個值，請執行 <command>snapper -c <replaceable>組態</replaceable> set-config "<replaceable>索引鍵</replaceable>=<replaceable>值</replaceable>"</command>。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>ALLOW_GROUPS</literal>、<literal>ALLOW_USERS</literal>
+      </term>
+      <listitem>
+       <para>
+        授予一般使用者快照的使用權限。如需相關資訊，請參閱<xref linkend="sec.snapper.config.user"/>。
+       </para>
+       <para>
+        預設值為 <literal>""</literal>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>BACKGROUND_COMPARISON</literal>
+      </term>
+      <listitem>
+       <para>
+        定義建立前後快照後是否應在背景中對它們進行比較。
+       </para>
+       <para>
+        預設值為 <literal>"yes"</literal>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>EMPTY_*</literal>
+      </term>
+      <listitem>
+       <para>
+        為包含相同「前」快照和「後」快照的快照組定義清理演算法。如需詳細資料，請參閱 <xref linkend="sec.snapper.clean-up.empty"/>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>FSTYPE</literal>
+      </term>
+      <listitem>
+       <para>
+        分割區的檔案系統類型。請勿進行變更。
+       </para>
+       <para>
+        預設值為 <literal>"btrfs"</literal>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>NUMBER_*</term>
+      <listitem>
+       <para>
+        為安裝快照與管理快照定義清理演算法。如需詳細資料，請參閱 <xref linkend="sec.snapper.clean-up.number"/>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>QGROUP</literal> / <literal>SPACE_LIMIT</literal>
+      </term>
+      <listitem>
+       <para>
+        將配額支援新增至清理演算法。如需詳細資料，請參閱 <xref linkend="sec.snapper.clean-up.quota"/>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>SUBVOLUME</literal>
+      </term>
+      <listitem>
+       <para>
+        要建立快照之分割區或子磁碟區的掛裝點。請勿進行變更。
+       </para>
+       <para>
+        預設值為 <literal>"/"</literal>.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>SYNC_ACL</literal>
+      </term>
+      <listitem>
+       <para>
+        如果是一般使用者使用 Snapper (請參閱<xref linkend="sec.snapper.config.user"/>)，則使用者必須能夠存取 <filename>.snapshot</filename> 目錄並能夠讀取其中的檔案。如果 SYNC_ACL 設定為 <literal>yes</literal>，Snapper 會使用 ACL 自動允許 ALLOW_USERS 或 ALLOW_GROUPS 項目中的使用者和群組存取該目錄及其中的檔案。
+       </para>
+       <para>
+        預設值為 <literal>"no"</literal>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>TIMELINE_CREATE</literal>
+      </term>
+      <listitem>
+       <para>
+        如果設定為 <literal>yes</literal>，則會每小時建立一個快照。有效值：<literal>yes</literal> 和 <literal>no</literal>.
+       </para>
+       <para>
+        預設值為 <literal>"no"</literal>。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>TIMELINE_CLEANUP</literal> / <literal>TIMELINE_LIMIT_*</literal>
+      </term>
+      <listitem>
+       <para>
+        為時間軸快照定義清理演算法。如需詳細資料，請參閱 <xref linkend="sec.snapper.clean-up.timeline"/>。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+   <sect3 xml:id="sec.snapper.config.user">
+    <title>以一般使用者身分使用 Snapper</title>
+    <para>
+     依預設，Snapper 只能由 <systemitem class="username">root</systemitem> 使用者使用。但是，在下列情況中，某些群組或使用者需要能夠建立快照或透過回復至快照來復原變更：
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       想要建立 <filename>/srv/www</filename> 快照的網站管理員
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       想要建立其主目錄快照的使用者
+      </para>
+     </listitem>
+    </itemizedlist>
+    <para>
+     為了以上這些目的，您可以建立用於授予使用者或/和群組權限的 Snapper 組態。相應的 <filename>.snapshots</filename> 目錄必須可由指定的使用者讀取和存取。實現這一目的最簡單的方法是將 SYNC_ACL 選項設定為 <literal>yes</literal>。
+    </para>
+    <procedure>
+     <title>讓一般使用者可以使用 Snapper</title>
+     <para>
+      請注意，此程序中的所有步驟都必須由 <systemitem class="username">root</systemitem> 使用者執行。
+     </para>
+     <step>
+      <para>
+       若不存在，請為使用者應該能夠在其上使用 Snapper 的分割區或子磁碟區建立 Snapper 組態。如需指示，請參閱<xref linkend="sec.snapper.config"/>。範例：
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper --config web_data create /srv/www</screen>
+     </step>
+     <step>
+      <para>
+       組態檔案將在 <filename>/etc/snapper/configs/<replaceable>CONFIG</replaceable></filename> 下建立，其中 CONFIG 是您在上一步中使用 <option>-c/--config</option> 指定的值 (如 <filename>/etc/snapper/configs/web_data</filename>)。根據您的需求調整該值；如需詳細資料，請參閱<xref linkend="sec.snapper.config.modify"/>。
+      </para>
+     </step>
+     <step>
+      <para>
+       設定 <envar>ALLOW_USERS</envar> 和/或 <envar>ALLOW_GROUPS</envar> 的值，以分別向使用者和/或群組授予權限。多個項目需要用 <keycap function="space"/> 加以分隔。例如，若要向使用者 <systemitem class="username">www_admin</systemitem> 授予權限，請執行：
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c web_data set-config "ALLOW_USERS=www_admin" SYNC_ACL="yes"</screen>
+     </step>
+     <step>
+      <para>
+       現在，指定的使用者和/或群組便可以使用給定的 Snapper 組態。您可以使用 <literal>list</literal> 指令進行測試，例如：
+      </para>
+<screen>www_admin:~ &gt; snapper -c web_data list</screen>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.snapper.manage">
+  <title>手動建立和管理快照</title>
+
+  <para>
+   Snapper 並不限於依照組態自動建立和管理快照；您還可以使用指令行工具或 YaST 模組手動建立快照對 (<quote>前與後</quote>) 或單一快照。
+  </para>
+
+  <para>
+   所有 Snapper 操作都會對現有組態進行 (如需詳細資料，請參閱<xref linkend="sec.snapper.config"/>)。您只能為存在組態的分割區或磁碟區建立快照。預設會使用系統組態 (<literal>根</literal>)。如果您要為您自己的組態建立或管理快照，則必須明確選擇它。使用 YaST 中的<guimenu>目前組態</guimenu>下拉式方塊，或在指令行上指定 <option>-c</option> 選項 (<command>snapper -c<replaceable> MYCONFIG</replaceable>
+   <replaceable> COMMAND</replaceable></command>)。
+  </para>
+
+  <sect2 xml:id="sec.snapper.manage.metadata">
+   <title>快照中繼資料</title>
+   <para>
+    每個快照都包含快照本身和一些中繼資料。建立快照時，您還需要指定中繼資料。修改快照即表示變更其中繼資料 — 您無法修改其內容。使用 <command>snapper list</command> 顯示現有快照及其中繼資料：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><command>snapper --config home list</command>
+     </term>
+     <listitem>
+      <para>
+       列出組態 <literal>home</literal> 的快照。若要列出預設組態 (root) 的快照，請使用 <command>snapper -c root list</command> 或 <command>snapper list</command>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper list -a</command>
+     </term>
+     <listitem>
+      <para>
+       列出所有現有組態的快照。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper list -t pre-post</command>
+     </term>
+     <listitem>
+      <para>
+       列出預設 (<literal>root</literal>) 組態的所有「前」快照與「後」快照組。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper list -t single</command>
+     </term>
+     <listitem>
+      <para>
+       列出預設 (<literal>root</literal>) 組態的所有 <literal>single</literal> 類型快照。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    下列中繼資料適用於每個快照：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      <emphasis role="bold">類型</emphasis>：快照類型，請參閱<xref linkend="sec.snapper.manage.metadata.type"/> 以取得詳細資料。此資料無法變更。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis role="bold">編號</emphasis>：快照的唯一編號。此資料無法變更。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis role="bold">前快照編號</emphasis>：指定相應前快照的編號。僅適用於類型為後的快照。此資料無法變更。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis role="bold">描述</emphasis>：快照的描述。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis role="bold">使用者資料</emphasis>：延伸描述，您可在其中以逗號分隔之「鍵=值」清單的形式指定自訂資料：<literal>reason=testing, project=foo</literal>。此欄位還用於將快照標示為重要 (<literal>important=yes</literal>) 並列出建立該快照的使用者 (user=tux)。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <emphasis role="bold">清理演算法</emphasis>：快照的清理演算法，請參閱<xref linkend="sec.snapper.clean-up"/> 以取得詳細資料。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <sect3 xml:id="sec.snapper.manage.metadata.type">
+    <title>快照類型</title>
+    <para>
+     Snapper 知道三種不同類型的快照：前、後與單一。實際上，它們並無差異，但是 Snapper 會以不同的方式處理它們。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>前</literal>
+      </term>
+      <listitem>
+       <para>
+        修改<emphasis>前</emphasis>檔案系統的快照。每個<literal>前</literal>快照都對應一個<literal>後</literal>快照。例如，用於自動建立 YaST/Zypper 快照。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>後</literal>
+      </term>
+      <listitem>
+       <para>
+        修改<emphasis>後</emphasis>檔案系統的快照。每個<literal>後</literal>快照都對應一個<literal>前</literal>快照。例如，用於自動建立 YaST/Zypper 快照。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>單一</literal>
+      </term>
+      <listitem>
+       <para>
+        獨立快照。例如，用於自動按小時建立快照。這是建立快照時的預設類型。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+   <sect3 xml:id="sec.snapper.manage.metadata.cleanup">
+    <title>清理演算法</title>
+    <para>
+     Snapper 提供了三種用於清理舊快照的演算法。每日 cron 工作中會執行這些演算法。可以定義要在 Snapper 組態中保留的不同類型的快照數量 (如需詳細資料，請參閱<xref linkend="sec.snapper.config.modify"/>)。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>數量</term>
+      <listitem>
+       <para>
+        當達到特定的快照計數時刪除舊快照。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>時間軸</term>
+      <listitem>
+       <para>
+        刪除經過特定期限的舊快照，但會保留若干每小時、每日、每月和每年快照。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>空-前-後</term>
+      <listitem>
+       <para>
+        刪除無差異的前/後快照對。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.manage.create">
+   <title>建立快照</title>
+   <para>
+    可透過執行 <command>snapper create</command> 或在 YaST 模組 <guimenu>Snapper</guimenu> 中按一下<guimenu>建立</guimenu>建立快照。下列範例說明如何從指令行建立快照。透過 YaST 介面可便於採用這兩種建立方法。
+   </para>
+   <tip>
+    <title>快照描述</title>
+    <para>
+     您應始終指定有意義的描述，以便日後能夠識別其用途。透過使用者資料選項可以指定更多資訊。
+    </para>
+   </tip>
+   <para/>
+   <variablelist>
+    <varlistentry>
+     <term><command>snappercreate --description "2014 年第 2 週的快照"</command>
+     </term>
+     <listitem>
+      <para>
+       為預設 (<literal>根</literal>) 組態建立獨立快照 (類型為單一) 並提供描述。因為未指定清理演算法，所以一律不自動刪除快照。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper --config home create --description "在 ~tux 中清理"</command>
+     </term>
+     <listitem>
+      <para>
+       為名為 <literal>home</literal> 的自訂組態建立獨立快照 (類型為單一) 並提供描述。因為未指定清理演算法，所以一律不自動刪除快照。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper --config home create --description "每日資料備份" --cleanup-algorithm timeline</command>&gt;
+     </term>
+     <listitem>
+      <para>
+       為名為 <literal>home</literal> 的自訂組態建立獨立快照 (類型為單一) 並提供描述。當檔案符合特定於組態中時間軸清理演算法的準則時，將會自動刪除該檔案。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper create --type pre--print-number--description "在 Apache 組態清理之前"--userdata "important=yes"</command>
+     </term>
+     <listitem>
+      <para>
+       建立類型為<literal>前</literal>的快照並列印快照編號。需要第一個指令才能建立用於儲存<quote>前</quote>和<quote>後</quote>狀態的快照對。快照會標示為重要。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper create --type post--pre-number 30--description "在 Apache 組態清理之前"--userdata "important=yes"</command>
+     </term>
+     <listitem>
+      <para>
+       建立類型為<literal>後</literal>並與<literal>前</literal>快照編號 <literal>30</literal> 配對的快照。需要第二個指令才能建立用於儲存<quote>前</quote>和<quote>後</quote>狀態的快照對。快照會標示為重要。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper create --command <replaceable>COMMAND</replaceable>--description "在指令前後"</command>
+     </term>
+     <listitem>
+      <para>
+       在執行<replaceable>指令</replaceable>前後自動建立快照對。僅當在指令行上使用 snapper 時，此選項才可用。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.manage.modify">
+   <title>修改快照中繼資料</title>
+   <para>
+    Snapper 可讓您修改快照的描述、清理演算法和使用者資料，所有其他中繼資料則無法變更。下列範例說明如何從指令行修改快照。透過 YaST 介面可便於採用這兩種建立方法。
+   </para>
+   <para>
+    若要透過指令行修改快照，您需要知道其編號。使用 <command>snapper list</command> 可以顯示所有快照及其編號。
+   </para>
+   <para>
+    YaST <guimenu>Snapper</guimenu> 模組已列出所有快照。從清單中選擇一個快照，然後按一下<guimenu>修改</guimenu>。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><command>snapper modify --cleanup-algorithm "時間軸"</command> 10
+     </term>
+     <listitem>
+      <para>
+       修改預設 (<literal>根</literal>) 組態之快照 10 的中繼資料。清理演算法設為<literal>時間軸</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper --config home modify --description "每日備份" -cleanup-algorithm "時間軸"120</command>
+     </term>
+     <listitem>
+      <para>
+       修改名為 <literal>home</literal> 的自訂組態之快照 120 的中繼資料。將會設定新的描述並取消設定清理演算法。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.manage.delete">
+   <title>刪除快照</title>
+   <para>
+    若要使用 YaST <guimenu>Snapper </guimenu> 模組刪除快照，請從清單中選擇快照，然後按一下<guimenu>刪除</guimenu>。
+   </para>
+   <para>
+    若要使用指令行工具刪除快照，您需要知道其編號。請透過執行 <command>snapper list</command> 來取得該編號。若要刪除快照，請執行 <command>snapper delete</command>
+    <replaceable> 編號</replaceable>。
+   </para>
+   <para>
+    使用 Snapper 刪除快照時，在背景中執行的 Btrfs 程序將會回收已釋放的空間。因此，可用空間的可見度與可用性將會延遲。如果您希望在刪除快照後立即可以使用釋放的空間，請結合選項 <option>--sync</option> 使用 delete 指令。
+   </para>
+   <tip>
+    <title>刪除快照對</title>
+    <para>
+     刪除<literal>前</literal>快照時，您應一律刪除其對應的<literal>後</literal>快照 (反之亦然)。
+    </para>
+   </tip>
+   <variablelist>
+    <varlistentry>
+     <term><command>snapper delete 65</command>
+     </term>
+     <listitem>
+      <para>
+       刪除預設 (<literal>根</literal>) 組態的快照 65。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper -c home delete 89 90</command>
+     </term>
+     <listitem>
+      <para>
+       刪除名為 <literal>home</literal> 之自訂組態的快照 89 和 90。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper delete --sync 23</command></term>
+     <listitem>
+      <para>
+       刪除預設 (<literal>根</literal>) 組態的快照 23，並使釋放的空間立即可用。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <tip>
+    <title>刪除未參考的快照</title>
+    <para>
+     有時，雖然 Btrfs 快照存在，但卻缺少包含 Snapper 中繼資料的 XML 檔案。這種情況表示快照對 Snapper 不可見，需要手動刪除該快照：
+    </para>
+<screen>btrfs subvolume delete /.snapshots/<replaceable>SNAPSHOTNUMBER</replaceable>/snapshot
+rm -rf /.snapshots/SNAPSHOTNUMBER</screen>
+   </tip>
+   <tip>
+    <title>舊快照佔用較多磁碟空間</title>
+    <para>
+     如果您要刪除快照以釋放硬碟上的空間，請確定先刪除舊快照。快照越舊，它佔用的磁碟空間就越多。
+    </para>
+   </tip>
+   <para>
+    快照也可由每日 cron 工作自動刪除。如需詳細資訊，請參閱<xref linkend="sec.snapper.manage.metadata.cleanup"/>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.snapper.clean-up">
+  <title>自動快照清理</title>
+
+  <para>
+   快照會佔用磁碟空間，一段時間後，快照可能會佔用大量的磁碟空間。為了防止磁碟上的空間耗盡，Snapper 提供了演算法用於自動刪除舊快照。這些演算法依據時間軸快照和數字快照 (管理快照與安裝快照組) 而異。您可以指定要為每種類型保留的快照數量。
+  </para>
+
+  <para>
+   除此之外，您可以指定一個快照空間配額，用於定義快照可佔用的最大磁碟空間量。系統還可以自動刪除無相異的「前」快照與「後」快照組。
+  </para>
+
+  <para>
+   清理演算法一律系繫結到單一 Snapper 組態，因此您需要為每個組態指定演算法。如果您想要防止自動刪除特定的快照，請參閱<xref linkend="faq.snapper.permanent"/>。
+  </para>
+
+  <para>
+   預設設定 (<literal>root</literal>) 設定為清理數字快照以及空的「前」快照與「後」快照組。已啟用配額支援 - 快照佔用的空間不可超過根分割區可用磁碟空間的 50%。時間軸快照預設為停用，因此，時間軸清理演算法亦已停用。
+  </para>
+
+  <sect2 xml:id="sec.snapper.clean-up.number">
+   <title>清理數字快照</title>
+   <para>
+    數字快照 (管理快照與安裝快照組) 的清理由 Snapper 組態的以下參數控制。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>NUMBER_CLEANUP</literal>
+     </term>
+     <listitem>
+      <para>
+       啟用或停用安裝快照與管理快照組的清理。如果已啟用，則在快照總數超過 <literal>NUMBER_LIMIT</literal> 和/或 <literal>NUMBER_LIMIT_IMPORTANT</literal> <emphasis> 指定的數字，以及</emphasis> <literal>NUMBER_MIN_AGE</literal> 指定的時限時，會刪除快照組。有效值：<literal>yes</literal> (啟用)、<literal>no</literal> (停用)。
+      </para>
+      <para>
+       預設值為 <literal>"yes"</literal>。
+      </para>
+      <para>
+       用於變更或設定值的範例指令：
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> set-config "NUMBER_CLEANUP=no"</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>NUMBER_LIMIT</literal> / <literal>NUMBER_LIMIT_IMPORTANT</literal>
+     </term>
+     <listitem>
+      <para>
+       定義要保留多少個普通和/或重要安裝快照與管理快照組。只會保留最新的快照。如果 <literal>NUMBER_CLEANUP</literal> 設定為 <literal>"no"</literal>，則忽略此參數。
+      </para>
+      <para>
+       <literal>NUMBER_LIMIT</literal> 的預設值為 <literal>"2-10"</literal>，<literal>NUMBER_LIMIT_IMPORTANT</literal> 的預設值為 <literal>"4-10"</literal>。
+      </para>
+      <para>
+       用於變更或設定值的範例指令：
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> set-config "NUMBER_LIMIT=10"</screen>
+      <important>
+       <title>範圍值與常數值的比較</title>
+       <para>
+        如果已啟用配額支援 (請參閱<xref linkend="sec.snapper.clean-up.quota"/>)，則需要將限制指定為最小值-最大值範圍，例如 <literal>2-10</literal>。如果已停用配額支援，則需要提供常數值，例如 <literal>10</literal>，否則清理將會失敗並出現錯誤。
+       </para>
+      </important>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>NUMBER_MIN_AGE</literal>
+     </term>
+     <listitem>
+      <para>
+       定義快照在可供自動刪除之前的最短保留期限 (秒)。期限小於此處指定值的快照不會刪除，不論存在多少個這樣的快照。
+      </para>
+      <para>
+       預設值為 <literal>"1800"</literal>。
+      </para>
+      <para>
+       用於變更或設定值的範例指令：
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> set-config "NUMBER_MIN_AGE=864000"</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <note>
+    <title>限制和期限</title>
+    <para>
+     <literal>NUMBER_LIMIT</literal>、<literal>NUMBER_LIMIT_IMPORTANT</literal> 和 <literal>NUMBER_MIN_AGE</literal> 始終會予以評估。只有在滿足<emphasis>全部</emphasis>條件時，才會刪除快照。
+    </para>
+    <para>
+     如果您希望總是保留 <literal>NUMBER_LIMIT*</literal> 所定義數量的快照而不考慮其期限，請將 <literal>NUMBER_MIN_AGE</literal> 設定為 <literal>0</literal>。
+    </para>
+    <para>
+     下面的範例顯示了保留最近 10 個重要和 10 個普通快照 (不論保留期限) 的組態︰
+    </para>
+<screen>NUMBER_CLEANUP=yes
+NUMBER_LIMIT_IMPORTANT=10
+NUMBER_LIMIT=10
+NUMBER_MIN_AGE=0</screen>
+    <para>
+     不過，如果您不想保留超過特定期限的快照，請將 <literal>NUMBER_LIMIT*</literal> 設定為 <literal>0</literal>，並使用 <literal>NUMBER_MIN_AGE</literal> 提供期限。
+    </para>
+    <para>
+     下面的範例顯示了只保留十天以內的快照的組態︰
+    </para>
+<screen>NUMBER_CLEANUP=yes
+NUMBER_LIMIT_IMPORTANT=0
+NUMBER_LIMIT=0
+NUMBER_MIN_AGE=864000</screen>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.clean-up.timeline">
+   <title>清理時間軸快照</title>
+   <para>
+    時間軸快照的清理由 Snapper 組態的以下參數控制。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>TIMELINE_CLEANUP</literal>
+     </term>
+     <listitem>
+      <para>
+       啟用或停用時間軸快照的清理。如果已啟用，則在快照總數超過 <literal>TIMELINE_LIMIT_*</literal>
+       <emphasis> 指定的數量以及</emphasis> <literal>TIMELINE_MIN_AGE</literal> 指定的期限時，會刪除快照。有效值：<literal>yes</literal> 和 <literal>no</literal>.
+      </para>
+      <para>
+       預設值為 <literal>"yes"</literal>。
+      </para>
+      <para>
+       用於變更或設定值的範例指令：
+      </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c <replaceable>CONFIG</replaceable> set-config "TIMELINE_CLEANUP=yes"</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>TIMELINE_LIMIT_DAILY</literal>、<literal>TIMELINE_LIMIT_HOURLY</literal>、<literal>TIMELINE_LIMIT_MONTHLY</literal>、<literal>TIMELINE_LIMIT_WEEKLY</literal>、<literal>TIMELINE_LIMIT_YEARLY</literal>
+     </term>
+     <listitem>
+      <para>
+       要以小時、天、月、週和年保留的快照數量。
+      </para>
+      <para>
+       每個項目的預設值為 <literal>"10"</literal>，但 <literal>TIMELINE_LIMIT_WEEKLY</literal> 除外 (預設為 <literal>"0"</literal>)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>TIMELINE_MIN_AGE</literal>
+     </term>
+     <listitem>
+      <para>
+       定義快照在可供自動刪除之前的最短保留期限 (秒)。
+      </para>
+      <para>
+       預設值為 <literal>"1800"</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <example xml:id="ex.snapper.config.timeline">
+    <title>時間軸組態範例</title>
+<screen>TIMELINE_CLEANUP="yes"
+TIMELINE_CREATE="yes"
+TIMELINE_LIMIT_DAILY="7"
+TIMELINE_LIMIT_HOURLY="24"
+TIMELINE_LIMIT_MONTHLY="12"
+TIMELINE_LIMIT_WEEKLY="4"
+TIMELINE_LIMIT_YEARLY="2"
+TIMELINE_MIN_AGE="1800"</screen>
+    <para>
+     此組態範例啟用了會自動清理的每小時快照。系統始終會同時評估 <literal>TIMELINE_MIN_AGE</literal> 和 <literal>TIMELINE_LIMIT_*</literal>。在此範例中，快照在可供刪除之前的最短期限設定為 30 分鐘 (1800 秒)。因為我們建立了每小時快照，所以這可確保僅保留最新的快照。如果將 <literal>TIMELINE_LIMIT_DAILY</literal> 設為非零值，這表示同時會保留當天的第一個快照。
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <title>要保留的快照</title>
+     <listitem>
+      <para>
+       每小時：已建立的最後 24 個快照。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       每日：保留最近 7 天內建立的第一個每日快照。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       每月：保留最近 12 個月內當月最後一天建立的第一個快照。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       每週：保留最近 4 週內當週最後一天建立的第一個快照。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       每年：保留最近 2 年內當年最後一天建立的第一個快照。
+      </para>
+     </listitem>
+    </itemizedlist>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.clean-up.empty">
+   <title>清理無差異的快照組</title>
+   <para>
+    如<xref linkend="snapper.snapshot-type"/>中所述，每當您執行 YaST 模組或執行 Zypper 時，會在啟動時建立一個「前」快照，在結束時建立一個「後」快照。如果您做出任何變更，則「前」快照與「後」快照沒有差異。在 Snapper 組態中設定以下參數可自動刪除此類<quote>空白</quote>快照組：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>EMPTY_PRE_POST_CLEANUP</literal>
+     </term>
+     <listitem>
+      <para>
+       如果設定為 <literal>yes</literal>，將會刪除前後快照相同的快照對。
+      </para>
+      <para>
+       預設值為 <literal>"yes"</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>EMPTY_PRE_POST_MIN_AGE</literal>
+     </term>
+     <listitem>
+      <para>
+       定義前後快照相同的快照對在自動刪除之前必須保留的最短期限 (以秒為單位)。
+      </para>
+      <para>
+       預設值為 <literal>"1800"</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.clean-up.manual">
+   <title>清理手動建立的快照</title>
+   <para>
+    Snapper 未針對手動建立的快照提供自訂清理演算法。但是，您可以向手動建立的快照指定 number 或 timeline 清理演算法。如果您這麼做，該快照會加入所指定演算法的<quote>清理佇列</quote>。可以在建立快照時，或者透過修改現有快照來指定清理演算法：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><command>snapper create --description "Test" --cleanup-algorithm number</command>
+     </term>
+     <listitem>
+      <para>
+       為預設 (root) 組態建立獨立快照 (單一類型) 並指定 <literal>number</literal> 清理演算法。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>snapper modify --cleanup-algorithm "時間軸" 25</command>
+     </term>
+     <listitem>
+      <para>
+       使用數字 25 修改快照，並指定清理演算法 <literal>timeline</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.snapper.clean-up.quota">
+   <title>新增磁碟配額支援</title>
+   <para>
+    除了上述 number 和/或 timeline 清理演算法之外，Snapper 還支援配額。您可以定義允許快照佔用的可用空間百分比。此百分比值一律套用至相應 Snapper 組態中定義的 Btrfs 子磁碟區。
+   </para>
+   <para>
+    如果在安裝期間啟用了 Snapper，則會自動啟用配額支援。如果在安裝後的某個時間手動啟用 Snapper，則可以透過執行 <command>snapper setup-quota</command> 來啟用配額支援。這需要提供有效的組態 (如需詳細資訊，請參閱<xref linkend="sec.snapper.config"/>)。
+   </para>
+   <para>
+    配額支援由 Snapper 組態的以下參數控制。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>QGROUP</literal>
+     </term>
+     <listitem>
+      <para>
+       Snapper 使用的 Btrfs 配額群組。如果未設定，請執行 <command>snapper setup-quota</command>。如果已設定，則僅當您熟悉 <command>man 8 btrfs-qgroup</command> 時方可對其進行變更。此值是使用 <command>snapper setup-quota</command> 設定的，請勿變更。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SPACE_LIMIT</literal>
+     </term>
+     <listitem>
+      <para>
+       允許快照使用的空間限制，以 1 (100%) 的分數表示。有效值範圍為 0 到 1 (0.1 = 10%，0.2 = 20%...)。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    需遵循以下限制和指導方針：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      只能在已啟用現有 number 和/或 timeline 清理演算法的<emphasis>前提下</emphasis>才能啟用配額。如果未啟用任何清理演算法，則無法套用配額限制。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      啟用配額支援後，Snapper 會視需要執行兩輪清理。第一輪清理套用針對數字快照和時間軸快照指定的規則。僅當完成這一輪清理後超出配額時，才會在第二輪清理中套用配額特定的規則。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      即使已啟用配額支援，Snapper 也永遠會保留 <literal>NUMBER_LIMIT*</literal> 和 <literal>TIMELINE_LIMIT*</literal> 值指定的快照數量，而不論是否超出了配額。因此，建議為 <literal><replaceable>NUMBER_LIMIT*</replaceable> 和 <replaceable>TIMELINE_LIMIT*</replaceable></literal> 指定範圍值 (<literal>min</literal>-<literal>max</literal>)，以確定可以套用配額。
+     </para>
+     <para>
+      例如，如果已設定 <literal>NUMBER_LIMIT=5-20</literal>，Snapper 將執行第一輪清理，並將普通的數字快照數量減少為 20 個。如果這 20 個快照超出配額，Snapper 將在第二輪清理中刪除最舊的快照，直到符合配額限制。永遠會保留最少五個快照，不論這些快照佔用了多少空間。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.snapper.faqs">
+  <title>常見問題解答</title>
+
+  <qandaset defaultlabel="qanda">
+   <qandaentry>
+    <question>
+     <para>
+      為何 Snapper 從不顯示 <filename>/var/log</filename>、<filename>/tmp</filename> 及其他目錄中的變更？
+     </para>
+    </question>
+    <answer>
+     <para>
+      對於我們確定要從快照中排除的某些目錄，請參閱<xref linkend="snapper.dir-excludes"/>獲取清單及排除原因。為了將某路徑從快照中排除，我們為該路徑建立了子磁碟區。
+     </para>
+    </answer>
+   </qandaentry>
+   <qandaentry>
+    <question>
+     <para>
+      快照使用了多少磁碟空間？如何釋放磁碟空間？
+     </para>
+    </question>
+    <answer>
+     <para>
+      目前，<literal>Btrfs</literal> 工具無法顯示快照配置的磁碟空間量。但是，如果您啟用了配額，則可以判斷在刪除<emphasis>所有</emphasis>快照後可以釋放多少空間：
+     </para>
+     <procedure>
+      <step>
+       <para>
+        取得配額群組 ID (在以下範例中為 <literal>1/0</literal>)：
+       </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper -c root get-config | grep QGROUP
+QGROUP                 | 1/0</screen>
+      </step>
+      <step>
+       <para>
+        重新掃描子磁碟區配額：
+       </para>
+<screen><prompt>tux &gt; </prompt>sudo btrfs quota rescan -w /</screen>
+      </step>
+      <step>
+       <para>
+        顯示配額群組 (在以下範例中為 <literal>1/0</literal>) 的資料：
+       </para>
+<screen><prompt>tux &gt; </prompt>sudo btrfs qgroup show / | grep "1/0"
+1/0           4.80GiB    108.82MiB</screen>
+       <para>
+        第三欄顯示刪除所有快照時可釋放的空間數量 (<literal>108.82MiB</literal>)。
+       </para>
+      </step>
+     </procedure>
+     <para>
+      為了釋放包含快照之 <literal>Btrfs</literal> 分割區上的空間，您需要刪除不需要的快照，而不是檔案。與新快照相比，較舊的快照佔用的空間更多。如需詳細資料，請參閱<xref linkend="sec.snapper.setup.customize.archiving"/>。
+     </para>
+     <para>
+      從一個 Service Pack 升級到另一個 Service Pack 會導致快照佔用系統子磁碟區上的大量磁碟空間，這是因為有許多資料進行了變更 (套件更新)。對於不再需要的快照，建議您手動將其刪除。如需詳細資料，請參閱<xref linkend="sec.snapper.manage.delete"/>。
+     </para>
+    </answer>
+   </qandaentry>
+   <qandaentry>
+    <question>
+     <para>
+      能否從開機載入程式將快照開機？
+     </para>
+    </question>
+    <answer>
+     <para>
+      能，請參閱<xref linkend="sec.snapper.snapshot-boot"/>獲取詳細資訊。
+     </para>
+    </answer>
+   </qandaentry>
+   <qandaentry xml:id="faq.snapper.permanent">
+    <question>
+     <para>
+      如何永久保留快照？
+     </para>
+    </question>
+    <answer>
+     <para>
+      目前，Snapper 無法防止手動刪除快照。但是，您可以防止清理演算法自動刪除快照。除非您使用 <xref linkend="sec.snapper.manage.create"/>--cleanup-algorithm<option> 指定清理演算法，否則不會為手動建立的快照 (請參閱</option>) 指定清理演算法。總是為自動建立的快照指定 <literal>number</literal> 或 <literal>timeline</literal> 演算法。若要從一或多個快照中移除此類指定，請執行以下步驟：
+     </para>
+     <procedure>
+      <step>
+       <para>
+        列出所有可用的快照：
+       </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper list -a</screen>
+      </step>
+      <step>
+       <para>
+        記住您要防止刪除的快照數。
+       </para>
+      </step>
+      <step>
+       <para>
+        執行以下指令，並用您記住的數字取代數字預留位置：
+       </para>
+<screen><prompt>tux &gt; </prompt>sudo snapper modify --cleanup-algorithm "" <replaceable>#1</replaceable> <replaceable>#2</replaceable> <replaceable>#n</replaceable></screen>
+      </step>
+      <step>
+       <para>
+        再次執行 <command>snapper list -a</command> 來檢查結果。在 <literal>Cleanup</literal> 欄中，與修改的快照相對應的項目現在應該為空白。
+       </para>
+      </step>
+     </procedure>
+    </answer>
+   </qandaentry>
+   <qandaentry>
+    <question>
+     <para>
+      何處可以取得有關 Snapper 的詳細資訊？
+     </para>
+    </question>
+    <answer>
+     <para>
+      請造訪 Snapper 首頁，網址為 <link xlink:href="http://snapper.io/"/>。
+     </para>
+    </answer>
+   </qandaentry>
+  </qandaset>
+ </sect1>
+</chapter>
