@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_raid.xml" version="5.0" xml:id="cha.raid" xml:lang="ja">
+ <title>ソフトウェアRAIDの設定</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  RAID (Redundant Array of Independent Disks)の目的は、複数のハードディスクパーティションを1つの大きい仮想ハードディスクに結合し、パフォーマンスとデータのセキュリティを最適化することです。ほとんどのRAIDコントローラはSCSIプロトコルを使用します。これは、IDEプロトコルも効率的な方法で多数のハードディスクのアドレスを指定でき、コマンドのパラレル処理に適しているからです。一方、IDEまたはSATAハードディスクをサポートしているRAIDコントローラもあります。ソフトウェアRAIDは、ハードウェアRAIDコントローラ購入による追加コストなしで、RAIDシステムの利点を提供します。ただし、これにはいくらかのCPU時間を要し、高性能なコンピュータには適さないメモリ要件があります。
+ </para>
+ <important>
+  <title>クラスタファイルシステムのRAID</title>
+  <para>
+   クラスタファイルシステムのソフトウェアRAIDはクラスタマルチデバイス(Cluster MD)を使用して設定する必要があります。<link xlink:href="https://www.suse.com/documentation/sle-ha-12/book_sleha/data/cha_ha_cluster-md.html"/>にある高可用性拡張機能のドキュメントを参照してください。
+  </para>
+ </important>
+ <para>
+  SUSE Linux Enterpriseには、いくつかのハードディスクを1つのソフトウェアRAIDシステムに統合するオプションがあります。RAIDには、それぞれが異なる目標、利点、および属性をもついくつかのハードディスクを1つのRAIDシステムに結合するためのいくつかの戦略が含まれています。これらは通常、<emphasis>RAIDレベル</emphasis>と呼ばれます。
+ </para>
+ <sect1 xml:id="sec.raid.intro">
+  <title>RAIDレベルの理解</title>
+
+  <para>
+   本項では、通常のRAIDレベル(0、1、2、3、4、5)とネストしたRAIDレベルについて説明します。
+  </para>
+
+  <sect2 xml:id="sec.raid.intro.raid0">
+   <title>RAID 0</title>
+   <para>
+    このレベルでは、各ファイルのブロックが複数のディスクに分散されるので、データアクセスのパフォーマンスが向上します。このレベルはデータのバックアップを提供しないため、実際にはRAIDではありませんが、この種のシステムでは<emphasis>RAID  0</emphasis>という名前が一般的です。RAID 0では、2つ以上のハードディスクが互いにプールします。高いパフォーマンスが得られます。ただし、1つのハードディスクに障害が発生しただけで、RAIDシステムが破壊され、データは失われます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid1">
+   <title>RAID 1</title>
+   <para>
+    このレベルでは、データが他のハードディスクに一対一でコピーされるため、データに対する適切なセキュリティが提供されます。これは、<emphasis>ハードディスクミラーリング</emphasis>として知られています。ディスクが破壊された場合は、ディスクの内容のコピーをミラー先のもう1つのディスクで利用できます。したがって、1つのディスク以外のすべてのディスクが損なわれても、データを保全できます。ただし、損傷が検出されない場合は、正しいディスクに損傷したデータがミラーリングされる可能性があり、その場合はデータが壊れます。単一ディスクアクセスの使用時と比較すると、コピープロセスで書き込みのパフォーマンスが若干低下しますが(10～ 20%遅くなる)、読み取りアクセスは、通常の物理ハードディスクのどれと比べても、著しく高速です。これは、データが複製されているので、それらを並行してスキャンできるためです。RAID 1では、一般に、読み取りトランザクションの速度が単一ディスクのほぼ2倍、書き込みトランザクションの速度が単一ディスクと同じです。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid23">
+   <title>RAID 2およびRAID 3</title>
+   <para>
+    これらは、一般的なRAID実装ではありません。レベル2では、データは、ブロックレベルではなく、ビットレベルでストライプ化されます。レベル3は、専用パリティディスクによってバイトレベルのストライプ化を提供しますが、複数の要求を同時にサービスすることはできません。両レベルとも、まれにしか使用されません。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid4">
+   <title>RAID 4</title>
+   <para>
+    レベル 4は、専用パリティディスクと結合されたレベル 0と同様に、ブロックレベルのストライピングを提供します。データディスクがエラーになると、パリティデータで置き換え用のディスクが作成されます。ただし、パリティディスクは、書き込みアクセスにボトルネックを生成する可能性があります。にもかかわらず、レベル4は時々使用されます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid5">
+   <title>RAID 5</title>
+   <para>
+    RAIDD 5は、レベル0とレベル1の間をパフォーマンスおよび冗長性の面で調整して、最適化したものです。ハードディスクスペースは、使用されるディスク数から1を引いたものに等しくなります。データは、RAIDD 0の場合のようにハードディスク間で分散されます。パーティションの1つで作成された<emphasis>パリティブロック</emphasis>があるのは、セキュリティ上の理由からです。各パーティションはXORによって互いにリンクされているので、システム障害の場合に、内容が対応するパリティブロックによって再構築されます。RAIDD 5の場合、同時に複数のハードディスクが障害を起こすことはありません。1つのハードディスクに障害がある場合は、可能であればそのハードディスクを交換して、データ消失の危険性をなくす必要があります。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid6">
+   <title>RAID 6</title>
+   <para>
+    RAID 6は、本来、RAID 5の拡張であり、2つ目の独立した分散パリティスキーム(デュアルパリティ)の使用により、耐障害性をさらに追加します。データ回復プロセスで、2つのハードディスクに障害が発生しても、システムは稼動し続け、データが失われることはありません。
+   </para>
+   <para>
+    RAID 6は、複数の同時ドライブエラーに耐えることで、非常に高いデータ耐障害性を提供します。RAID 6は、データを失うことなく、2つのデバイスの喪失を処理します。したがって、N個のドライブのデータを保存するには、N+2個のドライブが必要です。その結果、最低限4個のデバイスが必要となります。
+   </para>
+   <para>
+    通常モードおよび単一ディスク障害モードでは、RAID 5と比べ、RAID 6のパフォーマンスは若干低いですが、同程度です。デュアルディスク障害モードでは、RAID 6は非常に低速です。RAID 6設定では、書き込み操作のためにかなりのCPU時間とメモリが必要です。
+   </para>
+   <table>
+    <title>RAID 5とRAID 6の比較</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="3334*"/>
+     <colspec colnum="2" colname="2" colwidth="3334*"/>
+     <colspec colnum="3" colname="3" colwidth="3334*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         機能
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 5
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 6
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         デバイスの数
+        </para>
+       </entry>
+       <entry>
+        <para>
+         N+1(最小限3個)
+        </para>
+       </entry>
+       <entry>
+        <para>
+         N+2(最小限4個)
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         パリティ
+        </para>
+       </entry>
+       <entry>
+        <para>
+         分散型、シングル
+        </para>
+       </entry>
+       <entry>
+        <para>
+         分散型、デュアル
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         パフォーマンス
+        </para>
+       </entry>
+       <entry>
+        <para>
+         書き込みおよび再構築に中程度の影響
+        </para>
+       </entry>
+       <entry>
+        <para>
+         シーケンシャルな書き込みでは、RAID 5より影響大
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         耐障害性
+        </para>
+       </entry>
+       <entry>
+        <para>
+         1つのコンポーネントデバイスの障害
+        </para>
+       </entry>
+       <entry>
+        <para>
+         2つのコンポーネントデバイスの障害
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec.raid.intro.raid_nested">
+   <title>ネストしたコンプレックスRAIDレベル</title>
+   <para>
+    他にもいくつかのRAIDレベルが開発されています(RAIDn、RAID 10、RAID 0+1、RAID 30、RAID 50など)。これらの一部は、ハードウェアベンダーによって作成された専有インプリメンテーションです。RAID 10設定の作成例については、「<xref linkend="cha.raid10"/>」を参照してください。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid.yast">
+  <title>YaSTによるソフトウェアRAID設定</title>
+
+  <para>
+   YaSTソフトRAID設定には、YaST Expert Partitionerからアクセスできます。このパーティション設定ツールを使用すると、既存のパーティションを編集および削除したり、ソフトウェアRAIDで使用する新規パーティションを作成したりすることもできます。これらの方法は、RAIDレベル0、1、5、および6の設定に適用されます。RAID 10の設定については、<xref linkend="cha.raid10"/>で説明されています。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     YaSTを起動して<guimenu>パーティショナ</guimenu>を開きます。
+    </para>
+   </step>
+   <step>
+    <para>
+     必要に応じて、RAID設定で使用するパーティションを作成します。パーティションをフォーマットしたり、パーティションタイプを<guimenu>0xFD Linux RAID</guimenu>に設定したりしないでください。既存のパーティションを使用する場合、パーティションタイプを変更する必要はありません。YaSTによって自動的に変更されます。詳細については、<xref linkend="sec.yast2.i_y2_part_expert"/>を参照してください。
+    </para>
+    <para>
+     ハードディスクのどれかに障害が発生した場合にデータを失うリスクを減らすため(RAID 1、RAID 5)、およびRAID 0のパフォーマンスを最適化するため、異なるハードディスクに保存されているパーティションを使用することを強くお勧めします。
+    </para>
+    <para>
+     RAID 0の場合は、少なくとも2つのパーティションが必要です。RAID 1に必要なパーティションは2つだけですが、RAID 5の場合は少なくとも3つのパーティションが必要です。RAID 6セットアップでは、少なくとも4つのパーティションが必要です。各セグメントは最小サイズのパーティションと同量のスペースしか提供できないので、同じサイズのパーティションだけを使用するようお勧めします。
+    </para>
+   </step>
+   <step>
+    <para>
+     左のパネルで、<guimenu>RAID</guimenu>を選択します。
+    </para>
+    <para>
+     既存のRAID設定のリストが右のパネルに表示されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     ［RAID］ページの左下で、<guimenu>RAIDの追加</guimenu>をクリックします。
+    </para>
+    <informalfigure>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_raid2_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_raid2_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </informalfigure>
+   </step>
+   <step>
+    <para>
+     <guimenu>RAID種類</guimenu>を選択し、<guimenu>追加</guimenu>をクリックして、<guimenu>使用可能なデバイス</guimenu>ダイアログから適切な数のパーティションを追加します。
+    </para>
+    <para>
+     オプションで、<guimenu>RAID Name (RAID名)</guimenu>でRAIDに名前を割り当てることができます。この名前は、<filename>/dev/md/<replaceable>name</replaceable></filename>として利用可能になります。詳細については、<xref linkend="sec.raid.yast.names"/>を参照してください。
+    </para>
+    <figure xml:id="fig.yast2.raid3">
+     <title>RAID 5設定の例</title>
+     <mediaobject>
+      <imageobject role="fo">
+       <imagedata fileref="yast2_raid3_a.png" width="80%" format="PNG"/>
+      </imageobject>
+      <imageobject role="html">
+       <imagedata fileref="yast2_raid3_a.png" width="100%" format="PNG"/>
+      </imageobject>
+     </mediaobject>
+    </figure>
+    <para>
+     <guimenu>次へ</guimenu>で続行します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>チャンクサイズ</guimenu>を選択し、該当する場合は<guimenu>パリティアルゴリズム</guimenu>を選択します。最適なチャンクサイズは、データのタイプとRAIDのタイプによって変わります。詳細については、<link xlink:href="https://raid.wiki.kernel.org/index.php/RAID_setup#Chunk_sizes"/>を参照してください。パリティアルゴリズムの詳細については、<option>--layout</option>オプションの検索時に<command>man 8 mdadm</command>を使用して参照できます。わからない場合は、デフォルト値を使用してください。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>Role (役割)</guimenu>でボリュームの役割を選択します。ここで選択した内容は、次のダイアログのデフォルト値にのみ影響します。値は次の手順で変更可能です。わからない場合は、<guimenu>Raw Volume (Unformatted) (RAWボリューム(未フォーマット))</guimenu>を選択します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>フォーマットオプション</guimenu>で、<guimenu>パーティションをフォーマットする</guimenu>を選択し、<guimenu>ファイルシステム</guimenu>を選択します。<guimenu>オプション</guimenu>メニューの内容は、ファイルシステムによって異なります。通常は、デフォルト値を変更する必要はありません。
+    </para>
+    <para>
+     <guimenu>マウントのオプション</guimenu>の下で、<guimenu>パーティションをマウントする</guimenu>を選択してから、マウントポイントを選択します。<guimenu>Fstabオプション</guimenu>をクリックして、このボリュームの特別なマウントオプションを追加します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>次へ</guimenu>をクリックし、変更が一覧されることを確認してから、<guimenu>完了</guimenu>をクリックします。
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 xml:id="sec.raid.yast.names">
+   <title>RAIDの名前</title>
+   <para>
+    デフォルトでは、ソフトウェアRAIDデバイスには、<literal>mdN</literal> (<literal>N</literal>は数字)というパターンに従った数字の名前が付いています。そのため、たとえば<filename>/dev/md127</filename>としてデバイスにアクセスでき、<filename>/proc/mdstat</filename>および<filename>/proc/partitions</filename>には<literal>md127</literal>としてリストされます。このような名前では作業しづらい場合があります。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>では、この問題を回避する方法を2つ提供しています。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>デバイスへの名前付きリンクを指定する</term>
+     <listitem>
+      <para>
+       オプションで、YaSTでRAIDデバイスを作成する際、または<command>mdadm --create '/dev/md/</command> <replaceable>name'</replaceable>を使用してコマンドラインで、RAIDデバイスの名前を指定できます。デバイス名は<literal>mdN</literal>のままですが、リンク<filename>/dev/md/<replaceable>name</replaceable></filename>が作成されます。
+      </para>
+<screen><prompt>tux &gt; </prompt>ls -og /dev/md
+total 0
+lrwxrwxrwx 1 8 Dec  9 15:11 myRAID -&gt; ../md127</screen>
+      <para>
+       デバイスは<filename>/proc</filename>には引き続き<literal>md127</literal>としてリストされます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>名前付きデバイスを指定する</term>
+     <listitem>
+      <para>
+       ご使用のセットアップでデバイスへの名前付きリンクでは不十分な場合、次のコマンドを実行して、<filename>/etc/mdadm.conf</filename>に「CREATE names=yes」という行を追加します。
+      </para>
+<screen>sudo echo "CREATE names=yes" &gt;&gt; /etc/mdadm.conf</screen>
+      <para>
+       これにより、<literal>myRAID</literal>のような名前が<quote>実際の</quote>デバイス名として使用されるようになります。このデバイスは<filename>/dev/myRAID</filename>でアクセスできるだけでなく、<filename>/proc</filename>にも<literal>myRAID</literal>としてリストされます。これは、設定ファイルの変更後に設定したRAIDにのみ適用される点に注意してください。アクティブなRAIDでは、停止して再アセンブルするまで引き続き<literal>mdN</literal>形式の名前が使用されます。
+      </para>
+      <warning>
+       <title>非互換のツール</title>
+       <para>
+        一部のツールは、名前付きRAIDデバイスをサポートしていません。ツールがRAIDデバイスに<literal>mdN</literal>形式の名前が付いていることを予期している場合、そのツールはデバイスを特定できません。
+       </para>
+      </warning>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid.trouble">
+  <title>ソフトウェアRAIDのトラブルシューティング</title>
+
+  <para>
+   <filename>/proc/mdstat</filename>ファイルをチェックして、RAIDパーティションが破損しているかどうかを調べます。ディスク障害が発生した場合は、Linuxシステムをシャットダウンして、問題のあるハードディスクを、同じ方法でパーティション分割されている新しいハードディスクで置き換えます。次に、システムを再起動して、<command>mdadm /dev/mdX --add /dev/sdX</command>コマンドを入力します。<literal>「X」を特定のデバイス識別子に置き換えてください。</literal>これにより、ハードディスクがRAIDシステムに自動的に統合され、そのRAIDシステムが完全に再構築されます(RAID 0を除くすべてのRAIDレベル)。
+  </para>
+
+  <para>
+   再構築中もすべてのデータにアクセスできますが、RAIDが完全に再構築されるまでは、パフォーマンスに問題が発生する場合があります。
+  </para>
+
+  <sect2 xml:id="sec.raid.trouble.autorecovery">
+   <title>ディスク障害復旧後の回復</title>
+   <para>
+    RAIDアレイに含まれているディスクが障害を起こす理由はいくつかあります。最も一般的な理由を一覧にしました。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      ディスクメディアに問題が発生
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ディスクドライブコントローラに障害発生
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ディスクへの接続に障害発生
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    ディスクメディアまたはディスクコントローラの障害の場合、デバイスを交換または修理する必要があります。RAID内でホットスペアが設定されていない場合、手動による介入作業が必要です。
+   </para>
+   <para>
+    最後の接続障害の場合、接続の修復後(自動的に修復する場合もあります)、<command>mdadm</command>コマンドによって、障害が発生したデバイスは、自動的に再度追加されます。
+   </para>
+   <para>
+    <command>md</command>/<command>mdadm</command>は、ディスク障害の原因を正確に判断できないため、デバイスが正常であると明示的に指示されるまで、ディスクエラーを深刻なエラーと判断し、障害が発生しているデバイスを異常と見なします。
+   </para>
+   <para>
+    内部RAIDアレイを持つストレージデバイスなど、環境によっては、デバイス障害の原因の多くを接続の問題が占める場合があります。このような場合、<command>mdadm</command>に対して、デバイスが表示されたら、そのデバイスを<option>--re-add</option>によって自動的に再度追加しても問題ないと指示することができます。これには、以下の行を<filename>/etc/mdadm.conf</filename>に追加します。
+   </para>
+<screen>POLICY action=re-add</screen>
+   <para>
+    再表示されたらそのデバイスを自動的に再度追加できるのは、<systemitem>udev</systemitem>ルールによって、<command>mdadm -I <replaceable>disk_device_name</replaceable></command>が、自動的に表示されたあらゆるデバイスで実行されるように設定されている場合(デフォルトの動作)、およびwrite-intentビットマップが設定されている場合(デフォルトの設定)に限られることに注意してください。
+   </para>
+   <para>
+    このポリシーを特定のデバイスにのみ適用し、他には適用しない場合、<literal>path=</literal>オプションを<filename>/etc/mdadm.conf</filename>内の<literal>POLICY</literal>行に追加して、選択したデバイスにのみデフォルトでないアクションを限定することができます。ワイルドカードを使用して、デバイスのグループを指定することができます。詳しくは、<command>man 5 mdadm.conf</command>を参照してください。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid.more">
+  <title>詳細情報</title>
+
+  <para>
+   ソフトウェアRAIDの設定方法と詳細情報が、次のHOWTOにあります。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <citetitle>Linux RAID wiki</citetitle>: <link xlink:href="https://raid.wiki.kernel.org/index.php/Linux_Raid"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <citetitle>The Software RAID HOWTO</citetitle>(<filename>/usr/share/doc/packages/mdadm/Software-RAID.HOWTO.html</filename>ファイル)
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   「<citetitle>linux-raid</citetitle>」(<link xlink:href="http://marc.info/?l=linux-raid"/>)などのLinux RAIDメーリングリストもあります。
+  </para>
+ </sect1>
+</chapter>

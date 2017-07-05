@@ -1,0 +1,699 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_prep_boot.xml" version="5.0" role="General" xml:id="cha.deployment.prep_boot">
+ <title>準備目標系統的啟動</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  可以使用不同的方法安裝 <phrase role="productname"><phrase os="sles">SUSE® Linux Enterprise Server</phrase></phrase>。除了<xref linkend="cha.inst"/>中介紹的常見媒體安裝方式外，也可以選擇使用各種基於網路的方式，甚至採用完全自動的方式來安裝 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>。
+ </para>
+ <para>
+  本章中的範例使用 NFS 來提供安裝資料。如果要使用 FTP、SMB 或 HTTP，請參閱<xref linkend="cha.deployment.instserver"/>。
+ </para>
+ <note>
+  <title>術語</title>
+  <para>
+   以下幾節中將要存放新安裝之 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的系統稱為<emphasis>目標系統</emphasis>或<emphasis>安裝目標</emphasis>。<emphasis>儲存庫</emphasis> (以前稱為<quote>安裝來源</quote>) 這個名詞則是用來表示所有安裝資料的來源。其中包括實體媒體 (例如 CD 和 DVD) 以及您網路中發佈安裝資料的網路伺服器。
+  </para>
+ </note>
+ <para>
+  本節內容會介紹各種複雜開機方式的組態任務。其中包含 DHCP、PXE 啟動、TFTP 和網路喚醒等現成的組態。
+ </para>
+ <para>
+  這些範例假設 DHCP、TFTP 和 NFS 伺服器位於 IP 為 192.168.1.1 的同一部機器上。所有服務都可以位於不同的機器上，不會產生任何問題。請務必視需要變更 IP 位址。
+ </para>
+ <sect1 xml:id="sec.deployment.prep_boot.dhcp">
+  <title>設定 DHCP 伺服器</title>
+  <para>
+   除了為網路用戶端提供自動位址配置外，DHCP 伺服器需要執行的所有工作就是宣告 TFTP 伺服器的 IP 位址，以及目標機器上的安裝常式需要拉進的檔案。必須載入的檔案取決於目標機器的架構，以及使用的是傳統的 BIOS 還是 UEFI 開機方式。
+  </para>
+  <procedure xml:id="proc.deployment.prep_boot.dhcp.man">
+   <step>
+    <para>
+     以 <systemitem class="username">root</systemitem> 身分登入代管 DHCP 伺服器的機器。
+    </para>
+   </step>
+   <step>
+    <para>
+     透過執行 <command>systemctl enable dhcpd</command> 啟用 DHCP 伺服器。
+    </para>
+   </step>
+   <step>
+    <para>
+     將以下幾行附加到 <filename>/etc/dhcpd.conf</filename> 下之 DHCP 伺服器組態檔案的子網路組態︰
+    </para>
+<screen># The following lines are optional
+option domain-name "my.lab";
+option domain-name-servers 192.168.1.1;
+option routers 192.168.1.1;
+option ntp-servers 192.168.1.1;
+ddns-update-style none;
+default-lease-time 3600;
+
+# The following lines are required
+option arch code 93 = unsigned integer 16; # RFC4578
+subnet 192.168.1.0 netmask 255.255.255.0 {
+ next-server 192.168.1.1;
+ range 192.168.1.100 192.168.1.199;
+ default-lease-time 3600;
+ max-lease-time 3600;
+ if option arch = 00:07 or option arch = 00:09 {
+   filename "/EFI/x86/grub.efi";
+ }
+ else if option arch = 00:0b {
+   filename "/EFI/aarch64/bootaa64.efi";
+ }
+ else  {
+   filename "/BIOS/x86/pxelinux.0";
+ }
+}
+</screen>
+    <para>
+     此組態範例使用的子網路為 192.168.1.0/24，DHCP、DNS 和閘道設定在 IP 為 192.168.1.1 的伺服器上。請務必依據您的網路配置變更所有使用的 IP 位址。如需更多 <filename>dhcpd.conf</filename> 中可用選項的詳細資訊，請參閱 <systemitem>dhcpd.conf</systemitem> man 頁面。
+    </para>
+   </step>
+   <step>
+    <para>
+     執行 <command>systemctl restart dhcpd</command> 重新啟動 DHCP 伺服器。
+    </para>
+   </step>
+  </procedure>
+  <para>
+   如果您計畫使用 SSH 來遠端控制 PXE 和網路喚醒功能安裝，請明確指定 DHCP 應提供給安裝目標的 IP 位址。若要這麼做，請根據以下範例修改上述 DHCP 組態︰
+  </para>
+<screen>group {
+ host test {
+   hardware ethernet <replaceable>mac_address</replaceable>;
+   fixed-address <replaceable>some_ip_address</replaceable>;
+   }
+}
+</screen>
+  <para>
+   host 陳述式會引入安裝目標的主機名稱。若要結合特定主機的主機名稱和 IP 位址，您必須瞭解並指定系統的硬體 (MAC) 位址。將此範例中的所有變數取代成符合您環境的實際值。
+  </para>
+  <para>
+   重新啟動 DHCP 伺服器後，它將向所指定的主機提供一個靜態 IP，讓您能透過 SSH 連接到該系統。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.tftp">
+  <title>設定 TFTP 伺服器</title>
+
+  <para>
+   如果使用基於 SUSE 的安裝，您可以使用 YaST 來設定 TFTP 伺服器。另外還可以進行手動設定。每當目標系統開機時，TFTP 伺服器即會傳送開機影像至目標系統，並傳送對目標系統的要求。
+  </para>
+
+  <sect2 xml:id="sec.deployment.prep_boot.tftp.yast">
+   <title>使用 YaST 設定 TFTP 伺服器</title>
+   <procedure xml:id="proc.deployment.prep_boot.tftp.yast">
+    <step>
+     <para>
+      以 <systemitem class="username">root</systemitem> 身分登入。
+     </para>
+    </step>
+    <step>
+     <para>
+      依序啟動 <menuchoice> <guimenu>YaST</guimenu> <guimenu>網路服務</guimenu> <guimenu>TFTP 伺服器，並安裝所需套件。</guimenu></menuchoice>
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>啟用</guimenu>，確定伺服器已經啟動，並已包含至開機常式。為安全起見，xinetd 在開機時啟動 tftpd 時，您不需執行任何動作。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>在防火牆中開啟埠</guimenu>，開啟在您機器上運作中防火牆的適當連接埠。如果您的伺服器上沒有執行任何防火牆，就無法使用此選項。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>瀏覽</guimenu>，瀏覽開機影像目錄。系統會自動建立並選取預設目錄 <filename>/srv/tftpboot</filename>。
+     </para>
+    </step>
+    <step>
+     <para>
+      按一下<guimenu>完成</guimenu>便可套用您的設定，並啟動伺服器。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.deployment.prep_boot.tftp.man">
+   <title>手動設定 TFTP 伺服器</title>
+   <procedure xml:id="proc.deployment.prep_boot.tftp.man">
+    <step>
+     <para>
+      以 <systemitem class="username">root</systemitem> 身分登入，並安裝 <systemitem>tftp</systemitem> 和 <systemitem>xinetd</systemitem> 套件。
+     </para>
+    </step>
+    <step>
+     <para>
+      修改位於 <filename>/etc/xinetd.d</filename> 下的 xinetd 組態，以確保開機時會啟動 TFTP 伺服器︰
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        如果 xinetd 不存在，請使用 <filename>touch tftp</filename>，在此目錄下建立一個名為 <command>tftp</command> 的檔案。接著執行 <command>chmod 755 tftp</command>。
+       </para>
+      </step>
+      <step>
+       <para>
+        開啟檔案 <filename>tftp</filename>，並新增以下內容︰
+       </para>
+<screen>service tftp
+{
+        socket_type            = dgram
+        protocol               = udp
+        wait                   = yes
+        user                   = root
+        server                 = /usr/sbin/in.tftpd
+        server_args            = -s /srv/tftpboot
+        disable                = no
+}
+</screen>
+      </step>
+      <step>
+       <para>
+        儲存檔案，並使用 <command>systemctl restart xinetd</command> 重新啟動 xinetd。
+       </para>
+      </step>
+     </substeps>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.pxe">
+  <title>在 TFTP 伺服器上安裝檔案</title>
+  <para>
+   以下程序介紹了如何在 32 位元和 64 位元 x86 架構上為配有 UEFI 和 BIOS 的目標機器準備伺服器。準備好的結構也為 aarch64 系統提供了空間。
+  </para>
+  <sect2 xml:id="sec.deployment.prep_boot.pxe">
+   <title>準備結構</title>
+   <para>
+    在下面的程序中，請使用所用的作業系統和 Service Pack 版本來取代 <replaceable>OS_version</replaceable> 和 <replaceable>SP_version</replaceable>。例如，使用 <literal>sles12</literal> 和 <literal>sp3</literal>。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      在 <filename>/srv/tftpboot</filename> 中建立一個結構以支援各種選項。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/BIOS/x86
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/EFI/x86/boot
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/EFI/aarch64/boot
+<prompt role="root">root # </prompt>mkdir -p /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+<prompt role="root">root # </prompt>mkdir -p /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+     </screen> 
+    </step>
+    <step>
+     <para>
+      從 SUSE 網站下載您需要的所有架構對應的 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> SP3 DVD ISO 影像。
+     </para>
+    </step>
+    <step>
+     <para>
+      依<xref linkend="sec.deployment.remoteinst.iso"/>所述掛接 ISO 檔案。若要在重新開機後使檔案可用，請在 <filename>/etc/fstab</filename> 中建立一個項目。若要進行標準安裝，則只需要 DVD1。
+     </para>
+<screen><prompt role="root">root # </prompt>mount -o loop <replaceable>path_to_iso</replaceable> /srv/install/<replaceable>arch</replaceable>/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/</screen>
+     <para>
+      對所有所需架構重複此步驟，並使用 <literal>x86</literal> 或 <literal>aarch64</literal> 取代 <replaceable>arch</replaceable>，使用對應 iso 檔案的路徑取代 <replaceable>path_to_iso</replaceable>。
+     </para>
+     <para>
+     </para>
+    </step>
+    <step>
+     <para>
+      將 x86 BIOS 和 UEFI 開機所需的 <filename>核心</filename>、<filename>initrd</filename> 和 <filename>message</filename> 檔案複製到適當的位置。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/x86_64/loader/
+<prompt role="root">root # </prompt>cp -a linux initrd message /srv/tftpboot/BIOS/x86/
+     </screen>
+    </step>
+    <step>
+     <para>
+      確認透過 NFS 可以使用路徑 <filename>/srv/install</filename>。如需詳細資料，請參閱<xref linkend="sec.deployment.instserver.nfs"/>。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.pxelinux">
+   <title>用於 x86 的 BIOS 檔案</title>
+   <procedure>
+    <step>
+     <para>
+      將 <filename>pxelinux.0</filename> 複製到 TFTP 資料夾並為組態檔案準備一個子資料夾。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cp /usr/share/syslinux/pxelinux.0 /srv/tftpboot/BIOS/x86/
+<prompt role="root">root # </prompt>mkdir /srv/tftpboot/BIOS/x86/pxelinux.cfg
+     </screen>
+    </step>
+    <step>
+     <para>
+      建立 <filename>/srv/tftpboot/BIOS/x86/pxelinux.cfg/default</filename> 並新增以下幾行︰
+     </para>
+     <screen>
+default install
+
+# hard disk
+label harddisk
+ localboot -2
+# install
+label install
+ kernel linux
+ append initrd=initrd install=nfs://192.168.1.1:/srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+
+display message
+implicit 0
+prompt 1
+timeout 5
+     </screen>
+    </step>
+    <step>
+     <para>
+      編輯檔案 <filename>/srv/tftpboot/BIOS/x86/message</filename>，以反映您剛編輯過的 <filename>default</filename> 檔案。
+     </para>
+     <screen>
+Welcome to the Installer Environment! 
+
+To start the installation enter 'install' and press &lt;return&gt;.
+
+Available boot options:
+ harddisk   - Boot from Hard Disk (this is default)
+ install    - Installation
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.efilinux_x86">
+   <title>用於 x86 的 UEFI 檔案</title>
+   <para>
+    在下面的程序中，請使用所用的作業系統和 Service Pack 版本來取代 <replaceable>OS_version</replaceable> 和 <replaceable>SP_version</replaceable>。例如，使用 <literal>sles12</literal> 和 <literal>sp3</literal>。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      複製 UEFI 開機所需的所有 <package>grub2</package> 檔案。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/EFI/BOOT
+<prompt role="root">root # </prompt>cp -a bootx64.efi grub.efi MokManager.efi /srv/tftpboot/EFI/x86/
+     </screen>
+    </step>
+    <step>
+     <para>
+      將核心和 initrd 檔案複製到目錄結構。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/x86_64/loader/
+<prompt role="root">root # </prompt>cp -a linux initrd /srv/tftpboot/EFI/x86/boot
+     </screen>
+    </step>
+    <step>
+     <para>
+     建立檔案 <filename>/srv/tftpboot/EFI/x86/grub.cfg</filename>，在其中至少包含以下內容︰
+     </para>
+     <screen>
+set timeout=5
+menuentry 'Install <replaceable>OS_version</replaceable> <replaceable>SP_version</replaceable> for x86_64' {
+  linuxefi /EFI/x86/boot/linux \
+   install=nfs://192.168.1.1/srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+  initrdefi /EFI/x86/boot/initrd
+}
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.efilinux_aarch64">
+   <title>用於 AARCH64 的 UEFI 檔案</title>
+   <para>
+    在下面的程序中，請使用所用的作業系統和 Service Pack 版本來取代 <replaceable>OS_version</replaceable> 和 <replaceable>SP_version</replaceable>。例如，使用 <literal>sles12</literal> 和 <literal>sp3</literal>。
+   </para>
+   <procedure>
+    <step>
+     <para>
+     執行此操作的方法與 x86_64 EFI 環境的方法極其相似。首先，複製 grub2-efi 環境中 UEFI 開機所需的檔案。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/EFI/BOOT
+<prompt role="root">root # </prompt>cp -a bootaa64.efi /srv/tftpboot/EFI/aarch64/
+     </screen>
+    </step>
+    <step>
+     <para>
+      將核心和 initrd 複製到目錄結構
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/aarch64
+<prompt role="root">root # </prompt>cp -a linux initrd /srv/tftpboot/EFI/aarch64/boot
+     </screen>
+    </step>
+    <step>
+     <para>
+      現在，建立檔案 <filename>/srv/tftpboot/EFI/grub.cfg</filename> 並新增以下內容︰
+     </para>
+     <screen>
+menuentry 'Install <replaceable>OS_version</replaceable> <replaceable>SP_version</replaceable>' {
+  linux /EFI/aarch64/boot/linux network=1 usessh=1 sshpassword="suse" \
+   install=nfs://192.168.1.1:/srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1 \
+   console=ttyAMA0,115200n8
+  initrd /EFI/aarch64/boot/initrd
+}
+     </screen>
+     <para>
+      透過在組態檔案中新增以上內容，新增了一些可啟用序列主控台並允許透過 ssh 進行安裝的其他選項，這對沒有標準 KVM 主控台介面的系統而言非常實用。您會發現該設定專門針對特定的 ARM 平台。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeopts">
+  <title>PXELINUX 組態選項</title>
+
+  <para>
+   此處列出的選項為 PXELINUX 組態檔案中所有可用選項的子集合。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><option>APPEND <replaceable>選項... </replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      新增一個或多個選項至核心指令行。這些新增選項是用於自動和手動開機。新增選項會加在每個核心指令行的開頭位置，通常您只要明確輸入核心選項，便可覆寫這些選項。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>APPEND -</option>
+    </term>
+    <listitem>
+     <para>
+      不附加任何項目。在 <option>LABEL</option> 區段中做為引數且包含單一連字號的 <option>APPEND</option>，可以用來覆寫全域的 <option>APPEND</option>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>DEFAULT <replaceable>kernel options</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      設定預設的核心指令行。當 PXELINUX 是自動啟動，則該選項的作用相當於在啟動提示處輸入了在 DEFAULT 後輸入的所有內容 (表示自動啟動的 auto 選項除外，它是自動新增的)。
+     </para>
+     <para>
+      如果組態檔案不存在或其中未定義 DEFAULT 項目，則預設使用不帶任何選項的核心名稱<quote>linux</quote>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+
+    <term><option>IFAPPEND <replaceable>旗標</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      根據<replaceable>旗標</replaceable>值將特定選項新增至核心指令行。<option>IFAPPEND</option> 選項僅適用於 PXELINUX。<replaceable>旗標</replaceable>需要一個值，如<xref linkend="tab.deployment.boot.pxeopts.ifappend"/> 中所述。
+     </para>
+     <table xml:id="tab.deployment.boot.pxeopts.ifappend">
+      <title>從 <option>IFAPPEND</option> 產生和新增的核心指令行選項</title>
+      <tgroup cols="2">
+       <colspec colwidth="1*"/>
+       <colspec colwidth="4*"/>
+       <thead>
+        <row>
+         <entry valign="middle">
+          <para>
+           引數
+          </para>
+         </entry>
+         <entry>
+          <para>
+           產生的核心指令行/描述
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <option>1</option>
+          </para>
+         </entry>
+         <entry>
+<screen>ip=<replaceable>CLIENT_IP</replaceable>:<replaceable>BOOT_SERVER_IP</replaceable>:<replaceable>GW_IP</replaceable>:<replaceable>NETMASK</replaceable></screen>
+          <para>
+           預留位置根據 DHCP/BOOTP 或 PXE 開機伺服器中的輸入加以取代。
+          </para>
+          <para>
+           請注意，此選項並非在已開機系統中執行 DHCP 用戶端的替代項。如果不進行定期更新，PXE BIOS 取得的租用將會過期，使得該 IP 位址可供 DHCP 伺服器重複使用。
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>2</option>
+          </para>
+         </entry>
+         <entry>
+<screen>BOOTIF=<replaceable>MAC_ADDRESS_OF_BOOT_INTERFACE</replaceable></screen>
+          <para>
+           如果您要在安裝伺服器上逐一查探 LAN 介面，直到取得 DHCP 伺服器的回覆時以避免逾時，此選項非常有用。使用此選項可讓 initrd 程式決定系統是從哪個介面開機的。linuxrc 會讀取此選項並使用此網路介面。
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>4</option>
+          </para>
+         </entry>
+         <entry>
+<screen>SYSUUID=<replaceable>SYSTEM_UUID</replaceable></screen>
+          <para>
+           新增採用小寫十六進位的 UUID，請參閱 <filename>/usr/share/doc/packages/syslinux/pxelinux.txt</filename>
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LABEL <replaceable>label</replaceable> KERNEL <replaceable>image</replaceable> APPEND <replaceable>options</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      指示是否要將輸入的 <replaceable>label</replaceable> 當作開機核心，或是 PXELINUX 應該要開機 <replaceable>image</replaceable>；以及是否要使用指定 <option>APPEND</option> 選項，而不是使用該檔案全域區段中的指定選項 (在第一個 <option>LABEL</option> 指令前)。image<replaceable> 的預設值與 </replaceable>label<replaceable> 相同，而且如果沒有指定 </replaceable>APPEND<option>，就會預設使用全域項目 (如果有的話)。</option> 您最多可輸入 128 個 <option>LABEL</option> 項目。
+     </para>
+
+     <para>
+      PXELINUX 使用以下語法︰
+     </para>
+<screen>label <replaceable>mylabel</replaceable>
+  kernel <replaceable>mykernel</replaceable>
+  append <replaceable>myoptions</replaceable></screen>
+     <para>
+      系統會將標籤當成檔案名稱一樣截斷，截斷後，它們必須是唯一的。舉例來說，<quote>v2.6.30</quote> 和 <quote>v2.6.31</quote> 這兩個標籤在 PXELINUX 中將無法區分，因為它們都會截斷成相同的 DOS 檔案名稱。
+     </para>
+     <para>
+      該核心不必是 Linux 核心。它也可以是開機磁區或 COMBOOT 檔案。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LOCALBOOT <replaceable>類型</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      在 PXELINUX 上，指定 <option>LOCALBOOT 0</option> 而不指定 <option>KERNEL</option> 選項，表示要呼叫此特定標籤；而且最後要使用本地磁碟開機，而不使用核心開機。
+     </para>
+     <informaltable frame="topbot" rowsep="0">
+      <tgroup cols="2">
+
+       <thead>
+        <row>
+         <entry>
+          <para>
+           引數
+          </para>
+         </entry>
+         <entry>
+          <para>
+           描述
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>0</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           執行正常開機
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>4</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           使用仍常駐在記憶體中的「通用網路驅動程式介面」(Universal Network Driver Interface, UNDI) 執行本地開機。
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>5</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           使用仍常駐在記憶體中完整的 PXE 堆疊 (包括 UNDI 驅動程式) 執行本地開機。
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+     <para>
+      其他所有值都未定義。如果您對 UNDI 或 PXE 堆疊不甚瞭解，請指定 <literal>0</literal>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>TIMEOUT <replaceable>time-out</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      指示在開機提示等待自動開機的時間長度，單位為 1/10 秒。若使用者在鍵盤上按下任何一個鍵，就會取消逾時，前提是假設使用者會完成已開始的指令。如果逾時時間設為 0，則會完全停用逾時功能 (此設定值亦為預設值)。可能的最大逾時值為 35996 (小於一小時)。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>PROMPT<replaceable> flag_val</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      如果 <option>flag_val</option> 為 0，只有在按下 <keycap function="shift"/> 或 <keycap function="alt"/>，或者已設定 <keycap>Caps Lock</keycap> 或 <keycap>Scroll Lock</keycap> 時才會顯示開機提示 (此設定值為預設值)。如果 <option>flag_val</option> 為 1，則永遠會顯示開機提示。
+     </para>
+<screen>F2  <replaceable>filename</replaceable>
+F1  <replaceable>filename</replaceable>
+..etc...
+F9  <replaceable>filename</replaceable>
+F10 <replaceable>filename</replaceable></screen>
+     <para>
+      可在開機提示下按下功能鍵時，於螢幕畫面上顯示指定的檔案。這可用來執行開機前線上說明 (可能是針對核心指令行選項)。如果是使用較早版本的反向相容，<keycap>F10</keycap> 也可以當作 <literal>F0</literal> 輸入。請注意，目前還無法將檔案名稱繫結至 <keycap>F11</keycap> 和 <keycap>F12</keycap>。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeprep">
+  <title>準備用於 PXE 啟動的目標系統</title>
+
+  <para>
+   請在 BIOS 開機順序中包含 PXE 選項，以便準備 PXE 開機的系統 BIOS。
+  </para>
+
+  <warning>
+   <title>BIOS 開機順序</title>
+   <para>
+    請勿將 PXE 選項置於 BIOS 硬碟開機選項之前。否則，此系統會在您每次開機時嘗試重新安裝系統。
+   </para>
+  </warning>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolprep">
+  <title>準備用於網路喚醒功能的目標系統</title>
+
+  <para>
+   您需要使用適當的 BIOS 選項才可在安裝前啟用網路喚醒 (WOL) 功能。另外，請記下目標系統的 MAC 位址。啟動網路喚醒功能時將會用到此資料。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wol">
+  <title>區域網路喚醒</title>
+
+  <para>
+   「網路喚醒功能」可藉由包含機器 MAC 位址的特定網路封包來開機。因為世界上的每台機器都有一個獨一無二的 MAC 識別碼，所以您不必擔心會不小心開啟錯誤的機器。
+  </para>
+
+  <important>
+   <title>跨越不同網路區段的網路喚醒功能</title>
+   <para>
+    如果控制機器與喚醒安裝目標的位置不在同一個網路區段，請將要傳送的 WOL 要求設定為多重廣播，或者遠端控制網路區段上傳送這些要求的機器。
+   </para>
+  </important>
+
+  <para>
+   SUSE Linux Enterprise Server 的使用者可以使用名為 WOL 的 YaST 模組輕鬆設定網路喚醒功能。其他 SUSE Linux 版本作業系統的使用者則可以使用指令行工具。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolyast">
+  <title>使用 YaST 設定網路喚醒功能</title>
+
+  <procedure xml:id="proc.deployment.prep_boot.wolyast">
+   <step>
+    <para>
+     以 <systemitem class="username">root</systemitem> 身分登入。
+    </para>
+   </step>
+   <step>
+    <para>
+     啟動<menuchoice> <guimenu>YaST</guimenu> <guimenu> 網路服務</guimenu> <guimenu> WOL</guimenu></menuchoice>。
+    </para>
+   </step>
+   <step>
+    <para>
+     按一下<guimenu>新增</guimenu>，並輸入目標系統的主機名稱和 MAC 位址。
+    </para>
+   </step>
+   <step>
+    <para>
+     若要開啟此機器，請選取適當的項目，並按一下<guimenu>喚醒</guimenu>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.mksusecd">
+  <title>從 CD 或 USB 磁碟機而非 PXE 開機</title>
+  <para>
+   您還可以使用包含小型系統影像的 CD、DVD 或 USB 磁碟機來開機，而不透過 PXE 開機。載入核心和 initrd 後，將會立即透過 NFS 載入必要檔案。可使用 <command>mksusecd</command> 建立可開機影像。如果目標機器不支援 PXE 開機，此選項可能相當實用。
+  </para>
+  <para>
+   使用 <command>sudo zypper in mksusecd</command> 可安裝該工具。使用以下指令可建立可開機 ISO 影像︰
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=nfs://192.168.1.1:/srv/install/<replaceable>arch</replaceable>/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1  \
+/srv/tftpboot/EFI/<replaceable>arch</replaceable>/boot</screen>
+  <para>
+   使用目標系統架構對應的資料夾取代 <replaceable>arch</replaceable>。另外，依據<xref linkend="sec.deployment.pxe"/>中的路徑取代 <replaceable>OS_version</replaceable> 和 <replaceable>SP_version</replaceable>。
+  </para>
+  <para>
+   對於 <option>--net</option> 選項，您可以不使用 NFS 伺服器，而是使用 HTTP 儲存庫，例如 openSUSE 儲存庫︰
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=http://download.opensuse.org/tumbleweed/repo/oss/suse \
+/srv/tftpboot/EFI/<replaceable>arch</replaceable>/boot</screen>
+  <para>
+   <filename>image.iso</filename> 可寫入到 DVD 或 CD，或使用 <command>dd</command> 寫入到 USB 記憶棒︰
+  </para>
+  <screen><prompt role="root">root # </prompt><command>dd</command> if=image.iso of=/dev/<replaceable>usb_device</replaceable></screen>
+  <para>
+   使用 USB 記憶棒的裝置名稱取代 <replaceable>usb_device</replaceable>。全面檢查裝置名稱，以確認您未意外損毀其他磁碟機上的資料。
+  </para>
+ </sect1>
+</chapter>

@@ -1,0 +1,699 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_prep_boot.xml" version="5.0" role="General" xml:id="cha.deployment.prep_boot">
+ <title>ターゲットシステムのブートの準備</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  <phrase role="productname"><phrase os="sles">SUSE® Linux Enterprise Server</phrase></phrase>は複数の方法でインストールすることができます。<xref linkend="cha.inst"/>SUSE Linux Enterprise Server<phrase role="productname"><phrase os="sles">をインストールするには、</phrase></phrase>で説明されている通常のメディアによるインストール以外に、ネットワークベースのさまざまなアプローチや、完全自動のアプローチも選択できます。
+ </para>
+ <para>
+  以下の例では、インストールデータを扱うためにNFSを使用しています。FTP、SMB、またはHTTPを使用する場合は、<xref linkend="cha.deployment.instserver"/>を参照してください。
+ </para>
+ <note>
+  <title>用語集</title>
+  <para>
+   以降のセクションでは、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>を新たにインストールするシステムのことを「ターゲットシステム」または「インストールターゲット」と呼びます。<emphasis/><emphasis/><emphasis>リポジトリ</emphasis>(以前は<quote>インストールソース</quote>と呼ぶ)という言葉は、インストールデータのすべてのソースを表すために使用されます。これには、CDやDVDなどの物理メディアや、ネットワーク内でインストールデータを配布するネットワークサーバが含まれます。
+  </para>
+ </note>
+ <para>
+  このセクションでは、複雑なブートシナリオで必要となる設定タスクについて説明します。DHCP、PXEブート、TFTP、およびWake on LAN用の、すぐに使用できる設定例も含まれています。
+ </para>
+ <para>
+  以下の例では、DHCPサーバ、TFTPサーバ、およびNFSサーバがIP 192.168.1.1の同じマシンに存在することを想定しています。すべてのサービスが異なるマシンに存在していてもまったく問題ありません。必ず、必要に応じてIPアドレスを変更してください。
+ </para>
+ <sect1 xml:id="sec.deployment.prep_boot.dhcp">
+  <title>DHCPサーバのセットアップ</title>
+  <para>
+   すべてのDHCPサーバは、ネットワーククライアントへの自動アドレス割り当てのほか、TFTPサーバのIPアドレスとターゲットマシン上のインストールルーチンで取得する必要のあるファイルをアナウンスする必要があります。ロードする必要があるファイルは、ターゲットマシンのアーキテクチャと、レガシBIOSブートまたはUEFIブートのどちらを使用するかによって異なります。
+  </para>
+  <procedure xml:id="proc.deployment.prep_boot.dhcp.man">
+   <step>
+    <para>
+     DHCPサーバのホストとなるマシンに<systemitem class="username">root</systemitem>としてログインします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <command>systemctl enable dhcpd</command>コマンドを実行して、DHCPサーバを有効にします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <filename>/etc/dhcpd.conf</filename>にあるDHCPサーバの設定ファイルのサブネット設定に、次の行を追加します。
+    </para>
+<screen># The following lines are optional
+option domain-name "my.lab";
+option domain-name-servers 192.168.1.1;
+option routers 192.168.1.1;
+option ntp-servers 192.168.1.1;
+ddns-update-style none;
+default-lease-time 3600;
+
+# The following lines are required
+option arch code 93 = unsigned integer 16; # RFC4578
+subnet 192.168.1.0 netmask 255.255.255.0 {
+ next-server 192.168.1.1;
+ range 192.168.1.100 192.168.1.199;
+ default-lease-time 3600;
+ max-lease-time 3600;
+ if option arch = 00:07 or option arch = 00:09 {
+   filename "/EFI/x86/grub.efi";
+ }
+ else if option arch = 00:0b {
+   filename "/EFI/aarch64/bootaa64.efi";
+ }
+ else  {
+   filename "/BIOS/x86/pxelinux.0";
+ }
+}
+</screen>
+    <para>
+     この設定例では、サブネット192.168.1.0/24と、IP 192.168.1.1のサーバ上のDHCP、DNS、およびゲートウェイを使用しています。使用されているIPアドレスはすべて、ご自身のネットワークレイアウトに従って変更してください。<filename>dhcpd.conf</filename>で利用可能なオプションの詳細については、<systemitem>dhcpd.conf</systemitem>のマニュアルページを参照してください。
+    </para>
+   </step>
+   <step>
+    <para>
+     <command>systemctl restart dhcpd</command>コマンドを実行して、DHCPサーバを再起動します。
+    </para>
+   </step>
+  </procedure>
+  <para>
+   PXEおよびWake on LANインストールのリモート制御にSSHを使う場合には、DHCPがインストールターゲットに提供するIPアドレスを明示的に指定してください。そのためには、上記のDHCP設定を、以下の例に従って修正します。
+  </para>
+<screen>group {
+ host test {
+   hardware ethernet <replaceable>mac_address</replaceable>;
+   fixed-address <replaceable>some_ip_address</replaceable>;
+   }
+}
+</screen>
+  <para>
+   host文は、インストールターゲットのホスト名になります。ホスト名とIPアドレスを特定のホストにバインドするには、そのシステムのハードウェア(MAC)アドレスを調べ、これを指定する必要があります。この例で使用されているすべての変数を、使用する環境にマッチする実際の値で置き換えてください。
+  </para>
+  <para>
+   DHCPサーバをリスタートすると、サーバは指定されたホストに静的なIPを提供するので、そのシステムにSSHで接続することが可能になります。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.tftp">
+  <title>TFTPサーバのセットアップ</title>
+
+  <para>
+   SUSEベースのインストールを使用している場合は、YaSTを使用してTFTPサーバをセットできます。また、手動でTFTPサーバをセットアップすることもできます。TFTPサーバは、ターゲットシステムがブートして要求を送ったときに、ブートイメージを提供します。
+  </para>
+
+  <sect2 xml:id="sec.deployment.prep_boot.tftp.yast">
+   <title>YaSTによるTFTPサーバのセットアップ</title>
+   <procedure xml:id="proc.deployment.prep_boot.tftp.yast">
+    <step>
+     <para>
+      <systemitem class="username">root</systemitem>としてログインします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <menuchoice> <guimenu>YaST</guimenu> <guimenu>ネットワークサービス</guimenu> <guimenu>TFTPサーバ</guimenu></menuchoice>の順に選択して、要求されたパッケージをインストールします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>有効にする</guimenu>をクリックして、サーバが起動し、ブートルーチンに含まれるようにします。この. xinetdがブート時にtftpdを起動するようにするために必要なユーザ操作はありません。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>ファイアウォール内でポートを開く</guimenu>をクリックして、マシンで動作しているファイアウォールで適切なポートを開きます。サーバでファイアウォールが動作していない場合には、このオプションは利用できません。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>参照</guimenu>をクリックして、ブートイメージのディレクトリを参照します。デフォルトのディレクトリ<filename>/srv/tftpboot</filename>が作成され、自動的に選択されます。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>完了</guimenu>をクリックして、設定内容を適用し、サーバを起動します。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.deployment.prep_boot.tftp.man">
+   <title>TFTPサーバの手動セットアップ</title>
+   <procedure xml:id="proc.deployment.prep_boot.tftp.man">
+    <step>
+     <para>
+      <systemitem class="username">root</systemitem>としてログインして、<systemitem>tftp</systemitem>および<systemitem>xinetd</systemitem>パッケージをインストールします。
+     </para>
+    </step>
+    <step>
+     <para>
+      /etc/xinetd.d/<filename>にあるxinetdの設定ファイルを変更して、ブート時にTFTPサーバが起動するようにします。</filename>
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        もしまだ存在していなければ、<filename>touch tftp</filename>コマンドで、このディレクトリに<command>tftp</command>というファイルを作成します。それから<command>chmod 755 tftp</command>を実行します。
+       </para>
+      </step>
+      <step>
+       <para>
+        <filename>tftp</filename>ファイルを開いて、次の行を入力します。
+       </para>
+<screen>service tftp
+{
+        socket_type            = dgram
+        protocol               = udp
+        wait                   = yes
+        user                   = root
+        server                 = /usr/sbin/in.tftpd
+        server_args            = -s /srv/tftpboot
+        disable                = no
+}
+</screen>
+      </step>
+      <step>
+       <para>
+        このファイルを保存し、<command>systemctl restart xinetd</command>でxinetdをリスタートします。
+       </para>
+      </step>
+     </substeps>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.pxe">
+  <title>TFTPサーバへのファイルのインストール</title>
+  <para>
+   以下の手順では、32ビットおよび64ビットのx86アーキテクチャでUEFIおよびBIOSを搭載したターゲットマシン用にサーバを準備する方法を説明します。ここで準備する構造は、aarch64システム用の場所としても使用できます。
+  </para>
+  <sect2 xml:id="sec.deployment.prep_boot.pxe">
+   <title>構造の準備</title>
+   <para>
+    この手順では、<replaceable>OS_version</replaceable>および<replaceable>SP_version</replaceable>を、使用しているオペレーティングシステムとサービスパックのバージョンに置き換えてください。たとえば、<literal>sles12</literal>と<literal>sp3</literal>を使用します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      さまざまなオプションをサポートするため、<filename>/srv/tftpboot</filename>内に構造を作成します。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/BIOS/x86
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/EFI/x86/boot
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/EFI/aarch64/boot
+<prompt role="root">root # </prompt>mkdir -p /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+<prompt role="root">root # </prompt>mkdir -p /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+     </screen> 
+    </step>
+    <step>
+     <para>
+      SUSEのWebサイトから、必要なアーキテクチャすべての<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> SP3のDVD ISOイメージをダウンロードします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <xref linkend="sec.deployment.remoteinst.iso"/>の説明に従って、ISOファイルをマウントします。再起動後にこれらのファイルを利用できるようにするため、<filename>/etc/fstab</filename>にエントリを作成します。標準インストールの場合は、DVD1のみが必要です。
+     </para>
+<screen><prompt role="root">root # </prompt>mount -o loop <replaceable>path_to_iso</replaceable> /srv/install/<replaceable>arch</replaceable>/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/</screen>
+     <para>
+      必要なすべてのアーキテクチャに対してこの手順を繰り返します。<replaceable>arch</replaceable>は<literal>x86</literal>または<literal>aarch64</literal>に置き換え、<replaceable>path_to_iso</replaceable>は対応するISOファイルのパスに置き換えてください。
+     </para>
+     <para>
+     </para>
+    </step>
+    <step>
+     <para>
+      x86のBIOSおよびUEFIブートに必要なファイル<filename>kernel</filename>、<filename>initrd</filename>、および<filename>message</filename>を適切な場所にコピーします。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/x86_64/loader/
+<prompt role="root">root # </prompt>cp -a linux initrd message /srv/tftpboot/BIOS/x86/
+     </screen>
+    </step>
+    <step>
+     <para>
+      NFSでパス<filename>/srv/install</filename>が利用できることを確認します。詳細については、<xref linkend="sec.deployment.instserver.nfs"/>を参照してください。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.pxelinux">
+   <title>x86用BIOSファイル</title>
+   <procedure>
+    <step>
+     <para>
+      <filename>pxelinux.0</filename>をTFTPフォルダにコピーして、設定ファイル用のサブフォルダを準備します。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cp /usr/share/syslinux/pxelinux.0 /srv/tftpboot/BIOS/x86/
+<prompt role="root">root # </prompt>mkdir /srv/tftpboot/BIOS/x86/pxelinux.cfg
+     </screen>
+    </step>
+    <step>
+     <para>
+      <filename>/srv/tftpboot/BIOS/x86/pxelinux.cfg/default</filename>を作成して、次の行を追加します。
+     </para>
+     <screen>
+default install
+
+# hard disk
+label harddisk
+ localboot -2
+# install
+label install
+ kernel linux
+ append initrd=initrd install=nfs://192.168.1.1:/srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+
+display message
+implicit 0
+prompt 1
+timeout 5
+     </screen>
+    </step>
+    <step>
+     <para>
+      上で編集した<filename>default</filename>ファイルが反映されるように、ファイル<filename>/srv/tftpboot/BIOS/x86/message</filename>を編集します。
+     </para>
+     <screen>
+Welcome to the Installer Environment! 
+
+To start the installation enter 'install' and press &lt;return&gt;.
+
+Available boot options:
+ harddisk   - Boot from Hard Disk (this is default)
+ install    - Installation
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.efilinux_x86">
+   <title>x86用UEFIファイル</title>
+   <para>
+    この手順では、<replaceable>OS_version</replaceable>および<replaceable>SP_version</replaceable>を、使用しているオペレーティングシステムとサービスパックのバージョンに置き換えてください。たとえば、<literal>sles12</literal>と<literal>sp3</literal>を使用します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      UEFIブートに必要なすべての <package>grub2</package> ファイルをコピーします。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/EFI/BOOT
+<prompt role="root">root # </prompt>cp -a bootx64.efi grub.efi MokManager.efi /srv/tftpboot/EFI/x86/
+     </screen>
+    </step>
+    <step>
+     <para>
+      カーネルおよびinitrdのファイルをディレクトリ構造にコピーします。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/x86_64/loader/
+<prompt role="root">root # </prompt>cp -a linux initrd /srv/tftpboot/EFI/x86/boot
+     </screen>
+    </step>
+    <step>
+     <para>
+     ファイル<filename>/srv/tftpboot/EFI/x86/grub.cfg</filename>を作成し、少なくとも次の内容を記述します。
+     </para>
+     <screen>
+set timeout=5
+menuentry 'Install <replaceable>OS_version</replaceable> <replaceable>SP_version</replaceable> for x86_64' {
+  linuxefi /EFI/x86/boot/linux \
+   install=nfs://192.168.1.1/srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+  initrdefi /EFI/x86/boot/initrd
+}
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.efilinux_aarch64">
+   <title>AARCH64用UEFIファイル</title>
+   <para>
+    この手順では、<replaceable>OS_version</replaceable>および<replaceable>SP_version</replaceable>を、使用しているオペレーティングシステムとサービスパックのバージョンに置き換えてください。たとえば、<literal>sles12</literal>と<literal>sp3</literal>を使用します。
+   </para>
+   <procedure>
+    <step>
+     <para>
+     方法はx86_64のUEFI環境の場合に非常によく似ています。最初に、grub2-efi環境のUEFIブートに必要なファイルをコピーします。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/EFI/BOOT
+<prompt role="root">root # </prompt>cp -a bootaa64.efi /srv/tftpboot/EFI/aarch64/
+     </screen>
+    </step>
+    <step>
+     <para>
+      カーネルとinitrdをディレクトリ構造にコピーします。
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/aarch64
+<prompt role="root">root # </prompt>cp -a linux initrd /srv/tftpboot/EFI/aarch64/boot
+     </screen>
+    </step>
+    <step>
+     <para>
+      ファイル<filename>/srv/tftpboot/EFI/grub.cfg</filename>を作成して、少なくとも次の内容を追加します。
+     </para>
+     <screen>
+menuentry 'Install <replaceable>OS_version</replaceable> <replaceable>SP_version</replaceable>' {
+  linux /EFI/aarch64/boot/linux network=1 usessh=1 sshpassword="suse" \
+   install=nfs://192.168.1.1:/srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1 \
+   console=ttyAMA0,115200n8
+  initrd /EFI/aarch64/boot/initrd
+}
+     </screen>
+     <para>
+      設定ファイルにこれを追加する際、他にもオプションがいくつかあり、シリアルコンソールを有効にしたり、SSH経由でのインストールを許可したりすることができます。これは、標準のKVMコンソールインタフェースを持たないシステムで便利です。これは特定のARMプラットフォーム専用の設定です。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeopts">
+  <title>PXELINUXの設定オプション</title>
+
+  <para>
+   ここに記されているのは、PXELINUX設定ファイルで利用可能なオプションの一部です。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><option>APPEND <replaceable>options... </replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      カーネルのコマンドラインに1つまたは複数のオプションを追加します。これらは、自動ブートと手動ブートのどちらの場合でも追加されます。オプションはカーネルコマンドラインの先頭に追加されるので、通常は、明示的に入力したカーネルオプションによって上書きすることができます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>APPEND -</option>
+    </term>
+    <listitem>
+     <para>
+      何も追加しません。<option>LABEL</option>セクション内で、<option>APPEND</option>に引数として1つのハイフンを付ければ、グローバルな<option>APPEND</option>を上書きすることができます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>DEFAULT <replaceable>kernel options</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      デフォルトのカーネルコマンドラインを設定します。PXELINUXが自動的にブートする場合には、DEFAULTの後のエントリがブートプロンプトに対して入力されたときのように動作します。加えて、自動ブートであることを示すautoオプションも自動的に追加されます。
+     </para>
+     <para>
+      設定ファイルが存在しない、または設定ファイル内でDEFAULTエントリが定義されていない場合には、オプションの付かないカーネル名<quote>linux</quote>がデフォルトとなります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+
+    <term><option>IFAPPEND <replaceable>FLAG</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      <replaceable>FLAG</replaceable>値に応じて、特定のオプションをカーネルコマンドラインに追加します。<option>IFAPPEND</option>オプションは、PXELINUXでのみ使用可能です。<replaceable>FLAG</replaceable>では、<xref linkend="tab.deployment.boot.pxeopts.ifappend"/>で説明されている値が必要です:
+     </para>
+     <table xml:id="tab.deployment.boot.pxeopts.ifappend">
+      <title><option>IFAPPEND</option>から生成され、追加されたカーネルコマンドラインオプション</title>
+      <tgroup cols="2">
+       <colspec colwidth="1*"/>
+       <colspec colwidth="4*"/>
+       <thead>
+        <row>
+         <entry valign="middle">
+          <para>
+           引数
+          </para>
+         </entry>
+         <entry>
+          <para>
+           生成されたカーネルコマンドライン/記述
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <option>1</option>
+          </para>
+         </entry>
+         <entry>
+<screen>ip=<replaceable>CLIENT_IP</replaceable>:<replaceable>BOOT_SERVER_IP</replaceable>:<replaceable>GW_IP</replaceable>:<replaceable>NETMASK</replaceable></screen>
+          <para>
+           プレースホルダは、DHCP/BOOTPまたはPXEブートサーバからの入力に基づいて置換されます。
+          </para>
+          <para>
+           このオプションは、ブートされたシステムでDHCPクライアントを実行するための代替品ではないことに注意してください。定期的な更新がない場合、PXE BIOSによって取得されたリースは期限切れになり、IPアドレスはDHCPサーバによる再使用で使用可能になります。
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>2</option>
+          </para>
+         </entry>
+         <entry>
+<screen>BOOTIF=<replaceable>MAC_ADDRESS_OF_BOOT_INTERFACE</replaceable></screen>
+          <para>
+           このオプションは、インストールサーバが、DHCPサーバからの返信を受け取るまで、LANインタフェースを交互に検索する場合に、タイムアウトを回避する場合に有用です。このオプションを使用すると、initrdプログラムはシステムがブートされたインタフェースから断定することができます。linuxrcではこのオプションを読み込み、このネットワークインタフェースを使用します。
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>4</option>
+          </para>
+         </entry>
+         <entry>
+<screen>SYSUUID=<replaceable>SYSTEM_UUID</replaceable></screen>
+          <para>
+           小文字16進数でUUIDを追加します。<filename>/usr/share/doc/packages/syslinux/pxelinux.txt</filename>を参照してください。
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LABEL <replaceable>label</replaceable> KERNEL <replaceable>image</replaceable> APPEND <replaceable>options</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      ブートするカーネルとして<replaceable>label</replaceable>が入力された場合、PXELINUXは代わりに<replaceable>image</replaceable>をブートし、ファイルのグローバルセクション(最初の<option>LABEL</option>コマンドの前)で指定されたものの代わりに、指定された<option>APPEND</option>オプションを使用します。<replaceable>image</replaceable>のデフォルトは<replaceable>label</replaceable>と同じです。また、<option>APPEND</option>が指定されなかった場合には、グローバルエントリがデフォルトとして使用されます(あれば)。最大で128の<option>LABEL</option>エントリが使用できます。
+     </para>
+
+     <para>
+      PXELINUXは次の構文を使用します。
+     </para>
+<screen>label <replaceable>mylabel</replaceable>
+  kernel <replaceable>mykernel</replaceable>
+  append <replaceable>myoptions</replaceable></screen>
+     <para>
+      ラベルは、ファイル名の場合のように切り詰められるので、切り詰められた後も固有性が保たれるように決める必要があります。たとえば、<quote/>「v2.6.30」と<quote/>「v2.6.31」という2つのラベルは、PXELINUXでは区別できません。これらは切り詰められるとどちらも同じDOSファイル名になるからです。
+     </para>
+     <para>
+      カーネルはLinuxカーネルである必要はありません。ブートセクタまたはCOMBOOTファイルを使用することもできます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LOCALBOOT <replaceable>type</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      PXELINUXでは、<option>KERNEL</option>オプションの代わりに<option>LOCALBOOT 0</option>を指定すると、 この特定のラベルが呼び出されて、カーネルブートの代わりにローカルディスクのブートが行われます。
+     </para>
+     <informaltable frame="topbot" rowsep="0">
+      <tgroup cols="2">
+
+       <thead>
+        <row>
+         <entry>
+          <para>
+           引数
+          </para>
+         </entry>
+         <entry>
+          <para>
+           説明
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>0</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           通常のブートを行う
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>4</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           まだメモリ上に常駐しているUNDI (Universal Network Driver Interface)ドライバを使用して、ローカルブートを行う
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>5</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           まだメモリ上に常駐しているUNDIドライバを含め、PXEスタック全体でローカルブートを行う
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+     <para>
+      他の値は定義されていません。UNDIやPXEスタックについて知らない場合は、<literal>0</literal>を指定してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>TIMEOUT <replaceable>time-out</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      自動的にブートする前に、ブートプロンプトをどれくらいの時間表示するかを指定します。単位は1/10秒です。タイムアウトは、ユーザがキーボードで何か入力するとキャンセルされます。この場合、ユーザがコマンドを入力するものと見なされます。タイムアウトの値を0に設定すると、タイムアウトは無効になります(これがデフォルトです)。タイムアウトの最大値は35996です(1時間よりほんの少しだけ短い時間です)。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>PROMPT<replaceable> flag_val</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      <option>flag_val</option>を0に設定すると、<keycap function="shift"/>か<keycap function="alt"/>キーが押された場合、または<keycap>Caps Lock</keycap>か<keycap>Scroll Lock</keycap>キーがセットされている場合にのみ、ブートプロンプトを表示します(デフォルト)。<option>flag_val</option>を1に設定すると、常にブートプロンプトを表示します。
+     </para>
+<screen>F2  <replaceable>filename</replaceable>
+F1  <replaceable>filename</replaceable>
+..etc...
+F9  <replaceable>filename</replaceable>
+F10 <replaceable>filename</replaceable></screen>
+     <para>
+      ブートプロンプトでファンクションキーを押したときに、指定されたファイルを表示します。これは、ブート前のオンラインヘルプ(おそらくはカーネルコマンドラインのオプション)を設定するために使用することができます。以前のリリースとの後方互換性のために、<keycap>F10</keycap>を&lt;<literal>F0</literal>&gt;として入力することもできます。現在のところ、<keycap>F11</keycap>と<keycap>F12</keycap>にファイル名を関連付けることはできないことに注意してください。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeprep">
+  <title>ターゲットシステムでPXEブートの準備をする</title>
+
+  <para>
+   システムのBIOSで、PXEブートの準備をします。これには、BIOSのブート順でのPXEオプションの設定も含まれます。
+  </para>
+
+  <warning>
+   <title>BIOSブートオーダー</title>
+   <para>
+    BIOSで、PXEオプションをハードディスクブートオプションの前に指定しないでください。さもないと、システムはブートのたびに再インストールを行おうとします。
+   </para>
+  </warning>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolprep">
+  <title>ターゲットシステムでWake on LANの準備をする</title>
+
+  <para>
+   Wake on LAN (WOL)では、インストールの前に適切なBIOSオプションを有効にすることが必要です。また、ターゲットシステムのMACアドレスを記録しておいてください。このデータは、Wake on LANを開始するために必要です。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wol">
+  <title>Wake on LAN</title>
+
+  <para>
+   Wake on LANを使えば、コンピュータのMACアドレスを含む特別なネットワークパケットを使って、コンピュータの電源を入れることができます。世界中のすべてのコンピュータは固有のMAC識別子を持っているので、間違って別のコンピュータの電源を入れてしまう心配はありません。
+  </para>
+
+  <important>
+   <title>異なるネットワークセグメントにまたがるWake on LAN</title>
+   <para>
+    制御用のマシンが、起動すべきインストールターゲットと同じネットワークセグメント内にない場合には、WOL要求がマルチキャストとして送信されるように設定するか、またはそのネットワークセグメント内にあるマシンをリモートに制御して、要求の送信元として作動させてください。
+   </para>
+  </important>
+
+  <para>
+   SUSE Linux Enterprise Serverのユーザは、WOLと呼ばれるYaSTモジュールを使って、簡単にWake on LANを設定することができます。他のバージョンのSUSE LinuxベースのOSユーザは、コマンドラインツールを使用してください。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolyast">
+  <title>YaSTを使ったWake on LAN</title>
+
+  <procedure xml:id="proc.deployment.prep_boot.wolyast">
+   <step>
+    <para>
+     <systemitem class="username">root</systemitem>としてログインします。
+    </para>
+   </step>
+   <step>
+    <para>
+     <menuchoice> <guimenu>YaST</guimenu> <guimenu>ネットワークサービス</guimenu> <guimenu>WOL</guimenu></menuchoice>の順に選択します。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>追加</guimenu>をクリックして、ターゲットシステムのホスト名とMACアドレスを入力します。
+    </para>
+   </step>
+   <step>
+    <para>
+     このコンピュータの電源を入れるには、適切な項目を選択して、<guimenu>起動</guimenu>をクリックします。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.mksusecd">
+  <title>PXEではなくCDドライブまたはUSBドライブからブート</title>
+  <para>
+   PXEでブートするのではなく、CDドライブ、DVDドライブ、またはUSBドライブと小容量のシステムイメージを使用することもできます。必要なファイルは、カーネルとinitrdがロードされるとすぐにNFSを介してロードされます。ブート可能なイメージは<command>mksusecd</command>で作成できます。これはターゲットマシンがPXEブートをサポートしていない場合に便利です。
+  </para>
+  <para>
+   <command>sudo zypper in mksusecd</command>を使用してイメージをインストールします。次のコマンドを使用して、ブート可能なISOイメージを作成します。
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=nfs://192.168.1.1:/srv/install/<replaceable>arch</replaceable>/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1  \
+/srv/tftpboot/EFI/<replaceable>arch</replaceable>/boot</screen>
+  <para>
+   <replaceable>arch</replaceable>は、ターゲットのシステムアーキテクチャの対応するフォルダに置き換えます。また、<replaceable>OS_version</replaceable>と<replaceable>SP_version</replaceable>も、<xref linkend="sec.deployment.pxe"/>に記載されているパスに従って置き換えます。
+  </para>
+  <para>
+   <option>--net</option>オプションにNFSサーバを使用する代わりに、openSUSEリポジトリなどのHTTPリポジトリを使用することもできます。
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=http://download.opensuse.org/tumbleweed/repo/oss/suse \
+/srv/tftpboot/EFI/<replaceable>arch</replaceable>/boot</screen>
+  <para>
+   <filename>image.iso</filename>はDVDまたはCDに書き込むことも、<command>dd</command>を使用してUSBスティックに書き込むこともできます。
+  </para>
+  <screen><prompt role="root">root # </prompt><command>dd</command> if=image.iso of=/dev/<replaceable>usb_device</replaceable></screen>
+  <para>
+   <replaceable>usb_device</replaceable>は、USBスティックのデバイス名に置き換えます。デバイス名を十分に確認して、誤って別のドライブ上のデータを破壊することがないようにしてください。
+  </para>
+ </sect1>
+</chapter>

@@ -1,0 +1,409 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_sdn.xml" version="5.0" xml:id="sec.ovs">
+ <title>使用 <phrase role="productname">Open vSwitch</phrase> 的軟體定義網路</title>
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  軟體定義網路 (SDN) 表示控制流量傳送目標的系統 (<emphasis>控制平面</emphasis>) 與轉遞流量至所選目的地的基礎系統 (<emphasis>資料平面</emphasis>，也稱為<emphasis>轉遞平面</emphasis>) 區分開來。這表示之前由單個而且往往不太靈活的交換器執行的功能，現在可以分給交換器 (資料平面) 及其控制器 (控制平面) 共同執行。在此模式下，可以對控制器編寫程式，使其變得非常靈活，而且可以快速適應不斷變化的網路條件。
+ </para>
+
+ <para>
+  <phrase role="productname">Open vSwitch</phrase> 是實作與 <phrase role="productname">OpenFlow</phrase> 通訊協定相容的分散式虛擬多層交換器的軟體。<phrase role="productname">OpenFlow</phrase> 允許控制器應用程式修改交換器的組態。<phrase role="productname"/>它會分層至 TCP 通訊協定，並對一定範圍的軟體和硬體實作。於是，單個控制器便可以驅動多個大相逕庭的交換器。
+ </para>
+
+ <sect2 xml:id="sec.ovs.advantage">
+  <title><phrase role="productname">Open vSwitch</phrase> 的優勢</title>
+  <para>
+   使用 <phrase role="productname">Open vSwitch</phrase> 的軟體定義網路有多項優勢，尤其是與虛擬機器配合使用時︰
+  </para>
+  <remark>
+   Tried to create short version of this:
+   https://github.com/openvswitch/ovs/blob/master/WHY-OVS.md
+   - sknorr, 2015-09-30
+  </remark>
+  <itemizedlist>
+   <listitem>
+    <para>
+     可以輕鬆識別網路狀態。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     網路及其即時狀態可以從一個主機移動至另一個主機。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     可以追蹤網路動態，並啟用外部軟體對它們進行回應。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     可以套用並處理網路封包中的標記以識別它們的來源或目標機器，並維護其他網路位置。可以設定及移轉標記規則。
+    </para>
+    <remark>
+     Feedback from Éric Bischoff: "[...] isn't that _how OVS works_, rather
+     than _what OVS can do_?"
+     =&gt; Added second sentence. It does ultimately seem like a feature to me,
+       though. Leaving it in for the moment.
+     - sknorr, 2015-10-15
+    </remark>
+   </listitem>
+   <listitem>
+    <para>
+     <phrase role="productname">Open vSwitch</phrase> 會實作 GRE 通訊協定 (<emphasis>泛型路由封裝</emphasis>)。有了這點，舉例而言，您便可以將私人 VM 網路彼此相連。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <phrase role="productname">Open vSwitch</phrase> 可以單獨使用，不過其設計是與網路硬體整合，可用於控制硬體交換器。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.install">
+  <title>安裝 <phrase role="productname">Open vSwitch</phrase></title>
+  <procedure>
+   <step>
+    <para>
+     安裝 <phrase role="productname">Open vSwitch</phrase> 及補充套件︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>zypper</command> install openvswitch openvswitch-switch</screen>
+    <para>
+     如果您想讓 <phrase role="productname">Open vSwitch</phrase> 與 KVM 監管程式配合使用，還需另外安裝 
+     <package>tunctl</package>
+     。如果您想讓 <phrase role="productname">Open vSwitch</phrase> 與 Xen 監管程式配合使用，還需另外安裝 
+     <package>openvswitch-kmp-xen</package>
+     。
+    </para>
+   </step>
+   <step>
+    <para>
+     啟用 <phrase role="productname">Open vSwitch</phrase> 服務︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>systemctl</command> enable openvswitch</screen>
+
+   </step>
+   <step>
+    <para>
+     重新啟動電腦或使用 <command>systemctl</command> 立即啟動 <phrase role="productname">Open vSwitch</phrase> 服務︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>systemctl</command> start openvswitch</screen>
+   </step>
+   <step>
+    <para>
+     若要檢查 <phrase role="productname">Open vSwitch</phrase> 是否已正確啟動，請使用︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>systemctl</command> status openvswitch</screen>
+   </step>
+  </procedure>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.userspace">
+  <title><phrase role="productname">Open vSwitch</phrase> 精靈與公用程式的綜覽</title>
+  <para>
+   <phrase role="productname">Open vSwitch</phrase> 由一些元件組成，其中包括一個核心模組和不同的使用者空間元件。核心模組用於加速資料路徑，但 <phrase role="productname">Open vSwitch</phrase> 的精簡安裝並不需要該模組。
+  </para>
+  <sect3 xml:id="sec.ovs.daemon">
+   <title>精靈</title>
+   <para>
+    <phrase role="productname">Open vSwitch</phrase> 的中心可執行檔是其兩個精靈。啟動 <systemitem>openvswitch</systemitem> 服務時，它們也會間接啟動。
+   </para>
+   <para>
+    <phrase role="productname">Open vSwitch</phrase> 主要精靈 (<command>ovs-vswitchd</command>) 提供交換器的實作。<phrase role="productname">Open vSwitch</phrase> 資料庫精靈 (<command>ovsdb-server</command>) 為儲存 <phrase role="productname">Open vSwitch</phrase> 之組態和狀態的資料庫提供服務。
+   </para>
+  </sect3>
+  <sect3 xml:id="sec.ovs.utility">
+   <title>公用程式</title>
+   <para>
+    <phrase role="productname">Open vSwitch</phrase> 還包含一些方便您配合使用的公用程式。以下列出了其中一部分，僅介紹了重要的指令。
+   </para>
+
+   <variablelist xml:id="vl.ovs.utility">
+    <varlistentry>
+     <term><command>ovsdb-tool</command>
+     </term>
+     <listitem>
+      <para>
+       建立、升級、壓縮與查詢 <phrase role="productname">Open vSwitch</phrase> 資料庫。對 <phrase role="productname">Open vSwitch</phrase> 資料庫執行異動。
+      </para>
+     </listitem>
+    </varlistentry>
+
+    <varlistentry>
+     <term><command>ovs-appctl</command>
+     </term>
+     <listitem>
+      <para>
+       設定正在執行的 <command>ovs-vswitchd</command> 或 <command>ovsdb-server</command> 精靈。
+      </para>
+     </listitem>
+    </varlistentry>
+
+
+    <varlistentry>
+     <term><command>ovs-dpctl</command> 與 <command>ovs-dpctl-top</command>
+     </term>
+     <listitem>
+      <para>
+       建立、修改、視覺化與刪除資料路徑。使用此工具可能會干擾 <command>ovs-vswitchd</command>，後者也執行資料路徑管理。因此，它通常僅用於診斷。
+      </para>
+      <para>
+       <command>ovs-dpctl-top</command> 會建立 <command>top</command> 一類的資料路徑的視覺化。<remark>Is visualize/ation the right word? - sknorr, 2015-09-30</remark>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>ovs-ofctl</command>
+     </term>
+     <listitem>
+      <para>
+       管理任何遵守 <phrase role="productname">OpenFlow</phrase> 通訊協定的交換器。<command>ovs-ofctl</command> 不僅可以與 <phrase role="productname">Open vSwitch</phrase> 互動。
+      </para>
+     </listitem>
+    </varlistentry>
+
+
+
+
+    <varlistentry>
+     <term><command>ovs-vsctl</command>
+     </term>
+     <listitem>
+      <para>
+       提供組態資料庫的概覽介面，可用於查詢及修改資料庫。實際上，它會顯示 <command>ovs-vswitchd</command> 的狀態，並可用於其設定。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect3>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.bridge">
+  <title>使用 <phrase role="productname">Open vSwitch</phrase> 建立橋接器</title>
+  <para>
+   以下範例組態使用 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上預設使用的 Wicked 網路服務。若要瞭解 Wicked 的詳細資訊，請參閱<xref linkend="sec.basicnet.manconf"/>。
+  </para>
+  <para>
+   安裝並啟動 <phrase role="productname">Open vSwitch</phrase> 後，執行如下操作︰
+  </para>
+  <procedure>
+   <step>
+    <para>
+     若要設定虛擬機器使用的橋接器，請建立包含如下內容的檔案︰
+    </para>
+<screen>STARTMODE='auto'<co xml:id="ovs.ifcfg.mode"/>
+BOOTPROTO='dhcp'<co xml:id="ovs.ifcfg.protocol"/>
+OVS_BRIDGE='yes'<co xml:id="ovs.ifcfg.bridge"/>
+OVS_BRIDGE_PORT_DEVICE_1='<replaceable>eth0</replaceable>'<co xml:id="ovs.ifcfg.port"/></screen>
+    <calloutlist>
+     <callout arearefs="ovs.ifcfg.mode">
+      <para>
+       啟動網路服務時自動設定橋接器。
+      </para>
+     </callout>
+     <callout arearefs="ovs.ifcfg.protocol">
+      <para>
+       設定 IP 位址時使用的通訊協定。
+      </para>
+     </callout>
+     <callout arearefs="ovs.ifcfg.bridge">
+      <para>
+       將組態標記為 <phrase role="productname">Open vSwitch</phrase> 橋接器。
+      </para>
+     </callout>
+     <callout arearefs="ovs.ifcfg.port">
+      <para>
+       選擇應新增至橋接器的一或多部裝置。若要新增多部裝置，請在文件中為每部裝置附加一行︰
+      </para>
+<screen>OVS_BRIDGE_PORT_DEVICE_<replaceable>SUFFIX</replaceable>='<replaceable>DEVICE</replaceable>'</screen>
+      <para>
+       <replaceable>SUFFIX</replaceable> 可以是任何英數字串。不過，為了避免之前的定義被覆寫，請確定每部裝置的 <replaceable>SUFFIX</replaceable> 均唯一。
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     將檔案儲存至 <filename>/etc/sysconfig/network</filename> 目錄，並命名為 <filename>ifcfg-br0</filename>。您也可以使用除 <replaceable>br0</replaceable> 以外自己喜歡的任何名稱。但檔案名稱必須以 <literal>ifcfg-</literal> 開頭。
+    </para>
+    <para>
+     若要瞭解更多選項，請參閱 <literal>ifcfg</literal> 與 <literal>ifcfg-ovs-bridge</literal> 的 man 頁面 (<command>man 5 ifcfg</command> 與 <command>man 5 ifcfg-ovs-bridge</command>)。
+    </para>
+   </step>
+   <step>
+    <para>
+     現在，啟動橋接器︰<remark>"Start" is weird - sknorr, 2015-10-26</remark>
+    </para>
+<screen><prompt role="root">root # </prompt><command>wicked</command> ifup <replaceable>br0</replaceable></screen>
+    <para>
+     Wicked 完成後應該會輸出橋接器的名稱及狀態 <literal>up</literal> (顯示在名稱的旁邊)。
+    </para>
+   </step>
+  </procedure>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.kvm">
+  <title><phrase role="productname">Open vSwitch</phrase> 直接與 KVM 配合使用</title>
+  <para>
+   如之前<xref linkend="sec.ovs.bridge"/>中所述建立橋接器之後，可以使用 <phrase role="productname">Open vSwitch</phrase> 管理透過 KVM/QEMU 建立之虛擬機器的網路存取。
+  </para>
+  <procedure>
+   <step>
+    <para>
+     為了能夠發揮 Wicked 的最大效用，可以對之前設定的橋接器做進一步的變更。開啟之前建立的 <filename>/etc/sysconfig/network/ifcfg-br0</filename> 並為另一個連接埠裝置附加一行︰
+    </para>
+<screen>OVS_BRIDGE_PORT_DEVICE_2='<replaceable>tap0</replaceable>'</screen>
+    <para>
+     另外，將 <literal>BOOTPROTO</literal> 設定為 <literal>none</literal>。現在，此檔案的內容形式如下︰
+    </para>
+<screen>STARTMODE='auto'
+BOOTPROTO='none'
+OVS_BRIDGE='yes'
+OVS_BRIDGE_PORT_DEVICE_1='<replaceable>eth0</replaceable>'
+OVS_BRIDGE_PORT_DEVICE_2='<replaceable>tap0</replaceable>'</screen>
+    <para>
+     新的連接埠裝置 <replaceable>tap0</replaceable> 將在下一步中進行設定。
+    </para>
+   </step>
+   <step>
+    <para>
+     現在，為 <replaceable>tap0</replaceable> 裝置新增組態檔案︰
+    </para>
+<screen>STARTMODE='auto'
+BOOTPROTO='none'
+TUNNEL='tap'</screen>
+    <para>
+     將檔案儲存至 <filename>/etc/sysconfig/network</filename> 目錄，並命名為 <filename>ifcfg-tap0</filename>。
+    </para>
+    <tip>
+     <title>允許其他使用者存取 TAP 裝置</title>
+     <para>
+      若要透過以非 <systemitem class="username">root</systemitem> 使用者身分啟動的虛擬機器使用此 TAP 裝置，請附加︰
+     </para>
+<screen>TUNNEL_SET_OWNER=<replaceable>USER_NAME</replaceable></screen>
+     <para>
+      若要為整個群組授予存取權，請附加︰
+     </para>
+<screen>TUNNEL_SET_GROUP=<replaceable>GROUP_NAME</replaceable></screen>
+    </tip>
+   </step>
+   <step>
+    <para>
+     最後，開啟定義為第一個 <literal>OVS_BRIDGE_PORT_DEVICE</literal> 的裝置的組態。如果之前未變更過名稱，應為 <literal>eth0</literal>。因此，開啟 <filename>/etc/sysconfig/network/ifcfg-eth0</filename>，並確定已設定以下選項︰
+    </para>
+<screen>STARTMODE='auto'
+BOOTPROTO='none'</screen>
+    <para>
+     如果檔案尚不存在，請予以建立。
+    </para>
+   </step>
+   <step>
+    <para>
+     使用 Wicked 重新啟動橋接器介面︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>wicked</command> ifreload <replaceable>br0</replaceable></screen>
+    <para>
+     此操作還會觸發系統重新載入新定義的橋接器連接埠裝置。
+    </para>
+   </step>
+   <step>
+    <para>
+     若要啟動某虛擬機器，請使用類似如下的內容︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>qemu-kvm</command> \
+-drive file=<replaceable>/PATH/TO/DISK-IMAGE</replaceable><co xml:id="co.ovs.pathimage"/> \
+-m 512 -net nic,vlan=0,macaddr=00:11:22:EE:EE:EE \
+-net tap,ifname=<replaceable>tap0</replaceable>,script=no,downscript=no<co xml:id="co.ovs.tapdevice"/></screen>
+    <calloutlist>
+     <callout arearefs="co.ovs.pathimage">
+      <para>
+       您要啟動之 QEMU 磁碟影像的路徑。
+      </para>
+     </callout>
+     <callout arearefs="co.ovs.tapdevice">
+      <para>
+       使用之前建立的 TAP 裝置 (<literal>tap0</literal>)。
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     如需使用 KVM/QEMU 的更多資訊，請參閱<xref linkend="part.virt.qemu"/>。
+    </para>
+   </step>
+  </procedure>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.libvirt">
+  <title><phrase role="productname">Open vSwitch</phrase> 與 <systemitem class="library">libvirt</systemitem> 配合使用</title>
+  <para>
+   如<xref linkend="sec.ovs.bridge"/>中所述建立橋接器之後，可以將該橋接器新增至使用 <systemitem class="library">libvirt</systemitem> 進行管理的現有虛擬機器。由於 <systemitem class="library">libvirt</systemitem> 對 <phrase role="productname">Open vSwitch</phrase> 橋接器提供部份支援，因此您可以直接使用<xref linkend="sec.ovs.bridge"/>中建立的橋接器，無需進一步變更網路組態。
+  </para>
+  <procedure>
+   <step>
+    <para>
+     開啟目標虛擬機器的網域 XML 檔案︰
+    </para>
+<screen><prompt role="root">root # </prompt><command>virsh</command> edit <replaceable>VM_NAME</replaceable></screen>
+    <para>
+     將 <replaceable>VM_NAME</replaceable> 取代為所需虛擬機器的名稱。預設的文字編輯器即會開啟。
+    </para>
+   </step>
+   <step>
+    <para>
+     在文件中尋找網路區段，即尋找以 <literal>&lt;interface type="..."&gt;</literal> 開頭並以 <literal>&lt;/interface&gt;</literal> 結尾的區段。
+    </para>
+    <para>
+     將現有區段取代為類似如下的網路區段︰
+    </para>
+<screen>&lt;interface type='bridge'&gt;
+  &lt;source bridge='br0'/&gt;
+  &lt;virtualport type='openvswitch'/&gt;
+&lt;/interface&gt;</screen>
+    <important>
+     <title><command>virsh iface-*</command> 和虛擬機器管理員與 <phrase role="productname">Open vSwitch</phrase> 的相容性</title>
+     <para>
+      目前，在使用 <command>virsh iface-*</command> 工具和虛擬機器管理員的情況下，<phrase role="productname">Open vSwitch</phrase> 與 <systemitem class="library">libvirt</systemitem> 還不相容。如果您使用此類工具，組態可能會破壞。
+     </para>
+    </important>
+   </step>
+   <step>
+    <para>
+     現在，您可以照常啟動或重新啟動虛擬機器。
+    </para>
+   </step>
+  </procedure>
+  <para>
+   如需使用 <systemitem class="library">libvirt</systemitem> 的更多資訊，請參閱<xref linkend="part.virt.libvirt"/>。
+  </para>
+ </sect2>
+
+ <sect2 xml:id="sec.ovs.more">
+  <title>更多資訊</title>
+  <variablelist>
+   <varlistentry>
+    <term><link xlink:href="http://openvswitch.org/support/"/>
+    </term>
+    <listitem>
+     <para>
+      <phrase role="productname">Open vSwitch</phrase> 專案網站的文件區段
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><link xlink:href="https://www.opennetworking.org/images/stories/downloads/sdn-resources/white-papers/wp-sdn-newnorm.pdf"/>
+    </term>
+    <listitem>
+     <para>
+      Open Networking Foundation 編寫的關於軟體定義網路和 <phrase role="productname">OpenFlow</phrase> 通訊協定的白皮書
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+</sect1>

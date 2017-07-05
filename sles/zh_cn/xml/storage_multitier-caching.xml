@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_multitier-caching.xml" version="5.0" xml:id="cha.multitiercache" xml:lang="zh-cn">
+ <title>用于块设备操作的多层超速缓存</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  多层超速缓存是一种复制的/分布式超速缓存，它至少包括两个层：一个层由速度较慢但较为廉价的旋转块设备（硬盘）表示，另一个层成本更高，但执行数据操作的速度更快（例如，SSD 闪存盘）。
+ </para>
+ <para>
+  SUSE Linux Enterprise Server 为闪存设备与旋转设备的超速缓存实施两种不同的解决方案：<systemitem class="resource">bcache</systemitem> 和 <systemitem class="resource">lvmcache</systemitem>。
+ </para>
+ <sect1 xml:id="sec.multitiercache.terminology">
+  <title>一般术语</title>
+
+  <para>
+   本节对在介绍超速缓存相关功能时经常用到的几个术语进行了解释：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>迁移</term>
+    <listitem>
+     <para>
+      将逻辑块的主副本从一个设备移到另一个设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>升级</term>
+    <listitem>
+     <para>
+      从慢速设备迁移到快速设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>降级</term>
+    <listitem>
+     <para>
+      从快速设备迁移到慢速设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>源设备</term>
+    <listitem>
+     <para>
+      大型慢速块设备。它始终包含逻辑块的副本，该副本可能已过时或者与超速缓存设备上的副本保持同步（取决于策略）。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>超速缓存设备</term>
+    <listitem>
+     <para>
+      小型高速块设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>元数据设备</term>
+    <listitem>
+     <para>
+      一个小型设备，用于记录哪些块在超速缓存中、哪些块是脏的，以及供策略对象使用的附加提示。此信息可放在超速缓存设备上，但将它隔离可让卷管理器对它进行不同的配置，例如，配置为镜像以提高稳定性。元数据设备只能由单个超速缓存设备使用。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>脏块</term>
+    <listitem>
+     <para>
+      如果某个进程将信息写入超速缓存中的某个数据块，则该超速缓存的块将被标记为<emphasis>脏</emphasis>块，因为该块在超速缓存中已被覆盖，需要写回到原始设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>超速缓存未命中</term>
+    <listitem>
+     <para>
+      I/O 操作请求会先指向已超速缓存设备的超速缓存。如果找不到请求的值，则会在设备本身中查找，因此速度会变慢。这称为<emphasis>超速缓存未命中</emphasis>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>超速缓存命中</term>
+    <listitem>
+     <para>
+      如果在已超速缓存设备的超速缓存中找到请求的值，则可以快速提供该值。这称为<emphasis>超速缓存命中</emphasis>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>冷超速缓存</term>
+    <listitem>
+     <para>
+      不保存任何值（为空）且导致<emphasis>超速缓存未命中</emphasis>的超速缓存。在执行已超速缓存块设备的操作过程中，冷超速缓存中会填充数据，从而变为<emphasis>暖</emphasis>超速缓存。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>暖超速缓存</term>
+    <listitem>
+     <para>
+      已保存了一些值并且可能会导致<emphasis>超速缓存命中</emphasis>的超速缓存。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.caching_modes">
+  <title>超速缓存模式</title>
+
+  <para>
+   下面是多层超速缓存使用的基本超速缓存模式：<emphasis>写回</emphasis>、<emphasis>直写</emphasis>、<emphasis>绕写</emphasis>和<emphasis>直通</emphasis>。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>写回</term>
+    <listitem>
+     <para>
+      写入已超速缓存块的数据只会存入超速缓存，并且该块将标记为脏块。这是默认的超速缓存模式。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>直写</term>
+    <listitem>
+     <para>
+      只有在同时命中源设备和超速缓存设备之后，向已超速缓存块的写入才会完成。在<emphasis>直写</emphasis>超速缓存中，干净块将保持干净状态。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>绕写</term>
+    <listitem>
+     <para>
+      类似于直写超速缓存的一种技术，不过，写 I/O 将直接写入永久性储存，并绕过超速缓存。这可以防止超速缓存因写 I/O 而填满，导致以后不可重新读取，不过，缺点是对最近写入数据的读取请求会造成“超速缓存未命中”，因而需要从慢速大容量储存中读取这些数据，致使发生较高延迟。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>直通</term>
+    <listitem>
+     <para>
+      要启用<emphasis>直通</emphasis>模式，超速缓存必须是干净的。将绕过超速缓存，从源设备为读取请求提供服务。写请求将转到源设备，使超速缓存块“失效”。<emphasis>直通</emphasis>允许您激活超速缓存设备时不必考虑数据一致性，而这是可以维护的。随着写操作的不断进行，超速缓存将逐渐变为冷状态。如果您以后可以校验超速缓存的一致性，或者可以使用 <literal>invalidate_cblocks</literal> 讯息来建立这种一致性，则可以在超速缓存设备仍处于暖状态时，将它切换到<emphasis>直写</emphasis>或<emphasis>写回</emphasis>模式。或者，可以在切换到所需的超速缓存模式之前，先丢弃超速缓存内容。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.bcache">
+  <title><systemitem class="resource">bcache</systemitem></title>
+
+
+
+  <para>
+   <systemitem class="resource">bcache</systemitem> 是一个 Linux 内核块层超速缓存。它允许使用一个或多个高速磁盘驱动器（例如 SSD）作为一个或多个速度低得多的硬盘的超速缓存。<systemitem class="resource">bcache</systemitem> 支持直写和写回，不受所用文件系统的约束。默认情况下，它只超速缓存随机读取和写入，这也是 SSD 的强项。它还适合用于台式机、服务器和高端储存阵列。
+  </para>
+
+  <sect2 xml:id="sec.multitiercache.bcache.features">
+   <title>主要功能</title>
+   <itemizedlist>
+    <listitem>
+     <para>
+      可以使用单个超速缓存设备来超速缓存任意数量的后备设备。在运行时可以挂接和分离已装入及使用中的后备设备。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      在非正常关机后恢复 - 只有在超速缓存与后备设备一致后才完成写入。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      SSD 拥塞时限制传至 SSD 的流量。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      高效的写回实施方案。脏数据始终按排序顺序写出。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      稳定可靠，可在生产环境中使用。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+
+
+  <sect2 xml:id="sec.multitiercache.bcache.setting_bcache_device">
+   <title>设置 <systemitem class="resource">bcache</systemitem> 设备</title>
+   <para>
+    本节介绍设置和管理 <systemitem class="resource">bcache</systemitem> 设备的步骤。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      安装 <systemitem>bcache-tools</systemitem> 包：
+     </para>
+<screen>sudo zypper in bcache-tools</screen>
+    </step>
+    <step>
+     <para>
+      创建后备设备（通常是一个机械驱动器）。后备设备可以是整个设备、一个分区或任何其他标准块设备。
+     </para>
+<screen>sudo make-bcache -B /dev/sdb</screen>
+    </step>
+    <step>
+     <para>
+      创建超速缓存设备（通常是一个 SSD 磁盘）。
+     </para>
+<screen>sudo make-bcache -C /dev/sdc</screen>
+     <para>
+      本示例使用了默认的块大小和储存桶大小，分别为 512 B 和 128 KB。块大小应与后备设备的扇区大小（通常为 512 或 4k）匹配。储存桶大小应与超速缓存设备的擦除块大小匹配，以便减少写入放大现象。例如，如果使用具有 4k 扇区的硬盘和具有 2 MB 擦除块大小的 SSD，则此命令将如下所示：
+     </para>
+<screen>sudo make-bcache --block 4k --bucket 2M -C /dev/sdc</screen>
+     <tip>
+      <title>多设备支持</title>
+      <para>
+       <command>make-bcache</command> 可同时准备和注册多个后备设备与一个超速缓存设备。在这种情况下，以后您不需要将超速缓存设备手动挂接到后备设备：
+      </para>
+<screen>sudo make-bcache -B /dev/sda /dev/sdb -C /dev/sdc</screen>
+     </tip>
+    </step>
+    <step>
+     <para>
+      <systemitem class="resource">bcache</systemitem> 设备将显示为
+     </para>
+<screen>/dev/bcache<replaceable>N</replaceable></screen>
+     <para>
+      和
+     </para>
+<screen>/dev/bcache/by-uuid/<replaceable>uuid</replaceable>
+/dev/bcache/by-label/<replaceable>label</replaceable></screen>
+     <para>
+      您可以像平时一样正常格式化和装入 <systemitem class="resource">bcache</systemitem> 设备：
+     </para>
+<screen>mkfs.ext4 /dev/bcache0
+mount /dev/bcache0 /mnt</screen>
+     <para>
+      您可以在 <filename>/sys/block/bcache<replaceable>N</replaceable>/bcache</filename> 中通过 <systemitem>sysfs</systemitem> 控制 <systemitem class="resource">bcache</systemitem> 设备。
+     </para>
+    </step>
+    <step>
+     <para>
+      注册超速缓存设备和后备设备后，需要将后备设备挂接到相关的超速缓存集才能启用超速缓存：
+     </para>
+<screen>echo <replaceable>cache_set_uuid</replaceable> &gt; /sys/block/bcache0/bcache/attach</screen>
+     <para>
+      其中，<replaceable>cache_set_uuid</replaceable> 位于 <filename>/sys/fs/bcache</filename> 中。
+     </para>
+    </step>
+    <step>
+     <para>
+      默认情况下，<systemitem class="resource">bcache</systemitem> 使用直通超速缓存模式。要更改模式，例如，更改为写回模式，请运行
+     </para>
+<screen>echo writeback &gt; /sys/block/bcache0/bcache/cache_mode</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.multitiercache.bcache.sysfs">
+   <title>使用 <systemitem>sysfs</systemitem> 的 <systemitem class="resource">bcache</systemitem> 配置</title>
+   <para>
+    <systemitem class="resource">bcache</systemitem> 设备使用 <systemitem>sysfs</systemitem> 接口来储存其运行时配置值。这样，您便可以更改 <systemitem class="resource">bcache</systemitem> 后备设备和超速缓存磁盘的行为，或查看其使用统计数字。
+   </para>
+   <para>
+    有关 <systemitem class="resource">bcache</systemitem> <systemitem> sysfs</systemitem> 参数的完整列表，请查看 <filename>/usr/src/linux/Documentation/bcache.txt</filename> 文件的内容，主要查看 <literal>SYSFS - BACKING DEVICE</literal>、<literal>SYSFS - BACKING DEVICE STATS</literal> 和 <literal>SYSFS - CACHE DEVICE</literal> 部分。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.lvmcache">
+  <title><systemitem class="resource">lvmcache</systemitem></title>
+
+  <para>
+   <systemitem class="resource">lvmcache</systemitem> 是由逻辑卷 (LV) 组成的超速缓存机制。它使用 <literal>dm-cache</literal> 内核驱动程序，支持直写（默认）和写回超速缓存模式。<systemitem class="resource">lvmcache</systemitem> 可将大型慢速 LV 的部分数据动态迁移到更快、更小的 LV，从而提高其性能。有关 LVM 的详细信息，请参见<xref linkend="part.lvm"/>。
+  </para>
+
+  <para>
+   LVM 将小型快速 LV 称为<emphasis>超速缓存池 LV</emphasis>。大型慢速 LV 称为<emphasis>源 LV</emphasis>。由于 dm-cache 的要求，LVM 进一步将超速缓存池 LV 分割成两个设备：<emphasis>超速缓存数据 LV</emphasis> 和<emphasis>超速缓存元数据 LV</emphasis>。来自源 LV 的数据块副本保存在超速缓存数据 LV 中，以提高速度。超速缓存元数据 LV 保存记帐信息，这些信息指定数据块的储存位置。
+  </para>
+
+  <sect2 xml:id="sec.multitiercache.lvmcache.configure">
+   <title>配置 <systemitem class="resource">lvmcache</systemitem></title>
+   <para>
+    本节介绍创建和配置基于 LVM 的超速缓存的步骤。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      <emphasis>创建源 LV。</emphasis>创建新 LV，或使用现有 LV 作为源 LV：
+     </para>
+<screen>lvcreate -n <replaceable>origin_lv</replaceable> -L 100G vg <replaceable>/dev/slow_dev</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>创建超速缓存数据 LV。</emphasis>此 LV 将保存来自源 LV 的数据块。此 LV 的大小是超速缓存的大小，将报告为超速缓存池 LV 的大小。
+     </para>
+<screen>lvcreate -n <replaceable>cache_data_lv</replaceable> -L 10G vg <replaceable>/dev/fast</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>创建超速缓存元数据 LV。</emphasis>此 LV 将保存超速缓存池元数据。此 LV 的大小应该比超速缓存数据 LV 大约小 1000 倍，其最小大小为 8MB。
+     </para>
+<screen>lvcreate -n <replaceable>cache_metadata_lv</replaceable> -L 12M vg <replaceable>/dev/fast</replaceable></screen>
+     <para>
+      列出您目前为止所创建的卷：
+     </para>
+<screen>lvs -a vg
+LV                VG   Attr        LSize   Pool Origin
+cache_data_lv     vg   -wi-a-----  10.00g
+cache_metadata_lv vg   -wi-a-----  12.00m
+origin_lv         vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>创建超速缓存池 LV。</emphasis>将数据 LV 和元数据 LV 组合成一个超速缓存池 LV。同时还可以设置超速缓存池 LV 的行为。
+     </para>
+     <para>
+      <replaceable>cache_pool_lv</replaceable> 与 <replaceable>cache_data_lv</replaceable> 同名。
+     </para>
+     <para>
+      <replaceable>cache_data_lv</replaceable> 重命名为 <replaceable>cache_data_lv</replaceable>_cdata，并且会隐藏起来。
+     </para>
+     <para>
+      <replaceable>cache_meta_lv</replaceable> 重命名为 <replaceable>cache_data_lv</replaceable>_cmeta，并且会隐藏起来。
+     </para>
+<screen>lvconvert --type cache-pool \
+ --poolmetadata vg/cache_metadata_lv vg/cache_data_lv</screen>
+<screen>lvs -a vg
+LV                     VG   Attr       LSize   Pool Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-------  10.00g
+[cache_data_lv_cmeta]  vg   ewi-------  12.00m
+origin_lv              vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>创建超速缓存 LV。</emphasis>通过将超速缓存池 LV 链接到源 LV 来创建超速缓存 LV。
+     </para>
+     <para>
+      用户可访问的超速缓存 LV 与源 LV 同名，源 LV 将变成已重命名为 <replaceable>origin_lv</replaceable>_corig 的隐藏 LV。
+     </para>
+     <para>
+      CacheLV 与 <replaceable>origin_lv</replaceable> 同名。
+     </para>
+     <para>
+      <replaceable>origin_lv</replaceable> 重命名为 <replaceable>origin_lv</replaceable>_corig，并且会隐藏起来。
+     </para>
+<screen>lvconvert --type cache --cachepool vg/cache_data_lv vg/origin_lv</screen>
+<screen>lvs -a vg
+LV              VG   Attr       LSize   Pool   Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-ao----  10.00g
+[cache_data_lv_cmeta]  vg   ewi-ao----  12.00m
+origin_lv              vg   Cwi-a-C--- 100.00g cache_data_lv [origin_lv_corig]
+[origin_lv_corig]      vg   -wi-ao---- 100.00g</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.multitiercache.lvmcache.remove">
+   <title>去除超速缓存池</title>
+   <para>
+    可通过多种方法关闭 LV 超速缓存。
+   </para>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.detach">
+    <title>从超速缓存 LV 分离超速缓存池 LV</title>
+    <para>
+     您可以从超速缓存 LV 断开与超速缓存池 LV 的连接，留下一个未使用的超速缓存池 LV 和一个未超速缓存的源 LV。数据将根据需要从超速缓存池写回到源 LV。
+    </para>
+<screen>lvconvert --splitcache vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.wo_origin">
+    <title>去除超速缓存池 LV 但不去除其源 LV</title>
+    <para>
+     以下命令会根据需要将数据从超速缓存池写回到源 LV，然后去除超速缓存池 LV，留下未超速缓存的源 LV。
+    </para>
+<screen>lvremove vg/cache_data_lv</screen>
+    <para>
+     也可以使用以下替代命令从超速缓存 LV 断开与超速缓存池的连接，并删除超速缓存池：
+    </para>
+<screen>lvconvert --uncache vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.both">
+    <title>去除源 LV 和超速缓存池 LV</title>
+    <para>
+     去除超速缓存 LV 会同时去除源 LV 和链接的超速缓存池 LV。
+    </para>
+<screen>lvremove vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.info">
+    <title>更多信息</title>
+    <para>
+     可以在 <systemitem class="resource">lvmcache</systemitem> 手册页 (<command>man 7 lvmcache</command>) 中找到有关 <systemitem class="resource">lvmcache</systemitem> 的更多主题，例如支持的超速缓存模式、冗余的子逻辑卷、超速缓存策略，或者将现有 LV 转换为超速缓存类型。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>

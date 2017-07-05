@@ -1,0 +1,932 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_raid10.xml" version="5.0" xml:id="cha.raid10" xml:lang="ja">
+ <title>ソフトウェアRAID 10デバイスの作成</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  本項では、ネストしたコンプレックスRAID 10デバイスの設定方法について説明します。RAID 10デバイスは、ネストしたRAID 1 (ミラーリング)アレイとRAID 0 (ストライピング)アレイで構成されます。ネストしたRAIDは、ストライピングミラー(RAID 1+0)またはミラーリングされたストライプ(RAID 0+1)のいずれかとして設定できます。コンプレックスRAID 10のセットアップは、ミラーとストライプを組み合わせ、より高いデータ冗長性レベルをサポートすることによってデータのセキュリティを強化します。
+ </para>
+ <sect1 xml:id="sec.raid10.nest">
+  <title><command>mdadm</command>によるネストしたRAID 10デバイスの作成</title>
+
+  <para>
+   ネストしたRAIDデバイスは、物理ディスクを使用する代わりに、その基本エレメントとして別のRAIDアレイを使用するRAIDアレイで構成されます。この構成の目的は、RAIDのパフォーマンスと耐障害性を向上することです。ネストしたRAIDレベルの設定はYaSTではサポートされていませんが、<command>mdadm</command>コマンドラインツールを使用して実行できます。
+  </para>
+
+  <para>
+   ネストの順序に基づいて、2つの異なるネストしたRAIDを設定できます。このマニュアルでは、次の用語を使用します。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <formalpara>
+     <title>RAID 1+0:</title>
+     <para>
+      まず、RAID 1（ミラー）アレイが構築され、次に、それらのアレイが組み合わされてRAID 0 (ストライプ)アレイを構成します。
+     </para>
+    </formalpara>
+   </listitem>
+   <listitem>
+    <formalpara>
+     <title>RAID 0+1:</title>
+     <para>
+      まず、RAID 0（ストライプ）アレイが構築され、次に、それらのアレイが組み合わされてRAID 1(ミラー)アレイを構成します。
+     </para>
+    </formalpara>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   次の表では、RAID 10ネスティングの欠点と利点を、1+0対0+1という形式で説明します。使用するストレージオブジェクトは、それぞれが専用のI/Oをもつ別々のディスクに常駐すると想定しています。
+  </para>
+
+  <table>
+   <title>ネストしたRAIDレベル</title>
+   <tgroup cols="3">
+    <colspec colnum="1" colname="1" colwidth="20*"/>
+    <colspec colnum="2" colname="2" colwidth="30*"/>
+    <colspec colnum="3" colname="3" colwidth="60*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        RAIDレベル
+       </para>
+      </entry>
+      <entry>
+       <para>
+        説明
+       </para>
+      </entry>
+      <entry>
+       <para>
+        パフォーマンスと耐障害性
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        10 (1+0)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        RAID 1(ミラー)アレイで構築されたRAID (ストライプ)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        RAID 1+0は、高レベルのI/Oパフォーマンス、データ冗長性、およびディスク耐障害性を提供します。RAIDの各メンバーデバイスは個々にミラーリングされるので、エラーになったディスクのミラー先が異なる限り、複数ディスクの障害を許容し、データを使用することができます。
+       </para>
+       <para>
+        オプションとして、ベースをなすミラーリングされたアレイごとにスペアを設定したり、すべてのミラーに対するスペアグループに対応するスペアを設定できます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        10 (0+1)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        RAID 0(ストライプ)アレイで構築されたRAID 1(ミラー)
+       </para>
+      </entry>
+      <entry>
+       <para>
+        RAID 0+1は、高レベルのI/Oパフォーマンスとデータ冗長性を提供しますが、耐障害性が1+0より若干低くなります。ミラーの一方のサイドで複数のディスクがエラーになると、もう一方のミラーが使用可能になります。ただし、ミラーの両サイドで同時にディスクが失われると、すべてのデータが喪失します。
+       </para>
+       <para>
+        このソリューションは1+0ソリューションより耐障害性が低いですが、別のサイトで保守を実行したり、ミラーを保持する必要がある場合、ミラーのサイド全体をオフラインにしても、完全に機能するストレージデバイスを保持することができます。また、2つのサイト間の接続が失われた場合は、どちらかのサイトがもう一方のサイトから独立して稼動します。ミラーリングされたセグメントをストライプする場合はこうなりません。ミラーが低レベルで管理されているからです。
+       </para>
+       <para>
+        デバイスがエラーになると、RAID 0には耐障害性がないので、そのサイドのミラーがエラーになります。新しいRAID 0を作成して、エラーになったサイドに置き換え、次に、ミラーを再同期してください。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.raid10.nest.10">
+   <title>mdadmによるネストしたRAID 10 (1+0)デバイスの作成</title>
+   <para>
+    ネストしたRAID 1+0は、2つ以上のRAID 1(ミラー)デバイスを作成し、それらのRAID 1デバイスをRAID 0のコンポーネントデバイスとして使用することで構築します。
+   </para>
+   <important>
+    <title>マルチパス処理</title>
+    <para>
+     デバイスに対する複数の接続を管理する必要がある場合は、マルチパスI/Oを設定してから、RAIDデバイスを設定する必要があります。詳細については、<xref linkend="cha.multipath" xrefstyle="ChapTitleOnPage"/>を参照してください。
+    </para>
+   </important>
+   <para>
+    本項の手順では、次の表に示すデバイス名を使用します。それらのデバイス名は、必ず、ご使用のデバイスの名前で変更してください。
+   </para>
+   <table>
+    <title>ネスティングでRAID 10(1+0)を作成するシナリオ</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="3334*"/>
+     <colspec colnum="2" colname="2" colwidth="3334*"/>
+     <colspec colnum="3" colname="3" colwidth="3334*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         rawデバイス
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 1(ミラー)
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 1+0(ストライピングミラー)
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdb1</filename>
+         </member>
+         <member><filename> /dev/sdc1</filename>
+         </member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md0</filename>
+        </para>
+       </entry>
+       <entry morerows="1">
+        <para/>
+        <para>
+         <filename>/dev/md2</filename>
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdd1</filename>
+         </member>
+         <member><filename> /dev/sde1</filename>
+         </member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md1</filename>
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      必要に応じて、partedなどのディスクパーティショナを使用して、同じサイズの0xFD Linux RAIDパーティションを4つ作成します。
+     </para>
+    </step>
+    <step>
+     <para>
+      1デバイスごとに2つの異なるデバイスを使用して、2つのソフトウェアRAID 1デバイスを作成します。コマンドプロンプトで、次の2つのコマンドを入力します。
+     </para>
+<screen>sudo mdadm --create /dev/md0 --run --level=1 --raid-devices=2 /dev/sdb1 /dev/sdc1
+sudo mdadm --create /dev/md1 --run --level=1 --raid-devices=2 /dev/sdd1 /dev/sde1</screen>
+    </step>
+    <step>
+     <para>
+      ネストしたRAID 1+0デバイスを作成します。コマンドプロンプトで、前の手順で作成したソフトウェアRAID 1デバイスを使用して、次のコマンドを入力します。
+     </para>
+<screen>sudo mdadm --create /dev/md2 --run --level=0 --chunk=64 \
+--raid-devices=2 /dev/md0 /dev/md1</screen>
+     <para>
+      デフォルトのチャンクサイズは 64KBです。
+     </para>
+    </step>
+    <step>
+     <para>
+      RAID 1+0デバイス<filename>/dev/md2</filename>上でファイルシステム(XFSファイルシステムなど)を作成します。
+     </para>
+<screen>sudo mkfs.xfs /dev/md2</screen>
+     <para>
+      これとは別のファイルシステムを使用するには、コマンドを変更します。
+     </para>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/mdadm.conf</filename>ファイルを編集するか、ファイルがまだ存在しない場合は作成します(たとえば、<command>sudo vi /etc/mdadm.conf</command>を実行します)。次の行を追加します(ファイルが既に存在する場合、最初の行は記述済みの可能性があります)。
+     </para>
+<screen>DEVICE containers partitions
+ARRAY /dev/md0 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md1 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md2 UUID=<replaceable>UUID</replaceable></screen>
+     <para>
+      各デバイスのUUIDは次のコマンドで取得できます。
+     </para>
+<screen>sudo mdadm -D /dev/<replaceable>DEVICE</replaceable> | grep UUID</screen>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/fstab</filename>ファイルを編集して、RAID 1+0デバイス <filename>/dev/md2</filename>のエントリを追加します。次の例は、XFSファイルシステム、およびマウントポイントとして<filename>/data</filename>を使用するRAIDデバイスのエントリを示しています。
+     </para>
+<screen>/dev/md2 /data xfs defaults 1 2</screen>
+    </step>
+    <step>
+     <para>
+      RAIDデバイスをマウントします。
+     </para>
+<screen>sudo mount /data</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.nest.01">
+   <title>mdadmによるネストしたRAID 10 (0+1)デバイスの作成</title>
+   <para>
+    ネストしたRAID 0+1は、2個から4個のRAID 0(ストライプ)デバイスで構築され、それらのRAID 0デバイスをミラーリングしてRAID 1のコンポーネントデバイスとします。
+   </para>
+   <important>
+    <title>マルチパス処理</title>
+    <para>
+     デバイスに対する複数の接続を管理する必要がある場合は、マルチパスI/Oを設定してから、RAIDデバイスを設定する必要があります。詳細については、<xref linkend="cha.multipath" xrefstyle="ChapTitleOnPage"/>を参照してください。
+    </para>
+   </important>
+   <para>
+    この構成では、RAID 0がデバイスの喪失に耐えられないので、ベースのRAID 0デバイスにスペアデバイスを指定できません。デバイスがミラーの1つのサイドでエラーになった場合は、置き換え用のRAID 0デバイスを作成して、ミラーに追加します。
+   </para>
+   <para>
+    本項の手順では、次の表に示すデバイス名を使用します。それらのデバイス名は、必ず、ご使用のデバイスの名前で変更してください。
+   </para>
+   <table>
+    <title>ネストによるRAID 10 (0+1)作成のシナリオ</title>
+    <tgroup cols="3">
+     <colspec colnum="1" colname="1" colwidth="3334*"/>
+     <colspec colnum="2" colname="2" colwidth="3334*"/>
+     <colspec colnum="3" colname="3" colwidth="3334*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         rawデバイス
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 0 (ストライプ)
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 0+1 (ミラー化ストライピング)
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdb1</filename>
+         </member>
+         <member><filename> /dev/sdc1</filename>
+         </member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md0</filename>
+        </para>
+       </entry>
+       <entry morerows="1">
+        <para/>
+        <para>
+         <filename>/dev/md2</filename>
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <simplelist>
+         <member><filename>/dev/sdd1</filename>
+         </member>
+         <member><filename> /dev/sde1</filename>
+         </member>
+        </simplelist>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md1</filename>
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      必要に応じて、partedなどのディスクパーティショナを使用して、同じサイズの0xFD Linux RAIDパーティションを4つ作成します。
+     </para>
+    </step>
+    <step>
+     <para>
+      RAID 0デバイスごとに2つの異なるデバイスを使用して、2つのソフトウェアRAID 0デバイスを作成します。コマンドプロンプトで、次の2つのコマンドを入力します。
+     </para>
+<screen>sudo mdadm --create /dev/md0 --run --level=0 --chunk=64 \
+--raid-devices=2 /dev/sdb1 /dev/sdc1
+sudo mdadm --create /dev/md1 --run --level=0 --chunk=64 \
+--raid-devices=2 /dev/sdd1 /dev/sde1</screen>
+     <para>
+      デフォルトのチャンクサイズは 64KBです。
+     </para>
+    </step>
+    <step>
+     <para>
+      ネストしたRAID 0+1デバイスの作成コマンドプロンプトで、前の手順で作成したソフトウェアRAID 0デバイスを使用して、次のコマンドを入力します。
+     </para>
+<screen>sudo mdadm --create /dev/md2 --run --level=1 --raid-devices=2 /dev/md0 /dev/md1</screen>
+    </step>
+    <step>
+     <para>
+      RAID 1+0デバイス<filename>/dev/md2</filename>上でファイルシステム(XFSファイルシステムなど)を作成します。
+     </para>
+<screen>sudo mkfs.xfs /dev/md2</screen>
+     <para>
+      これとは別のファイルシステムを使用するには、コマンドを変更します。
+     </para>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/mdadm.conf</filename>ファイルを編集するか、ファイルがまだ存在しない場合は作成します(たとえば、<command>sudo vi /etc/mdadm.conf</command>を実行します)。次の行を追加します(ここでも、ファイルが既に存在する場合、最初の行は記述済みの可能性があります)。
+     </para>
+<screen>DEVICE containers partitions
+ARRAY /dev/md0 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md1 UUID=<replaceable>UUID</replaceable>
+ARRAY /dev/md2 UUID=<replaceable>UUID</replaceable></screen>
+     <para>
+      各デバイスのUUIDは次のコマンドで取得できます。
+     </para>
+<screen>sudo mdadm -D /dev/<replaceable>DEVICE</replaceable> | grep UUID</screen>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/fstab</filename>ファイルを編集して、RAID 1+0デバイス <filename>/dev/md2</filename>のエントリを追加します。次の例は、XFSファイルシステム、およびマウントポイントとして<filename>/data</filename>を使用するRAIDデバイスのエントリを示しています。
+     </para>
+<screen>/dev/md2 /data xfs defaults 1 2</screen>
+    </step>
+    <step>
+     <para>
+      RAIDデバイスをマウントします。
+     </para>
+<screen>sudo mount /data</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.raid10.complex">
+  <title>コンプレックスRAID 10の作成</title>
+
+  <para>
+   YaST(および<command>mdadm</command>と<option>--level=10</option>オプション)では、RAID 0(ストライピング)およびRAID 1(ミラーリング)の両方の機能を組み合わせた単一のコンプレックスソフトウェアRAID 10デバイスが作成されます。すべてのデータブロックの複数のコピーが、ストライピングの規則に従って、複数のドライブ上に配置されます。コンポーネントデバイスは、すべて同じサイズにする必要があります。
+  </para>
+
+  <para>
+   コンプレックスRAIDは、ネストしたRAID 10 (1+0)と目的は同じですが、次の点で異なります。
+  </para>
+
+  <table>
+   <title>複雑なRAID 10とネストしたRAID 10の比較</title>
+   <tgroup cols="3">
+    <colspec colnum="1" colname="1" colwidth="3334*"/>
+    <colspec colnum="2" colname="2" colwidth="3334*"/>
+    <colspec colnum="3" colname="3" colwidth="3334*"/>
+    <thead>
+     <row>
+      <entry>
+       <para>
+        機能
+       </para>
+      </entry>
+      <entry>
+       <para>
+        コンプレックスRAID 10
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ネストしたRAID 10 (1+0)
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        デバイスの数
+       </para>
+      </entry>
+      <entry>
+       <para>
+        偶数個または奇数個のコンポーネントデバイス
+       </para>
+      </entry>
+      <entry>
+       <para>
+        偶数個のコンポーネントデバイス
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        コンポーネントデバイス
+       </para>
+      </entry>
+      <entry>
+       <para>
+        単一のRAIDデバイスとして管理されます。
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ネストしたRAIDデバイスとして管理されます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        ストライピング
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ストライピングは、コンポーネントデバイス上にnearレイアウトまたはfarレイアウトを生じます。
+       </para>
+       <para>
+        farレイアウトでは、RAID 1ペアの数でなく、ドライブ数で増減するシーケンシャルな読み込みスループットを提供します。
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ストライピングは、連続的に、すべてのコンポーネントデバイスをまたぎます。
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        データの複数コピー
+       </para>
+      </entry>
+      <entry>
+       <para>
+        2からアレイ内のデバイス数まで
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ミラーリングされたセグメントごとにコピー
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        ホットスペアデバイス
+       </para>
+      </entry>
+      <entry>
+       <para>
+        単一スペアですべてのコンポーネントデバイスに対応できます。
+       </para>
+      </entry>
+      <entry>
+       <para>
+        ベースをなすミラーリングされたアレイごとにスペアを設定したり、すべてのミラーに対応するスペアグループに対するスペアを設定できます。
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec.raid10.complex.replicas">
+   <title>コンプレックスRAID 10のデバイスおよびレプリカの数</title>
+   <para>
+    コンプレックスRAID 10アレイの設定時に、データブロックごとに必要なレプリカ数を指定する必要があります。デフォルトのレプリカ数は2ですが、2からアレイ内のデバイス数まで可能です。
+   </para>
+   <para>
+    少なくとも、指定のレプリカ数と同数のコンポーネントデバイスを使用する必要があります。ただし、RAID 10アレイのコンポーネントデバイス数は各データブロックのレプリカ数の倍数である必要はありません。有効なストレージサイズは、デバイス数をレプリカ数で割った数です。
+   </para>
+   <para>
+    たとえば、5個のコンポーネントデバイスで作成したアレイに2つのレプリカを指定した場合は、各ブロックのコピーが2つの異なるデバイスに保存されます。したがって、すべてのデータの1コピーの有効なストレージサイズは、5/2(つまり、コンポーネントデバイスのサイズの2.5倍)となります。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.complex.layout">
+   <title>レイアウト</title>
+   <para>
+    コンプレックスRAID 10のセットアップでは、ディスクにデータブロックを配置する方法を定義するレイアウトが3つサポートされています。利用可能なレイアウトは、near (デフォルト)、far、およびoffsetです。各レイアウトはパフォーマンス特性が異なるため、ワークロードに適したレイアウトを選択することが重要です。
+   </para>
+   <sect3 xml:id="sec.raid10.complex.layout.near">
+    <title>nearレイアウト</title>
+    <para>
+     nearレイアウトでは、異なるコンポーネントデバイス上で、データブロックのコピーが互いに接近してストライプされます。つまり、あるデータブロックの複数のコピーが異なるデバイス内で同様にオフセットされます。nearは、RAID 10のデフォルトレイアウトです。たとえば、奇数個のコンポーネントデバイスとデータの2コピーを使用する場合は、一部のコピーが、1チャンク分、デバイス内を前進します。
+    </para>
+    <para>
+     コンプレックスRAID 10のnearレイアウトは、半数のドライブ上のRAID 0と同様の読み書きパフォーマンスを提供します。
+    </para>
+    <para>
+     偶数個のディスクと2つのレプリカを使用したnearレイアウト
+    </para>
+<screen>sda1 sdb1 sdc1 sde1
+  0    0    1    1
+  2    2    3    3
+  4    4    5    5
+  6    6    7    7
+  8    8    9    9</screen>
+    <para>
+     奇数個のディスクと2つのレプリカを使用したnearレイアウト
+    </para>
+<screen>sda1 sdb1 sdc1 sde1 sdf1
+  0    0    1    1    2
+  2    3    3    4    4
+  5    5    6    6    7
+  7    8    8    9    9
+  10   10   11   11   12</screen>
+   </sect3>
+   <sect3 xml:id="sec.raid10.complex.layout.far">
+    <title>farレイアウト</title>
+    <para>
+     farレイアウトは、すべてのドライブの前半部分にデータをストライプし、次に、2つ目のデータコピーをすべてのドライブの後半部分にストライプして、ブロックのすべてのコピーが異なるドライブに配置されるようにします。値の2つ目のセットは、コンポーネントドライブの中ほどから開始します。
+    </para>
+    <para>
+     farレイアウトでは、コンプレックスRAID 10の読み込みパフォーマンスは、すべてのドライブを使用したRAID 0と同様ですが、書き込みパフォーマンスは、ドライブヘッドのシーク回数が増えるので、RAID 0よりかなり遅くなります。このレイアウトは、 読み込み専用ファイルサーバなどの、読み込み集約型操作に最適です。
+    </para>
+    <para>
+     RAID 10の書き込み速度は、nearレイアウトを使用しているRAID 1やRAID 10などの他のミラーリングRAIDの種類と同等です。これは、ファイルシステムのエレベータが生の書き込みよりも効率のよい書き込みのスケジュールを行うためです。RAID 10をfarレイアウトで使用する方法は、ミラーリングによる書き込みアプリケーションに適しています。
+    </para>
+    <para>
+     偶数個のディスクと2つのレプリカを使用したfarレイアウト
+    </para>
+<screen>sda1 sdb1 sdc1 sde1
+  0    1    2    3
+  4    5    6    7
+  . . .
+  3    0    1    2
+  7    4    5    6</screen>
+    <para role="intro">
+     奇数個のディスクと2つのレプリカを使用したfarレイアウト
+    </para>
+<screen>sda1 sdb1 sdc1 sde1 sdf1
+  0    1    2    3    4
+  5    6    7    8    9
+  . . .
+  4    0    1    2    3
+  9    5    6    7    8</screen>
+   </sect3>
+   <sect3 xml:id="sec.raid10.complex.layout.offset">
+    <title>offsetレイアウト</title>
+    <para>
+     offsetレイアウトでは、あるチャンクの複数のコピーが連続したドライブ上で連続したオフセットにレイアウトされるよう、ストライプが複製されます。実際は、それぞれのストライプが複製され、コピーが1つのデバイスでオフセットされます。これにより、適度な大きさのチャンクサイズを使用している場合は、farレイアウトと同様の読み込み特性が得られますが、書き込みのシーク回数は少なくなります。
+    </para>
+    <para>
+     偶数個のディスクと2つのレプリカを使用したoffsetレイアウト
+    </para>
+<screen>sda1 sdb1 sdc1 sde1
+  0    1    2    3
+  3    0    1    2
+  4    5    6    7
+  7    4    5    6
+  8    9   10   11
+ 11    8    9   10</screen>
+    <para>
+     奇数個のディスクと2つのレプリカを使用したoffsetレイアウト
+    </para>
+<screen>sda1 sdb1 sdc1 sde1 sdf1
+  0    1    2    3    4
+  4    0    1    2    3
+  5    6    7    8    9
+  9    5    6    7    8
+ 10   11   12   13   14
+ 14   10   11   12   13</screen>
+   </sect3>
+   <sect3 xml:id="sec.raid10.complex.layout.parameter">
+    <title>YaSTおよびmdadmによるレプリカ数とレイアウトの指定</title>
+    <para>
+     レプリカ数とレイアウトは、YaSTでは<guimenu>パリティアルゴリズム</guimenu>、mdadmでは<option>--layout</option>パラメータで指定します。使用できる値は次のとおりです。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>n<replaceable>N</replaceable></literal>
+      </term>
+      <listitem>
+       <para>
+        nearレイアウトの場合、<literal>n</literal>を指定し、<replaceable>N</replaceable>をレプリカ数で置き換えます。レイアウトおよびレプリカ数を設定しない場合、デフォルトで<literal>n2</literal>が使用されます。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>f<replaceable>N</replaceable></literal>
+      </term>
+      <listitem>
+       <para>
+        farレイアウトの場合、<literal>f</literal>を指定し、<replaceable>N</replaceable>をレプリカ数で置き換えます。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>o<replaceable>N</replaceable></literal>
+      </term>
+      <listitem>
+       <para>
+        offsetレイアウトの場合、<literal>o</literal>を指定し、<replaceable>N</replaceable>をレプリカ数で置き換えます。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <note>
+     <title>レプリカの数</title>
+     <para>
+      YaSTでは、<guimenu>パリティアルゴリズム</guimenu>パラメータに設定可能なすべての値が自動的に表示されます。
+     </para>
+    </note>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.complex.yast">
+   <title>YaSTパーティショナによるコンプレックスRAID 10の作成</title>
+   <procedure>
+    <step>
+     <para>
+      YaSTを起動してパーティショナを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      必要に応じて、RAID設定で使用するパーティションを作成します。パーティションをフォーマットしたり、パーティションタイプを<guimenu>0xFD Linux RAID</guimenu>に設定したりしないでください。既存のパーティションを使用する場合、パーティションタイプを変更する必要はありません。YaSTによって自動的に変更されます。詳細については、<xref linkend="sec.yast2.i_y2_part_expert"/>を参照してください。
+     </para>
+     <para>
+      RAID 10の場合は、少なくとも4つのパーティションが必要です。ハードディスクのどれかに障害が発生した場合にデータを失うリスクを減らすため、異なるハードディスクに保存されているパーティションを使用することを強くお勧めします。各セグメントは最小サイズのパーティションと同量のスペースしか提供できないので、同じサイズのパーティションだけを使用するようお勧めします。
+     </para>
+    </step>
+    <step>
+     <para>
+      左のパネルで、<guimenu>RAID</guimenu>を選択します。
+     </para>
+     <para>
+      既存のRAID設定のリストが右のパネルに表示されます。
+     </para>
+    </step>
+    <step>
+     <para>
+      ［RAID］ページの左下で、<guimenu>RAIDの追加</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>RAID種類</guimenu>で、<guimenu>RAID 10 (ミラーリングおよびストライピング)</guimenu>を選択します。
+     </para>
+     <para>
+      オプションで、<guimenu>RAID Name (RAID名)</guimenu>でRAIDに名前を割り当てることができます。この名前は、<filename>/dev/md/<replaceable>name</replaceable></filename>として利用可能になります。詳細については、<xref linkend="sec.raid.yast.names"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>使用可能なデバイス</guimenu>リストで、希望のパーティションを選択し、次に<guimenu>追加</guimenu>をクリックして、それらを<guimenu>選択したデバイス</guimenu>リストに移動します。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="raid10_a.png" width="80%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="raid10_a.png" width="100%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      (オプション) <guimenu>分類</guimenu>をクリックして、RAIDアレイ内でのディスクの好みの順番を指定します。
+     </para>
+     <para>
+      RAID 10など、追加したディスクの順序が重要なRAIDタイプでは、デバイスの使用順序を指定できます。これにより、アレイの半数を特定のディスクサブシステムに配置し、もう半数を別のディスクサブシステムに配置できます。たとえば、1つのディスクサブシステムに障害が発生した場合、システムは2番目のディスクサブシステムから稼働し続けます。
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        各ディスクを順番に選択して、<guimenu>Class X</guimenu>ボタンのいずれかをクリックします。ここで、Xは、そのディスクに割り当てる文字です。用意されているクラスはA、B、C、DおよびEですが、多くの場合必要なクラスはそれより少なくなります(たとえばAとBのみ)。このようにして、すべての利用可能なRAIDディスクを割り当てます。
+       </para>
+       <para>
+        複数のデバイスを選択するには、<keycap function="control"/>キーまたは<keycap function="shift"/>キーを押します。選択したデバイスを右クリックして、コンテキストメニューから適切なクラスを選択することもできます。
+       </para>
+      </step>
+      <step>
+       <para>
+        次のソートオプションのいずれかを選択して、デバイスの順序を指定します。
+       </para>
+       <formalpara>
+        <title><guimenu>Sorted</guimenu>:</title>
+        <para>
+         クラスAのすべてのデバイスを、クラスBのすべてのデバイスより前に、というように並べます。例: <literal>AABBCC</literal>。
+        </para>
+       </formalpara>
+       <formalpara>
+        <title><guimenu>Interleaved</guimenu>:</title>
+        <para>
+         クラスAの最初のデバイス、次にクラスBの最初のデバイス、次にデバイスが割り当てられたすべての後続のクラスの順に、デバイスを並べます。次にクラスAの2番目のデバイス、クラスBの2番目のデバイス、というように続きます。クラスを持たないデバイスはすべて、デバイスリストの最後に並べられます。たとえば、<literal>ABCABC</literal>のようになります。
+        </para>
+       </formalpara>
+       <formalpara>
+        <title>Pattern File:</title>
+        <para>
+         それぞれが正規表現とクラス名である、複数の行を含む既存のファイルを選択します(<literal>"sda.* A"</literal>)。その正規表現に合致するすべてのデバイスが、その行に指定されたクラスに割り当てられます。正規表現は、カーネル名(<filename>/dev/sda1</filename>)、udevパス名(<filename>/dev/disk/by-path/pci-0000:00:1f.2-scsi-0:0:0:0-part1</filename>)、次にudev ID (<filename>/dev/disk/by-id/ata-ST3500418AS_9VMN8X8L-part1</filename>)に対して照合されます。デバイスの名前が、2つ以上の正規表現に合致する場合は、最初に合致したものでクラスが決定されます。
+        </para>
+       </formalpara>
+      </step>
+      <step>
+       <para>
+        ダイアログの下で、<guimenu>OK</guimenu>をクリックして、順番を確定します。
+       </para>
+       <informalfigure>
+        <mediaobject>
+         <imageobject role="fo">
+          <imagedata fileref="raid10_classify_a.png" width="80%" format="PNG"/>
+         </imageobject>
+         <imageobject role="html">
+          <imagedata fileref="raid10_classify_a.png" width="100%" format="PNG"/>
+         </imageobject>
+        </mediaobject>
+       </informalfigure>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      <guimenu>次へ</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>RAIDオプション</guimenu>で、<guimenu>チャンクサイズ</guimenu>と<guimenu>パリティアルゴリズム</guimenu>を指定し、次に<guimenu>次へ</guimenu>をクリックします。
+     </para>
+     <para>
+      RAID 10の場合、パリティオプションは、n (near)、f (far)、およびo (offset)です。数字は、必要となる各データブロックのレプリカの数を示します。2がデフォルトの設定です。詳細については、<xref linkend="sec.raid10.complex.layout" xrefstyle="SectTitleOnPage"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      ファイルシステムとマウントオプションをRAIDデバイスに追加して、<guimenu>完了</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      <guimenu>次へ</guimenu>をクリックします。
+     </para>
+    </step>
+    <step>
+     <para>
+      変更する内容を確認して、<guimenu>完了</guimenu>をクリックすると、RAIDが作成されます。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.raid10.complex.yast.mdadm">
+   <title>mdadmによるコンプレックスRAID 10の作成</title>
+   <para>
+    本項の手順では、次の表に示すデバイス名を使用します。それらのデバイス名は、必ず、ご使用のデバイスの名前で変更してください。
+   </para>
+   <table>
+    <title>mdadmでRAID 10を作成するシナリオ</title>
+    <tgroup cols="2">
+     <colspec colnum="1" colname="1" colwidth="50*"/>
+     <colspec colnum="2" colname="2" colwidth="50*"/>
+     <thead>
+      <row>
+       <entry>
+        <para>
+         rawデバイス
+        </para>
+       </entry>
+       <entry>
+        <para>
+         RAID 10
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <filename>/dev/sdf1</filename>
+        </para>
+        <para>
+         <filename>/dev/sdg1</filename>
+        </para>
+        <para>
+         <filename>/dev/sdh1</filename>
+        </para>
+        <para>
+         <filename>/dev/sdi1</filename>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         <filename>/dev/md3</filename>
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <procedure>
+    <step>
+     <para>
+      端末コンソールを開きます。
+     </para>
+    </step>
+    <step>
+     <para>
+      必要に応じて、partedなどのディスクパーティショナを使用して、同じサイズの0xFD Linux RAIDパーティションを少なくとも4つ作成します。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のコマンドを入力してRAID 10を作成します。
+     </para>
+<screen>mdadm --create /dev/md3 --run --level=10 --chunk=32 --raid-devices=4 \
+/dev/sdf1 /dev/sdg1 /dev/sdh1 /dev/sdi1</screen>
+     <para>
+      <option>--raid-devices</option>の値とパーティションのリストは、ご使用のセットアップに応じて調整してください。
+     </para>
+     <para>
+      ここに示すコマンドでは、nearレイアウトを使用し、2つのレプリカを持つアレイが作成されます。これら2つの値を変更するには、<option>--layout</option>を使用します。<xref linkend="sec.raid10.complex.layout.parameter"/>を参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      RAID 10デバイス<filename>/dev/md3</filename>上でファイルシステム(XFSファイルシステムなど)を作成します。
+     </para>
+<screen>sudo mkfs.xfs /dev/md3</screen>
+     <para>
+      これとは別のファイルシステムを使用するには、コマンドを変更します。
+     </para>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/mdadm.conf</filename>ファイルを編集するか、ファイルがまだ存在しない場合は作成します(たとえば、<command>sudo vi /etc/mdadm.conf</command>を実行します)。次の行を追加します(ここでも、ファイルが既に存在する場合、最初の行は記述済みの可能性があります)。
+     </para>
+<screen>DEVICE containers partitions
+ARRAY /dev/md3 UUID=<replaceable>UUID</replaceable></screen>
+     <para>
+      デバイスのUUIDは次のコマンドで取得できます。
+     </para>
+<screen>sudo mdadm -D /dev/md3 | grep UUID</screen>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/fstab</filename>ファイルを編集して、RAID 10デバイス<filename>/dev/md3</filename>のエントリを追加します。次の例は、XFSファイルシステム、およびマウントポイントとして<filename>/data</filename>を使用するRAIDデバイスのエントリを示しています。
+     </para>
+<screen>/dev/md3 /data xfs defaults 1 2</screen>
+    </step>
+    <step>
+     <para>
+      RAIDデバイスをマウントします。
+     </para>
+<screen>sudo mount /data</screen>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+</chapter>

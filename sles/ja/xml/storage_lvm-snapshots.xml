@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_lvm-snapshots.xml" version="5.0" xml:id="cha.lvm_snapshots" xml:lang="ja">
+ <title>LVMボリュームスナップショット</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  LVM (Logical Volume Manager)論理ボリュームスナップショットはコピーオンライト技術の1つで、既存のボリュームのデータブロックに対する変更を監視し、いずれかのブロックに書き込みが行われると、スナップショット時のブロックの値がスナップショットボリュームにコピーされます。こうすることで、スナップショットボリュームが削除されるまで、データのその時点のコピーが保存されます。
+ </para>
+ <sect1 xml:id="sec.lvm_snapshots.intro">
+  <title>ボリュームスナップショットの理解</title>
+
+  <para>
+   ファイルシステムのスナップショットには、それ自体のメタデータと、スナップショットの作成後に変更されたソース論理ボリュームのデータブロックが含まれています。スナップショットを介してデータにアクセスすると、ソース論理ボリュームのその時点のコピーが表示されます。バックアップ媒体からデータを復元したり、変更されたデータを上書きする必要はありません。
+  </para>
+
+  <important>
+   <title>スナップショットによるボリュームのマウント</title>
+   <para>
+    スナップショットのライフタイム中は、スナップショットを先にマウントしないと、ソース論理ボリュームをマウントできません。
+   </para>
+  </important>
+
+  <para>
+   LVMボリュームスナップショットでは、ファイルシステムのその時点のビューからバックアップを作成できます。スナップショットは瞬時に作成され、削除するまで保存されます。ボリューム自体はユーザが引き続き利用できるようにしながら、スナップショットからファイルシステムのバックアップを作成できます。当初のスナップショットには、スナップショットに関するメタデータが含まれていますが、ソース論理ボリュームの実際のデータは含まれていません。スナップショットはコピーオンライト技術を使用して、オリジナルデータブロックのデータ変更を検出します。スナップショットをとった際に保存されていた値をスナップショットボリューム内のブロックにコピーし、ソースブロックに新しいデータを保存することができます。ソース論理ボリュームで元の値から変更されるブロックが増えると、スナップショットのサイズが増えます。
+  </para>
+
+  <para>
+   スナップショットのサイズを決定する際には、ソース論理ボリュームに対して予想されるデータ変更量、およびスナップショットの保存期間を考慮する必要があります。スナップショットボリュームに割り当てるスペースの量は、ソース論理ボリュームのサイズ、スナップショットの保持予定期間、およびスナップショットのライフタイム中に変更が予期されるデータブロックの数によって異なります。スナップショットボリュームは、作成後のサイズ変更はできません。目安として、元の論理ボリュームの約10%のサイズで、スナップショットボリュームを作成してください。スナップショットの削除前に、ソース論理ボリューム内のすべてのブロックが1回以上変更されると予期される場合は、スナップボリュームのサイズを、少なくともソース論理ボリュームサイズにそのボリュームに関するメタデータ用スペースを加えたサイズにする必要があります。データ変更が頻繁でないか、またはライフタイムが十分短いと予期される場合、必要なスペースは少なくなります。
+  </para>
+
+  <para>
+   LVM2では、スナップショットはデフォルトで読み書き可能です。データをスナップショットに直接書き込む際は、そのブロックは例外テーブルで使用中とマークされ、ソース論理ボリュームからのコピーは行われません。スナップショットボリュームをマウントし、そのスナップショットボリュームにデータを直接書き込むことによって、アプリケーションの変更をテストできます。スナップショットをマウント解除してスナップショットを削除し、ソース論理ボリュームを再マウントするだけで、変更を簡単に破棄できます。
+  </para>
+
+  <para>
+   仮想ゲスト環境では、物理サーバの場合と同様に、サーバのディスク上に作成するLVM論理ボリュームに対してスナップショット機能を使用できます。
+  </para>
+
+  <para>
+   仮想ホスト環境では、スナップショット機能を使用して、仮想マシンのストレージバックエンドをバックアップしたり、仮想マシンイメージに対する変更(パッチやアップグレードなど)を、ソース論理ボリュームを変更せずにテストしたりできます。仮想マシンは、仮想ディスクファイルの使用ではなく、ストレージバックエンドとして、LVM論理ボリュームを使用する必要があります。LVM論理ボリュームをマウントし、ファイルに格納されたディスクとして仮想マシンイメージを保存するために使用できます。また、そのLVM論理ボリュームを物理ディスクとして割り当てて、ブロックデバイスとして書き込むことができます。
+  </para>
+
+  <para>
+   SLES 11 SP3から、LVM論理ボリュームスナップショットはシンプロビジョニング可能になっています。サイズを指定しないでスナップショットを作成した場合は、シンプロビジョニングと想定されます。スナップショットは、シンプールから必要な領域を使用するシンボリュームとして作成されます。シンスナップショットボリュームは、他のシンボリュームと同じ特性を持ちます。ボリュームは個別にアクティブ化、拡張、名前変更、および削除でき、そのスナップショットを作成することもできます。
+  </para>
+
+  <important>
+   <title>クラスタにおけるシンプロビジョニングボリューム</title>
+   <para>
+    クラスタでシンプロビジョニングスナップショットを使用するには、ソース論理ボリュームとそのスナップショットを1つのクラスタリソースで管理する必要があります。これにより、ボリュームとそのスナップショットを常に同じノードに排他的にマウントできます。
+   </para>
+  </important>
+
+  <para>
+   スナップショットが不要になったら、必ず、システムからスナップショットを削除してください。ソース論理ボリュームでデータブロックが変化していくのに応じて、スナップショットは最終的に満杯になります。スナップショットは満杯になると使用不可になるので、ソース論理ボリュームの再マウントができなくなります。
+  </para>
+
+  <para>
+   ソース論理ボリュームのスナップショットを複数作成している場合、スナップショットの削除は、最後に作成したものを最初に削除するという順番で行います。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.create">
+  <title>LVMによるLinuxスナップショットの作成</title>
+
+  <para>
+   LVM (Logical Volume Manager)は、ファイルシステムのスナップショットの作成に使用できます。
+  </para>
+
+  <para>
+   端末コンソールを開いて、次のコマンドを入力します。
+  </para>
+
+<screen>sudo lvcreate -s [-L <replaceable>&lt;size</replaceable>&gt;] -n <replaceable>snap_volume</replaceable> <replaceable>source_volume_path</replaceable></screen>
+
+  <para>
+   サイズを指定しない場合、スナップショットはシンスナップショットとして作成されます。
+  </para>
+
+  <para>
+   次に例を示します。
+  </para>
+
+<screen>sudo lvcreate -s -L 1G -n linux01-snap /dev/lvm/linux01</screen>
+
+  <para>
+   スナップショットが<filename>/dev/lvm/linux01-snap</filename>ボリュームとして作成されます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.monitor">
+  <title>スナップショットの監視</title>
+
+  <para>
+   端末コンソールを開いて、次のコマンドを入力します。
+  </para>
+
+<screen>sudo lvdisplay <replaceable>snap_volume</replaceable></screen>
+
+  <para>
+   次に例を示します。
+  </para>
+
+<screen><prompt>tux &gt; </prompt>sudo lvdisplay /dev/vg01/linux01-snap
+
+--- Logical volume ---
+  LV Name                /dev/lvm/linux01
+  VG Name                vg01
+  LV UUID                QHVJYh-PR3s-A4SG-s4Aa-MyWN-Ra7a-HL47KL
+  LV Write Access        read/write
+  LV snapshot status     active destination for /dev/lvm/linux01
+  LV Status              available
+  # open                 0
+  LV Size                80.00 GB
+  Current LE             1024
+  COW-table size         8.00 GB
+  COW-table LE           512
+  Allocated to snapshot  30%
+  Snapshot chunk size    8.00 KB
+  Segments               1
+  Allocation             inherit
+  Read ahead sectors     0
+  Block device           254:5</screen>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.delete">
+  <title>Linuxスナップショットの削除</title>
+
+  <para>
+   端末コンソールを開いて、次のコマンドを入力します。
+  </para>
+
+<screen>sudo lvremove <replaceable>snap_volume_path</replaceable></screen>
+
+  <para>
+   次に例を示します。
+  </para>
+
+<screen>sudo lvremove /dev/lvmvg/linux01-snap</screen>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.xen_host">
+  <title>仮想ホスト上の仮想マシンに対するスナップショットの使用</title>
+
+  <para>
+   仮想マシンのバックエンドストレージにLVM論理ボリュームを使用すると、基礎となるデバイスを柔軟に管理でき、ストレージオブジェクトの移動、スナップショットの作成、データのバックアップなどの操作を容易に行うことができるようになります。LVM論理ボリュームをマウントし、ファイルに格納されたディスクとして仮想マシンイメージを保存するために使用できます。また、そのLVM論理ボリュームを物理ディスクとして割り当てて、ブロックデバイスとして書き込むことができます。LVM論理ボリューム上に仮想ディスクイメージを作成してから、LVMのスナップショットを作成できます。
+  </para>
+
+  <para>
+   スナップショットの読み込み/書き込み機能を利用して、1つの仮想マシンのインスタンスを複数作成できます。この場合、変更は、仮想マシンの特定のインスタンスのスナップショットに対して行われます。LVM論理ボリューム上に仮想ディスクイメージを作成してソース論理ボリュームのスナップショットを作成し、仮想マシンの特定のインスタンスのスナップショットを変更できます。ソース論理ボリュームのスナップショットをもう1つ作成して、仮想マシンの別のインスタンス用に変更できます。複数の仮想マシンインスタンスのデータの大部分は、ソース論理ボリューム上のイメージと共に存在します。
+  </para>
+
+  <para>
+   スナップショットの読み込み/書き込み機能を利用すると、仮想ディスクイメージを維持したまま、ゲスト環境でパッチやアップグレードをテストすることもできます。そのイメージが含まれるLVMボリュームのスナップショットを作成し、そのスナップショットの場所で仮想マシンを実行します。ソース論理ボリュームは変更されず、そのマシンに対する変更はすべてスナップショットに書き込まれます。仮想マシンイメージのソース論理ボリュームに戻るには、仮想マシンの電源をオフにした後、ソース論理ボリュームからスナップショットを削除します。もう一度やり直すには、スナップショットを再作成してマウントしてから、スナップショットイメージ上で仮想マシンを再起動します。
+  </para>
+
+  <para>
+   次の手順では、ファイルに格納された仮想ディスクイメージとXenハイパーバイザを使用します。本項の手順は、KVMなど、SUSE Linuxプラットフォーム上で動作する他のハイパーバイザに適用できます。スナップショットボリュームからファイルに格納された仮想マシンイメージを実行するには:
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     ファイルに格納された仮想マシンイメージが含まれるソース論理ボリュームがマウントされていることを確認します(たとえば、マウントポイント<filename>/var/lib/xen/images/&lt;<replaceable>イメージ名</replaceable>&gt;</filename>)。
+    </para>
+   </step>
+   <step>
+    <para>
+     予想される差分を保存するのに十分な領域があるLVM論理ボリュームのスナップショットを作成します。
+    </para>
+<screen>sudo lvcreate -s -L 20G -n myvm-snap /dev/lvmvg/myvm</screen>
+    <para>
+     サイズを指定しない場合、スナップショットはシンスナップショットとして作成されます。
+    </para>
+   </step>
+   <step>
+    <para>
+     スナップショットボリュームをマウントするマウントポイントを作成します。
+    </para>
+<screen>sudo mkdir -p /mnt/xen/vm/myvm-snap</screen>
+   </step>
+   <step>
+    <para>
+     作成したマウントポイントにスナップショットボリュームをマウントします。
+    </para>
+<screen>sudo mount -t auto /dev/lvmvg/myvm-snap /mnt/xen/vm/myvm-snap</screen>
+   </step>
+   <step>
+    <para>
+     テキストエディタで、ソース仮想マシンの設定ファイルをコピーし、マウントしたスナップショットボリューム上の、ファイルに格納されたイメージファイルを指すようにパスを変更し、ファイルを<filename>/etc/xen/myvm-snap.cfg</filename>などの名前で保存します。
+    </para>
+   </step>
+   <step>
+    <para>
+     仮想マシンのマウント済みスナップショットボリュームを使用して、仮想マシンを起動します。
+    </para>
+<screen>sudo xm create -c /etc/xen/myvm-snap.cfg</screen>
+   </step>
+   <step>
+    <para>
+     (オプション)スナップショットを削除して、ソース論理ボリューム上の変更されていない仮想マシンイメージを使用します。
+    </para>
+<screen>sudo unmount /mnt/xenvms/myvm-snap
+sudo lvremove -f /dev/lvmvg/mylvm-snap</screen>
+   </step>
+   <step>
+    <para>
+     (オプション)このプロセスを必要なだけ繰り返します。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.lvm_snapshots.rollback">
+  <title>スナップショットをソース論理ボリュームとマージして変更を元に戻すか、前の状態にロールバックする</title>
+
+  <para>
+   スナップショットは、ボリューム上のデータを前の状態にロールバックまたは復元する必要がある場合に役立ちます。たとえば、管理者の手違いがあった場合、またはパッケージのインストールやアップグレードが失敗したり望む内容と違ったりした場合、データ変更を元に戻さなければならないことがあります。
+  </para>
+
+  <para>
+   <command>lvconvert --merge</command>コマンドを使用して、LVM論理ボリュームの変更を元に戻すことができます。マージは次のように開始されます。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     ソース論理ボリュームとスナップショットボリュームが両方とも開かれていない場合、マージはすぐに開始されます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ソース論理ボリュームまたはスナップショットボリュームが開かれていない場合、初めてソース論理ボリュームまたはスナップショットボリュームのどちらかがアクティブになって両方が閉じられた時点でマージが開始されます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ルートファイルシステムのように、閉じることができないソース論理ボリュームの場合、次にサーバが再起動されてソース論理ボリュームがアクティブになるときまで、マージは延期されます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     ソース論理ボリュームに仮想マシンイメージが含まれる場合、仮想マシンをシャットダウンしてソース論理ボリュームとスナップショットボリュームを(この順序でマウント解除することによって)非アクティブにした後、mergeコマンドを発行する必要があります。マージ完了時に、ソース論理ボリュームが自動的に再マウントされてスナップショットボリュームは削除されるので、マージ完了後まで仮想マシンを再起動しないでください。マージが完了した後、生成された論理ボリュームを仮想マシンで使用します。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   マージが開始されると、サーバ再起動後もマージは自動的に続行され、これはマージが完了するまで続きます。マージの進行中は、マージ中のソース論理ボリュームの新しいスナップショットを作成することはできません。
+  </para>
+
+  <para>
+   マージの進行中は、ソース論理ボリュームに対する読み込みまたは書き込みは、マージ中のスナップショットに透過的にリダイレクトされます。これにより、ユーザは直接、スナップショット作成時のデータを表示したり、そのデータにアクセスしたりできます。マージが完了するまで待つ必要はありません。
+  </para>
+
+  <para>
+   マージが完了すると、ソース論理ボリュームにはスナップショット作成時と同じデータと、マージ開始後に行われたデータ変更がすべて含まれます。生成された論理ボリュームの名前、マイナー番号、およびUUIDは、ソース論理ボリュームと同じです。ソース論理ボリュームは自動的に再マウントされ、スナップショットボリュームは削除されます。
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     端末コンソールを開いて、次のコマンドを入力します。
+    </para>
+<screen>sudo lvconvert --merge  [-b] [-i <replaceable>seconds</replaceable>] [<replaceable>snap_volume_path</replaceable>[...<replaceable>snapN</replaceable>]|@<replaceable>volume_tag</replaceable>]</screen>
+    <para>
+     コマンドラインで1つ以上のスナップショットを指定できます。または、複数のソース論理ボリュームに同じボリュームタグを設定し、「<literal>@&lt;<replaceable>ボリュームタグ</replaceable>&gt;</literal>」と指定することもできます。タグ付きボリュームのスナップショットは、それぞれのソース論理ボリュームにマージされます。タグ付き論理ボリュームについては、<xref linkend="sec.lvm.tagging" xrefstyle="SectTitleOnPage"/>を参照してください。
+    </para>
+    <para>
+     次のオプションがあります。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>-b</term>
+      <term>--background</term>
+      <listitem>
+       <para>
+        デーモンをバックグラウンドで実行します。これにより、指定した複数のスナップショットのマージを同時に並行して実行できます。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>-i</term>
+      <term>--interval &lt;<replaceable>seconds</replaceable>&gt;</term>
+      <listitem>
+       <para>
+        進行状況を定期的にパーセント値でレポートします。間隔を秒単位で指定します。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <para>
+     このコマンドの詳細については、<command>lvconvert(8)</command>のマニュアルページを参照してください。
+    </para>
+    <para>
+     次に例を示します。
+    </para>
+<screen>sudo lvconvert --merge /dev/lvmvg/linux01-snap</screen>
+    <para>
+     このコマンドは、<filename>/dev/lvmvg/linux01-snap</filename>をそのソース論理ボリュームにマージします。
+    </para>
+<screen>sudo lvconvert --merge @mytag</screen>
+    <para>
+     <filename>lvol1</filename>、<filename>lvol2</filename>、および<filename>lvol3</filename>すべてにタグ<literal>mytag</literal>が付いている場合、各スナップショットは対応するソース論理ボリュームに順番にマージされます。すなわち、<filename>lvol1</filename>、<filename>lvol2</filename>、<filename>lvol3</filename>の順にマージされます。<literal>--background</literal>オプションが指定されている場合、各タグ付きソース論理ボリュームのスナップショットは同時に並行してマージされます。
+    </para>
+   </step>
+   <step>
+    <para>
+     (オプション)ソース論理ボリュームとスナップショットが両方とも開いていて、閉じることができる場合、手動でソース論理ボリュームを非アクティブにしてからアクティブにすることによって、すぐにマージを開始できます。
+    </para>
+<screen>sudo umount <replaceable>original_volume</replaceable>
+sudo lvchange -an <replaceable>original_volume</replaceable>
+sudo lvchange -ay <replaceable>original_volume</replaceable>
+sudo mount <replaceable>original_volume</replaceable> <replaceable>mount_point</replaceable></screen>
+    <para>
+     次に例を示します。
+    </para>
+<screen>sudo umount /dev/lvmvg/lvol01
+sudo lvchange -an /dev/lvmvg/lvol01
+sudo lvchange -ay /dev/lvmvg/lvol01
+sudo mount /dev/lvmvg/lvol01 /mnt/lvol01</screen>
+   </step>
+   <step>
+    <para>
+     (オプション)ソース論理ボリュームとスナップショットボリュームが両方とも開いていて、ソース論理ボリュームを閉じることができない場合(<systemitem class="username">root</systemitem>ファイルシステムなど)、サーバを再起動してソース論理ボリュームをマウントすることによって、再起動後すぐにマージを開始できます。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+</chapter>

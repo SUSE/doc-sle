@@ -1,0 +1,699 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_prep_boot.xml" version="5.0" role="General" xml:id="cha.deployment.prep_boot">
+ <title>Preparando a inicialização do sistema de destino</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes (sim)</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  O <phrase role="productname"><phrase os="sles">SUSE® Linux Enterprise Server</phrase></phrase> pode ser instalado de várias maneiras. Além da instalação comum de mídia descrita no <xref linkend="cha.inst"/>, você pode escolher uma das várias abordagens baseadas em rede ou até optar por uma abordagem totalmente sem intervenção para a instalação do <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>.
+ </para>
+ <para>
+  Os exemplos usam NFS para suprir os dados de instalação. Para usar FTP, SMB ou HTTP, consulte o <xref linkend="cha.deployment.instserver"/>.
+ </para>
+ <note>
+  <title>Terminologia</title>
+  <para>
+   Nas seções a seguir, o sistema que armazenará a instalação do novo <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> é chamado de <emphasis>sistema de destino</emphasis> ou <emphasis>destino de instalação</emphasis>. O termo <emphasis>repositório</emphasis> (antes chamado de <quote>fonte de instalação</quote>) é usado para todas as fontes de dados de instalação. Isso inclui mídia física, como CD e DVD e servidores de rede que distribuem os dados de instalação na sua rede.
+  </para>
+ </note>
+ <para>
+  Esta seção aborda as tarefas de configuração necessárias em cenários complexos de inicialização. Contém exemplos de configurações prontas para aplicar referentes a DHCP, inicialização PXE, TFTP e Wake on LAN.
+ </para>
+ <para>
+  Os exemplos consideram que os servidores DHCP, TFTP e NFS residem na mesma máquina com o IP 192.168.1.1. Todos os serviços podem residir em máquinas diferentes sem nenhum problema. Mude os endereços IP conforme necessário.
+ </para>
+ <sect1 xml:id="sec.deployment.prep_boot.dhcp">
+  <title>Configurando um servidor DHCP</title>
+  <para>
+   O que todo servidor DHCP precisa fazer, além de fornecer alocação automática de endereço aos clientes de rede, é anunciar o endereço IP do servidor TFTP e o arquivo que deve ser transferido pelas rotinas de instalação para a máquina de destino. O arquivo que precisa ser carregado depende da arquitetura da máquina de destino e se foi utilizado BIOS legado ou boot UEFI.
+  </para>
+  <procedure xml:id="proc.deployment.prep_boot.dhcp.man">
+   <step>
+    <para>
+     Efetue login como <systemitem class="username">root</systemitem> na máquina que hospeda o servidor DHCP.
+    </para>
+   </step>
+   <step>
+    <para>
+     Habilite o servidor DHCP executando <command>systemctl enable dhcpd</command>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Anexe as linhas seguintes a uma configuração de sub-rede do arquivo de configuração de seu servidor DHCP localizado em <filename>/etc/dhcpd.conf</filename>:
+    </para>
+<screen># The following lines are optional
+option domain-name "my.lab";
+option domain-name-servers 192.168.1.1;
+option routers 192.168.1.1;
+option ntp-servers 192.168.1.1;
+ddns-update-style none;
+default-lease-time 3600;
+
+# The following lines are required
+option arch code 93 = unsigned integer 16; # RFC4578
+subnet 192.168.1.0 netmask 255.255.255.0 {
+ next-server 192.168.1.1;
+ range 192.168.1.100 192.168.1.199;
+ default-lease-time 3600;
+ max-lease-time 3600;
+ if option arch = 00:07 or option arch = 00:09 {
+   filename "/EFI/x86/grub.efi";
+ }
+ else if option arch = 00:0b {
+   filename "/EFI/aarch64/bootaa64.efi";
+ }
+ else  {
+   filename "/BIOS/x86/pxelinux.0";
+ }
+}
+</screen>
+    <para>
+     Este exemplo de configuração usa a sub-rede 192.168.1.0/24 com o DHCP, DNS e gateway no servidor com o IP 192.168.1.1. Verifique se todos os endereços IP usados foram alterados de acordo com o layout da rede. Para obter mais informações sobre as opções disponíveis em <filename>dhcpd.conf</filename>, consulte a página de manual sobre <systemitem>dhcpd.conf</systemitem>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Reinicie o servidor DHCP executando <command>systemctl restart dhcpd</command>.
+    </para>
+   </step>
+  </procedure>
+  <para>
+   Se você planeja usar SSH para controle remoto de uma instalação PXE e Wake on LAN, especifique explicitamente o endereço IP que o DHCP deve fornecer ao destino de instalação. Para isso, modifique a configuração DHCP mencionada acima de acordo com o exemplo a seguir:
+  </para>
+<screen>group {
+ host test {
+   hardware ethernet <replaceable>mac_address</replaceable>;
+   fixed-address <replaceable>some_ip_address</replaceable>;
+   }
+}
+</screen>
+  <para>
+   A declaração de host apresenta o nome de host do destino de instalação. Para vincular o nome de host e o endereço IP a um host específico, você deve saber e especificar o endereço de hardware (MAC) do sistema. Substitua todas as variáveis usadas neste exemplo pelos valores reais que correspondem ao seu ambiente.
+  </para>
+  <para>
+   Após a reinicialização do servidor DHCP, ele fornece um IP estático para o host especificado, habilitando-o a conectar-se ao sistema por SSH.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.tftp">
+  <title>Configurando um servidor TFTP</title>
+
+  <para>
+   Se for usada a instalação baseada no SUSE, será possível usar o YaST para configurar um Servidor TFTP. Se preferir, configure-o manualmente. O servidor TFTP entrega a imagem de boot ao sistema de destino após a inicialização e envia uma solicitação para ele.
+  </para>
+
+  <sect2 xml:id="sec.deployment.prep_boot.tftp.yast">
+   <title>Configurando um servidor TFTP usando YaST</title>
+   <procedure xml:id="proc.deployment.prep_boot.tftp.yast">
+    <step>
+     <para>
+      Efetue login como <systemitem class="username">root</systemitem>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Inicie <menuchoice><guimenu>YaST</guimenu><guimenu>Serviços de Rede</guimenu><guimenu>Servidor TFTP</guimenu></menuchoice> e instale o pacote solicitado.
+     </para>
+    </step>
+    <step>
+     <para>
+      Clique em <guimenu>Habilitar</guimenu> para verificar se o servidor foi iniciado e incluído nas rotinas de inicialização. De sua parte, não é necessária nenhuma outra ação de proteção. O xinetd inicia o tftpd no momento de inicialização.
+     </para>
+    </step>
+    <step>
+     <para>
+      Clique em <guimenu>Abrir Porta no Firewall</guimenu> para abrir a porta adequada no firewall em execução na sua máquina. Se nenhum firewall estiver em execução no seu servidor, esta opção não está disponível.
+     </para>
+    </step>
+    <step>
+     <para>
+      Clique em <guimenu>Pesquisar</guimenu> para pesquisar o diretório de imagem de inicialização. O diretório padrão <filename>/srv/tftpboot</filename> é criado e selecionado automaticamente.
+     </para>
+    </step>
+    <step>
+     <para>
+      Clique em <guimenu>Concluir</guimenu> para aplicar as suas configurações e iniciar o servidor.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.deployment.prep_boot.tftp.man">
+   <title>Configurando um servidor TFTP manualmente</title>
+   <procedure xml:id="proc.deployment.prep_boot.tftp.man">
+    <step>
+     <para>
+      Efetue login como <systemitem class="username">root</systemitem> e instale os pacotes <systemitem>tftp</systemitem> e <systemitem>xinetd</systemitem>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Modifique a configuração do xinetd localizado em <filename>/etc/xinetd.d</filename> para certificar-se de que o servidor TFTP seja iniciado no boot:
+     </para>
+     <substeps performance="required">
+      <step>
+       <para>
+        Se não existir, crie um arquivo chamado <filename>tftp</filename> neste diretório com <command>touch tftp</command>. Em seguida, execute <command>chmod 755 tftp</command>.
+       </para>
+      </step>
+      <step>
+       <para>
+        Abra o arquivo <filename>tftp</filename> e adicione as seguintes linhas:
+       </para>
+<screen>service tftp
+{
+        socket_type            = dgram
+        protocol               = udp
+        wait                   = yes
+        user                   = root
+        server                 = /usr/sbin/in.tftpd
+        server_args            = -s /srv/tftpboot
+        disable                = no
+}
+</screen>
+      </step>
+      <step>
+       <para>
+        Grave o arquivo e reinicie xinetd com o comando <command>rcxinetd restart</command>.
+       </para>
+      </step>
+     </substeps>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.pxe">
+  <title>Instalando arquivos no servidor TFTP</title>
+  <para>
+   Os procedimentos a seguir descrevem como preparar o servidor para máquinas de destino com UEFI e BIOS em arquiteturas x86 de 32 e 64 bits. A estrutura preparada também dispõe de um local para os sistemas aarch64.
+  </para>
+  <sect2 xml:id="sec.deployment.prep_boot.pxe">
+   <title>Preparando a estrutura</title>
+   <para>
+    Neste procedimento, substitua <replaceable>versão_OS</replaceable> e <replaceable>versão_SP</replaceable> pelo sistema operacional e pela versão de pacote de serviço usados. Por exemplo, use <literal>sles12</literal> e <literal>sp3</literal>.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Crie uma estrutura em <filename>/srv/tftpboot</filename> para suportar as diversas opções.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/BIOS/x86
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/EFI/x86/boot
+<prompt role="root">root # </prompt>mkdir -p /srv/tftpboot/EFI/aarch64/boot
+<prompt role="root">root # </prompt>mkdir -p /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+<prompt role="root">root # </prompt>mkdir -p /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+     </screen> 
+    </step>
+    <step>
+     <para>
+      Faça download das imagens ISO de DVD do <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> SP3 do site da SUSE na Web para todas as arquiteturas necessárias.
+     </para>
+    </step>
+    <step>
+     <para>
+      Monte os arquivos ISO conforme descrito na <xref linkend="sec.deployment.remoteinst.iso"/>. Para que os arquivos fiquem disponíveis após a reinicialização, crie uma entrada em <filename>/etc/fstab</filename>. Para a instalação padrão, apenas o DVD1 é necessário.
+     </para>
+<screen><prompt role="root">root # </prompt>mount -o loop <replaceable>path_to_iso</replaceable> /srv/install/<replaceable>arch</replaceable>/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/</screen>
+     <para>
+      Repita essa etapa para todas as arquiteturas necessárias e substitua <replaceable>arch</replaceable> por <literal>x86</literal> ou <literal>aarch64</literal>, e <replaceable>caminho_para_ISO</replaceable> pelo caminho para o arquivo ISO correspondente.
+     </para>
+     <para>
+     </para>
+    </step>
+    <step>
+     <para>
+      Copie os arquivos <filename>kernel</filename>, <filename>initrd</filename> e <filename>message</filename> necessários para o BIOS x86 e boot UEFI no local apropriado.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/x86_64/loader/
+<prompt role="root">root # </prompt>cp -a linux initrd message /srv/tftpboot/BIOS/x86/
+     </screen>
+    </step>
+    <step>
+     <para>
+      Verifique se o caminho <filename>/srv/install</filename> está disponível por meio do NFS. Para obter os detalhes, consulte a <xref linkend="sec.deployment.instserver.nfs"/>.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.pxelinux">
+   <title>Arquivos BIOS para x86</title>
+   <procedure>
+    <step>
+     <para>
+      Copie <filename>pxelinux.0</filename> para a pasta TFTP e prepare uma subpasta para o arquivo de configuração.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cp /usr/share/syslinux/pxelinux.0 /srv/tftpboot/BIOS/x86/
+<prompt role="root">root # </prompt>mkdir /srv/tftpboot/BIOS/x86/pxelinux.cfg
+     </screen>
+    </step>
+    <step>
+     <para>
+      Crie <filename>/srv/tftpboot/BIOS/x86/pxelinux.cfg/default</filename> e adicione as seguintes linhas:
+     </para>
+     <screen>
+default install
+
+# hard disk
+label harddisk
+ localboot -2
+# install
+label install
+ kernel linux
+ append initrd=initrd install=nfs://192.168.1.1:/srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+
+display message
+implicit 0
+prompt 1
+timeout 5
+     </screen>
+    </step>
+    <step>
+     <para>
+      Edite o arquivo <filename>/srv/tftpboot/BIOS/x86/message</filename> para refletir o arquivo <filename>default</filename> que você acabou de editar.
+     </para>
+     <screen>
+Welcome to the Installer Environment! 
+
+To start the installation enter 'install' and press &lt;return&gt;.
+
+Available boot options:
+ harddisk   - Boot from Hard Disk (this is default)
+ install    - Installation
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.efilinux_x86">
+   <title>Arquivos UEFI para x86</title>
+   <para>
+    Neste procedimento, substitua <replaceable>versão_OS</replaceable> e <replaceable>versão_SP</replaceable> pelo sistema operacional e pela versão de pacote de serviço usados. Por exemplo, use <literal>sles12</literal> e <literal>sp3</literal>.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Copie todos os arquivos <package>grub2</package> necessários para inicialização UEFI.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/EFI/BOOT
+<prompt role="root">root # </prompt>cp -a bootx64.efi grub.efi MokManager.efi /srv/tftpboot/EFI/x86/
+     </screen>
+    </step>
+    <step>
+     <para>
+      Copie os arquivos kernel e initrd para a estrutura de diretórios.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/x86_64/loader/
+<prompt role="root">root # </prompt>cp -a linux initrd /srv/tftpboot/EFI/x86/boot
+     </screen>
+    </step>
+    <step>
+     <para>
+     Crie o arquivo <filename>/srv/tftpboot/EFI/x86/grub.cfg</filename> com, no mínimo, este conteúdo:
+     </para>
+     <screen>
+set timeout=5
+menuentry 'Install <replaceable>OS_version</replaceable> <replaceable>SP_version</replaceable> for x86_64' {
+  linuxefi /EFI/x86/boot/linux \
+   install=nfs://192.168.1.1/srv/install/x86/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1
+  initrdefi /EFI/x86/boot/initrd
+}
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.prep_boot.efilinux_aarch64">
+   <title>Arquivos UEFI para AARCH64</title>
+   <para>
+    Neste procedimento, substitua <replaceable>versão_OS</replaceable> e <replaceable>versão_SP</replaceable> pelo sistema operacional e pela versão de pacote de serviço usados. Por exemplo, use <literal>sles12</literal> e <literal>sp3</literal>.
+   </para>
+   <procedure>
+    <step>
+     <para>
+     Isso é feito de modo muito semelhante ao do ambiente EFI x86_64. Comece copiando os arquivos necessários para inicialização UEFI de um ambiente grub2-efi.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/EFI/BOOT
+<prompt role="root">root # </prompt>cp -a bootaa64.efi /srv/tftpboot/EFI/aarch64/
+     </screen>
+    </step>
+    <step>
+     <para>
+      Copie o kernel e o initrd para a estrutura de diretórios.
+     </para>
+     <screen>
+<prompt role="root">root # </prompt>cd /srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1/boot/aarch64
+<prompt role="root">root # </prompt>cp -a linux initrd /srv/tftpboot/EFI/aarch64/boot
+     </screen>
+    </step>
+    <step>
+     <para>
+      Agora, crie o arquivo <filename>/srv/tftpboot/EFI/grub.cfg</filename> e adicione o seguinte conteúdo:
+     </para>
+     <screen>
+menuentry 'Install <replaceable>OS_version</replaceable> <replaceable>SP_version</replaceable>' {
+  linux /EFI/aarch64/boot/linux network=1 usessh=1 sshpassword="suse" \
+   install=nfs://192.168.1.1:/srv/install/aarch64/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1 \
+   console=ttyAMA0,115200n8
+  initrd /EFI/aarch64/boot/initrd
+}
+     </screen>
+     <para>
+      Essa adição ao arquivo de configuração tem algumas outras opções para habilitar o console serial e permitir a instalação por ssh, que é útil para sistemas que não têm uma interface de console KVM padrão. Você perceberá que se trata de uma configuração específica para determinada plataforma ARM.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeopts">
+  <title>Opções de configuração PXELINUX</title>
+
+  <para>
+   As opções relacionadas aqui são um subconjunto de todas as opções disponíveis para o arquivo de configuração PXELINUX.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><option>APPEND <replaceable>opções... </replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Adicione uma ou mais opções à linha de comando do kernel. São adicionadas para inicializações manuais e automáticas. As opções são adicionadas no início da linha de comando do kernel, normalmente permitindo que as opções de kernel digitadas explicitamente as substituam.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>APPEND -</option>
+    </term>
+    <listitem>
+     <para>
+      Não anexa nada. <option>APPEND</option> com um único hífen como argumento em uma seção <option>LABEL</option> pode ser usado para anular um <option>APPEND</option> global.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>DEFAULT <replaceable>opções de kernel</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      Configura a linha de comando padrão do kernel. Se PXELINUX é inicializado automaticamente, atua como se as entradas após DEFAULT tivessem sido digitadas no prompt de boot, exceto a opção auto, que é adicionada automaticamente, indicando uma inicialização automática.
+     </para>
+     <para>
+      Se não houver nenhum arquivo de configuração ou nenhuma entrada DEFAULT definida no arquivo de configuração, o padrão será o nome do kernel <quote>linux</quote> sem opções.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+
+    <term><option>IFAPPEND <replaceable>FLAG</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Adiciona uma opção específica à linha de comando do kernel de acordo com o valor <replaceable>FLAG</replaceable>. A opção <option>IFAPPEND</option> está disponível apenas no PXELINUX. <replaceable>FLAG</replaceable> espera um valor, descrito em <xref linkend="tab.deployment.boot.pxeopts.ifappend"/>:
+     </para>
+     <table xml:id="tab.deployment.boot.pxeopts.ifappend">
+      <title>Opções de linha de comando do kernel geradas e adicionadas do <option>IFAPPEND</option></title>
+      <tgroup cols="2">
+       <colspec colwidth="1*"/>
+       <colspec colwidth="4*"/>
+       <thead>
+        <row>
+         <entry valign="middle">
+          <para>
+           Argumento
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Linha de Comando do Kernel Gerada/Descrição
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <option>1</option>
+          </para>
+         </entry>
+         <entry>
+<screen>ip=<replaceable>CLIENT_IP</replaceable>:<replaceable>BOOT_SERVER_IP</replaceable>:<replaceable>GW_IP</replaceable>:<replaceable>NETMASK</replaceable></screen>
+          <para>
+           Os marcadores são substituídos de acordo com a entrada do servidor DHCP/BOOTP ou boot PXE.
+          </para>
+          <para>
+           Observe que essa opção não substitui a execução de um cliente DHCP no sistema inicializado. Sem as renovações regulares, o aluguel adquirido pelo BIOS PXE vai expirar, disponibilizando o endereço IP para reutilização do servidor DHCP.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>2</option>
+          </para>
+         </entry>
+         <entry>
+<screen>BOOTIF=<replaceable>MAC_ADDRESS_OF_BOOT_INTERFACE</replaceable></screen>
+          <para>
+           Essa opção é útil para evitar tempos de espera quando o servidor de instalação investiga uma interface LAN em seguida da outra, até obter a resposta de um servidor DHCP. Usando essa opção, o programa initrd pode determinar de qual interface o sistema foi inicializado. O linuxrc lê essa opção e utiliza essa interface de rede.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>4</option>
+          </para>
+         </entry>
+         <entry>
+<screen>SYSUUID=<replaceable>SYSTEM_UUID</replaceable></screen>
+          <para>
+           Adiciona UUIDs como hexadecimais em minúsculas, consulte <filename>/usr/share/doc/packages/syslinux/pxelinux.txt</filename>
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LABEL <replaceable>rótulo</replaceable> KERNEL <replaceable>imagem</replaceable> APPEND <replaceable>opções</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      Indica que, se <replaceable>rótulo</replaceable> for digitado como kernel de inicialização, PXELINUX deve inicializar <replaceable>imagem</replaceable>, e as opções <option>APPEND</option> especificadas devem ser usadas em vez das que estão especificadas na seção global do arquivo (antes do primeiro comando <option>LABEL). </option> O padrão para <replaceable>imagem</replaceable> é o mesmo de <replaceable>rótulo</replaceable> e, se não for fornecido nenhum <option>APPEND</option>, o padrão será usar a entrada global (se houver). Até 128 entradas <option>LABEL</option> são permitidas.
+     </para>
+
+     <para>
+      E PXELINUX usa a seguinte sintaxe:
+     </para>
+<screen>label <replaceable>mylabel</replaceable>
+  kernel <replaceable>mykernel</replaceable>
+  append <replaceable>myoptions</replaceable></screen>
+     <para>
+      Os rótulos são desmembrados como se fossem nomes de arquivo e deverão ser exclusivos após o desmembramento. Por exemplo, não seria possível distinguir os dois rótulos <quote>v2.6.30</quote> e <quote>v2.6.31</quote> em PXELINUX, pois ambos são desmembrados em um mesmo nome de arquivo do DOS.
+     </para>
+     <para>
+      O kernel não precisa ser do Linux. Ele também pode ser um setor de boot ou um arquivo COMBOOT.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LOCALBOOT <replaceable>tipo</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Em PXELINUX, especificar <option>LOCALBOOT 0</option> em vez de uma opção <option>KERNEL</option> significa chamar este rótulo específico e causa uma inicialização de disco local em vez de uma inicialização de kernel.
+     </para>
+     <informaltable frame="topbot" rowsep="0">
+      <tgroup cols="2">
+
+       <thead>
+        <row>
+         <entry>
+          <para>
+           Argumento
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Descrição
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>0</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Executa uma inicialização normal
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>4</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Executa uma inicialização local com o driver UNDI (Universal Network Driver Interface) ainda residente na memória
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>5</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Realiza uma inicialização local com toda a pilha PXE, incluindo o driver UNDI, ainda residente na memória
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+     <para>
+      Todos os outros valores são indefinidos. Se você não sabe quais são as pilhas UNDI ou PXE, especifique <literal>0</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>TIMEOUT <replaceable>tempo_de_espera</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Indica quanto tempo esperar no prompt de boot até inicializar automaticamente, em unidades de 1/10 de segundo. O tempo de espera é cancelado quando o usuário digita algo no teclado, considerando que ele concluirá o comando que começou. O tempo de espera zero desabilita completamente o tempo de espera (que é também o padrão). O valor do tempo de espera máximo possível é 35996 (pouco menos de uma hora).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>PROMPT<replaceable> val_flag</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Se <option>flag_val</option> for 0, o prompt de boot apenas será exibido se a tecla <keycap function="shift"/> ou <keycap function="alt"/> for pressionada ou se <keycap>Caps Lock</keycap> ou <keycap>Scroll Lock</keycap> estiver ativado (padrão). Se <option>val_flag</option> for 1, exibirá sempre o prompt de boot.
+     </para>
+<screen>F2  <replaceable>filename</replaceable>
+F1  <replaceable>filename</replaceable>
+..etc...
+F9  <replaceable>filename</replaceable>
+F10 <replaceable>filename</replaceable></screen>
+     <para>
+      Exibe o arquivo indicado na tela quando uma tecla de função é pressionada no prompt de boot. Isso pode ser usado para implementar a ajuda online de pré-inicialização (supostamente para as opções de linha do comando do kernel). Para compatibilidade com versões anteriores, <keycap>F10</keycap> também pode ser digitado como <literal>F0</literal>. Observe que ainda não há um meio de vincular nomes de arquivo a <keycap>F11</keycap> e <keycap>F12</keycap>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeprep">
+  <title>Preparando o sistema de destino para inicialização PXE</title>
+
+  <para>
+   Prepare o BIOS do sistema para a inicialização PXE incluindo a opção PXE na ordem de inicialização do BIOS.
+  </para>
+
+  <warning>
+   <title>Ordem de inicialização do BIOS</title>
+   <para>
+    Não coloque a opção PXE na frente da opção de inicialização do disco rígido no BIOS. Do contrário, o sistema tentaria se reinstalar sempre que fosse inicializado.
+   </para>
+  </warning>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolprep">
+  <title>Preparando o sistema de destino para Wake on LAN</title>
+
+  <para>
+   Wake on LAN (WOL) requer que a opção de BIOS adequada seja habilitada antes da instalação. Além disso, anote o endereço MAC do sistema de destino. Esses dados são necessários para iniciar o Wake on LAN.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wol">
+  <title>Ativação na LAN</title>
+
+  <para>
+   Wake on LAN permite que a máquina seja ativada por um pacote de rede especial contendo o endereço MAC da máquina. Como toda máquina no mundo tem um identificador MAC exclusivo, não se preocupe caso ligue acidentalmente a máquina errada.
+  </para>
+
+  <important>
+   <title>Wake on LAN em diferentes segmentos de rede</title>
+   <para>
+    Se a máquina controladora não estiver localizada no mesmo segmento de rede que o destino de instalação que deve ser desperto, configure as solicitações WOL para serem enviadas como multicasts ou controle remotamente uma máquina naquele segmento de rede para atuar como remetente das solicitações.
+   </para>
+  </important>
+
+  <para>
+   Os usuários do SUSE Linux Enterprise Server podem utilizar um módulo do YaST chamado WOL para configurar facilmente o Wake on LAN. Os usuários de outras versões de sistemas operacionais baseados no SUSE Linux podem usar uma ferramenta de linha de comando.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolyast">
+  <title>Wake on LAN com o YaST</title>
+
+  <procedure xml:id="proc.deployment.prep_boot.wolyast">
+   <step>
+    <para>
+     Efetue login como <systemitem class="username">root</systemitem>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Inicie <menuchoice><guimenu>YaST</guimenu><guimenu>Serviços de Rede</guimenu><guimenu>WOL</guimenu></menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Clique em <guimenu>Adicionar</guimenu> e digite o nome de host e o endereço MAC do sistema de destino.
+    </para>
+   </step>
+   <step>
+    <para>
+     Para ativar essa máquina, selecione a entrada apropriada e clique em <guimenu>Wake up</guimenu>.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.mksusecd">
+  <title>Inicializando da unidade de CD ou USB, em vez do PXE</title>
+  <para>
+   Você também pode usar uma unidade de CD, DVD ou USB com uma pequena imagem do sistema em vez de inicializar por PXE. Os arquivos necessários serão carregados por NFS assim que o kernel e o initrd forem carregados. É possível criar uma imagem inicializável com <command>mksusecd</command>. Isso poderá ser útil se a máquina de destino não suportar boot PXE.
+  </para>
+  <para>
+   Faça a instalação com o comando <command>sudo zypper in mksusecd</command>. Use o seguinte comando para criar uma imagem ISO inicializável:
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=nfs://192.168.1.1:/srv/install/<replaceable>arch</replaceable>/<replaceable>OS_version</replaceable>/<replaceable>SP_version</replaceable>/cd1  \
+/srv/tftpboot/EFI/<replaceable>arch</replaceable>/boot</screen>
+  <para>
+   Substitua <replaceable>arch</replaceable> pela pasta correspondente à arquitetura do sistema de destino. Substitua também <replaceable>versão_OS</replaceable> e <replaceable>versão_SP</replaceable> de acordo com os seus caminhos na <xref linkend="sec.deployment.pxe"/>.
+  </para>
+  <para>
+   Em vez de usar um servidor NFS para a opção <option>--net</option>, também é possível usar um repositório HTTP, por exemplo, o repositório openSUSE:
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=http://download.opensuse.org/tumbleweed/repo/oss/suse \
+/srv/tftpboot/EFI/<replaceable>arch</replaceable>/boot</screen>
+  <para>
+   É possível gravar <filename>image.iso</filename> em um DVD ou CD, ou com a ajuda do comando <command>dd</command> em um pendrive USB:
+  </para>
+  <screen><prompt role="root">root # </prompt><command>dd</command> if=image.iso of=/dev/<replaceable>usb_device</replaceable></screen>
+  <para>
+   Substitua <replaceable>dispositivo_USB</replaceable> pelo nome do pendrive USB. Verifique o nome completo do dispositivo para garantir que você não destrua acidentalmente os dados em outra unidade.
+  </para>
+ </sect1>
+</chapter>

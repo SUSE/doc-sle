@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_multitier-caching.xml" version="5.0" xml:id="cha.multitiercache" xml:lang="zh-tw">
+ <title>用於區塊裝置操作的多層快取</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  多層快取是一種複製式/分散式快取，它至少包括兩層︰一層由速度較慢、較為廉價的旋轉區塊裝置 (硬碟) 代表，另一層成本較高，但執行資料操作時速度更快 (例如，SSD 隨身碟)。
+ </para>
+ <para>
+  SUSE Linux Enterprise Server 為快閃裝置與旋轉裝置之間的快取實作兩種不同的解決方案︰<systemitem class="resource">bcache</systemitem> 和 <systemitem class="resource">lvmcache</systemitem>。
+ </para>
+ <sect1 xml:id="sec.multitiercache.terminology">
+  <title>一般術語</title>
+
+  <para>
+   本節介紹在說明快取相關功能時經常用到的一些術語︰
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>移轉</term>
+    <listitem>
+     <para>
+      將邏輯區塊的主要副本從一個裝置移至另一個裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>升職</term>
+    <listitem>
+     <para>
+      從慢速裝置移轉至快速裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>降級</term>
+    <listitem>
+     <para>
+      從快速裝置移轉至慢速裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>原始裝置</term>
+    <listitem>
+     <para>
+      大型慢速區塊裝置。它總是包含邏輯區塊的副本，該副本可能已過時或者與快取裝置上的副本保持同步 (視規則而定)。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>快取裝置</term>
+    <listitem>
+     <para>
+      小型高速區塊裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>中繼資料裝置</term>
+    <listitem>
+     <para>
+      小型裝置，用於記錄哪些區塊在快取中、哪些區塊有所改動，以及規則物件使用的其他提示。此資訊也可以放在快取裝置上，但分開放置可讓磁碟區管理員對它進行不同的設定，例如，設定為鏡像以進一步提高穩健性。中繼資料裝置只能由單一快取裝置使用。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>改動的區塊</term>
+    <listitem>
+     <para>
+      如果某個程序將資料寫入快取中的某個資料區塊，該快取的區塊便會標記為<emphasis>改動</emphasis>區塊，因為該區塊已在快取中覆寫，需要寫回原始裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>快取遺漏</term>
+    <listitem>
+     <para>
+      對 I/O 操作的要求首先會指向已快取裝置的快取。如果找不到要求的值，則會在裝置本身內尋找，因此速度會變慢。這稱為<emphasis>快取遺漏</emphasis>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>快取命中</term>
+    <listitem>
+     <para>
+      如果在已快取裝置的快取中找到要求的值，便可以快速提供該值。這稱為<emphasis>快取命中</emphasis>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>冷快取</term>
+    <listitem>
+     <para>
+      未保留任何值 (空白) 並且會導致<emphasis>快取遺漏</emphasis>的快取。在快取的區塊裝置進行操作的過程中，冷快取中會填入資料，從而變為<emphasis>暖</emphasis>快取。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>暖快取</term>
+    <listitem>
+     <para>
+      已保留一些值並且可能會導致<emphasis>快取命中</emphasis>的快取。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.caching_modes">
+  <title>快取模式</title>
+
+  <para>
+   下面是多層快取使用的基本快取模式︰<emphasis>寫回</emphasis>、<emphasis>直寫</emphasis>、<emphasis>繞寫</emphasis>和<emphasis>直通</emphasis>。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>寫回</term>
+    <listitem>
+     <para>
+      寫入已快取區塊的資料只會移至快取，並且該區塊會標記為改動。這是預設的快取模式。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>直寫</term>
+    <listitem>
+     <para>
+      只有在同時命中原始裝置和快取裝置之後，向快取區塊的寫入才會完成。在<emphasis>直寫</emphasis>快取中，空白的區塊將保持空白狀態。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>繞寫</term>
+    <listitem>
+     <para>
+      類似於直寫快取的一種技術，不過，寫入 I/O 會直接寫入永久性儲存，並繞過快取。這可以防止在快取中發生大量後續不會重新讀取的寫入 I/O。不過，缺點是對最近寫入資料的讀取要求會造成「快取遺漏」，因而需要從慢速大量儲存中讀取這些資料，造成更大的延遲。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>直通</term>
+    <listitem>
+     <para>
+      若要啟用<emphasis>直通</emphasis>模式，快取須空白。讀取會從原始裝置進行，而繞過快取。寫入會轉遞到原始裝置，並使快取區塊「失效」。<emphasis>直通</emphasis>可以啟用快取裝置，而不必擔心資料的一致性。隨著寫入的不斷進行，快取將逐漸變為冷快取。如果您之後可以驗證快取的一致性，或者可以使用 <literal>invalidate_cblocks</literal> 訊息來建立這種一致性，則可以在快取裝置仍處於暖狀態時，將它切換到<emphasis>直寫</emphasis>或<emphasis>寫回</emphasis>模式。否則，可以先丟棄快取內容，然後切換到所需的快取模式。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.bcache">
+  <title><systemitem class="resource">bcache</systemitem></title>
+
+
+
+  <para>
+   <systemitem class="resource">bcache</systemitem> 是一個 Linux 核心區塊層快取。它允許使用一或多個高速磁碟機 (例如 SSD) 做為一或多個慢速硬碟的快取。<systemitem class="resource">bcache</systemitem> 支援直寫和寫回，不受所使用的檔案系統的影響。依預設，它只快取隨機讀取和寫入，這也是 SSD 的強項。它還適合用於桌上型電腦、伺服器和高端儲存陣列。
+  </para>
+
+  <sect2 xml:id="sec.multitiercache.bcache.features">
+   <title>主要功能</title>
+   <itemizedlist>
+    <listitem>
+     <para>
+      可以使用單個快取裝置來快取任意數量的支援裝置。在執行時期，可以附加和分離已掛接及使用中的支援裝置。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      在非正常關機後復原 — 只有在快取與支援裝置保持一致後才會完成寫入。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      在 SSD 壅塞期對傳往 SSD 的流量進行節流。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      高效的寫回實作。已改動資料一律按排序順序寫出。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      穩定可靠 — 可用於線上用途。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+
+
+  <sect2 xml:id="sec.multitiercache.bcache.setting_bcache_device">
+   <title>設定 <systemitem class="resource">bcache</systemitem> 裝置</title>
+   <para>
+    本節介紹設定及管理 <systemitem class="resource">bcache</systemitem> 裝置的步驟。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      安裝 <systemitem>bcache-tools</systemitem> 套件︰
+     </para>
+<screen>sudo zypper in bcache-tools</screen>
+    </step>
+    <step>
+     <para>
+      建立支援裝置 (通常是機械磁碟機)。支援裝置可以是整個裝置、一個分割區或其他任何標準區塊裝置。
+     </para>
+<screen>sudo make-bcache -B /dev/sdb</screen>
+    </step>
+    <step>
+     <para>
+      建立快取裝置 (通常是 SSD 磁碟)。
+     </para>
+<screen>sudo make-bcache -C /dev/sdc</screen>
+     <para>
+      本範例使用預設的區塊大小和貯體大小，分別為 512 B 和 128 KB。區塊大小應與支援裝置的磁區大小 (通常為 512 或 4k) 相符。貯體大小應與快取裝置的去除區塊大小相符，以盡可能減少寫入放大。例如，如果使用具有 4k 磁區的硬碟和具有 2 MB 去除區塊大小的 SSD，此指令如下所示︰
+     </para>
+<screen>sudo make-bcache --block 4k --bucket 2M -C /dev/sdc</screen>
+     <tip>
+      <title>多裝置支援</title>
+      <para>
+       <command>make-bcache</command> 可以同時準備和註冊多部支援裝置與一部快取裝置。如此，您便無需再將快取裝置手動附加到支援裝置︰
+      </para>
+<screen>sudo make-bcache -B /dev/sda /dev/sdb -C /dev/sdc</screen>
+     </tip>
+    </step>
+    <step>
+     <para>
+      <systemitem class="resource">bcache</systemitem> 裝置將顯示為
+     </para>
+<screen>/dev/bcache<replaceable>N</replaceable></screen>
+     <para>
+      和
+     </para>
+<screen>/dev/bcache/by-uuid/<replaceable>uuid</replaceable>
+/dev/bcache/by-label/<replaceable>label</replaceable></screen>
+     <para>
+      您可以像往常一樣正常格式化和掛接 <systemitem class="resource">bcache</systemitem> 裝置︰
+     </para>
+<screen>mkfs.ext4 /dev/bcache0
+mount /dev/bcache0 /mnt</screen>
+     <para>
+      您可以在 <filename>/sys/block/bcache<replaceable>N</replaceable>/bcache</filename> 中透過 <systemitem>sysfs</systemitem> 控制 <systemitem class="resource">bcache</systemitem> 裝置。
+     </para>
+    </step>
+    <step>
+     <para>
+      註冊快取裝置和支援裝置後，需要將支援裝置附加到相關的快取集才能啟用快取︰
+     </para>
+<screen>echo <replaceable>cache_set_uuid</replaceable> &gt; /sys/block/bcache0/bcache/attach</screen>
+     <para>
+      其中，<replaceable>cache_set_uuid</replaceable> 可以在 <filename>/sys/fs/bcache</filename> 中找到。
+     </para>
+    </step>
+    <step>
+     <para>
+      <systemitem class="resource">bcache</systemitem> 預設使用直通快取模式。您可以變更其模式，例如，若要變更為寫回，請執行
+     </para>
+<screen>echo writeback &gt; /sys/block/bcache0/bcache/cache_mode</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.multitiercache.bcache.sysfs">
+   <title>使用 <systemitem>sysfs</systemitem> 的 <systemitem class="resource">bcache</systemitem> 組態</title>
+   <para>
+    <systemitem class="resource">bcache</systemitem> 裝置使用 <systemitem>sysfs</systemitem> 介面來儲存其執行時期組態值。如此您可以變更 <systemitem class="resource">bcache</systemitem> 支援裝置和快取磁碟的行為，或查看其使用統計資料。
+   </para>
+   <para>
+    如需 <systemitem class="resource">bcache</systemitem> <systemitem> sysfs</systemitem> 參數的完整清單，請查看 <filename>/usr/src/linux/Documentation/bcache.txt</filename> 檔案的內容，主要是 <literal>SYSFS - BACKING DEVICE</literal>、<literal>SYSFS - BACKING DEVICE STATS</literal> 和 <literal>SYSFS - CACHE DEVICE</literal> 區段的內容。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.multitiercache.lvmcache">
+  <title><systemitem class="resource">lvmcache</systemitem></title>
+
+  <para>
+   <systemitem class="resource">lvmcache</systemitem> 是由邏輯磁碟區 (LV) 組成的快取機制。它使用 <literal>dm-cache</literal> 核心驅動程式，並支援直寫 (預設) 和寫回快取模式。<systemitem class="resource">lvmcache</systemitem> 可將其某些資料動態移轉至更快、更小的 LV，以提高大型慢速 LV 的效能。如需 LVM 的詳細資訊，請參閱<xref linkend="part.lvm"/>。
+  </para>
+
+  <para>
+   LVM 將小型快速 LV 稱為<emphasis>快取池 LV</emphasis>。大型慢速 LV 稱為<emphasis>原始 LV</emphasis>。由於 dm-cache 的要求，LVM 進一步將快取池 LV 分割成兩個裝置︰<emphasis>快取資料 LV</emphasis> 和<emphasis>快取中繼資料 LV</emphasis>。來自原始 LV 的資料區塊副本保存在快取資料 LV 中，以提高速度。快取中繼資料 LV 保存統計資訊，這些資訊指定資料區塊的儲存位置。
+  </para>
+
+  <sect2 xml:id="sec.multitiercache.lvmcache.configure">
+   <title>設定 <systemitem class="resource">lvmcache</systemitem></title>
+   <para>
+    本節介紹建立及設定 LVM 式快取的步驟。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      <emphasis>建立原始 LV。</emphasis>建立新 LV，或使用現有 LV 做為原始 LV︰
+     </para>
+<screen>lvcreate -n <replaceable>origin_lv</replaceable> -L 100G vg <replaceable>/dev/slow_dev</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>建立快取資料 LV。</emphasis>此 LV 將保存來自原始 LV 的資料區塊。此 LV 的大小即是快取的大小，將報告為快取池 LV 的大小。
+     </para>
+<screen>lvcreate -n <replaceable>cache_data_lv</replaceable> -L 10G vg <replaceable>/dev/fast</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>建立快取中繼資料 LV。</emphasis>此 LV 將保存快取池中繼資料。此 LV 的大小應該比快取資料 LV 大約小 1000 倍，最小大小為 8MB。
+     </para>
+<screen>lvcreate -n <replaceable>cache_metadata_lv</replaceable> -L 12M vg <replaceable>/dev/fast</replaceable></screen>
+     <para>
+      列出到目前為止建立的磁碟區︰
+     </para>
+<screen>lvs -a vg
+LV                VG   Attr        LSize   Pool Origin
+cache_data_lv     vg   -wi-a-----  10.00g
+cache_metadata_lv vg   -wi-a-----  12.00m
+origin_lv         vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>建立快取池 LV。</emphasis>將資料 LV 和中繼資料 LV 合併成一個快取池 LV。可以同時設定快取池 LV 的行為。
+     </para>
+     <para>
+      <replaceable>cache_pool_lv</replaceable> 與 <replaceable>cache_data_lv</replaceable> 同名。
+     </para>
+     <para>
+      <replaceable>cache_data_lv</replaceable> 將重新命名為 <replaceable>cache_data_lv</replaceable>_cdata，並且會隱藏。
+     </para>
+     <para>
+      <replaceable>cache_meta_lv</replaceable> 將重新命名為 <replaceable>cache_data_lv</replaceable>_cmeta，並且會隱藏。
+     </para>
+<screen>lvconvert --type cache-pool \
+ --poolmetadata vg/cache_metadata_lv vg/cache_data_lv</screen>
+<screen>lvs -a vg
+LV                     VG   Attr       LSize   Pool Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-------  10.00g
+[cache_data_lv_cmeta]  vg   ewi-------  12.00m
+origin_lv              vg   -wi-a----- 100.00g</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>建立快取 LV。</emphasis>透過將快取池 LV 連結到原始 LV，來建立快取 LV。
+     </para>
+     <para>
+      使用者可存取的快取 LV 與原始 LV 同名，原始 LV 將變成重新命名為 <replaceable>origin_lv</replaceable>_corig 的隱藏 LV。
+     </para>
+     <para>
+      CacheLV 與 <replaceable>origin_lv</replaceable> 同名。
+     </para>
+     <para>
+      <replaceable>origin_lv</replaceable> 將重新命名為 <replaceable>origin_lv</replaceable>_corig，並且會隱藏。
+     </para>
+<screen>lvconvert --type cache --cachepool vg/cache_data_lv vg/origin_lv</screen>
+<screen>lvs -a vg
+LV              VG   Attr       LSize   Pool   Origin
+cache_data_lv          vg   Cwi---C---  10.00g
+[cache_data_lv_cdata]  vg   Cwi-ao----  10.00g
+[cache_data_lv_cmeta]  vg   ewi-ao----  12.00m
+origin_lv              vg   Cwi-a-C--- 100.00g cache_data_lv [origin_lv_corig]
+[origin_lv_corig]      vg   -wi-ao---- 100.00g</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec.multitiercache.lvmcache.remove">
+   <title>移除快取池</title>
+   <para>
+    關閉 LV 快取的方法有數種。
+   </para>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.detach">
+    <title>從快取 LV 分離快取池 LV</title>
+    <para>
+     您可以從快取 LV 中斷快取池 LV 的連接，留下一個未使用的快取池 LV 和一個未快取的原始 LV。資料將視需要從快取池寫回到原始 LV。
+    </para>
+<screen>lvconvert --splitcache vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.wo_origin">
+    <title>移除快取池 LV 但不移除其原始 LV</title>
+    <para>
+     如此，可以在必要時將資料從快取池寫回原始 LV，然後移除快取池 LV，留下未快取的原始 LV。
+    </para>
+<screen>lvremove vg/cache_data_lv</screen>
+    <para>
+     也可以使用以下替代指令從快取 LV 中斷快取池連接，並刪除快取池︰
+    </para>
+<screen>lvconvert --uncache vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.both">
+    <title>移除原始 LV 和快取池 LV</title>
+    <para>
+     移除快取 LV 會同時移除原始 LV 和連結的快取池 LV。
+    </para>
+<screen>lvremove vg/origin_lv</screen>
+   </sect3>
+   <sect3 xml:id="sec.multitiercache.lvmcache.remove.info">
+    <title>更多資訊</title>
+    <para>
+     您可以在 <systemitem class="resource">lvmcache</systemitem> man 頁面 (<command>man 7 lvmcache</command>) 中找到 <systemitem class="resource">lvmcache</systemitem> 的更多相關主題，例如支援的快取模式、備援的子邏輯磁碟區、快取規則，或者將現有 LV 轉換為不同的快取類型。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>

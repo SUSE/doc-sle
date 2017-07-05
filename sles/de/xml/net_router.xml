@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="net_router.xml" version="5.0" xml:id="sec.basicnet.router">
+ <title>Grundlegende Routereinrichtung</title>
+
+
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>Ja</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  Ein Router ist ein Netzwerkgerät, das Daten hin und zurück an mehr als ein Netzwerk zustellt und von diesen empfängt (Netzwerkpakete). Ein Router wird häufig zum Verbinden Ihres lokalen Netzwerks mit dem Remote-Netzwerk (Internet) oder zum Verbinden lokaler Netzwerksegmente verwendet. Mit SUSE Linux Enterprise Server können Sie einen Router mit Funktionen wie Network Address Translation (NAT) oder erweiterten Firewalls erstellen. 
+ </para>
+
+
+
+ <para>
+  Im Folgenden sind grundlegende Schritte beschrieben, mit denen Sie SUSE Linux Enterprise Server in einen Router umfunktionieren können.
+ </para>
+
+ <procedure>
+  <step>
+   <para>
+    Aktivieren Sie die Weiterleitung, beispielsweise in der Datei <filename>/etc/sysctl.d/50-router.conf</filename> aktivieren
+   </para>
+<screen>net.ipv4.conf.all.forwarding = 1
+net.ipv6.conf.all.forwarding = 1</screen>
+   <para>
+    Stellen Sie dann ein statisches IPv4- und IPv6-IP-Setup für die Schnittstellen bereit. Durch das Aktivieren der Weiterleitung werden mehrere Mechanismen deaktiviert. Beispielsweise akzeptiert IPv6 keine IPv6-RAs (Router Advertisements) mehr, wodurch ebenfalls die Erstellung einer Standardroute vermieden wird.
+   </para>
+  </step>
+  <step>
+   <para>
+    In vielen Situationen, beispielsweise wenn Sie über mehr als eine Schnittstelle auf das gleiche (interne) Netzwerk zugreifen können oder wenn in der Regel VPN verwendet wird (und sich bereits auf <quote>normalen Multihome-Hosts</quote> befindet), müssen Sie den Reverse-Path-Filter für IPv4 deaktivieren (diese Funktion ist derzeit für IPv6 nicht vorhanden):
+   </para>
+<screen>net.ipv4.conf.all.rp_filter = 0</screen>
+   <para>
+    Stattdessen ist auch das Filtern mit Firewall-Einstellungen möglich.
+   </para>
+  </step>
+  <step>
+   <para>
+    Um ein IPv6-RA zu akzeptieren (vom Router auf eine externe, Uplink- oder ISP-Schnittstelle) und wieder eine IPv6-Standardroute (oder auch eine speziellere Route) zu erstellen, legen Sie Folgendes fest:
+   </para>
+<screen>net.ipv6.conf.${ifname}.accept_ra = 2
+net.ipv6.conf.${ifname}.autoconf = 0</screen>
+   <para>
+    (Hinweis: <quote><literal>eth0.42</literal></quote> muss in einem durch Punkte getrennten sysfs-Pfad als <literal>eth0/42</literal> angegeben werden.)
+   </para>
+  </step>
+ </procedure>
+
+ <para>
+  Weitere Beschreibungen zum Routerverhalten und zu Weiterleitungsabhängigkeiten sind unter <link xlink:href="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt">https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt</link> zu finden.
+ </para>
+
+ <para>
+  Um IPv6 auf Ihren internen (DMZ-)Schnittstellen bereitzustellen und den eigenen Router als IPv6-Router bekanntzugeben sowie <quote>autoconf</quote> der Netzwerke für die Clients auszuführen, installieren und konfigurieren Sie <systemitem class="daemon">radvd</systemitem> in der Datei <filename>/etc/radvd.conf</filename>. Beispiel:
+ </para>
+
+<screen>interface eth0
+{
+    IgnoreIfMissing on;         # do not fail if interface missed
+
+    AdvSendAdvert on;           # enable sending RAs
+    AdvManagedFlag on;          # IPv6 addresses managed via DHCPv6
+    AdvOtherConfigFlag on;      # DNS, NTP... only via DHCPv6
+
+    AdvDefaultLifetime 3600;    # client default route lifetime of 1 hour
+
+    prefix 2001:db8:0:1::/64    # (/64 is default and required for autoconf)
+    {
+        AdvAutonomous off;         # Disable address autoconf (DHCPv6 only)
+
+        AdvValidLifetime 3600;     # prefix (autoconf addr) is valid 1 h
+        AdvPreferredLifetime 1800; # prefix (autoconf addr) is prefered 1/2 h
+    }
+}</screen>
+
+ <para>
+  Konfigurieren Sie zuletzt die Firewall. In SuSEfirewall2 müssen Sie <literal>FW_ROUTE="yes"</literal> festlegen (sonst wird auch das Weiterleiten von sysctl wieder zurück gesetzt) und nach Bedarf die Schnittstellen in den Zonenvariablen <literal>FW_DEV_INT</literal>, <literal>FW_DEV_EXT</literal> (und <literal>FW_DEV_DMZ</literal>), vielleicht auch <literal>FW_MASQUERADE="yes"</literal> und <literal>FW_MASQ_DEV</literal> angeben.
+ </para>
+</sect1>

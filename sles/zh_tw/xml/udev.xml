@@ -1,0 +1,764 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="udev.xml" version="5.0" xml:id="cha.udev">
+ <title>使用 <systemitem class="service">udev</systemitem> 進行動態核心裝置管理</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  核心可以新增或移除執行中系統內幾乎所有的裝置。裝置狀態的變更 (無論裝置插入或移除) 必須傳播至使用者空間。一旦插入並辨識出裝置，就必須立刻進行設定。如果辨識到的裝置狀態發生任何變更，必須通知該裝置的使用者。<systemitem class="service"/>udev 會提供所需的基礎結構，以便動態維護 <filename>/dev</filename> 目錄中的裝置節點檔案和符號連結。<systemitem class="service">udev</systemitem> 規則能將外部工具插入核心裝置事件處理。如此，您可以自訂 <systemitem class="service">udev</systemitem> 裝置處理，例如，新增特定的程序檔以在核心裝置處理過程中執行，或是在裝置處理過程中要求並輸入其他資料進行評估。
+ </para>
+ <sect1 xml:id="sec.udev.devdir">
+  <title>/dev<filename> 目錄</filename></title>
+
+  <para>
+   <filename>/dev</filename> 中的裝置節點可用來存取對應的核心裝置。透過 <systemitem class="service">udev</systemitem>，<filename>/dev</filename> 目錄會反映核心的目前狀態。每個核心裝置都有一個對應的裝置檔案。如果裝置與系統的連接中斷，該裝置節點就會遭到移除。
+  </para>
+
+  <para>
+   <filename>/dev</filename> 目錄的內容保存在暫存檔案系統中，而且所有檔案都會在每次系統開機時顯示。根據系統設計，手動建立或修改的檔案在重新開機後都將遺失。無論可使用 systemd-tmpfiles 建立的對應核心裝置狀態為何，靜態檔案和目錄都必須在 <filename>/dev</filename> 目錄中。組態檔案可在 <filename>/usr/lib/tmpfiles.d/</filename> 和 <filename>/etc/tmpfiles.d/</filename> 中找到；如需詳細資訊，請參閱 <systemitem>systemd-tmpfiles(8)</systemitem> 線上文件。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.kernel">
+  <title>核心 <systemitem class="service">uevent</systemitem> 和 <systemitem class="service">udev</systemitem></title>
+
+  <para>
+   <systemitem class="filesystem">sysfs</systemitem> 檔案系統會輸出必要的裝置資訊。每個核心已偵測和啟始化的裝置，都會建立包含其裝置名稱的目錄。其中會包含裝置特定的屬性內容。
+  </para>
+
+  <para>
+   每次新增或移除裝置時，核心都會傳送 uevent 來通知 <systemitem class="service">udev</systemitem> 此變更。<systemitem class="service">udev</systemitem> 精靈會在啟動時從 <filename>/etc/udev/rules.d/*.rules</filename> 檔案中讀取並剖析一次所有指定的規則，然後將剖析結果保留在記憶體中。如果變更、新增或移除了規則檔案，則精靈可以使用指令 <command>udevadm control --reload</command> 重新載入所有規則在記憶體中的表示。如需有關 <systemitem class="service">udev</systemitem> 規則及其語法的詳細資訊，請參閱<xref linkend="sec.udev.rules"/>。
+  </para>
+
+  <para>
+   每個收到的事件都將與提供的規則集合進行比對。這些規則可新增或變更事件環境識別碼、要求要建立之裝置節點的特定名稱、新增指向該節點的符號連結，或是新增要在裝置節點建立後執行的程式。驅動程式核心 <systemitem class="service">uevent</systemitem> 是從核心網路連結插槽接收。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.drivers">
+  <title>驅動程式、核心模組和裝置</title>
+
+  <para>
+   核心匯流排驅動程式會查探裝置。核心 (kernel) 會為每個偵測到的裝置建立一個內部裝置結構，而驅動程式核心 (core) 會向 <systemitem class="service">udev</systemitem> 精靈傳送一個 uevent。匯流排裝置會以特殊格式的 ID 識別本身，表明其為何種裝置。通常這些 ID 會包含廠商和產品 ID，以及其他子系統特定值。每個匯流排都會指定自己的 ID 配置，即所謂的 <envar>MODALIAS</envar>。核心會接收這些裝置資訊，並根據這些資訊設定 <envar>MODALIAS</envar> ID 字串，然後隨事件一起傳送該字串。例如，USB 滑鼠的 ID 字串將如下所示︰
+  </para>
+
+<screen>MODALIAS=usb:v046DpC03Ed2000dc00dsc00dp00ic03isc01ip02</screen>
+
+  <para>
+   每個裝置驅動程式都包含有裝置可處理的已知別名清單。清單會包含在核心模組檔案本身。depmod 程式會讀取 ID 清單，並且為目前所有可用模組在核心的<filename> /lib/modules</filename> 目錄中建立 <filename>modules.alias</filename> 檔案。透過此基礎結構，模組載入方式就會像在每次出現帶有 <literal>MODALIAS</literal> 識別碼的事件時呼叫 <command>modprobe</command> 一樣容易。如果是呼叫 <command>modprobe $MODALIAS</command>，此次呼叫就會比對裝置的已組織裝置別名和模組指定別名。如果有找到符合項目，該模組就可載入。以上這一切都是由 <systemitem class="service">udev</systemitem> 自動觸發。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.boot">
+  <title>開機和初始裝置設定</title>
+
+  <para>
+   在 <systemitem class="service">udev</systemitem> 精靈執行之前，於開機過程中發生的所有裝置事件都會遺失，這是因為處理這些事件的基礎結構位於根檔案系統中，在該階段無法使用。為彌補這一損失，核心在 sysfs 檔案系統中之每部裝置的裝置目錄中都提供了一份 <filename>uevent</filename> 檔案。<systemitem class="filesystem"/>使用 <literal>add</literal> 寫入該檔案，核心便可重新傳送與開機期間所遺失的相同事件。負責 <filename>/sys</filename> 中所有 <filename>uevent</filename> 檔案的簡易迴圈，可以再次觸發所有事件，建立裝置節點並執行裝置設定。
+  </para>
+
+  <para>
+   例如，開機期間出現的 USB 滑鼠可能無法由早期的開機邏輯啟始化，這是因為當時尚無法使用驅動程式。裝置探查事件遺失，而且無法找到裝置的核心模組。<systemitem class="service">udev</systemitem> 只需在根目錄檔案系統可用後向核心要求所有裝置事件，這樣 USB 滑鼠裝置的事件就會再次執行，因此並不需要手動搜尋可能連接的裝置。現在，它會在已掛接根目錄檔案系統中找到核心模組，並讓 USB 滑鼠完成啟始化。
+  </para>
+
+  <para>
+   從使用者空間的角度，執行期間的裝置冷插拔 (ColdPlud) 順序和裝置探查並沒有明顯的不同。這兩種情況都會使用相同規則來進行比對，而且會執行相同的設定程式。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.debug">
+  <title>監控執行中的 <systemitem class="service">udev</systemitem> 精靈</title>
+
+  <para>
+   <command>udevadm monitor</command> 程式可用來視覺化驅動程式核心事件以及 udev 事件程序的時間。<systemitem class="service"/>
+  </para>
+
+<screen>UEVENT[1185238505.276660] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UDEV  [1185238505.279198] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1 (usb)
+UEVENT[1185238505.279527] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UDEV  [1185238505.285573] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0 (usb)
+UEVENT[1185238505.298878] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UDEV  [1185238505.305026] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10 (input)
+UEVENT[1185238505.305442] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)
+UEVENT[1185238505.306440] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.325384] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/event4 (input)
+UDEV  [1185238505.342257] add   /devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10/mouse2 (input)</screen>
+
+  <para>
+   <literal>UEVENT</literal> 行會顯示核心已透過網路連結傳送的事件。<literal>UDEV</literal> 行會顯示已完成的 udev 事件處理常式。<systemitem class="service"/>列印時間是百萬分之一秒。介於 <literal>UEVENT</literal> 和 <literal>UDEV</literal> 之間的時間是指 udev 處理此事件所耗費的時間，或者是 udev 精靈延遲執行以便此事件能與執行中相關事件同步的時間。<systemitem class="service"/><systemitem class="service"/>例如，硬碟分割區的事件始終會等待主要磁碟裝置事件完成，因為分割區事件可能與主要磁碟事件向硬體查詢的資料有關。
+  </para>
+
+  <para>
+   <command>udevadm monitor --env</command> 會顯示完整的事件環境︰
+  </para>
+
+<screen>ACTION=add
+DEVPATH=/devices/pci0000:00/0000:00:1d.2/usb3/3-1/3-1:1.0/input/input10
+SUBSYSTEM=input
+SEQNUM=1181
+NAME="Logitech USB-PS/2 Optical Mouse"
+PHYS="usb-0000:00:1d.2-1/input0"
+UNIQ=""
+EV=7
+KEY=70000 0 0 0 0
+REL=103
+MODALIAS=input:b0003v046DpC03Ee0110-e0,1,2,k110,111,112,r0,1,8,amlsfw</screen>
+
+  <para>
+   <systemitem class="service">udev 也會將訊息傳送到 syslog。</systemitem>控制哪些訊息要傳送到 syslog 的預設 syslog 優先程度是在 <systemitem class="service">udev</systemitem> 的組態檔 <filename>/etc/udev/udev.conf</filename> 中指定。可以使用 <command>udevadm control --log_priority=</command><replaceable>level/number</replaceable> 來變更執行中精靈的記錄優先程度。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.udev.rules">
+  <title>透過 <systemitem class="service">udev</systemitem> 規則影響核心裝置事件的處理</title>
+
+  <para>
+   <systemitem class="service">udev</systemitem> 規則可以比對核心新增至事件本身的任何內容，或者核心輸出到 <filename>sysfs</filename> 的任何資訊。規則也可向外部程式要求其他資訊。每個事件都會與所有指定規則進行比對。所有規則都位於 <filename>/etc/udev/rules.d</filename> 目錄中。
+  </para>
+
+  <para>
+   規則檔案中的每一行都包含至少一個鍵值組合。鍵類型共有兩種，包括比對和指定鍵。當所有比對鍵都與指定值相符時就會套用規則，而該指定值就會指定給指定鍵。相符規則可以指定裝置節點的名稱、新增指向該節點的符號連結，或是在事件處理過程中執行指定的程式。如果找不到任何符合規則，就會使用預設的裝置節點名稱來建立裝置節點。如需有關規則語法和系統提供之用於比對或輸入資料的鍵的詳細資訊，請參閱 <systemitem class="service">udev</systemitem> man 頁面。以下範例規則提供了對 <systemitem class="service">udev</systemitem> 規則語法的基本介紹。這些範例規則摘自 <filename>/etc/udev/rules.d/50-udev-default.rules</filename> 下的 <systemitem class="service">udev</systemitem> 預設規則集。
+  </para>
+
+  <example xml:id="ex.rules">
+   <title>範例 <systemitem class="service">udev</systemitem> 規則</title>
+<screen># console
+KERNEL=="console", MODE="0600", OPTIONS="last_rule"
+
+# serial devices
+KERNEL=="ttyUSB*", ATTRS{product}=="[Pp]alm*Handheld*", SYMLINK+="pilot"
+
+# printer
+SUBSYSTEM=="usb", KERNEL=="lp*", NAME="usb/%k", SYMLINK+="usb%k", GROUP="lp"
+
+# kernel firmware loader
+SUBSYSTEM=="firmware", ACTION=="add", RUN+="firmware.sh"</screen>
+  </example>
+
+  <para>
+   <systemitem>主控台</systemitem>規則包含三個鍵︰一個比對鍵 (<literal>KERNEL</literal>) 以及兩個指定鍵 (<literal>MODE</literal>、<literal>OPTIONS</literal>)。<literal>KERNEL</literal> 比對規則用於搜尋類型為<literal>主控台</literal>的所有項目的裝置清單。只有完全符合的項目才有效，才會觸發此規則讓其執行。<literal>MODE</literal> 鍵用於將特殊權限指派給裝置節點，在此案例中，僅此裝置的擁有者才會被指派讀取與寫入權限。<literal>OPTIONS</literal> 鍵用於將此規則做為要套用至所有此類型裝置的最後一條規則。符合此特殊裝置類型的任何後續規則都不會生效。
+  </para>
+
+  <para>
+   <systemitem>序列裝置</systemitem>規則在 <filename>50-udev-default.rules</filename> 中雖已不再可用，但仍值得瞭解一下。它包含兩個比對鍵 (<literal>KERNEL</literal> 和 <literal>ATTRS</literal>) 與一個指派鍵 (<literal>SYMLINK</literal>)。<literal>KERNEL</literal> 鍵用於搜尋類型為 <literal>ttyUSB</literal> 的所有裝置。使用 <literal>*</literal> 萬用字元時，此鍵可比對多部此類裝置。第二個比對鍵 <literal>ATTRS</literal> 用於檢查 <literal>sysfs</literal> 中針對 <literal>ttyUSB</literal> 裝置的 <filename>product</filename> 屬性檔案是否包含特定字串。指派鍵 (<literal>SYMLINK</literal>) 用於觸發將符號連結新增至 <filename>/dev/pilot</filename> 下的此裝置。此鍵中使用的運算子 (<literal>+=</literal>) 將告知 udev 額外執行此動作，即使先前或之後的規則會新增其他符號連結也是如此。<systemitem class="service"/>由於此規則包含兩個比對鍵，因此僅當兩個條件均滿足時才適用。
+  </para>
+
+  <para>
+   <systemitem>印表機</systemitem>規則可處理 USB 印表機，它包含兩個比對鍵，必須同時套用這兩個鍵才能套用整個規則 (<literal>SUBSYSTEM</literal> 與 <literal>KERNEL</literal>)。三個指定鍵用於命名此裝置類型 (<literal>NAME</literal>)、建立符號裝置連結 (<literal>SYMLINK</literal>) 以及對此裝置類型的成員進行分組 (<literal>GROUP</literal>)。在 <literal>KERNEL</literal> 鍵中使用 <literal>*</literal> 萬用字元可使其符合多部 <literal>lp</literal> 印表機裝置。可以在 <literal>NAME</literal> 與 <literal>SYMLINK</literal> 鍵中使用替代項，透過內部裝置名稱延伸這些字串。例如，第一部 <literal>lp</literal> USB 印表機的符號連結會讀取 <filename>/dev/usblp0</filename>。
+  </para>
+
+  <para>
+   <systemitem>核心韌體載入程式</systemitem>規則可讓 <systemitem class="service">udev</systemitem> 在執行時期透過外部輔助程式程序檔載入其他韌體。<literal>SUBSYSTEM</literal> 比對鍵可搜尋<literal>韌體</literal>子系統。<literal>ACTION</literal> 鍵可檢查是否已新增任何屬於<literal>韌體</literal>子系統的裝置。<literal>RUN+=</literal> 鍵可觸發執行 <literal>firmware.sh</literal> 程序檔以查找要載入的韌體。
+  </para>
+
+  <para>
+   某些一般特性適用於所有規則︰
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     每條規則都包含一個或多個以逗號分隔的鍵值對。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     鍵的操作由運算子決定。<systemitem class="service">udev</systemitem> 規則支援多種不同的運算子。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     每個指定值必須括在引號中。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     規則檔案中的每一行都表示一條規則。如果某規則的長度超出一行，請使用 <literal>\</literal> 連接不同的行，就如同在外圍程序語法中一樣。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service">udev</systemitem> 規則支援符合 <literal>*</literal>、<literal>?</literal> 與 <literal>[]</literal> 模式的外圍程序式模式。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="service">udev</systemitem> 規則支援替代項。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 xml:id="sec.udev.rules.ops">
+   <title>在 <systemitem class="service">udev</systemitem> 規則中使用運算子</title>
+   <para>
+    建立金鑰時，您可以根據要建立的金鑰類型從多個運算子中進行選擇。比對鍵通常用於尋找符合或明顯不符合搜尋值的值。比對鍵可包含以下運算子︰
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>==</literal>
+     </term>
+     <listitem>
+      <para>
+       比較是否相等。如果鍵包含搜尋模式，則所有符合此模式的結果均有效。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>!=</literal>
+     </term>
+     <listitem>
+      <para>
+       比較是否不相等。如果鍵包含搜尋模式，則所有符合此模式的結果均有效。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    指派鍵可使用以下運算子︰
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>=</literal>
+     </term>
+     <listitem>
+      <para>
+       將某個值指派給鍵。如果鍵先前包含值清單，則此鍵將重設並僅指派單一值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>+=</literal>
+     </term>
+     <listitem>
+      <para>
+       將某個值新增至包含項目清單的鍵。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>:=</literal>
+     </term>
+     <listitem>
+      <para>
+       指派最終值。不允許後續規則再做任何變更。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.subst">
+   <title>在 <systemitem class="service">udev</systemitem> 規則中使用替代項</title>
+   <para>
+    <systemitem class="service">udev</systemitem> 規則支援使用佔位符與替代項。使用方式與任何其他程序檔中的方式類似。在 <systemitem class="service">udev</systemitem> 規則中可以使用以下替代項︰
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>%r</literal>, <literal>$root</literal>
+     </term>
+     <listitem>
+      <para>
+       依預設為裝置目錄 <filename>/dev</filename>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%p</literal>, <literal>$devpath</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>DEVPATH</envar> 的值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%k</literal>, <literal>$kernel</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>KERNEL</envar> 的值或內部裝置名稱。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%n</literal>, <literal>$number</literal>
+     </term>
+     <listitem>
+      <para>
+       裝置編號。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%N</literal>, <literal>$tempnode</literal>
+     </term>
+     <listitem>
+      <para>
+       裝置檔案的暫存名稱。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%M</literal>, <literal>$major</literal>
+     </term>
+     <listitem>
+      <para>
+       裝置的主要編號。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%m</literal>, <literal>$minor</literal>
+     </term>
+     <listitem>
+      <para>
+       裝置的次要編號。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%s{<replaceable>屬性</replaceable>}</literal>, <literal>$attr{<replaceable>屬性</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       <filename>sysfs</filename> 屬性的值 (由<replaceable>屬性</replaceable>指定)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%E{<replaceable>變數</replaceable>}</literal>, <literal>$attr{<replaceable>變數</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       環境變數的值 (由<replaceable>變數</replaceable>指定)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%c</literal>, <literal>$result</literal>
+     </term>
+     <listitem>
+      <para>
+       <envar>PROGRAM</envar> 的輸出。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>%%</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>%</literal> 字元。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>$$</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>$</literal> 字元。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.match">
+   <title>使用 <systemitem class="service">udev</systemitem> 比對鍵</title>
+   <para>
+    比對鍵定義要套用 <systemitem class="service">udev</systemitem> 規則所必須滿足的條件。以下為可用的比對鍵︰
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>ACTION</literal>
+     </term>
+     <listitem>
+      <para>
+       事件動作的名稱，例如新增或移除裝置時的 <literal>add</literal> 或 <literal>remove</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DEVPATH</literal>
+     </term>
+     <listitem>
+      <para>
+       事件裝置的裝置路徑，例如 <literal>DEVPATH=/bus/pci/drivers/ipw3945</literal>，用於搜尋與 ipw3945 驅動程式相關的所有事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNEL</literal>
+     </term>
+     <listitem>
+      <para>
+       事件裝置的內部 (核心) 名稱。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEM</literal>
+     </term>
+     <listitem>
+      <para>
+       事件裝置的子系統，例如 <literal>SUBSYSTEM=usb</literal>，適用於與 USB 裝置相關的所有事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>檔案名稱</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       事件裝置的 <systemitem class="filesystem">sysfs</systemitem> 屬性。例如，若要比對 <filename>vendor</filename> 屬性檔案名稱中包含的字串，可以使用 <literal>ATTR{vendor}=="On[sS]tream"</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KERNELS</literal>
+     </term>
+     <listitem>
+      <para>
+       讓 <systemitem class="service">udev</systemitem> 向上搜尋符合裝置名稱的裝置路徑。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SUBSYSTEMS</literal>
+     </term>
+     <listitem>
+      <para>
+       讓 <systemitem class="service">udev</systemitem> 向上搜尋相符裝置子系統名稱的裝置路徑。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>DRIVERS</literal>
+     </term>
+     <listitem>
+      <para>
+       讓 <systemitem class="service">udev</systemitem> 向上搜尋相符裝置驅動程式名稱的裝置路徑。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTRS{<replaceable>檔案名稱</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       讓 <systemitem class="service">udev</systemitem> 向上搜尋與 <systemitem class="filesystem">sysfs</systemitem> 屬性值相符之裝置的裝置路徑。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>鍵</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       環境變數的值，例如 <literal>ENV{ID_BUS}="ieee1394</literal>，用於搜尋與 FireWire 匯流排 ID 相關的所有事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>PROGRAM</literal>
+     </term>
+     <listitem>
+      <para>
+       讓 <systemitem class="service">udev</systemitem> 執行外部程式。若要成功執行，程式必須以離開碼零返回。<literal>RESULT</literal> 鍵可使用程式的輸出 (列印至 STDOUT)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RESULT</literal>
+     </term>
+     <listitem>
+      <para>
+       比對上次 <literal>PROGRAM</literal> 呼叫的輸出字串。即可將此鍵包含於相同規則中 (如 <literal>PROGRAM</literal> 鍵)，也可含於後續規則中。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec.udev.rules.assign">
+   <title>使用 <systemitem class="service">udev</systemitem> 指定鍵</title>
+   <para>
+    與上述比對鍵不同，指定鍵不會說明必須滿足的條件，而是將值、名稱和動作指定給 <systemitem class="service">udev</systemitem> 維護的裝置節點。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>NAME</literal>
+     </term>
+     <listitem>
+      <para>
+       要建立之裝置節點的名稱。如果規則已設定了節點名稱，則將忽略適用於此節點的所有其他含 <literal>NAME</literal> 鍵的規則。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>SYMLINK</literal>
+     </term>
+     <listitem>
+      <para>
+       與要建立的節點相關聯之符號連結的名稱。可以為多項比對規則新增符號連結以便使用裝置節點進行建立。您還可以使用空格字元分隔符號連結名稱，從而為一項規則中的一個節點指定多個符號連結。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OWNER、GROUP、MODE</literal>
+     </term>
+     <listitem>
+      <para>
+       新裝置節點的權限。在此處指定的值將覆寫已編譯的任何項目。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ATTR{<replaceable>鍵</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       指定要寫入事件裝置之 <systemitem class="filesystem">sysfs</systemitem> 屬性的值。如果使用運算子 <literal>==</literal>，也會使用此鍵來比對 <systemitem class="filesystem">sysfs</systemitem> 屬性的值。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>ENV{<replaceable>鍵</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 將某變數輸出到環境中。如果使用運算子 <literal>==</literal>，也會使用此鍵來比對環境變數。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>RUN</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 將某程式新增至要為此裝置執行的程式清單。對極短任務套用此項時要格外小心，以免封鎖此裝置的其他事件。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>LABEL</literal>
+     </term>
+     <listitem>
+      <para>
+       在 <literal>GOTO</literal> 可以跳轉之處新增一個標籤。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>GOTO</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 跳過多項規則並根據 <literal>GOTO</literal> 鍵所參考之標籤對應的規則繼續。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>IMPORT{<replaceable>類型</replaceable>}</literal>
+     </term>
+     <listitem>
+      <para>
+       將變數載入事件環境，如外部程式的輸出。<systemitem class="service">udev</systemitem> 可輸入多種類型的變數。如果未指定任何類型，<systemitem class="service">udev</systemitem> 會根據檔案權限的可執行位元嘗試自行決定類型。
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>program</literal> 可告知 <systemitem class="service">udev</systemitem> 執行外部程式並輸入其輸出。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>file</literal> 可告知 <systemitem class="service">udev</systemitem> 輸入文字檔。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>parent</literal> 可告知 <systemitem class="service">udev</systemitem> 輸入父代裝置中儲存的鍵。
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>WAIT_FOR_SYSFS</literal>
+     </term>
+     <listitem>
+      <para>
+       告知 <systemitem class="service">udev</systemitem> 等待系統為特定裝置建立指定的 <systemitem class="filesystem">sysfs</systemitem> 檔案。例如，<literal>WAIT_FOR_SYSFS="ioerr_cnt"</literal> 通知 <systemitem class="service">udev</systemitem> 等待，直到 <filename>ioerr_cnt</filename> 檔案建立。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>OPTIONS</literal>
+     </term>
+     <listitem>
+      <para>
+       <literal>OPTION</literal> 鍵可以使用多個值︰
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+       <listitem>
+        <para>
+         <literal>last_rule</literal> 告知 <systemitem class="service">udev</systemitem> 忽略所有後續規則。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_device</literal> 告知 <systemitem class="service">udev</systemitem> 完全忽略此事件。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>ignore_remove</literal> 告知 <systemitem class="service">udev</systemitem> 忽略針對該裝置的所有後續移除事件。
+        </para>
+       </listitem>
+       <listitem>
+        <para>
+         <literal>all_partitions</literal> 告知 <systemitem class="service">udev</systemitem> 為區塊裝置上的所有可用分割區建立裝置節點。
+        </para>
+       </listitem>
+      </itemizedlist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.udev.persdev">
+  <title>永久裝置命名</title>
+
+  <para>
+   動態裝置目錄和 <systemitem class="service">udev</systemitem> 規則基礎架構讓系統可以為所有磁碟裝置提供固定名稱，無論裝置的辨識順序或所使用的連接為何。核心所建立的每個相應區塊裝置，都會採用針對特定匯流排、磁碟類型或檔案系統所設計的工具進行檢查。<systemitem class="service">udev</systemitem> 會根據核心動態提供的裝置節點名稱，維護指向裝置的永久符號連結類別︰
+  </para>
+
+<screen>/dev/disk
+|-- by-id
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B -&gt; ../../sda
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part1 -&gt; ../../sda1
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part6 -&gt; ../../sda6
+|   |-- scsi-SATA_HTS726060M9AT00_MRH453M4HWHG7B-part7 -&gt; ../../sda7
+|   |-- usb-Generic_STORAGE_DEVICE_02773 -&gt; ../../sdd
+|   `-- usb-Generic_STORAGE_DEVICE_02773-part1 -&gt; ../../sdd1
+|-- by-label
+|   |-- Photos -&gt; ../../sdd1
+|   |-- SUSE10 -&gt; ../../sda7
+|   `-- devel -&gt; ../../sda6
+|-- by-path
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0 -&gt; ../../sda
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part1 -&gt; ../../sda1
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part6 -&gt; ../../sda6
+|   |-- pci-0000:00:1f.2-scsi-0:0:0:0-part7 -&gt; ../../sda7
+|   |-- pci-0000:00:1f.2-scsi-1:0:0:0 -&gt; ../../sr0
+|   |-- usb-02773:0:0:2 -&gt; ../../sdd
+|   |-- usb-02773:0:0:2-part1 -&gt; ../../sdd1
+`-- by-uuid
+    |-- 159a47a4-e6e6-40be-a757-a629991479ae -&gt; ../../sda7
+    |-- 3e999973-00c9-4917-9442-b7633bd95b9e -&gt; ../../sda6
+    `-- 4210-8F8C -&gt; ../../sdd1</screen>
+ </sect1>
+ <sect1 xml:id="sec.udev.files">
+  <title><systemitem class="service">udev</systemitem> 使用的檔案</title>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/sys/*</filename>
+    </term>
+    <listitem>
+     <para>
+      由 Linux 核心提供的虛擬檔案系統，可輸出所有目前已知裝置。<systemitem class="service">udev</systemitem> 用此資訊在 <filename>/dev</filename> 中建立裝置節點。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/dev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      動態建立的裝置節點和使用 systemd-tmpfiles 建立的靜態內容；如需詳細資訊，請參閱 <systemitem>systemd-tmpfiles(8)</systemitem> 線上文件。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   下列檔案和目錄包含了 <systemitem class="service">udev</systemitem> 基礎結構的重要元件︰
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><filename>/etc/udev/udev.conf</filename>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">udev</systemitem> 主組態檔。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/etc/udev/rules.d/*</filename>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">udev</systemitem> 事件比對規則。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/tmpfiles.d/</filename> 和 <filename>/etc/tmpfiles.d/</filename>
+    </term>
+    <listitem>
+     <para>
+      針對靜態 <filename>/dev</filename> 內容。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><filename>/usr/lib/udev/*</filename>
+    </term>
+    <listitem>
+     <para>
+      <systemitem class="service">udev</systemitem> 規則中呼叫的協助程式。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.udev.moreinfo">
+  <title>更多資訊</title>
+
+  <para>
+   如需關於 <systemitem class="service">udev</systemitem> 基礎結構的詳細資訊，請參閱下列 man 頁面︰
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><systemitem class="service">udev</systemitem>
+    </term>
+    <listitem>
+     <para>
+      關於 <systemitem class="service">udev</systemitem>、鍵、規則和其他重要組態問題的一般資訊。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>udevadm</command>
+    </term>
+    <listitem>
+     <para>
+      <command>udevadm</command> 可用於控制 <systemitem class="service">udev</systemitem> 的執行時期行為、要求核心事件、管理事件佇列以及提供簡單的除錯機制。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><systemitem class="daemon">udevd</systemitem>
+    </term>
+    <listitem>
+     <para>
+      關於 <systemitem class="daemon">udev</systemitem> 事件管理精靈的資訊。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+</chapter>
