@@ -2900,40 +2900,66 @@ sles-ha1.&exampledomain;,sles-ha2.&exampledomain;,sles-ha3.&exampledomain;</scre
     <para>
      The <command>umask</command> (user file-creation mode mask) command is a
      shell built-in command which determines the default file permissions for
-     newly created files. This can be overwritten by system calls but many
+     newly created files and directories. This can be overwritten by system calls but many
      programs and utilities use <command>umask</command>. By default, &suse;
      sets <command>umask</command> to <literal>022</literal>. You can modify
-     this by changing the value in <filename>/etc/profile</filename>.
+     this globally by changing the value in <filename>/etc/profile</filename>
+     or for each user in the startup files of the shell.
     </para>
 
     <para>
-     The <command>id</command> command will print out the current user identity
-     information. Example from a non-root prompt:
-    </para>
-
-<screen>&prompt.user;id
-uid=1000(ne0) gid=100(users) groups=16(dialout),33(video),100(users)</screen>
-
-    <remark>jsegitz 2014-08-13: I don't really get why id is shown here
-    tbazant 2014-09-01: probably to compare the command's output when root vs
-    when not root</remark>
-
-    <para>
-     And to determine the active umask, use the <command>umask</command>
+     To determine the active umask, use the <command>umask</command>
      command:
     </para>
 
 <screen>&prompt.user;umask
-0022</screen>
+022</screen>
 
     <para>
-     Now, for comparison's sake, the same commands from the root user:
+    The umask is subtracted from the access mode <literal>777</literal> if at least on bit
+    is set.
+    </para>
+    
+    <para>
+With the default umask you see the behavior most users expect to see on a Linux system.
     </para>
 
-<screen>&prompt.root;id
-uid=0(root) gid=0(root) groups=0(root)
-&prompt.root;umask
-0022</screen>
+<screen>
+&prompt.user; touch a
+&prompt.user; mkdir b
+&prompt.user; ls -on
+total 16
+-rw-r--r--. 1 17086    0 Nov 29 15:05 a
+drwxr-xr-x. 2 17086 4096 Nov 29 15:05 b
+</screen>
+
+    <para>
+You can specify arbitrary umask values, depending on you needs.
+    </para>
+<screen>
+&prompt.user; umask 111
+&prompt.user; touch c
+&prompt.user; mkdir d
+&prompt.user; ls -on
+total 16
+-rw-rw-rw-. 1 17086    0 Nov 29 15:05 c
+drw-rw-rw-. 2 17086 4096 Nov 29 15:05 d
+</screen>
+
+    <para>
+Based on your thread model you can use a stricter umask like <literal>037</literal>
+to prevent accidential data leakage.
+    </para>
+<screen>
+&prompt.user; umask 037
+&prompt.user; touch e
+&prompt.user; mkdir f
+&prompt.user; ls -on
+total 16
+-rw-r-----. 1 17086    0 Nov 29 15:06 e
+drwxr-----. 2 17086 4096 Nov 29 15:06 f
+</screen>
+
    </sect1>
    <sect1 xml:id="sec.sec_prot.general.s-bit">
     <title>SUID/SGID Files</title>
@@ -2942,33 +2968,53 @@ uid=0(root) gid=0(root) groups=0(root)
      When the SUID (set user ID) or SGID (set group ID) bits are set on an
      executable, it executes with the UID or GID of the owner of the executable
      rather than that of the person executing it. This means that, for example,
-     all executables that have the SUID bit set and are owned by root are
-     executed with the UID of root. A good example is the passwd command that
-     allows ordinary users to update the password field in the /etc/shadow file
-     which is owned by root.
+     all executables that have the SUID bit set and are owned by &rootuser; are
+     executed with the UID of &rootuser;. A good example is the <command>passwd</command> command that
+     allows ordinary users to update the password field in the <filename>/etc/shadow</filename> file
+     which is owned by &rootuser;.
     </para>
 
     <para>
-     But SUID/SGID bits can be misused when the SUID/SGID executable has a
+     But SUID/SGID bits can be misused when the executable has a
      security hole. Therefore, you should search the entire system for
-     SUID/SGID executables and document it. For example, ensure that code
-     developers do not set SUID/SGID bits on their programs if it is not an
-     absolute requirement. Very often you can use workarounds like removing the
-     executable bit for world/others. However, a better approach is to change
-     the design of the software if possible.
-    </para>
-
-    <para>
-     To search the entire system for SUID or SGID files, you can run the
+     SUID/SGID executables and document it. To search the entire system for SUID or SGID files, you can run the
      following command:
     </para>
 
-<screen>&prompt.root;find / -path /proc -prune -o -type f -perm '/6000' -ls</screen>
+<screen>&prompt.root;find /bin /boot /etc /home /lib /lib64 /opt /root /sbin /srv /tmp /usr /var -type f -perm '/6000' -ls</screen>
 
     <para>
-     The <option>-prune</option> option in this example is used to skip the
-     /proc file system.
+    You might need to extend the list of directories that are searched if you have a different filesystem structure.
     </para>
+
+     
+    <para>
+     &suse; only sets the SUID/SGID bit on binary if it is really necessary. 
+     Ensure that code
+     developers do not set SUID/SGID bits on their programs if it is not an
+     absolute requirement. Very often you can use workarounds like removing the
+     executable bit for world/others. However, a better approach is to change
+     the design of the software or use capabilities.
+    </para>
+
+    <para>
+     &productname; supports file capabilities to allow more fine grained
+     privileges to be given to programs rather than the full power of &rootuser;:
+    </para>
+
+<screen>&prompt.root;getcap -v /usr/bin/ping
+      /usr/bin/ping = cap_new_raw+eip</screen>
+
+    <para>
+     The previous command only grants the CAP_NET_RAW capability to whoever
+     executes <command>ping</command>. In case of vulnerabilities inside <command>ping</command>, an attacker can
+     gain at most this capability in contrast to full &rootuser;.
+     Whenever possible, file capabilities should
+     be chosen in favor of the SUID bit. But this only applies when the
+     binary is suid to &rootuser; not to other users such as
+     <literal>news</literal>, <literal>lp</literal> and alike.
+    </para>
+
    </sect1>
    <sect1 xml:id="sec.sec_prot.general.filepermissions">
     <title>World-Writable Files</title>
@@ -3010,23 +3056,6 @@ drwxrwxrwt 18 root root 16384 Dec 23 22:20 /tmp</screen>
      the owner of the directory.
     </para>
 
-    <para>
-     &productname; supports file capabilities to allow more fine grained
-     privileges to be given to programs rather than the full power of root:
-    </para>
-
-<screen>&prompt.root;getcap -v /usr/bin/ping
-      /usr/bin/ping = cap_new_raw+eip</screen>
-
-    <para>
-     The previous command only grants the CAP_NET_RAW capability to whoever
-     executes ping. In case of vulnerabilities inside ping, an attacker can
-     gain at most this capability in contrast to full root when granting the
-     ping binary suid root rights. Whenever possible, file capabilities should
-     be chosen in favor of the suid-to-root bit. But this only applies when the
-     binary is suid to root, not to other users such as
-     <literal>news</literal>, <literal>lp</literal> and alike.
-    </para>
    </sect1>
    <sect1 xml:id="sec.sec_prot.general.orphaned">
     <title>Orphaned or Unowned Files</title>
