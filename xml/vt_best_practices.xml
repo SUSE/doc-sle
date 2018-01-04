@@ -3975,30 +3975,35 @@ VGA trouble debug
    &xen; fully virtualized machine.
   </para>
   <para>
-   First you need to change to the <literal>-default</literal> kernel; if not
-   already installed, you need to install it while in PV mode.
+   Prior to converting the guest, apply all pending patches and reboot the guest.
   </para>
   <para>
-   In case you are using <literal>vda*</literal> disk naming, you need to
-   change this to <literal>hd*</literal> in <filename>/etc/fstab</filename>,
-   <filename>/boot/grub/menu.lst</filename> and
-   <filename>/boot/grub/device.map</filename>.
+   FV machines use the <literal>-default</literal> kernel; if this kernel is not
+   already installed, install the <literal>kernel-default</literal> package
+   (while running in PV mode).
+  </para>
+  <para>
+   PV machines typically use disk names such as <literal>vda*</literal>. These names
+   must be changed to the FV <literal>hd*</literal> syntax. This change must be done
+   in the following files: <filename>/etc/fstab</filename>,
+   <filename>/boot/grub/menu.lst (SLES11 only)</filename> and
+   <filename>/boot/grub*/device.map</filename>.
   </para>
   <note>
    <title>Prefer UUIDs</title>
    <para>
     You should use UUIDs or logical volumes within your
-    <filename>/etc/fstab</filename>. Using UUID simplifies attached network
+    <filename>/etc/fstab</filename>. Using UUID simplifies using attached network
     storage, multipathing, and virtualization.
    </para>
   </note>
   <para>
-   Moving from PV to FV will lead to disk driver modules being missing from the
-   initrd. The modules expected are <literal>xen-vbd</literal> (and
-   <literal>xen-vnif</literal> for network). These are the PV drivers for a
-   fully virtualized &vmguest;. All other modules like
-   <literal>ata_piix</literal>, <literal>ata_generic</literal> and
-   <literal>libata</literal> should be added automatically.
+   PV and FV machines use different disk and network driver modules. These FV modules
+   must be added to the initrd manually. The expected modules are
+   <literal>xen-vbd</literal> (for disk) and <literal>xen-vnif</literal> (for network).
+   These are the only PV drivers for a fully virtualized &vmguest;. All other modules,
+   such as <literal>ata_piix</literal>, <literal>ata_generic</literal> and
+   <literal>libata</literal>, should be added automatically.
   </para>
   <tip>
    <title>Adding Modules to the initrd</title>
@@ -4014,21 +4019,31 @@ VGA trouble debug
    </para>
    <para>
     On &slsa; 12, open <filename>/etc/dracut.conf.d/01-dist.conf</filename>
-    and add the modules with <literal>force-drivers</literal> by adding a
+    and add the modules with <literal>force_drivers</literal> by adding a
     line as in the example below:
    </para>
-   <screen>force-drivers+="xen-vbd xen-vnif"</screen>
+   <screen>force_drivers+="xen-vbd xen-vnif"</screen>
    <para>
-    Run <command>dracut -f</command> to build a new initrd containing the
+    Run <command>dracut -f --kver [KERNEL_VERSION]-default</command> to build a
+    new initrd (for the -default version of the kernel) which contains the required
     modules.
    </para>
   </tip>
   <para>
-   You need to change a few parameters in the XML configuration file to
-   describe your &vmguest;:
+   Before shutting down the guest, set the default boot option to the
+   <literal>-default</literal> kernel using <command>yast bootloader</command>.
   </para>
   <para>
-   Set the OS section to something like:
+   Shutdown the guest.
+  </para>
+  <para>
+   In order to start the guest in FV mode, the configuration of the VM must be modified
+   to match an FV configuration. Editing the configuration of the VM can easily be done
+   using <command>virsh edit [DOMAIN]</command>. The following changes are recommended:
+  </para>
+  <para>
+   Ensure the machine type in the OS section is changed from <literal>xenpv</literal> to
+   <literal>xenfv</literal>. The full OS section should like similar to:
   </para>
   <screen>&lt;os&gt;
     &lt;type arch='x86_64' machine='xenfv'&gt;hvm&lt;/type&gt;
@@ -4036,13 +4051,41 @@ VGA trouble debug
     &lt;boot dev='hd'/&gt;
 &lt;/os&gt;</screen>
   <para>
-    In the devices section, you need to add:
+    In the devices section, add the qemu emulator as:
   </para>
   <screen>&lt;emulator&gt;/usr/lib/xen/bin/qemu-system-i386&lt;/emulator&gt;</screen>
   <para>
-   Replace the <literal>xen</literal> disk bus with <literal>ide</literal>,
-   and the <literal>vda</literal> target device with <literal>hda</literal>.
+   Update the disk configuration so the target device and bus using the FV syntax.
+   This required replace the <literal>xen</literal> disk bus with <literal>ide</literal>,
+   and the <literal>vda</literal> target device with <literal>hda</literal>. The changes
+   should look similar to:
+   </para>
+   <screen>&lt;target dev='hda' bus='ide'/&gt;</screen>
+  <para>
+      Change the bus for the mouse and keyboard from <literal>xen</literal> to <literal>ps2</literal>:
   </para>
+  <screen>&lt;input type='mouse' bus='ps2'/&gt;
+&lt;input type='keyboard' bus='ps2'/&gt;</screen>
+  <para>
+   Change the console target type from <literal>xen</literal> to <literal>serial</literal>:
+  </para>
+<screen>&lt;console type='pty'&gt;
+   &lt;target type='serial' port='0'/&gt;
+&lt;/console&gt;</screen>
+  <para>
+   Change the video configuration from <literal>xen</literal> to <literal>cirrus</literal>,
+   with 8M of VRAM:
+  </para>
+   <screen>&lt;video&gt;
+   &lt;model type='cirrus' vram='8192' heads='1' primary='yes'/&gt;
+&lt;/video&gt;</screen>
+  <para>
+      If desired, add <literal>acpi</literal> and <literal>apic</literal> to the features of the VM:
+  </para>
+   <screen>&lt;features&gt;
+   &lt;acpi/&gt;
+   &lt;apic/&gt;
+&lt;/features&gt;</screen>
   <note>
    <title>guestfs-tools</title>
    <para>
