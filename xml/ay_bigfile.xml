@@ -145,6 +145,12 @@
      done.
     </para>
     <para>
+     The packages <literal>autoyast2</literal> and
+     <literal>autoyast2-installation</literal> have to be installed to run
+     the second stage in the installed system correctly. Otherwise an error
+     will be shown before booting into the installed system.
+    </para>
+    <para>
      The second stage can be turned off with the
      <literal>second_stage</literal> parameter:
     </para>
@@ -311,6 +317,15 @@ exit 0
      restriction is specified in the schema files. A configuration component
      with more than one value must either be represented as an embedded list in a property value or as a nested resource.
     </para>
+    <para>
+      An empty element, such as
+      <literal>&lt;foo&gt;&lt;/foo&gt;</literal> or
+      <literal>&lt;bar/&gt;</literal> will be <emphasis>not</emphasis>
+      present in the parsed data model. Usually this is interpreted as
+      wanting a sensible default value. In cases where you need an
+      explicit empty string instead, use a CDATA section:
+      <literal>&lt;foo&gt;&lt;![CDATA[]]&gt;&lt;/foo&gt;</literal>.
+    </para>
    </sect2>
 
    <sect2 xml:id="Profile.Format.ressources_nested">
@@ -319,43 +334,14 @@ exit 0
      Nested resource elements allow a tree-like structure of configuration
      components to be built to any level.
     </para>
+    <para>
+     There are two kinds of nested resources: maps and lists. Maps, also
+     known as associative arrays, hashes, or dictionaries, contain mixed
+     contents, identified by their tag names. Lists, or arrays, have all
+     items of the same type.
+    </para>
     <example>
      <title>Nested Resources</title>
-<screen>...
-&lt;drive&gt;
-  &lt;device&gt;/dev/sda&lt;/device&gt;
-  &lt;partitions&gt; &lt;!-- this is wrong, explanation below --&gt;
-    &lt;partition&gt;
-      &lt;size&gt;10G&lt;/size&gt;
-      &lt;mount&gt;/&lt;/mount&gt;
-    &lt;/partition&gt;
-    &lt;partition&gt;
-      &lt;size&gt;1G&lt;/size&gt;
-      &lt;mount&gt;/tmp&lt;/mount&gt;
-    &lt;/partition&gt;
-  &lt;/partitions&gt;
-&lt;/drive&gt;
-....</screen>
-    </example>
-    <para>
-     In the example above the disk resource consists of a device property
-     and a partitions resource. The partitions resource contains multiple
-     instances of the partition resource. Each partition resource contains a
-     size and mount property.
-    </para>
-    <para>
-     The XML schema defines the partitions element as a resource supporting
-     one or multiple partition element children. If only one partition
-     resource is specified, it is important to use the
-     <literal>config:type</literal> attribute of the partitions element to
-     indicate that the content is a resource, in this case a list. Using the
-     partitions element without specifying the type in this case will
-     result in undefined behavior, as &yast; will incorrectly interpret the
-     partitions resource as a property. The example below illustrates this
-     use case.
-    </para>
-    <example>
-     <title>Nested Resources with Type Attributes</title>
 <screen>...
 &lt;drive&gt;
   &lt;device&gt;/dev/sda&lt;/device&gt;
@@ -372,6 +358,18 @@ exit 0
 &lt;/drive&gt;
 ....</screen>
     </example>
+    <para>
+     In the example above the <literal>drive</literal> resource is a map
+     consisting of a <literal>device</literal> property and a
+     <literal>partitions</literal> resource. The partitions resource is a list
+     containing multiple instances of the <literal>partition</literal>
+     resource. Each partition resource is a map containing a
+     <literal>size</literal> and <literal>mount</literal> property.
+    </para>
+    <para>
+     The default type of a nested resource is map. Lists must be marked as
+     such using the <literal>config:type="list"</literal> attribute.
+    </para>
    </sect2>
 
    <sect2 xml:id="Profile.Format.attributes">
@@ -384,23 +382,23 @@ exit 0
      be treated as reserved words in the default namespace.
     </para>
     <para>
-     Global attributes are defined in the configuration namespace and must
-     always be prefixed with <literal>config:</literal> . All attributes are
-     optional. Most can be used with both resource and property elements but
-     some can only be used with one type of element which is specified in
-     the schema files.
+     The <literal>config:type</literal> attribute determines the type of the
+     resource or property in the parsed data model. For resources, lists need
+     a <literal>list</literal> type whereas a map is the default type that
+     does not need an attribute. For properties, <literal>boolean</literal>,
+     <literal>symbol</literal>, and <literal>integer</literal> can be used,
+     the default being a string.
     </para>
     <para>
-     The type of an element is defined using the
-     <literal>config:type</literal> attribute. The type of a resource
-     element is always RESOURCE, although this can also be made explicit
-     with this attribute (to ensure correct identification of an empty
-     element, for example, when there is no schema file to refer to). A
-     resource element cannot be any other type and this restriction is
-     specified in the schema file. The type of a property element determines
-     the interpretation of its literal value. The type of a property element
-     defaults to <literal>STRING</literal>, as specified in the schema file.
-     The full set of permissible types is specified in the schema file.
+     Attributes are not optional. It may appear that attributes are
+     optional, because various parts of the schema are not very
+     consistent in their usage of data types. In some places an
+     enumeration is represented by a symbol, elsewhere a string is
+     required. One resource needs
+     <literal>config:type="integer"</literal>, another will parse the
+     number from a string property. Some resources use
+     <literal>config:type="boolean"</literal>, other want "yes" or even
+     "1". If in doubt, consult the schema file.
     </para>
    </sect2>
   </sect1>
@@ -1028,7 +1026,7 @@ exit 0
         <para>
          This option allows to enable (set to <literal>true</literal>)
          or disable (set to <literal>false</literal> the self-update.
-         Check out <xref linkend="sec.install.yast2.self_update"/> to find further
+         Check out <xref linkend="sec.yast_install.self_update"/> to find further
          information about this feature.
          </para>
         <screen>&lt;self_update config:type="boolean"&gt;
@@ -1149,17 +1147,6 @@ exit 0
       &lt;/module&gt;
     &lt;/post-modules&gt;
   &lt;/wait&gt;
-  &lt;storage&gt;
-    &lt;!--
-       partition_alignment:
-         align_optimal  - That is the default. Partitions are aligned like the
-                          kernel suggests. This can lead to problem with some
-                          machines/bioses that are unable to boot with that
-                          alignment
-         align_cylinder -  Partitions always start on a cylinder boundary
-    --&gt;
-     &lt;partition_alignment config:type="symbol"&gt;align_cylinder&lt;/partition_alignment&gt;
-  &lt;/storage&gt;
 &lt;/general&gt;</screen>
    </example>
 
@@ -1317,7 +1304,7 @@ exit 0
    <para>
     As an alternative to the fully automated registration, &ay; can also
     be configured to start the &yast; registration module during the
-    installation. this offers the possibility to enter the registration data
+    installation. This offers the possibility to enter the registration data
     manually. The following XML code is required:
    </para>
 
@@ -1489,13 +1476,13 @@ exit 0
        </entry>
        <entry>
         <para>
-         Optional. &smt; server URL. If neither <literal>slp_discovery</literal>
+         Optional. &rmt; server URL. If neither <literal>slp_discovery</literal>
          nor <literal>reg_server</literal> are set, the system is registered with
          the &scc;.
         </para>
         <para>
-         The &smt; server is queried for a URL of the self-update repository. So if
-         <literal>self_update_url</literal> is not set, the &smt; server influences
+         The &rmt; server is queried for a URL of the self-update repository. So if
+         <literal>self_update_url</literal> is not set, the &rmt; server influences
          where the self-updates are downloaded from. Check out the &deploy;
          to find further information about this feature.
         </para>
@@ -1612,17 +1599,19 @@ openssl x509 -noout -fingerprint -sha256
     </para>
     <para>
      <emphasis>NOTE: </emphasis>This can be used in a trusted network only!
-     In a non-trusted network (or over Internet) you should get the
-     fingerprint directly on the server. Or verify that the downloaded
-     certificate is exactly as on the server.
-     </para>
+     In a non-trusted network, for example the Internet, you should get the
+     fingerprint directly from the server by other means. Fingerprints can
+     be fetched via SSH, a saved server configuration and other sources.
+     Alternatively, you can  verify that the downloaded certificate is exactly
+     the same as on the server.
+    </para>
    </tip>
 
    <sect2 xml:id="CreateProfile.Register.Extension" os="sles;sled">
     <title>Extensions</title>
     <para>
      The &scc; provides several extensions, such as
-     <literal>sle-sdk</literal> (Software Development Kit - SDK) that
+     <literal>sle-module-development-tools</literal> (Development Tools Module) that
      can be included as additional sources during the
      installation. Adding extensions can be done via the
      <literal>addons</literal> property within the
@@ -1633,25 +1622,24 @@ openssl x509 -noout -fingerprint -sha256
     <note>
      <title>Availability of Extensions</title>
      <para>
-      The availability of extensions is product and architecture dependent.
+      The availability of extensions is product and architecture dependent,
+      not all extensions are available on all architectures.
       <!-- All listed extensions are available for &sls; on the x86_64
            architecture. -->
-      Not all extensions are available on other architectures.  The only
-      extension available for &sled; is the <literal>sle-sdk</literal>.
      </para>
      <para>
-      Some extensions, such as the <literal>sle-we</literal>,
-      <literal>sle-ha</literal> and <literal>sle-ha-geo</literal>
+      Some extensions, such as the <literal>sle-ha</literal>
       require a registration code.
+      Depending on your subscription, either use a dedicated registration code
+      for the extension, or restate the code for the base product.
      </para>
     </note>
 
     <para>
-     With <command>SUSEConnect --list-extensions</command> (available
-     since &slsa; 12 SP1), you can list all available extensions in a
-     registered system. The result looks like:
+     With <command>SUSEConnect --list-extensions</command> you can list all
+     available extensions in a registered system. The result contains lines like:
     </para>
-    <screen>Install with: SUSEConnect -p sle-sdk/12.2/x86_64</screen>
+    <screen>Install with: SUSEConnect -p sle-module-development-tools/15/x86_64</screen>
     <para>
      The <option>-p</option> argument displays the
      <replaceable>NAME/VERSION/ARCH</replaceable> values that can be
@@ -1659,20 +1647,40 @@ openssl x509 -noout -fingerprint -sha256
     </para>
     <screen><![CDATA[<addons config:type="list">
  <addon>
-  <!-- SUSE Linux Enterprise Software Development Kit -->
-  <name>sle-sdk</name>
-  <version>12.2</version>
+  <!-- Development Tools Module -->
+  <name>sle-module-development-tools</name>
+  <version>15</version>
   <arch>x86_64</arch>
  </addon>
 </addons>]]></screen>
+
+<note>
+ <title>Extension Dependencies</title>
+ <para>
+   Since &slsa; 15 &ay; automatically reorders the extensions according to their
+   dependencies during registration. That means the order of the extensions
+   in the &ay; profile is not important.
+ </para>
+ <para>
+   Also &ay; automatically registers the dependent extensions even though
+   they are missing in the profile. That means you are not required to fill
+   the extensions list completely.
+ </para>
+ <para>
+   However, if the dependent extension requires a registration key it must be
+   specified in the profile, including the registration key. Otherwise the
+   registration would fail.
+ </para>
+</note>
+
     <para>
-     For background information and add-on listings for &slsa; 12,
-     12 SP1, and 12 SP2, see <link
+     For background information and add-on listings for &slsa; see <link
      xlink:href="https://github.com/yast/yast-registration/wiki/Available-SCC-Extensions-for-Use-in-Autoyast"/>.
      The listings will get updated from time to time.
     </para>
    </sect2>
   </sect1>
+
   <sect1 xml:id="CreateProfile.Bootloader">
    <title>The Boot Loader</title>
 
@@ -2096,6 +2104,10 @@ openssl x509 -noout -fingerprint -sha256
          <para>
           A RAID must always have <literal>/dev/md</literal> as device.
          </para>
+         <para>
+          If set to <literal>ask</literal>, &ay; will ask the user which device to use
+          during installation.
+         </para>
         </entry>
        </row>
        <row>
@@ -2268,7 +2280,9 @@ openssl x509 -noout -fingerprint -sha256
         </entry>
         <entry>
          <para>
-          Optional. By default &yast; decides what makes sense.
+          Optional. By default &yast; decides what makes sense. If a partition table
+          of a different type already exists, it will be recreated with the given type
+          only if does not include any partition that should be kept or reused.
          </para>
         </entry>
        </row>
@@ -2404,15 +2418,15 @@ openssl x509 -noout -fingerprint -sha256
         </entry>
         <entry>
          <para>
-          Specify if this partition must be created or if it already exists.
+          Specify if this partition or logical volume must be created or if it already exists.
          </para>
 <screen>&lt;create config:type="boolean" &gt;false&lt;/create&gt;</screen>
         </entry>
         <entry>
          <para>
           If set to <literal>false</literal>, you also need to set
-          <literal>partition_nr</literal> to tell &ay; the partition
-          number.
+          <literal>partition_nr</literal>, <literal>lv_name</literal> or <literal>uuid</literal>
+          to tell &ay; which device to use.
          </para>
         </entry>
        </row>
@@ -2917,14 +2931,9 @@ openssl x509 -noout -fingerprint -sha256
         <entry>
          <para>
           This boolean must be <literal>true</literal> if an existing
-          partition should be resized. In this case, you want to set
-          <literal>create</literal> to <literal>false</literal> and usually
-          you do not want to <literal>format</literal> the partition.  You need
-          to tell &ay; the <literal>partition_nr</literal> and the
-          <literal>size</literal>. The size can be in percentage of the
-          original size or a number, like <literal>800M</literal>.
-          <literal>max</literal> and <literal>auto</literal> do not work as
-          size here.
+          partition should be resized. In this case, you need to tell &ay;
+          to reuse the device (see the <literal>create</literal>) and specify
+          a <literal>size</literal>.
          </para>
 <screen>&lt;resize config:type="boolean"
 &gt;false&lt;/resize&gt;</screen>
@@ -2938,6 +2947,20 @@ openssl x509 -noout -fingerprint -sha256
       </tbody>
      </tgroup>
     </informaltable>
+
+    <important>
+     <title>Creating Boot Partitions Automatically</title>
+     <para>
+      When &ay; determines that a boot partition might be required in order
+      to boot properly, it will automatically add one even if it is not specified
+      in the profile.
+     </para>
+     <para>
+      However, if for any reason the boot partition does not fit in the current
+      partitioning layout, &ay; will just display a warning, allowing the
+      installation to proceed.
+     </para>
+    </important>
    </sect2>
 
    <sect2 xml:id="ay.btrfs_subvolumes">
@@ -3286,7 +3309,7 @@ openssl x509 -noout -fingerprint -sha256
     &lt;use&gt;all&lt;/use&gt;
     &lt;partitions config:type="list"&gt;
       &lt;partition&gt;
-        &lt;filesystem  config:type="symbol"&gt;reiser&lt;/filesystem&gt;
+        &lt;filesystem  config:type="symbol"&gt;ext4&lt;/filesystem&gt;
         &lt;mount&gt;/data1&lt;/mount&gt;
         &lt;size&gt;15G&lt;/size&gt;
       &lt;/partition&gt;
@@ -3451,7 +3474,7 @@ openssl x509 -noout -fingerprint -sha256
       <title>Mount Options</title>
 <screen>&lt;partitions config:type="list"&gt;
   &lt;partition&gt;
-    &lt;filesystem config:type="symbol"&gt;reiser&lt;/filesystem&gt;
+    &lt;filesystem config:type="symbol"&gt;ext4&lt;/filesystem&gt;
     &lt;format config:type="boolean"&gt;true&lt;/format&gt;
     &lt;fstopt&gt;ro,noatime,user,data=ordered,acl,user_xattr&lt;/fstopt&gt;
     &lt;mount&gt;/local&lt;/mount&gt;
@@ -3462,6 +3485,16 @@ openssl x509 -noout -fingerprint -sha256
 &lt;/partitions&gt;
 </screen>
      </example>
+
+    <note>
+     <title>
+      Check Supported File System Options
+     </title>
+     <para>
+      Different file system types support different options.
+      Check the documentation carefully before setting them.
+     </para>
+    </note>
     </sect3>
     <sect3 xml:id="ay.partition_advanced.keep">
      <title>Keeping Specific Partitions</title>
@@ -3579,56 +3612,6 @@ openssl x509 -noout -fingerprint -sha256
     </sect3>
    </sect2>
 
-   <sect2 xml:id="ay.partition_fstab">
-    <title>Using an Existing Mount Table (fstab)</title>
-    <note>
-     <title>
-      Cannot Be Combined with <literal>partitioning</literal> Section
-     </title>
-     <para>
-      This section will be ignored if you have defined your own
-      <literal>partitioning</literal> section too.
-     </para>
-    </note>
-    <para>
-     This option will allow &ay; to use an existing
-     <filename>/etc/fstab</filename> and use the partition data from a
-     previous installation. All partitions are kept and no new partitions
-     are created. The partitions will be formatted and mounted as specified
-     in <filename>/etc/fstab</filename> on a Linux root partition.
-    </para>
-    <para>
-     Although the default behavior is to format all partitions, it is also
-     possible to leave some partitions (for
-     example data partitions) untouched and only mount them. If multiple installations are found on the
-     system (multiple root partitions with different
-     <filename>fstab</filename> files, the installation will abort, unless
-     the root partition is configured in the control file. The following
-     example illustrates how this option can be used:
-    </para>
-    <example>
-     <title>Reading an Existing <filename>/etc/fstab</filename></title>
-<screen>&lt;partitioning_advanced&gt;
-  &lt;fstab&gt;
-    &lt;!-- Read data from existing fstab. If multiple root partitions are
-            found, use the one specified below. Otherwise the first root
-            partition is taken --&gt;
-    &lt;!-- &lt;root_partition&gt;/dev/sda5&lt;/root_partition&gt; --&gt;
-    &lt;use_existing_fstab config:type="boolean"&gt;true&lt;/use_existing_fstab&gt;
-    &lt;!-- all partitions found in fstab will be formatted and mounted
-            by default unless a partition is listed below with different
-            settings --&gt;
-    &lt;partitions config:type="list"&gt;
-      &lt;partition&gt;
-        &lt;format config:type="boolean"&gt;false&lt;/format&gt;
-        &lt;mount&gt;/bootmirror&lt;/mount&gt;
-      &lt;/partition&gt;
-    &lt;/partitions&gt;
-  &lt;/fstab&gt;
-&lt;/partitioning_advanced&gt;</screen>
-    </example>
-   </sect2>
-
    <sect2 xml:id="ay.partition_lvm">
     <title>Logical Volume Manager (LVM)</title>
     <para>
@@ -3681,19 +3664,19 @@ openssl x509 -noout -fingerprint -sha256
       &lt;is_lvm_vg config:type="boolean"&gt;true&lt;/is_lvm_vg&gt;
       &lt;partitions config:type="list"&gt;
         &lt;partition&gt;
-          &lt;filesystem config:type="symbol"&gt;reiser&lt;/filesystem&gt;
+          &lt;filesystem config:type="symbol"&gt;ext4&lt;/filesystem&gt;
           &lt;lv_name&gt;user_lv&lt;/lv_name&gt;
           &lt;mount&gt;/usr&lt;/mount&gt;
           &lt;size&gt;15G&lt;/size&gt;
         &lt;/partition&gt;
         &lt;partition&gt;
-          &lt;filesystem config:type="symbol"&gt;reiser&lt;/filesystem&gt;
+          &lt;filesystem config:type="symbol"&gt;ext4&lt;/filesystem&gt;
           &lt;lv_name&gt;opt_lv&lt;/lv_name&gt;
           &lt;mount&gt;/opt&lt;/mount&gt;
           &lt;size&gt;10G&lt;/size&gt;
         &lt;/partition&gt;
         &lt;partition&gt;
-          &lt;filesystem config:type="symbol"&gt;reiser&lt;/filesystem&gt;
+          &lt;filesystem config:type="symbol"&gt;ext4&lt;/filesystem&gt;
           &lt;lv_name&gt;var_lv&lt;/lv_name&gt;
           &lt;mount&gt;/var&lt;/mount&gt;
           &lt;size&gt;1G&lt;/size&gt;
@@ -3810,7 +3793,7 @@ openssl x509 -noout -fingerprint -sha256
     &lt;device&gt;/dev/md&lt;/device&gt;
     &lt;partitions config:type="list"&gt;
       &lt;partition&gt;
-        &lt;filesystem config:type="symbol"&gt;reiser&lt;/filesystem&gt;
+        &lt;filesystem config:type="symbol"&gt;ext4&lt;/filesystem&gt;
         &lt;format config:type="boolean"&gt;true&lt;/format&gt;
         &lt;mount&gt;/space&lt;/mount&gt;
         &lt;partition_id config:type="integer"&gt;131&lt;/partition_id&gt;
@@ -3883,12 +3866,22 @@ openssl x509 -noout -fingerprint -sha256
          </entry>
          <entry>
           <para>
+           Description
+          </para>
+         </entry>
+         <entry>
+          <para>
            Values
           </para>
          </entry>
          <entry>
           <para>
            Description
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Values
           </para>
          </entry>
         </row>
@@ -4059,7 +4052,7 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
    </example>
 
    <informaltable>
-      <tgroup cols="2">
+      <tgroup cols="3">
        <thead>
         <row>
          <entry>
@@ -4305,7 +4298,7 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
         <row>
          <entry>
           <para>
-           <literal>languages</literal>
+           <literal>language</literal>
           </para>
          </entry>
          <entry>
@@ -4323,7 +4316,7 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
         <row>
          <entry>
           <para>
-           <literal>language</literal>
+           <literal>languages</literal>
           </para>
          </entry>
          <entry>
@@ -4462,7 +4455,7 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
        </entry>
        <entry>
         <para>
-         A list of available keymaps can be found under
+         A list of available keymaps can be found in
          <literal>/usr/share/YaST2/data/keyboard_raw.ycp</literal>
         </para>
        </entry>
@@ -4491,7 +4484,7 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
      <title>Explicit Product Selection</title>
 <screen>&lt;software&gt;
   &lt;products config:type="list"&gt;
-    &lt;product&gt;SLED15&lt;/product&gt;
+    &lt;product&gt;SLED&lt;/product&gt;
   &lt;/products&gt;
 &lt;/software&gt;
 </screen>
@@ -4513,12 +4506,12 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
    </sect2>
 
    <sect2 xml:id="Software.Selections.sles10">
-    <title>Package Selection with Patterns</title>
+    <title>Package Selection with Patterns and Packages Sections</title>
     <para>
-     Patterns are configured like this:
+     Patterns or packages are configured like this:
     </para>
     <example>
-     <title>Package Selection in the Control File with Patterns</title>
+     <title>Package Selection in the Control File with Patterns and Packages Sections</title>
 <screen>&lt;software&gt;
   &lt;patterns config:type="list"&gt;
     &lt;pattern&gt;directory_server&lt;/pattern&gt;
@@ -4530,6 +4523,14 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
   &lt;do_online_update config:type="boolean"&gt;true&lt;/do_online_update&gt;
 &lt;/software&gt;</screen>
     </example>
+    <note>
+     <title>Package and Pattern Names</title>
+     <para>
+      The values are real package or pattern names. If the package name
+      has been changed due an upgrade, you will have to adapt these
+      settings too.
+     </para>
+    </note>
    </sect2>
 
    <sect2 xml:id="Software.Selections.images" os="osuse">
@@ -4572,10 +4573,9 @@ config:type="boolean"&gt;true&lt;/diag&gt;</screen>
      <para>
      The unpacked DVD is located in <literal>/usr/local/DVDs/LATEST</literal>.
      </para>
-<screen>
-cp /tmp/inst-source-utils-2016.7.26-1.2.noarch.rpm /usr/local/DVDs/LATEST/suse/noarch
-cd /usr/local/DVDs/LATEST/suse
-create_package_descr -d /usr/local/CDs/LATEST/suse</screen>
+<screen>&prompt.user;cp /tmp/inst-source-utils-2016.7.26-1.2.noarch.rpm /usr/local/DVDs/LATEST/suse/noarch
+&prompt.user;cd /usr/local/DVDs/LATEST/suse
+&prompt.user;create_package_descr -d /usr/local/CDs/LATEST/suse</screen>
     </example>
     <para>
      In the above example, the directory
@@ -5642,7 +5642,19 @@ config:type="boolean"&gt;true&lt;/keep_install_network&gt;</screen>
       </tbody>
      </tgroup>
     </informaltable>
-   </sect2>
+
+    <tip>
+     <title>Handling Collisions in Device Names</title>
+      <para>
+       When creating an incomplete <emphasis>udev</emphasis> rule set, the
+       chosen device name can collide with existing device names. For
+       example, when renaming a network interface to <literal>eth0</literal>,
+       a collision with a device automatically generated by the kernel can
+       occur. &ay; tries to handle such cases in best effort manner and
+       renames colliding devices.
+      </para>
+     </tip>
+    </sect2>
 
    <sect2 xml:id="CreateProfile.Network.s390">
     <title>s390 Devices</title>
@@ -6042,7 +6054,7 @@ config:type="boolean"&gt;true&lt;/keep_install_network&gt;</screen>
        </entry>
        <entry>
         <para>
-         Do not push the changes to slave servers. (Iseful if there are none).
+         Do not push the changes to slave servers. (Useful if there are none).
         </para>
        </entry>
        <entry>
@@ -6865,35 +6877,72 @@ config:type="boolean"&gt;true&lt;/keep_install_network&gt;</screen>
   <sect1 xml:id="Configuration.Network.Ntp">
    <title>NTP Client</title>
 
-   <para>
-    Select whether to start the NTP daemon when booting the system. The NTP
-    daemon resolves host names when initializing.
-   </para>
+   <important>
+    <title>NTP Client Profile Incompatible</title>
+    <para>
+     Since &productname; 15, the NTP client profile has a new format and is
+     <emphasis>not</emphasis> compatible with previous profiles. You need to
+     update your NTP client profile used in prior &productname; versions to be
+     compatible with version 15 and newer.
+    </para>
+   </important>
 
    <para>
-    To run NTP daemon in chroot jail, set
-    <literal>start_in_chroot</literal>. Starting any daemon in a chroot jail
-    is more secure and strongly recommended. To adjust NTP servers, peers,
-    local clocks, and NTP broadcasting, add the appropriate entry to the
-    control file. An example of various configuration options is shown
-    below.
+    Following is an example of the NTP client configuration:
    </para>
 
    <example>
     <title>Network configuration: NTP Client</title>
-<screen>&lt;ntp-client&gt;
-  &lt;configure_dhcp config:type="boolean"&gt;false&lt;/configure_dhcp&gt;
-  &lt;peers config:type="list"&gt;
-    &lt;peer&gt;
-      &lt;address&gt;&ntpname;&lt;/address&gt;
-      &lt;options&gt;&lt;/options&gt;
-      &lt;type&gt;server&lt;/type&gt;
-    &lt;/peer&gt;
-  &lt;/peers&gt;
-  &lt;start_at_boot config:type="boolean"&gt;true&lt;/start_at_boot&gt;
-  &lt;start_in_chroot config:type="boolean"&gt;true&lt;/start_in_chroot&gt;
-&lt;/ntp-client&gt;</screen>
+<screen>
+&lt;ntp-client>
+&lt;ntp_policy>auto&lt;/ntp_policy><co xml:id="co.ay.ntp.policy"/>
+ &lt;ntp_servers config:type="list">
+  &lt;ntp_server>
+   &lt;address>cz.pool.ntp.org&lt;/address><co xml:id="co.ay.ntp.address"/>
+   &lt;iburst config:type="boolean">false&lt;/iburst><co xml:id="co.ay.ntp.iburst"/>
+   &lt;offline config:type="boolean">true&lt;/offline><co xml:id="co.ay.ntp.offline"/>
+  &lt;/ntp_server>
+ &lt;/ntp_servers>
+ &lt;ntp_sync>15&lt;/ntp_sync><co xml:id="co.ay.ntp.sync"/>
+&lt;/ntp-client>
+</screen>
+    <calloutlist>
+     <callout arearefs="co.ay.ntp.policy">
+      <para>
+       The <literal>ntp_policy</literal> takes the same values as the
+       <option>NETCONFIG_NTP_POLICY</option> option in
+       <filename>/etc/sysconfig/network/config</filename>. The most common
+       options are 'static' and 'auto' (default).
+       See <command>man 8 netconfig</command> for more details.
+      </para>
+     </callout>
+     <callout arearefs="co.ay.ntp.address">
+      <para>
+       URL of the time server or pool of time servers.
+     </para>
+    </callout>
+     <callout arearefs="co.ay.ntp.iburst">
+      <para>
+       <option>iburst</option> speeds up the initial time synchronization for
+       the specific time source after &chronyd; is started.
+      </para>
+     </callout>
+     <callout arearefs="co.ay.ntp.offline">
+      <para>
+       <option>offline</option> prevents from querying the time server if no
+       network interface is active.
+      </para>
+      </callout>
+      <callout arearefs="co.ay.ntp.sync">
+      <para>
+       For <option>ntp_sync</option>, enter 'systemd' (default) when running an
+       NTP daemon, an <emphasis>integer</emphasis> interval in seconds to
+       synchronize using cron, or 'manual' for no automatic synchronization.
+      </para>
+     </callout>
+    </calloutlist>
    </example>
+
   </sect1>
   <sect1 xml:id="Configuration.Network.Sendmail">
    <title>Mail Configuration</title>
@@ -8067,7 +8116,6 @@ config:type="boolean"&gt;true&lt;/keep_install_network&gt;</screen>
     &lt;SSLv2&gt;NO&lt;/SSLv2&gt;
     &lt;SSLv3&gt;NO&lt;/SSLv3&gt;
     &lt;StartDaemon&gt;2&lt;/StartDaemon&gt;
-    &lt;StartXinetd&gt;YES&lt;/StartXinetd&gt;
     &lt;TLS&gt;YES&lt;/TLS&gt;
     &lt;Umask/&gt;
     &lt;UmaskAnon/&gt;
@@ -8503,23 +8551,6 @@ config:type="boolean"&gt;true&lt;/keep_install_network&gt;</screen>
         <entry>
          <para>
           Manually: 0; when booting: 1; via &systemd; socket: 2
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          StartXinetd
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Has to be set to YES if StartDaemon is 2
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Value: YES/NO
          </para>
         </entry>
        </row>
@@ -9632,7 +9663,7 @@ config:type="boolean"&gt;true&lt;/keep_install_network&gt;</screen>
        <row>
         <entry>
          <para>
-          <literal>no_group</literal>
+          <literal>no_groups</literal>
          </para>
         </entry>
         <entry>
@@ -11616,7 +11647,7 @@ echo -n "ldap1.mydom.de"
       &lt;type&gt;symbol&lt;/type&gt;
       &lt;selection config:type="list"&gt;
         &lt;entry&gt;
-          &lt;value config:type="symbol"&gt;reiser&lt;/value&gt;
+          &lt;value config:type="symbol"&gt;ext4&lt;/value&gt;
           &lt;label&gt;default File System (recommended)&lt;/label&gt;
         &lt;/entry&gt;
         &lt;entry&gt;
@@ -12921,32 +12952,32 @@ exit 0
   </sect1>
 
   <sect1 xml:id="CreateProfile.firewall">
-   <title>SUSE Firewall</title>
+   <title>Firewall Configuration</title>
 
    <para>
-    SUSE Firewall can be configured using the <literal>firewall</literal>
-    resource. All the properties in this resource are optional and all of them
-    are of type text (except the boolean
-    <literal>start_firewall</literal> and <literal>enable_firewall</literal> properties).
+    SuSEfirewall2 has been replaced by &firewalld; since
+    &slsa; 15. Profiles using SuSEfirewall2 properties will be translated
+    to &firewalld; profiles. However, not all profile
+    properties can be converted. For details about &firewalld; refer to
+    <xref linkend="sec.security.firewall.firewalld"/>.
    </para>
+
+    <important>
+     <title>Limited backward compatibility with SuSEFirewall2 based profiles</title>
+     <para>
+      The use of SuSEFirewall2 based profiles will be only
+      partially supported as many options are not valid in &firewalld; and
+      some missing configuration could affect your network security.
+     </para>
+    </important>
 
    <sect2 xml:id="CreateProfile.firewall.general">
     <title>General Firewall Configuration</title>
 
     <para>
-     The following properties are intended to configure the general settings of
-     SUSE Firewall. Most of them are a direct representation of the corresponding
-     setting at <filename>/etc/sysconfig/SuSEfirewall2</filename>. Check the
-     comments in that file for further information.
+     In &firewalld; the general configuration only exposes few
+     properties and most of the configuration is done by zones.
     </para>
-    <!-- Properties from .rng file intentionally not included:
-    fw_protect_from_internal (the code seems to use FW_PROTECT_FROM_INT)
-    fw_ipsec_trust (duplicate of `FW_IPSEC_TRUST`)
-    fw_allow_fw_traceroute and FW_ALLOW_FW_TRACEROUTE are not present
-         in recent versions of /etc/sysconfig/SuSEfirewall2. Still supported?
-    fw_masq_nets seems to not be used anymore
-    fw_autoprotect_services seems to not be used anymore
-    -->
 
     <informaltable>
      <tgroup cols="3">
@@ -12983,7 +13014,7 @@ exit 0
         </entry>
         <entry>
          <para>
-          Whether SUSE Firewall should be started right after applying the configuration.
+          Whether &firewalld; should be started right after applying the configuration.
          </para>
         </entry>
        </row>
@@ -13000,235 +13031,58 @@ exit 0
         </entry>
         <entry>
          <para>
-          Whether SUSE Firewall should be started on every system startup.
+          Whether &firewalld; should be started on every system startup.
          </para>
         </entry>
        </row>
        <row>
         <entry>
          <para>
-          <literal>FW_LOG_ACCEPT_ALL</literal>
+          <literal>default_zone</literal>
          </para>
         </entry>
         <entry>
          <para>
-          yes / no
+          Zone name
          </para>
         </entry>
         <entry>
          <para>
-          Log every accepted package. If set to "yes" the value of <literal>FW_LOG_ACCEPT_CRIT</literal> becomes irrelevant.
+          The default zone is used for everything that is not explicitely assigned.
          </para>
         </entry>
-       </row>
-       <row>
+      </row>
+      <row>
         <entry>
          <para>
-          <literal>FW_LOG_ACCEPT_CRIT</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          yes / no
+          <literal>log_denied_packets</literal>
          </para>
         </entry>
         <entry>
          <para>
-          Log accepted critical packages.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_LOG_DROP_ALL</literal>
+          Type of dropped packages to be logged
          </para>
         </entry>
         <entry>
          <para>
-          yes / no
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Log every dropped package. If set to "yes" the value of <literal>FW_LOG_DROP_CRIT</literal> becomes irrelevant.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_LOG_DROP_CRIT</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          yes / no
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Log dropped critical packages.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_ALLOW_PING_FW</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          yes / no
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Allow the firewall to reply to icmp echo requests.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_MASQUERADE</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          yes / no
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Used to enable network masquerading, which allows to transparently redirect ports
-          from one interface in the external zone to ports of another interface in a different zone.
-          Masquerading needs at least one external interface and one other (not external) interface.
-          Since routing is needed for masquerading, the values of this property and
-          <literal>FW_ROUTE</literal> are connected.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_FORWARD_MASQ</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space delimited list of rules
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Rules for network masquerading, with each rule following this format:          <literal>source_network,ip_to_forward_to,protocol,port[,redirect_port,[destination_ip]]</literal>
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_FORWARD_ALWAYS_INOUT_DEV</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space separated list of interface names
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Bridge interfaces without IP address.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_IPSEC_TRUST</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-         yes / no / int /ext / dmz
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Trust level of IPsec packets.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_LOAD_MODULES</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space delimited list
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Additional kernel modules to load at startup.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_ROUTE</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          yes / no
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Whether routing between external, dmz and internal network should be activated.
-          Related to <literal>FW_MASQUERADE</literal>.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_PROTECT_FROM_INT</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          yes / no / notrack
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Whether to protect the firewall from the internal network.
+          Enable logging of dropped packages for the type selected.
+          Values: off, unicast, multicast, broadcast, all
          </para>
         </entry>
        </row>
       </tbody>
      </tgroup>
     </informaltable>
-
    </sect2>
 
    <sect2 xml:id="CreateProfile.firewall.zones">
     <title>Firewall Zones Configuration</title>
 
     <para>
-     The configuration of SUSE Firewall is based on the existence of three network zones.
-     The behavior of each zone can be tweaked in several ways. Therefore, there are many almost
-     equivalent &ay; properties that differs only by name and the zone to
-     which they apply. For example, <literal>FW_DEV_DMZ</literal> for the demilitarized zone,
-     <literal>FW_DEV_EXT</literal> for the external zone and <literal>FW_DEV_INT</literal>
-     for the internal one.
+     The configuration of &firewalld; is based on the existence of several zones
+     which define the trust level for a connection, interface or source address.
+     The behavior of each zone can be tweaked in several ways although not all
+     the properties are exposed yet.
     </para>
 
     <informaltable>
@@ -13256,186 +13110,86 @@ exit 0
        <row>
         <entry>
          <para>
-          <literal>FW_ALLOW_FW_BROADCAST_{DMZ/EXT/INT}</literal>
+          <literal>interfaces</literal>
          </para>
         </entry>
         <entry>
          <para>
-          yes / no
+          List of interfaces names.
          </para>
         </entry>
         <entry>
          <para>
-          Allow IP broadcasts in that zone.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_CONFIGURATIONS_{DMZ/EXT/INT}</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space delimited list
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Services that should be accessible from that zone.
+          List of interface names assigned to this zone. Interfaces or
+          sources can only be part of one zone.
          </para>
         </entry>
        </row>
        <row>
         <entry>
          <para>
-          <literal>FW_DEV_{DMZ/EXT/INT}</literal>
+          <literal>services</literal>
          </para>
         </entry>
         <entry>
          <para>
-          Space delimited list
+          List of services
          </para>
         </entry>
         <entry>
          <para>
-          Name of the interfaces that are considered to belong to the zone.
-          The special keyword "any" means that packets arriving on interfaces not
-          explicitly configured as int, ext or dmz will be considered to belong to
-          this zone.
+          List of services accesibles in this zone.
          </para>
         </entry>
        </row>
        <row>
         <entry>
          <para>
-          <literal>FW_IGNORE_FW_BROADCAST_{DMZ/EXT/INT}</literal>
+          <literal>ports</literal>
          </para>
         </entry>
         <entry>
          <para>
-          yes / no
+          List of ports
          </para>
         </entry>
         <entry>
-         <para>
-          Suppress logging of dropped broadcast packets. Useful if you do not
-          allow broadcasts on a LAN interface.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_SERVICES_ACCEPT_{DMZ/EXT/INT}</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space separated list of rules
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Services to allow. Each rule following the format
-          <literal>net,protocol[,dport[,sport[,flags]]]</literal>.
-          For example, "0/0,tcp,22".
+          <para>
+            List of single ports or ranges to be opened in the assigned zone.
          </para>
         </entry>
        </row>
        <row>
         <entry>
          <para>
-          <literal>FW_SERVICES_ACCEPT_RELATED_{DMZ/EXT/INT}</literal>
+          <literal>protocols</literal>
          </para>
         </entry>
         <entry>
          <para>
-          Space delimited list of rules
+          List of protocols
          </para>
         </entry>
         <entry>
          <para>
-          Services to allow that are considered RELATED by the connection tracking engine.
-          Format of each rule: <literal>net,protocol[,sport[,dport]]</literal>. For example,
-          to allow Samba broadcast replies marked as related by <literal>nf_conntrack_netbios_ns</literal>
-          from a certain network: "192.168.1.0/24,udp,137".
+          List of protocols to be opened or be accessible in the assigned zone.
          </para>
         </entry>
        </row>
        <row>
         <entry>
          <para>
-          <literal>FW_SERVICES_{DMZ/EXT/INT}_IP</literal>
+          <literal>masquerade</literal>
          </para>
         </entry>
         <entry>
          <para>
-          Space separated list
+          Enable masquerade
          </para>
         </entry>
         <entry>
          <para>
-          Which IP services should be accessible from the zone. Every entry in
-          the list can be a port, a port range or a well known protocol name.
-          This setting has precedence over <literal>FW_SERVICES_ACCEPT_*</literal>.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_SERVICES_{DMZ/EXT/INT}_RPC</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space delimited list
-         </para>
-        </entry>
-        <entry>
-         <para>
-          RPC services that should be accessible from the zone.
-          This setting has precedence over <literal>FW_SERVICES_ACCEPT_*</literal>.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_SERVICES_{DMZ/EXT/INT}_TCP</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space separated list
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Which TCP services should be accessible from the zone. Every entry in
-          the list can be a port, a port range or a well known protocol name.
-          This setting has precedence over <literal>FW_SERVICES_ACCEPT_*</literal>.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>FW_SERVICES_{DMZ/EXT/INT}_UDP</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Space separated list
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Which UDP services should be accessible from the zone. Every entry in
-          the list can be a port, a port range or a well known protocol name.
-          This setting has precedence over <literal>FW_SERVICES_ACCEPT_*</literal>.
+          It will enable or disable network address translation <emphasis>(NAT)</emphasis> in the assigned zone
          </para>
         </entry>
        </row>
@@ -13454,33 +13208,42 @@ exit 0
 
     <example>
      <title>Example firewall section</title>
-     <screen>
-&lt;firewall&gt;
-  &lt;FW_ALLOW_FW_BROADCAST_DMZ&gt;no&lt;/FW_ALLOW_FW_BROADCAST_DMZ&gt;
-  &lt;FW_ALLOW_FW_BROADCAST_EXT&gt;no&lt;/FW_ALLOW_FW_BROADCAST_EXT&gt;
-  &lt;FW_ALLOW_FW_BROADCAST_INT&gt;no&lt;/FW_ALLOW_FW_BROADCAST_INT&gt;
-  &lt;FW_DEV_DMZ&gt;&lt;/FW_DEV_DMZ&gt;
-  &lt;FW_DEV_EXT&gt;any eth0&lt;/FW_DEV_EXT&gt;
-  &lt;FW_DEV_INT&gt;&lt;/FW_DEV_INT&gt;
-  &lt;FW_FORWARD_ALWAYS_INOUT_DEV&gt;&lt;/FW_FORWARD_ALWAYS_INOUT_DEV&gt;
-  &lt;FW_FORWARD_MASQ&gt;&lt;/FW_FORWARD_MASQ&gt;
-  &lt;FW_IGNORE_FW_BROADCAST_DMZ&gt;no&lt;/FW_IGNORE_FW_BROADCAST_DMZ&gt;
-  &lt;FW_IGNORE_FW_BROADCAST_EXT&gt;yes&lt;/FW_IGNORE_FW_BROADCAST_EXT&gt;
-  &lt;FW_IGNORE_FW_BROADCAST_INT&gt;no&lt;/FW_IGNORE_FW_BROADCAST_INT&gt;
-  &lt;FW_IPSEC_TRUST&gt;no&lt;/FW_IPSEC_TRUST&gt;
-  &lt;FW_LOAD_MODULES&gt;nf_conntrack_netbios_ns&lt;/FW_LOAD_MODULES&gt;
-  &lt;FW_LOG_ACCEPT_ALL&gt;no&lt;/FW_LOG_ACCEPT_ALL&gt;
-  &lt;FW_LOG_ACCEPT_CRIT&gt;yes&lt;/FW_LOG_ACCEPT_CRIT&gt;
-  &lt;FW_LOG_DROP_ALL&gt;no&lt;/FW_LOG_DROP_ALL&gt;
-  &lt;FW_LOG_DROP_CRIT&gt;yes&lt;/FW_LOG_DROP_CRIT&gt;
-  &lt;FW_MASQUERADE&gt;no&lt;/FW_MASQUERADE&gt;
-  &lt;FW_PROTECT_FROM_INT&gt;no&lt;/FW_PROTECT_FROM_INT&gt;
-  &lt;FW_ROUTE&gt;no&lt;/FW_ROUTE&gt;
-  &lt;enable_firewall config:type="boolean"&gt;true&lt;/enable_firewall&gt;
-  &lt;start_firewall config:type="boolean"&gt;true&lt;/start_firewall&gt;
-&lt;/firewall&gt; </screen>
+     <screen>&lt;firewall&gt;
+  &lt;enable_firewall&gt;true&lt;/enable_firewall&gt;
+  &lt;log_denied_packets&gt;all&lt;/log_denied_packets&gt;
+  &lt;default_zone&gt;external&lt;/default_zone&gt;
+  &lt;zones&gt;
+    &lt;zone&gt;
+      &lt;name&gt;public&lt;/name&gt;
+      &lt;interfaces&gt;
+        &lt;interface&gt;eth0&lt;/interface&gt;
+      &lt;/interfaces&gt;
+      &lt;services config:type="list"&gt;
+        &lt;service&gt;ssh&lt;/service&gt;
+        &lt;service&gt;dhcp&lt;/service&gt;
+        &lt;service&gt;dhcpv6&lt;/service&gt;
+        &lt;service&gt;samba&lt;/service&gt;
+        &lt;service&gt;vnc-server&lt;/service&gt;
+      &lt;/services&gt;
+      &lt;ports config:type="list"&gt;
+        &lt;port&gt;21/udp&lt;/port&gt;
+        &lt;port&gt;22/udp&lt;/port&gt;
+        &lt;port&gt;80/tcp&lt;/port&gt;
+        &lt;port&gt;443/tcp&lt;/port&gt;
+        &lt;port&gt;8080/tcp&lt;/port&gt;
+      &lt;/ports&gt;
+    &lt;/zone&gt;
+    &lt;zone&gt;
+      &lt;name&gt;dmz&lt;/name&gt;
+      &lt;interfaces&gt;
+        &lt;interface&gt;eth1&lt;/interface&gt;
+      &lt;/interfaces&gt;
+    &lt;/zone&gt;
+  &lt;/zones&gt;
+&lt;/firewall&gt;</screen>
     </example>
-   </sect2>
+  </sect2>
+
   </sect1>
 
   <sect1 xml:id="CreateProfile.Hardware">
@@ -14028,7 +13791,7 @@ exit 0
   <note>
     <title>Use <literal>autoyast</literal> Boot Option Only</title>
     <para>
-     Rules and classes are only supported by the boot option
+     Rules and classes are only supported by the boot parameter
      <literal>autoyast=<replaceable>URL</replaceable></literal>.
     </para>
     <para>
@@ -15358,7 +15121,7 @@ echo -n 100
       disk using the <command>dd</command> command (the flash disk must not be
       mounted, all data on the device will be erased):
      </para>
-<screen>dd if=PATH_TO_ISO_IMAGE of=USB_STORAGE_DEVICE bs=4M</screen>
+<screen>&prompt.sudo;dd if=PATH_TO_ISO_IMAGE of=USB_STORAGE_DEVICE bs=4M</screen>
     </tip>
    </sect2>
 
@@ -15379,7 +15142,7 @@ echo -n 100
      Booting via PXE requires a DHCP and a TFTP server in your network. The
      computer will then boot without a physical medium.  <phrase
      os="sles;sled">For instructions on setting up the required
-     infrastructure, see <xref linkend="cha.deployment.remoteinst"/>.</phrase>
+     infrastructure, see <xref linkend="cha.remote_installation"/>.</phrase>
     </para>
     <para>
      If you do installation via PXE, the
@@ -16133,7 +15896,7 @@ default</screen>
     </para>
     <example>
      <title>Determine HEX code for an IP address</title>
-<screen># /usr/bin/gethostip 10.10.0.1
+<screen>&prompt.user;/usr/bin/gethostip 10.10.0.1
 10.10.0.1 10.10.0.1 0A0A0001</screen>
     </example>
    </sect2>
@@ -16320,7 +16083,7 @@ autoyast: file:///info
     Store this file as <filename>/tmp/install_foo.xml</filename> and start the
     &ay; installation process by calling:
    </para>
-   <screen>yast2 ayast_setup setup filename=/tmp/install_foo.xml dopackages="yes"</screen>
+   <screen>&prompt.sudo;yast2 ayast_setup setup filename=/tmp/install_foo.xml dopackages="yes"</screen>
 
    <para>
     For more information, run <command>yast2 ayast_setup longhelp</command>
@@ -16497,7 +16260,7 @@ autoyast: file:///info
       To merge two profiles, <filename>a.xml</filename> with
       <filename>base.xml</filename>, run the following command:
      </para>
-     <screen>/usr/bin/xsltproc --novalid --param replace "'false'" \
+     <screen>&prompt.user;/usr/bin/xsltproc --novalid --param replace "'false'" \
 --param dontmerge1 "'package'" --param with "'a.xml'" --output out.xml \
 /usr/share/autoinstall/xslt/merge.xslt base.xml</screen>
      <para>
@@ -17298,6 +17061,10 @@ mv /var/run/zypp.sav /var/run/zypp.pid
    </para>
   </sect1>
  </appendix>
+<!--
+  taroth 2017-12-20: commenting because of major release,
+  to be enabled again for next maintenance update or SP1
  <xi:include os="sles;sled" href="ay_docupdates.xml"/>
+-->
  <xi:include href="common_legal.xml"/>
 </book>
