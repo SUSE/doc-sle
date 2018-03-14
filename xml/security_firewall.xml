@@ -619,8 +619,7 @@ dhcp
     <title>Routing, Forwarding and Masquerading</title>
 
     <para>
-     &firewalld; was originally designed to act as a desktop firewall and as
-     such didn't offer much support in the area of routing. In the meantime the
+     &firewalld; is not designed to run as a fully fledged router. The
      basic functionality for typical home router setups is available. For a
      corporate production router you should not use &firewalld;, however, but
      use dedicated router and firewall devices instead. The following provides
@@ -637,7 +636,7 @@ dhcp
      <listitem>
       <para>
        To enable IPv4 masquerading, for example in the
-       <literal>interal</literal> zone, issue the following command
+       <literal>internal</literal> zone, issue the following command
       </para>
       <screen>&prompt.root;<command>firewall-cmd --zone=internal --add-masquerade</command></screen>
      </listitem>
@@ -651,9 +650,252 @@ dhcp
      </listitem>
     </itemizedlist>
    </sect3>
-
   </sect2>
 
+  <sect2 xml:id="sec.security.firewall.firewalld.rpcports">
+   <title>Accessing Services Listening on Dynamic Ports</title>
+
+   <para>
+    Some network services do not listen on predefined port numbers. Instead
+    they operate based on the <literal>portmapper</literal> or
+    <literal>rpcbind</literal> protocol. We will use the term
+    <literal>rpcbind</literal> from here on. When one of these services
+    starts, it chooses a random local port and talks to
+    <literal>rpcbind</literal> to make the port number known.
+    <literal>rpcbind</literal> itself is listening on a well known port.
+    Remote systems can then query <literal>rpcbind</literal> about the network
+    services it knows about and on which ports they are listening. Not many
+    programs use this approach any more today. Popular examples are
+    Network Information Services (NIS; <command>ypserv</command> and
+    <command>ypbind</command>) and the Network File System (NFS) version 3.
+   </para>
+
+   <note>
+    <title>About NFSv4</title>
+    <para>
+     The newer NFSv4 only requires the single well known
+     TCP port 2049 any more. For protocol version 4.0 the kernel parameter
+     <literal>fs.nfs.nfs_callback_tcpport</literal> may need to be set
+     to a static port (see <xref linkend="ex.security.firewall.nfscallback"/>).
+     Starting with protocol version 4.1 this setting has also become
+     unnecessary.
+    </para>
+   </note>
+
+   <para>
+    The dynamic nature of the <literal>rpcbind</literal> protocol makes
+    it difficult to make the affected services behind the firewall accessible.
+    &firewalld; does not support these services by itself. In the following
+    section an approach to handle this case is discussed.
+   </para>
+
+   <sect3 xml:id="sec.security.firewall.firewalld.rpcports.static">
+    <title>Configuring Static Ports</title>
+    <para>
+     One possibility is to configure all involved network services to use
+     fixed port numbers. Once this is done, the fixed ports can be opened in
+     &firewalld; and everything should work. The actual port numbers used are
+     at your discretion but should not clash with any well known port numbers
+     assigned to other services. See <xref linkend="tab.security.firewall.sysconfigports"/>
+     for a list of the available configuration items for NIS and NFSv3
+     services. Note that depending on your actual NIS or NFS configuration
+     not all of these ports may be required for your setup.
+    </para>
+
+    <table xml:id="tab.security.firewall.sysconfigports">
+     <title>Important Sysconfig Variables for Static Port Configuration</title>
+     <tgroup cols="3">
+      <colspec colnum="1" colname="1" colwidth="3000*"/>
+      <colspec colnum="2" colname="2" colwidth="1000*"/>
+      <colspec colnum="3" colname="3" colwidth="2000*"/>
+      <thead>
+       <row>
+        <entry>
+         <para>
+          File Path
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Variable Name
+         </para>
+        </entry>
+        <entry>
+         <para>
+          Example Value
+         </para>
+        </entry>
+       </row>
+      </thead>
+      <tbody>
+       <row>
+        <entry morerows='4'>
+         <filename>
+          /etc/sysconfig/nfs
+         </filename>
+        </entry>
+        <entry>
+         MOUNTD_PORT
+        </entry>
+        <entry>
+         21001
+        </entry>
+       </row>
+       <row>
+        <entry>
+         STATD_PORT
+        </entry>
+        <entry>
+         21002
+        </entry>
+       </row>
+       <row>
+        <entry>
+         LOCKD_TCPPORT
+        </entry>
+        <entry>
+         21003
+        </entry>
+       </row>
+       <row>
+        <entry>
+         LOCKD_UDPPORT
+        </entry>
+        <entry>
+         21003
+        </entry>
+       </row>
+       <row>
+        <entry>
+         RQUOTAD_PORT
+        </entry>
+        <entry>
+         21004
+        </entry>
+       </row>
+       <row>
+        <entry>
+         <filename>
+          /etc/sysconfig/ypbind
+         </filename>
+        </entry>
+        <entry>
+         YPBIND_OPTIONS
+        </entry>
+        <entry>
+         -p 24500
+        </entry>
+       </row>
+       <row>
+        <entry morerows='2'>
+         <filename>
+          /etc/sysconfig/ypserv
+         </filename>
+        </entry>
+        <entry>
+         YPXFRD_ARGS
+        </entry>
+        <entry>
+         -p 24501
+        </entry>
+       </row>
+       <row>
+        <entry>
+         YPSERV_ARGS
+        </entry>
+        <entry>
+         -p 24502
+        </entry>
+       </row>
+       <row>
+        <entry>
+         YPPASSWDD_ARGS
+        </entry>
+        <entry>
+         --port 24503
+        </entry>
+       </row>
+      </tbody>
+     </tgroup>
+    </table>
+
+    <para>
+     You will need to restart any related services that are affected by these
+     static port configurations for the changes to take effect. You can see
+     the currently assigned rpcbind ports by using the command
+     <command>rpcinfo -p</command>. On success only the statically configured
+     ports should show up there any more.
+    </para>
+
+    <para>
+     Apart from the port configuration for network services running in
+     userspace there are also ports that are used by the Linux kernel directly
+     when it comes to NFS. One of these ports is the
+     <literal>nfs_callback_tcpport</literal>. It is only required for the NFS
+     protocol older than version 4.1. There is a sysctl named
+     <literal>fs.nfs.nfs_callback_tcpport</literal> to configure this port.
+     This sysctl node only appears dynamically when NFS mounts are active.
+     Therefore it is best to configure the port via kernel module
+     parameters. This can be achieved by creating a file like shown in
+     <xref linkend="ex.security.firewall.nfscallback"/>.
+    </para>
+
+    <example xml:id="ex.security.firewall.nfscallback">
+     <title>callback port configuration for the <literal>nfs</literal> kernel module in <filename>/etc/modprobe.d/60-nfs.conf</filename></title>
+<screen>options nfs callback_tcpport=21005
+</screen>
+    </example>
+
+    <para>
+     To make this change effective it is easiest to reboot the machine.
+     Otherwise all NFS services need to be stopped and the
+     <literal>nfs</literal> kernel module needs to be reloaded. To verify the
+     active NFS callback port check the output of
+     <command>cat /sys/module/nfs/parameters/callback_tcpport</command>.
+    </para>
+
+    <para>
+     For easy handling of the now statically configured RPC ports it is useful
+     to create a new &firewalld; service definition. This service definition
+     will group all related ports and for example makes it easy to make them
+     accessible in a specific zone. In
+     <xref linkend="ex.security.firewall.newrpcservice"/> this is done for the
+     NFS ports as they have been configured in the accompanying examples.
+    </para>
+
+    <example xml:id="ex.security.firewall.newrpcservice">
+     <title>Commands to Define a new &firewalld; RPC Service for NFS</title>
+<screen>&prompt.root;<command>firewall-cmd --permanent --new-service=nfs-rpc</command>
+&prompt.root;<command>firewall-cmd --permanent --service=nfs-rpc --set-description="NFS related, statically configured RPC ports"</command>
+# add UDP and TCP ports for the given sequence
+&prompt.root;<command>for port in 21001 21002 21003 21004; do
+    firewall-cmd --permanent --service=nfs-rpc --add-port ${port}/udp --add-port ${port}/tcp
+done</command>
+# the callback port is TCP only
+&prompt.root;<command>firewall-cmd --permanent --service=nfs-rpc --add-port 21005/tcp</command>
+
+# show the complete definition of the new custom service
+&prompt.root;<command>firewall-cmd --info-service=nfs-rpc --permanent -v</command>
+nfs-rpc
+  summary:
+  description: NFS and related, statically configured RPC ports
+  ports: 4711/tcp 21001/udp 21001/tcp 21002/udp 21002/tcp 21003/udp 21003/tcp 21004/udp 21004/tcp
+  protocols:
+  source-ports:
+  modules:
+  destination:
+
+# reload firewalld to make the new service definition available
+&prompt.root;<command>firewall-cmd --reload</command>
+
+# the new service definition can now be used to open the ports e.g. in the internal zone
+&prompt.root;<command>firewall-cmd --add-service=nfs-rpc --zone=internal</command>
+</screen>
+    </example>
+
+   </sect3>
+
+  </sect2>
  </sect1>
  <sect1 xml:id="sec.security.firewall.info">
   <title>For More Information</title>
