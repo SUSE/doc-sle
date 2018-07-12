@@ -1,9 +1,6 @@
 XMLFILES  := $(wildcard xml/*.xml)
 LANGS  := $(patsubst po/%.po, %, $(wildcard po/*.po))
 
-echo :
-	echo $(LANGS)
-
 all : xml2pot po2xml
 
 xml2pot : po/template.pot
