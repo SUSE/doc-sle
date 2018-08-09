@@ -103,5 +103,211 @@ Product Name: Standard PC (Q35 + ICH9, 2009)</screen>
   </tip>
  </sect1>
 
- 
+<sect1 xml:id="sec.libvirt.config.pci.virsh">
+   <title>Adding a PCI Device with <command>virsh</command></title>
+   <para>
+    To assign a PCI device to &vmguest; with <command>virsh</command>,
+    follow these steps:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Identify the host PCI device to assign to the guest. In the following
+      example, we are assigning a DEC network card to the guest:
+     </para>
+<screen>&prompt.sudo;<command>lspci -nn</command>
+[...]
+03:07.0 Ethernet controller [0200]: Digital Equipment Corporation DECchip \
+21140 [FasterNet] [1011:0009] (rev 22)
+[...]</screen>
+     <para>
+      Note down the device ID (<literal>03:07.0</literal> in this case).
+     </para>
+    </step>
+    <step>
+     <para>
+      Gather detailed information about the device using <command>virsh
+      nodedev-dumpxml <replaceable>ID</replaceable></command>. To get the
+      <replaceable>ID</replaceable>, you need to replace colon and period in
+      the device ID (<literal>03:07.0</literal>) with underscore and prefix
+      the result with <quote>pci_0000_</quote>
+      (<literal>pci_0000_03_07_0</literal>).
+     </para>
+<screen>&prompt.user;virsh nodedev-dumpxml pci_0000_03_07_0
+&lt;device&gt;
+  &lt;name&gt;pci_0000_03_07_0&lt;/name&gt;
+  &lt;path&gt;/sys/devices/pci0000:00/0000:00:14.4/0000:03:07.0&lt;/path&gt;
+  &lt;parent&gt;pci_0000_00_14_4&lt;/parent&gt;
+  &lt;driver&gt;
+    &lt;name&gt;tulip&lt;/name&gt;
+  &lt;/driver&gt;
+  &lt;capability type='pci'&gt;
+    <emphasis role="bold">&lt;domain&gt;0&lt;/domain&gt;
+    &lt;bus&gt;3&lt;/bus&gt;
+    &lt;slot&gt;7&lt;/slot&gt;
+    &lt;function&gt;0&lt;/function&gt;</emphasis>
+    &lt;product id='0x0009'&gt;DECchip 21140 [FasterNet]&lt;/product&gt;
+    &lt;vendor id='0x1011'&gt;Digital Equipment Corporation&lt;/vendor&gt;
+    &lt;numa node='0'/&gt;
+  &lt;/capability&gt;
+&lt;/device&gt;</screen>
+     <para>
+      Note down the values for domain, bus, and function.
+     </para>
+    </step>
+    <step>
+     <para>
+      Detach the device from the host system prior to attaching it to
+      &vmguest;.
+     </para>
+<screen>&prompt.user;virsh nodedev-detach pci_0000_03_07_0
+  Device pci_0000_03_07_0 detached</screen>
+     <tip>
+      <title>Multi-Function PCI Devices</title>
+      <para>
+       When using a multi-function PCI device that does not support FLR
+       (function level reset) or PM (power management) reset, you need to
+       detach all its functions from the &vmhost;. The whole device must be
+       reset for security reasons. <systemitem>libvirt</systemitem> will
+       refuse to assign the device if one of its functions is still in use
+       by the &vmhost; or another &vmguest;.
+      </para>
+     </tip>
+    </step>
+    <step>
+     <para>
+      Convert the domain, bus, slot, and function value from decimal to
+      hexadecimal, and prefix with <literal>0x</literal> to tell the
+      system that the value is hexadecimal. In our example, domain = 0,
+      bus = 3, slot = 7, and function = 0. Their hexadecimal values are:
+     </para>
+<screen>&prompt.user;printf %x 0
+0
+&prompt.user;printf %x 3
+3
+&prompt.user;printf %x 7
+7</screen>
+     <para>
+      This results in domain = 0x0000, bus = 0x03, slot = 0x07 and function
+      = 0x00.
+     </para>
+    </step>
+    <step>
+     <para>
+      Run <command>virsh edit</command> on your domain, and add the
+      following device entry in the <literal>&lt;devices&gt;</literal>
+      section using the values from the previous step:
+     </para>
+<screen>&lt;hostdev mode='subsystem' type='pci' managed='yes'&gt;
+  &lt;source&gt;
+    &lt;address domain='0x0000' bus='0x03' slot='0x07' function='0x0'/&gt;
+  &lt;/source&gt;
+&lt;/hostdev&gt;</screen>
+     <tip xml:id="tip.libvirt.config.pci.virsh.managed">
+      <title><literal>managed</literal> Compared to <literal>unmanaged</literal></title>
+      <para>
+       <systemitem>libvirt</systemitem> recognizes two modes for handling
+       PCI devices: they can be either <literal>managed</literal> or
+       <literal>unmanaged</literal>. In the managed case,
+       <systemitem>libvirt</systemitem> will handle all details of
+       unbinding the device from the existing driver if needed, resetting
+       the device, binding it to <systemitem>vfio-pci</systemitem> before
+       starting the domain, etc. When the domain is terminated or the device
+       is removed from the domain, <systemitem>libvirt</systemitem> will
+       unbind from <systemitem>vfio-pci</systemitem> and rebind to the
+       original driver in the case of a managed device. If the device is
+       unmanaged, the user must ensure all of these management
+       aspects of the device are done before assigning it to a domain, and
+       after the device is no longer used by the domain.
+      </para>
+      <para>
+       In the example above, the <literal>managed='yes'</literal> option
+       means that the device is managed. To switch the device mode to
+       unmanaged, set <literal>managed='no'</literal> in the listing above.
+       If you do so, you need to take care of the related driver with the
+       <command>virsh nodedev-detach</command> and <command>virsh
+       nodedev-reattach</command> commands. That means you need to run
+       <command>virsh nodedev-detach pci_0000_03_07_0</command> prior to
+       starting the &vmguest; to detach the device from the host. In case
+       the &vmguest; is not running, you can make the device available for
+       the host by running <command>virsh nodedev-reattach
+       pci_0000_03_07_0</command>.
+      </para>
+     </tip>
+    </step>
+    <step>
+     <para>
+      Shut down the &vmguest; and restart it to make the assigned PCI device
+      available.
+     </para>
+     <tip>
+      <title>&selnx;</title>
+      <para>
+       If you are running &selnx; on your &vmhost;, you need to disable it
+       prior to starting the &vmguest; with
+      </para>
+<screen>setsebool -P virt_use_sysfs 1</screen>
+     </tip>
+    </step>
+   </procedure>
+  </sect1>
+
+  <sect1 xml:id="sec.libvirt.config.usb.virsh">
+   <title>Adding a USB Device with <command>virsh</command></title>
+   <para>
+    To assign a USB device to &vmguest; using <command>virsh</command>,
+    follow these steps:
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Identify the host USB device to assign to the guest:
+     </para>
+<screen>&prompt.sudo;<command>lsusb</command>
+[...]
+Bus 001 Device 003: ID 0557:2221 ATEN International Co., Ltd Winbond Hermon
+[...]</screen>
+     <para>
+      Note down the vendor and product IDs. In our example, the vendor ID is
+      <literal>0557</literal> and the product ID is <literal>2221</literal>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Run <command>virsh edit</command> on your domain, and add the
+      following device entry in the <literal>&lt;devices&gt;</literal>
+      section using the values from the previous step:
+     </para>
+<screen>&lt;hostdev mode='subsystem' type='usb'&gt;
+  &lt;source startupPolicy='optional'&gt;
+   &lt;vendor id='0557'/&gt;
+   &lt;product id='2221'/&gt;
+  &lt;/source&gt;
+&lt;/hostdev&gt;</screen>
+     <tip>
+      <title>Vendor/Product or Device's Address</title>
+      <para>
+       Instead of defining the host device with &lt;vendor/> and &lt;product/> IDs, you
+     can use the &lt;address/> element as described for host PCI devices in <xref
+     linkend="sec.libvirt.config.pci.virsh"/>.
+      </para>
+     </tip>
+    </step>
+    <step>
+     <para>
+      Shut down the &vmguest; and restart it to make the assigned USB device
+      available.
+     </para>
+     <tip>
+      <title>&selnx;</title>
+      <para>
+       If you are running &selnx; on your &vmhost;, you need to disable it
+       prior to starting the &vmguest; with
+      </para>
+<screen>&prompt.user;setsebool -P virt_use_sysfs 1</screen>
+     </tip>
+    </step>
+   </procedure>
+  </sect1>
+
 </chapter>
