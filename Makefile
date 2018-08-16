@@ -8,7 +8,7 @@
 # * When creating output:   $ make linguas; make all
 # * To clean up:            $ make clean
 
-.PHONY: clean po pot pdf text single-html yast-html translatedxml profile
+.PHONY: clean po pot pdf text single-html translatedxml
 
 ifndef LANGS
   LANGS := $(shell cat po/LINGUAS)
@@ -41,14 +41,10 @@ PO_FILES := $(wildcard po/*.po)
 XML_FILES := $(foreach l, $(LANGS), xml/release-notes.$(l).xml)
 PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
 SINGLE_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/single-html/release-notes.$(l)/index.html)
-YAST_PROFILED_FILES := $(foreach l, $(LANGSEN), build/.profiled/general_$(LIFECYCLE)/release-notes.$(l).xml)
-YAST_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/yast-html/release-notes.$(l).html)
 TXT_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l).txt)
-DIRS := $(foreach l, $(LANGSEN), build/release-notes.$(l)/yast-html/)
 
 # Gets the language code: release-notes.en.xml => en
 LANG_COMMAND = `echo $@ | awk -F '.' '{gsub("/.*","",$$2); print($$2)}'`
-LANG_COMMAND_PROFILE = `echo $@ | awk -F '.' '{gsub("/.*","",$$3); print($$3)}'`
 DAPS_COMMAND_BASIC = daps -vv --styleroot $(STYLEROOT)
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -m xml/release-notes.$${lang}.xml
 
@@ -73,7 +69,7 @@ COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/re
 ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
 
 
-all: single-html yast-html pdf text
+all: single-html pdf text
 
 linguas: po/LINGUAS
 
@@ -139,27 +135,11 @@ $(SINGLE_HTML_FILES): po/LINGUAS translatedxml
 	--stringparam "homepage='https://www.opensuse.org'" \
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
-yast-html: | $(DIRS) $(YAST_HTML_FILES)
-$(YAST_HTML_FILES): po/LINGUAS $(YAST_PROFILED_FILES)
-	lang=$(LANG_COMMAND) ; \
-	  $(XSLTPROC_COMMAND) /usr/share/daps/daps-xslt/relnotes/yast.xsl build/.profiled/general_$(LIFECYCLE)/release-notes.$${lang}.xml > $@
-
-# xsltproc by itself does not support profiling, so we need to do this
-# beforehand for YaST HTML
-profile: $(YAST_PROFILED_FILES)
-$(YAST_PROFILED_FILES): po/LINGUAS translatedxml
-	lang=$(LANG_COMMAND_PROFILE) ; \
-	$(DAPS_COMMAND) profile \
-	PROFCONDITION="general\;$(LIFECYCLE)"
-
 text: $(TXT_FILES)
 $(TXT_FILES): po/LINGUAS translatedxml
 	lang=$(LANG_COMMAND) ; \
 	LANG=$${lang} $(DAPS_COMMAND) text \
 	PROFCONDITION="general\;$(LIFECYCLE)"
-
-$(DIRS):
-	mkdir -p $@
 
 clean:
 rm -rf po/*~ po/*.mo po/LINGUAS build/ xml/release-notes.*.xml xml/release-notes.*.xml.0 release-notes.pot
