@@ -99,6 +99,12 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 
 
 all: single-html pdf text
+	@echo "$(LANG_LIST)"
+	@echo "$(SOURCE_FILES)"
+	@echo "$(DOMAIN_LIST)"
+	@echo "$(POT_FILES)"
+	@echo "$(PO_FILES)"
+	@echo "$(MO_FILES)"
 
 #linguas: LINGUAS
 #LINGUAS: $(PO_FILES) 50-tools/po-selector
