@@ -12,7 +12,7 @@
 .PHONY: clean linguas po pot pdf text single-html translatedxml
 
 ifndef LANGS
-  LANGS := $(shell cat LINGUAS)
+#  LANGS := $(shell cat LINGUAS)
 endif
 LANGSEN := $(LANGS) en
 ifndef STYLEROOT
@@ -100,12 +100,12 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 
 all: single-html pdf text
 
-linguas: LINGUAS
-LINGUAS: $(PO_FILES) 50-tools/po-selector
-	50-tools/po-selector
+#linguas: LINGUAS
+#LINGUAS: $(PO_FILES) 50-tools/po-selector
+#	50-tools/po-selector
 
 pot: $(POT_FILES)
-$(POT_FILES): $(SOURCE_FILES) xml/release-notes.ent
+$(POT_FILES): $(SOURCE_FILES)
 	$(DAPS_COMMAND_BASIC) -m $(XML_SOURCE) validate
 	$(ITSTOOL) -o $@ $(XML_SOURCE)
 
@@ -171,4 +171,4 @@ $(TXT_FILES): LINGUAS translatedxml
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
 clean:
-rm -rf */po/~* $(MO_FILES) $(POT_FILES) LINGUAS build/ xml/release-notes.*.xml xml/release-notes.*.xml.0
+# rm -rf */po/~* $(MO_FILES) $(POT_FILES) LINGUAS build/ xml/release-notes.*.xml xml/release-notes.*.xml.0
