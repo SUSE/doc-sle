@@ -98,7 +98,8 @@ COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/re
 ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
 
 
-all: single-html pdf text
+# all: single-html pdf text
+all:
 	@echo "$(LANG_LIST)"
 	@echo "$(SOURCE_FILES)"
 	@echo "$(DOMAIN_LIST)"
