@@ -71,9 +71,9 @@ DAPS_COMMAND_BASIC = daps -vv --styleroot $(STYLEROOT)
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -m xml/release-notes.$${lang}.xml
 
 # Gets the xml source starting from target POT
-XML_SOURCE = `echo $(@F) | awk -F '.' '{print ("xml/" $$1 ".xml")}'`
+XML_SOURCE = $(addprefix xml/,$(addsuffix .xml,$(basename $(@F))))
 # Gets the po template starting from target PO
-PO_TEMPLATE = `echo $(@F) | awk -F '.' '{print ("50-pot/" $$1 ".pot")}'`
+PO_TEMPLATE = $(addprefix 50-pot/,$(addsuffix .pot,$(basename $(basename $(@F)))))
 # Gets the input po starting from target MO
 PO_FILE = $(addsuffix .mo,$(basename $@))
 
@@ -113,16 +113,16 @@ all:
 
 pot: $(POT_FILES)
 $(POT_FILES): $(SOURCE_FILES)
-	$(DAPS_COMMAND_BASIC) -m $(XML_SOURCE) validate
+#	$(DAPS_COMMAND_BASIC) -m $(XML_SOURCE) validate
 	$(ITSTOOL) -o $@ $(XML_SOURCE)
 
 po: $(PO_FILES)
 $(PO_FILES): $(POT_FILES)
 	if [ -r $@ ]; then \
-       msgmerge  --previous --update $@ $(PO_TEMPLATE); \
-   else \
-       msgen -o $@ $(PO_TEMPLATE); \
-   fi
+	msgmerge  --previous --update $@ $(PO_TEMPLATE); \
+	else \
+	msgen -o $@ $(PO_TEMPLATE); \
+	fi
 
 mo: $(MO_FILES)
 $(MO_FILES): $(PO_FILES)
@@ -178,4 +178,4 @@ $(TXT_FILES): LINGUAS translatedxml
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
 clean:
-# rm -rf */po/~* $(MO_FILES) $(POT_FILES) LINGUAS build/ xml/release-notes.*.xml xml/release-notes.*.xml.0
+	rm -rf */po/~* $(MO_FILES) $(POT_FILES) LINGUAS build/ xml/release-notes.*.xml xml/release-notes.*.xml.0
