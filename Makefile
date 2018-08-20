@@ -173,4 +173,4 @@ $(TXT_FILES): LINGUAS translatedxml
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
 clean:
-	rm -rf $(addprefix $(LANG_LIST),/po/~*) $(MO_FILES) $(POT_FILES) LINGUAS $(addprefix $(LANG_LIST),/xml/) build/
+	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/~*)) $(MO_FILES) $(POT_FILES) LINGUAS $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/xml/)) build/
