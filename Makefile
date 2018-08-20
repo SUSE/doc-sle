@@ -139,7 +139,7 @@ $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
 #	  fix-up.xsl $@.0 \
 #	  > $@
 #	rm $@.0
-#	daps-xmlformat -i $@
+	daps-xmlformat -i $@
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
 
