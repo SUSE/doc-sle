@@ -78,7 +78,7 @@ PO_FILE = $(addsuffix .po,$(basename $@))
 MO_FILE = $(addprefix $(subst xml,po,$(@D)/),$(addsuffix .mo,$(addsuffix .$(subst /xml,,$(@D)),$(basename $(@F)))))
 # MO_FILE = $(addprefix $(subst xml,po,$(@D)/),
 
-ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
+ITSTOOL = itstool # -i /usr/share/itstool/its/docbook5.its
 
 XSLTPROC_COMMAND = xsltproc \
 --stringparam generate.toc "book toc" \
