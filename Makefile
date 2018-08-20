@@ -123,7 +123,7 @@ $(MO_FILES): $(PO_FILES)
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES)
 $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
-	@echo $(XML_DEST_FILES)
+	@echo "mo file: $(MO_FILE)"
 	$(ITSTOOL) -m $(MO_FILE) -o $(@D) $(XML_SOURCE)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
