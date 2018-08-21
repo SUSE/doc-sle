@@ -83,7 +83,7 @@ MO_FILE = $(addprefix $(subst xml,po,$(@D)/),$(addsuffix .mo,$(addsuffix .$(subs
 COMMA := ,
 EMPTY :=
 SPACE := $(EMPTY) $(EMPTY)
-PREREQ_LIST_COMMA_SEPARATED := $(subst $(SPACE),$(COMMA),$^)
+PREREQ_LIST_COMMA_SEPARATED = $(subst $(SPACE),$(COMMA),$^)
 
 ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 
@@ -150,10 +150,10 @@ $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
 $(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
-	ln -s $< $@
+	ln -sf ../../$< $(@D)
 
 $(DC_DEST_FILES): $(DC_SOURCE_FILES)
-	cp {$(PREREQ_LIST_COMMA_SEPARATED)} $(@D)
+	cp $(@F) $(@D)
 
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	xsltproc \
