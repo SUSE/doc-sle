@@ -61,6 +61,8 @@ DC_SOURCE_FILES := $(wildcard DC-*)
 # If LANGS is not defined, for output, use only those files that have at least 60% translations
 MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(DOMAIN_LIST))))
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(XML_SOURCE_FILES)))
+SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
+DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(wildcard DC-*)))
 # PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
 # SINGLE_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/single-html/release-notes.$(l)/index.html)
 # TXT_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l).txt)
@@ -77,7 +79,11 @@ PO_TEMPLATE = $(addprefix 50-pot/,$(addsuffix .pot,$(basename $(basename $(@F)))
 PO_FILE = $(addsuffix .po,$(basename $@))
 # Gets the input mo starting from xml destination
 MO_FILE = $(addprefix $(subst xml,po,$(@D)/),$(addsuffix .mo,$(addsuffix .$(subst /xml,,$(@D)),$(basename $(@F)))))
-# MO_FILE = $(addprefix $(subst xml,po,$(@D)/),
+# Turns a space-separated prereq list into a comma-separated list
+COMMA := ,
+EMPTY :=
+SPACE := $(EMPTY) $(EMPTY)
+PREREQ_LIST_COMMA_SEPARATED = $(subst $(SPACE),$(COMMA),$^)
 
 ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 
@@ -137,8 +143,9 @@ $(MO_FILES): $(PO_FILES)
 	msgfmt $(PO_FILE) -o $@
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
-translate: $(XML_DEST_FILES)
+translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(DC_DEST_FILES)
 $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
+	if [ ! -d $(@D) ]; then mkdir -p $(@D); fi
 	$(ITSTOOL) -m $(MO_FILE) -o $(@D) $(XML_SOURCE)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
@@ -156,6 +163,11 @@ $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
 	daps-xmlformat -i $@
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
+$(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
+	ln -sf ../../$< $(@D)
+
+$(DC_DEST_FILES): $(DC_SOURCE_FILES)
+	cp $(@F) $(@D)
 
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	xsltproc \
