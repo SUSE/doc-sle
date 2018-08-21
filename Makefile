@@ -156,7 +156,9 @@ $(DC_DEST_FILES): $(DC_SOURCE_FILES)
 	cp $(@F) $(@D)
 
 validate: $(DC_DEST_FILES)
-	$(DAPS_COMMAND) -d {$(PREREQ_LIST_COMMA_SEPARATED)} validate
+	for DC_FILE in $^; do \
+	$(DAPS_COMMAND) -d $(DC_FILE) validate; \
+	done; 
 
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	xsltproc \
