@@ -9,7 +9,7 @@
 # * When creating output:   $ make linguas; make all
 # * To clean up:            $ make clean
 
-.PHONY: clean linguas po pot translate pdf text single-html translatedxml
+.PHONY: clean linguas po pot translate validate pdf text single-html translatedxml
 
 ifndef LANGS
   LANGS := $(shell cat LINGUAS)
@@ -168,6 +168,9 @@ $(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
 
 $(DC_DEST_FILES): $(DC_SOURCE_FILES)
 	cp $(@F) $(@D)
+
+validate: $(DC_DEST_FILES)
+	$(DAPS_COMMAND) -d {$(PREREQ_LIST_COMMA_SEPARATED)} validate
 
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	xsltproc \
