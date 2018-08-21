@@ -131,6 +131,7 @@ $(MO_FILES): $(PO_FILES)
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(DC_DEST_FILES)
 $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
+	if [ ! -d $(@D) ]; then mkdir -p $(@D); fi
 	$(ITSTOOL) -m $(MO_FILE) -o $(@D) $(XML_SOURCE)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
