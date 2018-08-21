@@ -127,7 +127,7 @@ $(PO_FILES): $(POT_FILES)
 	if [ -r $@ ]; then \
 	msgmerge  --previous --update $@ $(PO_TEMPLATE); \
 	else \
-	msgen -o $@ $(PO_TEMPLATE); \
+	msgen --lang=$(subst /po,,$(@D)) -o $@ $(PO_TEMPLATE); \
 	fi
 
 mo: $(MO_FILES)
