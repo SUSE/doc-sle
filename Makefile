@@ -157,7 +157,7 @@ $(DC_DEST_FILES): $(DC_SOURCE_FILES)
 
 validate: $(DC_DEST_FILES)
 	for DC_FILE in $^; do \
-	$(DAPS_COMMAND) -d $(DC_FILE) validate; \
+	$(DAPS_COMMAND) $(DC_FILE) validate; \
 	done; 
 
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
