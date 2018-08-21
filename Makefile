@@ -66,7 +66,7 @@ DC_SOURCE_FILES := $(wildcard DC-*)
 # If LANGS is not defined, for output, use only those files that have at least 60% translations
 MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(DOMAIN_LIST))))
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(XML_SOURCE_FILES)))
-ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,$(ENT_FILES)))
+ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
 DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(wildcard DC-*)))
 # PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
