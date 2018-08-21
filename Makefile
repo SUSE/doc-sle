@@ -150,7 +150,7 @@ $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
 $(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
-	ln -s @< $@
+	ln -s $@ @<
 
 $(DC_DEST_FILES): $(DC_SOURCE_FILES)
 	cp {$(PREREQ_LIST_COMMA_SEPARATED)} $(@D)
