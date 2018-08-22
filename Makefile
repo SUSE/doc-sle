@@ -9,7 +9,7 @@
 # * When creating output:   $ make linguas; make all
 # * To clean up:            $ make clean
 
-.PHONY: clean linguas po pot translate validate pdf text single-html translatedxml
+.PHONY: clean_po_temp clean_mo clean_pot clean linguas po pot translate validate pdf text single-html translatedxml
 
 ifndef LANGS
   LANGS := $(shell cat LINGUAS)
@@ -63,7 +63,7 @@ PO_FILES := $(foreach DOMAIN,$(DOMAIN_LIST),$(subst _DOMAIN_NAME_,$(DOMAIN),$(fo
 
 DC_SOURCE_FILES := $(wildcard DC-*)
 
-# If LANGS is not defined, for output, use only those files that have at least 60% translations
+# If LANGS is not defined, use for output only those files that have at least 60% translations
 MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(DOMAIN_LIST))))
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(XML_SOURCE_FILES)))
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(ENT_FILES)))
@@ -85,6 +85,8 @@ PO_TEMPLATE = $(addprefix 50-pot/,$(addsuffix .pot,$(basename $(basename $(@F)))
 PO_FILE = $(addsuffix .po,$(basename $@))
 # Gets the input mo starting from xml destination
 MO_FILE = $(addprefix $(subst xml,po,$(@D)/),$(addsuffix .mo,$(addsuffix .$(subst /xml,,$(@D)),$(basename $(@F)))))
+# Gets the DC source starting from target DC
+DC_SOURCE = $(basename $(@F))
 # Turns a space-separated prereq list into a comma-separated list
 COMMA := ,
 EMPTY :=
@@ -114,11 +116,11 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 
 all: single-html pdf text
 
-linguas: LINGUAS
 LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
 pot: $(POT_FILES)
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -135,22 +137,26 @@ $(POT_FILES): $(SOURCE_FILES)
 $(POT_FILES): $(XML_SOURCE_FILES)
 >>>>>>> 29f34e64f... Modified Makefile
 	$(ITSTOOL) -o $@ $(XML_SOURCE)
+=======
+$(POT_FILES): $(XML_SOURCE)
+	$(ITSTOOL) -o $@ $<
+>>>>>>> 8a3e6d198... Fixed prereqs
 
 po: $(PO_FILES)
-$(PO_FILES): $(POT_FILES)
+$(PO_FILES): $(PO_TEMPLATE)
 	if [ -r $@ ]; then \
-	msgmerge  --previous --update $@ $(PO_TEMPLATE); \
+	msgmerge  --previous --update $@ $<; \
 	else \
-	msgen --lang=$(subst /po,,$(@D)) -o $@ $(PO_TEMPLATE); \
+	msgen -o $@ $<; \
 	fi
 
 mo: $(MO_FILES)
-$(MO_FILES): $(PO_FILES)
-	msgfmt $(PO_FILE) -o $@
+$(MO_FILES): $(PO_FILE)
+	msgfmt $< -o $@
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DEST_FILES)
-$(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
+$(XML_DEST_FILES): $(MO_FILE) $(XML_SOURCE)
 	if [ ! -d $(@D) ]; then mkdir -p $(@D); fi
 	$(ITSTOOL) -m $(MO_FILE) -o $(@D) $(XML_SOURCE)
 #	sed -i -r \
@@ -177,8 +183,8 @@ $(ENT_DEST_FILES): $(ENT_FILES)
 	ln -sf ../../$$ENT_FILE $(@D); \
 	done;
 
-$(DC_DEST_FILES): $(DC_SOURCE_FILES)
-	cp $(@F) $(@D)
+$(DC_DEST_FILES): $(DC_SOURCE)
+	cp $< $(@D)
 
 validate: $(DC_DEST_FILES)
 	for DC_FILE in $^; do \
@@ -214,5 +220,14 @@ $(TXT_FILES): LINGUAS translatedxml
 	LANG=$${lang} $(DAPS_COMMAND) text \
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
-clean:
-	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/~*)) $(MO_FILES) $(POT_FILES) LINGUAS $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/xml/)) build/
+clean_po_temp:
+	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/~*))
+	
+clean_mo:
+	rm -rf $(MO_FILES)
+
+clean_pot:
+	rm -rf $(POT_FILES)
+	
+clean: clean_po_temp clean_mo clean_pot
+	rm -rf LINGUAS $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/xml/)) build/
