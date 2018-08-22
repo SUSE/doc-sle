@@ -63,7 +63,7 @@ PO_FILES := $(foreach DOMAIN,$(DOMAIN_LIST),$(subst _DOMAIN_NAME_,$(DOMAIN),$(fo
 
 DC_SOURCE_FILES := $(wildcard DC-*)
 
-# If LANGS is not defined, use for output only those files that have at least 60% translations
+# If LANGS is not defined, for output, use only those files that have at least 60% translations
 MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(DOMAIN_LIST))))
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(XML_SOURCE_FILES)))
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(ENT_FILES)))
@@ -85,8 +85,6 @@ PO_TEMPLATE = $(addprefix 50-pot/,$(addsuffix .pot,$(basename $(basename $(@F)))
 PO_FILE = $(addsuffix .po,$(basename $@))
 # Gets the input mo starting from xml destination
 MO_FILE = $(addprefix $(subst xml,po,$(@D)/),$(addsuffix .mo,$(addsuffix .$(subst /xml,,$(@D)),$(basename $(@F)))))
-# Gets the DC source starting from target DC
-DC_SOURCE = $(basename $(@F))
 # Turns a space-separated prereq list into a comma-separated list
 COMMA := ,
 EMPTY :=
@@ -116,28 +114,29 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 
 all: single-html pdf text
 
+linguas: LINGUAS
 LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
 pot: $(POT_FILES)
-$(POT_FILES): $(XML_SOURCE)
-	$(ITSTOOL) -o $@ $<
+$(POT_FILES): $(XML_SOURCE_FILES)
+	$(ITSTOOL) -o $@ $(XML_SOURCE)
 
 po: $(PO_FILES)
-$(PO_FILES): $(PO_TEMPLATE)
+$(PO_FILES): $(POT_FILES)
 	if [ -r $@ ]; then \
-	msgmerge  --previous --update $@ $<; \
+	msgmerge  --previous --update $@ $(PO_TEMPLATE); \
 	else \
-	msgen -o $@ $<; \
+	msgen -o $@ $(PO_TEMPLATE); \
 	fi
 
 mo: $(MO_FILES)
-$(MO_FILES): $(PO_FILE)
-	msgfmt $< -o $@
+$(MO_FILES): $(PO_FILES)
+	msgfmt $(PO_FILE) -o $@
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DEST_FILES)
-$(XML_DEST_FILES): $(MO_FILE) $(XML_SOURCE)
+$(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
 	if [ ! -d $(@D) ]; then mkdir -p $(@D); fi
 	$(ITSTOOL) -m $(MO_FILE) -o $(@D) $(XML_SOURCE)
 #	sed -i -r \
@@ -157,15 +156,15 @@ $(XML_DEST_FILES): $(MO_FILE) $(XML_SOURCE)
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
 $(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
-	ln -sf ../../$< $(@D)
+	ln -sf ../../$^ $(@D)
 	
 $(ENT_DEST_FILES): $(ENT_FILES)
 	for ENT_FILE in $^; do \
 	ln -sf ../../$$ENT_FILE $(@D); \
 	done;
 
-$(DC_DEST_FILES): $(DC_SOURCE)
-	cp $< $(@D)
+$(DC_DEST_FILES): $(DC_SOURCE_FILES)
+	cp $(@F) $(@D)
 
 validate: $(DC_DEST_FILES)
 	for DC_FILE in $^; do \
