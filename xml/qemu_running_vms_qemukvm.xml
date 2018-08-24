@@ -4,7 +4,7 @@
   <!ENTITY % entities SYSTEM "entity-decl.ent">
     %entities;
 ]>
-<!-- Converted by suse-upgrade version 1.1 -->
+
 <chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.qemu.running">
  <title>Running Virtual Machines with qemu-system-ARCH</title>
  <info>
@@ -332,7 +332,7 @@
        You can also specify the initial time of the &vmguest;'s clock with the
        <literal>base</literal> option:
       </para>
-<screen>qemu-system-x86_64 [...] -rtc clock=vm,base=2010-12-03T01:02:00</screen>
+<screen>&prompt.user;qemu-system-x86_64 [...] -rtc clock=vm,base=2010-12-03T01:02:00</screen>
       <para>
        Instead of a time stamp, you can specify <literal>utc</literal> or
        <literal>localtime</literal>. The former instructs &vmguest; to start at
@@ -365,7 +365,7 @@
     <literal>-device</literal> option, and identify with
     <literal>drive=</literal> suboption. For example:
    </para>
-<screen>qemu-system-x86_64 [...] -drive if=none,id=drive0,format=raw \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -drive if=none,id=drive0,format=raw \
 -device virtio-blk-pci,drive=drive0,scsi=off ...</screen>
    <para>
     To get help on available drivers and their properties, use <option>-device
@@ -474,20 +474,20 @@
     <para>
      You can use
     </para>
-<screen>qemu-system-x86_64 -cdrom /images/cdrom.iso</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 -cdrom /images/cdrom.iso</screen>
     <para>
      instead of
     </para>
-<screen>qemu-system-x86_64 -drive file=/images/cdrom.iso,index=2,media=cdrom</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 -drive file=/images/cdrom.iso,index=2,media=cdrom</screen>
     <para>
      and
     </para>
-<screen>qemu-system-x86_64 -hda /images/imagei1.raw -hdb /images/image2.raw -hdc \
+<screen>&prompt.sudo;qemu-system-x86_64 -hda /images/imagei1.raw -hdb /images/image2.raw -hdc \
 /images/image3.raw -hdd /images/image4.raw</screen>
     <para>
      instead of
     </para>
-<screen>qemu-system-x86_64 -drive file=/images/image1.raw,index=0,media=disk \
+<screen>&prompt.sudo;qemu-system-x86_64 -drive file=/images/image1.raw,index=0,media=disk \
 -drive file=/images/image2.raw,index=1,media=disk \
 -drive file=/images/image3.raw,index=2,media=disk \
 -drive file=/images/image4.raw,index=3,media=disk</screen>
@@ -503,11 +503,11 @@
     <para>
      To access the host CD-ROM drive, use
     </para>
-<screen>qemu-system-x86_64 [...] -drive file=/dev/cdrom,media=cdrom</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -drive file=/dev/cdrom,media=cdrom</screen>
     <para>
      To access the host hard disk, use
     </para>
-<screen>qemu-system-x86_64 [...] -drive file=/dev/hdb,media=disk</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -drive file=/dev/hdb,media=disk</screen>
     <para>
      A host drive used by a &vmguest; must not be accessed concurrently by the
      &vmhost; or another &vmguest;.
@@ -530,7 +530,7 @@
      that this option is valid only for the <literal>if=scsi</literal> drive
      interface:
     </para>
-<screen>qemu-system-x86_64 [...] -drive file=/path/to/file.img,if=scsi,discard=on</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -drive file=/path/to/file.img,if=scsi,discard=on</screen>
     <important>
      <title>Support Status</title>
      <para>
@@ -540,65 +540,40 @@
      </para>
     </important>
    </sect3>
-   <sect3 xml:id="kvm.virtio_data_plane">
-    <title>virtio-blk-data-plane</title>
+   <sect3 xml:id="kvm.iothreads">
+    <title>IOThreads</title>
     <para>
-     The <emphasis>virtio-blk-data-plane</emphasis> is a new feature for &kvm;.
-     It enables a high-performance code path for I/O requests coming from
-     &vmguest;s. More specifically, this feature introduces dedicated threads
-     (one per virtual block device) to process I/O requests going through the
-     <emphasis>virtio-blk</emphasis> driver. It uses the Linux AIO
-     (asynchronous I/O) interface of the &vmhost; kernel directly&mdash;without
-     the need to go through the &qemu; block layer. Therefore, it can sustain
-     very high I/O rates on storage setups.
+     IOThreads are dedicated event loop threads for virtio devices to perform
+     I/O requests in order to improve scalability, especially on an SMP
+     &vmhost; with SMP &vmguest;s using many disk devices. Instead of using
+     &qemu;'s main event loop for I/O processing, IOThreads allow spreading
+     I/O work across multiple CPUs and can improve latency when properly
+     configured.
     </para>
     <para>
-     The virtio-blk-data-plane feature can be enabled or disabled by the
-     <option>x-data-plane=on|off</option> option on the <command>qemu</command>
-     command line when starting the &vmguest;:
+     IOThreads are enabled by defining IOThread objects. virtio devices can
+     then use the objects for their I/0 event loops. Many virtio devices can
+     use a single IOThread object, or virtio devices and IOThread objects
+     can be configured in a 1:1 mapping. The following example creates a
+     single IOThread with ID <literal>iothread0</literal> which is then used
+     as the event loop for two virtio-blk devices.
     </para>
-<screen>&prompt.user;qemu-system-x86_64 [...] -drive if=none,id=drive0,cache=none,aio=native,\
+<screen>&prompt.user;qemu-system-x86_64 [...] -object iothread,id=iothread0\
+-drive if=none,id=drive0,cache=none,aio=native,\
 format=raw,file=filename -device virtio-blk-pci,drive=drive0,scsi=off,\
-config-wce=off,x-data-plane=on [...]</screen>
+iothread=iothread0 -drive if=none,id=drive1,cache=none,aio=native,\
+format=raw,file=filename -device virtio-blk-pci,drive=drive1,scsi=off,\
+iothread=iothread0 [...]</screen>
     <para>
-     Currently, virtio-blk-data-plane has the following limitations:
+      The following qemu command line example illustrates a 1:1 virtio device
+      to IOThread mapping:
     </para>
-    <itemizedlist mark="bullet" spacing="normal">
-     <listitem>
-      <para>
-       Only the raw image format is supported.
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       No support for live migration.
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       Block jobs and hot unplug operations fail with
-       <literal>-EBUSY</literal>.
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       I/O throttling limits are ignored.
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       Only Linux &vmhost;s are supported because of the Linux AIO usage, but
-       non-Linux &vmguest;s are supported.
-      </para>
-     </listitem>
-    </itemizedlist>
-    <important>
-     <title>Support Status</title>
-     <para>
-      The virtio-blk-data-plane feature is not yet supported in &productname;.
-      It is released as a technology preview only.
-     </para>
-    </important>
+<screen>&prompt.user;qemu-system-x86_64 [...] -object iothread,id=iothread0\
+-object iothread,id=iothread1 -drive if=none,id=drive0,cache=none,aio=native,\
+format=raw,file=filename -device virtio-blk-pci,drive=drive0,scsi=off,\
+iothread=iothread0 -drive if=none,id=drive1,cache=none,aio=native,\
+format=raw,file=filename -device virtio-blk-pci,drive=drive1,scsi=off,\
+    iothread=iothread1 [...]</screen>
    </sect3>
    <sect3 xml:id="kvm.virtio_blk.use_bio">
     <title>Bio-Based I/O Path for virtio-blk</title>
@@ -691,7 +666,7 @@ config-wce=off,x-data-plane=on [...]</screen>
      </para>
     </note>
 
-    <screen>qemu-system-x86_64 -machine accel=kvm \
+    <screen>&prompt.sudo;qemu-system-x86_64 -machine accel=kvm \
   -drive file=iscsi://192.168.100.1:3260/iqn.2016-08.com.example:314605ab-a88e-49af-b4eb-664808a3443b/0,\
   format=raw,if=none,id=mydrive,cache=none \
   -device ide-hd,bus=ide.0,unit=0,drive=mydrive ...</screen>
@@ -737,9 +712,9 @@ based iSCSI:
      <para>
       RADOS Block Devices (RBD) store data in a Ceph cluster. They allow snapshotting,
       replication, and data consistency. You can use an RBD from your
-      &kvm;-managed &vmguest;s similarly you use other block devices.
+      &kvm;-managed &vmguest;s similarly to how you use other block devices.
      </para>
-     <para>
+     <para os="sles;sled">
       Refer to <link
        xlink:href="https://www.suse.com/documentation/ses-4/book_storage_admin/data/cha_ceph_kvm.html">SUSE
        Enterprise Storage documentation</link> for more details.
@@ -956,7 +931,7 @@ QEMU 2.3.1 monitor - type 'help' for more information
         <literal>format</literal> option is used rather than detecting the
         format.
        </para>
-<screen>qemu-system-x86_64 [...] -usbdevice
+<screen>&prompt.user;qemu-system-x86_64 [...] -usbdevice
         disk:format=raw:/virt/usb_disk.raw</screen>
       </listitem>
      </varlistentry>
@@ -1007,7 +982,7 @@ QEMU 2.3.1 monitor - type 'help' for more information
         mouse on &vmguest; started with <literal>qemu-system-ARCH [...]
         -usbdevice mouse</literal>:
        </para>
-<screen>&prompt.user;sudo hwinfo --mouse
+<screen>&prompt.sudo;hwinfo --mouse
 20: USB 00.0: 10503 USB Mouse
 [Created at usb.122]
 UDI: /org/freedesktop/Hal/devices/usb_device_627_1_1_if0
@@ -1086,7 +1061,7 @@ Device: usb 0x0001 "QEMU USB Mouse"
        Creates a two-way stream socket. If <replaceable>PATH</replaceable> is
        specified, a Unix socket is created:
       </para>
-<screen>qemu-system-x86_64 [...] -chardev \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -chardev \
 socket,id=unix_socket1,path=/tmp/unix_socket1,server</screen>
       <para>
        The <replaceable>SERVER</replaceable> suboption specifies that the
@@ -1096,7 +1071,7 @@ socket,id=unix_socket1,path=/tmp/unix_socket1,server</screen>
        If <replaceable>PORT</replaceable> is specified, a TCP socket is
        created:
       </para>
-<screen>qemu-system-x86_64 [...] -chardev \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -chardev \
 socket,id=tcp_socket1,host=localhost,port=7777,server,nowait</screen>
       <para>
        The command creates a local listening (<literal>server</literal>) TCP
@@ -1113,7 +1088,7 @@ socket,id=tcp_socket1,host=localhost,port=7777,server,nowait</screen>
        Sends all network traffic from &vmguest; to a remote host over the UDP
        protocol.
       </para>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -chardev udp,id=udp_fwd,host=&wsIVname;,port=7777</screen>
       <para>
        The command binds port 7777 on the remote host &wsIVname; and sends
@@ -1129,7 +1104,7 @@ socket,id=tcp_socket1,host=localhost,port=7777,server,nowait</screen>
        Creates a new &qemu; text console. You can optionally specify the
        dimensions of the virtual console:
       </para>
-<screen>qemu-system-x86_64 [...] -chardev vc,id=vc1,width=640,height=480 \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] -chardev vc,id=vc1,width=640,height=480 \
 -mon chardev=vc1</screen>
       <para>
        The command creates a new virtual console called <literal>vc1</literal>
@@ -1146,7 +1121,7 @@ socket,id=tcp_socket1,host=localhost,port=7777,server,nowait</screen>
        <literal>path</literal> is required and will be created if it does not
        exist.
       </para>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -chardev file,id=qemu_log1,path=/var/log/qemu/guest1.log</screen>
      </listitem>
     </varlistentry>
@@ -1279,7 +1254,7 @@ socket,id=tcp_socket1,host=localhost,port=7777,server,nowait</screen>
     Use <literal>-netdev</literal> together with the related
     <option>-device</option> option to add a new emulated network card:
    </para>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -netdev tap<co xml:id="co.qemu.running.networking.nic.tap"/>,id=hostnet0 \
 -device virtio-net-pci<co xml:id="co.qemu.running.networking.nic.drv"/>,netdev=hostnet0,vlan=1<co xml:id="co.qemu.running.networking.nic.vlan"/>,\
 macaddr=&wsIVmac;<co xml:id="co.qemu.running.networking.nic.mac"/>,name=ncard1</screen>
@@ -1305,7 +1280,7 @@ macaddr=&wsIVmac;<co xml:id="co.qemu.running.networking.nic.mac"/>,name=ncard1</
       To view a list of options for a specific driver, add
       <option>help</option> as a driver option:
      </para>
-<screen>qemu-system-x86_64 -device e1000,help
+<screen>&prompt.sudo;qemu-system-x86_64 -device e1000,help
 e1000.mac=macaddr
 e1000.vlan=vlan
 e1000.netdev=netdev
@@ -1343,8 +1318,8 @@ e1000.command_serr_enable=on/off</screen>
     user-mode networking. This is the default if no networking mode is
     selected. Therefore, these command lines are equivalent:
    </para>
-<screen>qemu-system-x86_64 -hda /images/sles_base.raw</screen>
-<screen>qemu-system-x86_64 -hda /images/sles_base.raw -netdev user,id=hostnet0</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 -hda /images/sles_base.raw</screen>
+<screen>&prompt.sudo;qemu-system-x86_64 -hda /images/sles_base.raw -netdev user,id=hostnet0</screen>
    <para>
     This mode is useful if you want to allow the &vmguest; to access the
     external network resources, such as the Internet. By default, no incoming
@@ -1368,7 +1343,7 @@ e1000.command_serr_enable=on/off</screen>
     </para>
     <example xml:id="ex.qemu.net.usermode.resctrict">
      <title>Restricted User-mode Networking</title>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -netdev user<co xml:id="co.usermode.user"/>,id=hostnet0 \
 -device virtio-net-pci,netdev=hostnet0,vlan=1<co xml:id="co.usermode.vlan"/>,name=user_net1<co xml:id="co.usermode.name"/>,restrict=yes<co xml:id="co.usermode.restrict"/></screen>
      <calloutlist>
@@ -1398,7 +1373,7 @@ e1000.command_serr_enable=on/off</screen>
     </example>
     <example xml:id="ex.qemu.net.usermode.iprange">
      <title>User-mode Networking with Custom IP Range</title>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -netdev user,id=hostnet0 \
 -device virtio-net-pci,netdev=hostnet0,net=10.2.0.0/8<co xml:id="co.usermode.net"/>,host=10.2.0.6<co xml:id="co.usermode.host"/>,\
 dhcpstart=10.2.0.20<co xml:id="co.usermode.dhcpstart"/>,hostname=tux_kvm_guest<co xml:id="co.usermode.hostname"/></screen>
@@ -1431,7 +1406,7 @@ dhcpstart=10.2.0.20<co xml:id="co.usermode.dhcpstart"/>,hostname=tux_kvm_guest<c
     </example>
     <example xml:id="ex.qemu.net.usermode.netboot_tftp">
      <title>User-mode Networking with Network-boot and TFTP</title>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -netdev user,id=hostnet0 \
 -device virtio-net-pci,netdev=hostnet0,tftp=/images/tftp_dir<co xml:id="co.usermode.tftp"/>,\
 bootfile=/images/boot/pxelinux.0<co xml:id="co.usermode.bootfile"/></screen>
@@ -1456,7 +1431,7 @@ bootfile=/images/boot/pxelinux.0<co xml:id="co.usermode.bootfile"/></screen>
     </example>
     <example xml:id="ex.qemu.net.usermode.hostfwd">
      <title>User-mode Networking with Host Port Forwarding</title>
-<screen>qemu-system-x86_64 [...] \
+<screen>&prompt.sudo;qemu-system-x86_64 [...] \
 -netdev user,id=hostnet0 \
 -device virtio-net-pci,netdev=hostnet0,hostfwd=tcp::2222-:22</screen>
      <para>
@@ -1465,7 +1440,7 @@ bootfile=/images/boot/pxelinux.0<co xml:id="co.usermode.bootfile"/></screen>
       <systemitem class="daemon">sshd</systemitem> is running on &vmguest;,
       enter
      </para>
-<screen>ssh qemu_host -p 2222</screen>
+<screen>&prompt.user;ssh qemu_host -p 2222</screen>
      <para>
       where <literal>qemu_host</literal> is the host name or IP address of the
       host system, to get a <systemitem class="daemon">SSH</systemitem> prompt
@@ -1514,17 +1489,6 @@ bootfile=/images/boot/pxelinux.0<co xml:id="co.usermode.bootfile"/></screen>
       In the <guimenu>Bridged Devices</guimenu> pane, select the Ethernet
       device to add to the bridge.
      </para>
-     <figure>
-      <title>Configuring Network Bridge with &yast;</title>
-      <mediaobject>
-       <imageobject role="fo">
-        <imagedata fileref="qemu_yast_bridge_eth0.png" width="70%" format="PNG"/>
-       </imageobject>
-       <imageobject role="html">
-        <imagedata fileref="qemu_yast_bridge_eth0.png" width="70%" format="PNG"/>
-       </imageobject>
-      </mediaobject>
-     </figure>
      <para>
       Click <guimenu>Next</guimenu>. When asked about adapting an already
       configured device, click <guimenu>Continue</guimenu>.
@@ -1535,9 +1499,10 @@ bootfile=/images/boot/pxelinux.0<co xml:id="co.usermode.bootfile"/></screen>
       Click <guimenu>OK</guimenu> to apply the changes. Check if the bridge is
       created:
      </para>
-<screen>&prompt.user;brctl show
-bridge name bridge id          STP enabled  interfaces
-br0         8000.001676d670e4  no           eth0</screen>
+<screen>&prompt.user;bridge link
+2: eth0 state UP : &lt;BROADCAST,MULTICAST,UP,LOWER_UP&gt; mtu 1500 master br0 \
+ state forwarding priority 32 cost 100
+</screen>
     </step>
    </procedure>
    <sect3 xml:id="cha.qemu.running.networking.bridge.manually">
@@ -1548,27 +1513,27 @@ br0         8000.001676d670e4  no           eth0</screen>
      are run via the <command>sudo</command> mechanism because they require
      &rootuser; privileges.
     </para>
-    <note>
-     <title>Required Packages</title>
+    <tip>
+     <title>Required Software</title>
      <para>
-      Make sure the <systemitem>tunctl</systemitem> and
-      <systemitem>bridge-utils</systemitem> packages are installed on the
-      &vmhost;. If not, install them with <command>zypper in tunctl
-      bridge-utils</command>.
+      To manage a network bridge, you need to have the
+      <package>tunctl</package> package installed.
      </para>
-    </note>
+    </tip>
 <screen>
 #!/bin/bash
 bridge=br0<co xml:id="co.qemu.net.bridge.br"/>
 tap=$(sudo tunctl -u $(whoami) -b)<co xml:id="co.qemu.net.bridge.tap"/>
 sudo ip link set $tap up<co xml:id="co.qemu.net.bridge.up"/>
 sleep 1s<co xml:id="co.qemu.net.bridge.sleep"/>
-sudo brctl addif $bridge $tap<co xml:id="co.qemu.net.bridge.br3"/>
+sudo ip link add name $bridge type bridge
+sudo ip link set $bridge up
+sudo ip link set $tap master $bridge<co xml:id="co.qemu.net.bridge.br3"/>
 qemu-system-x86_64 -machine accel=kvm -m 512 -hda /images/sles_base.raw \
--netdev tap,id=hostnet0 \
--device virtio-net-pci,netdev=hostnet0,vlan=0,macaddr=&wsIVmac;,\
-ifname=$tap<co xml:id="co.qemu.net.bridge.ifname"/>,script=no<co xml:id="co.qemu.net.bridge.script"/>,downscript=no
-sudo brctl delif $bridge $tap<co xml:id="co.qemu.net.bridge.delif"/>
+ -netdev tap,id=hostnet0 \
+ -device virtio-net-pci,netdev=hostnet0,vlan=0,macaddr=&wsIVmac;,\
+ ifname=$tap<co xml:id="co.qemu.net.bridge.ifname"/>,script=no<co xml:id="co.qemu.net.bridge.script"/>,downscript=no
+sudo ip link set $tap nomaster<co xml:id="co.qemu.net.bridge.delif"/>
 sudo ip link set $tap down<co xml:id="co.qemu.net.bridge.linkdown"/>
 sudo tunctl -d $tap<co xml:id="co.qemu.net.bridge.deltap"/></screen>
     <calloutlist>
@@ -1883,8 +1848,8 @@ sudo tunctl -d $tap<co xml:id="co.qemu.net.bridge.deltap"/></screen>
   </para>
 
 <screen>&prompt.user;qemu-system-x86_64 [...] -vnc :5
-(on the client:)
-&prompt.user2;:~&gt;vinagre &wsII;:5905 &amp;</screen>
+# (on the client:)
+&prompt.user2;vncviewer &wsII;:5 &amp;</screen>
 
   <figure>
    <title>&qemu; VNC Session</title>
@@ -1919,24 +1884,16 @@ sudo tunctl -d $tap<co xml:id="co.qemu.net.bridge.deltap"/></screen>
     <xref linkend="sec.libvirt.connect.remote.tls.client"/>.
    </para>
    <para>
-    The Vinagre VNC viewer supports advanced authentication mechanisms.
+    The Remmina VNC viewer supports advanced authentication mechanisms.
     Therefore, it will be used to view the graphical output of &vmguest; in the
     following examples. For this example, let us assume that the server x509
     certificates <filename>ca-cert.pem</filename>,
     <filename>server-cert.pem</filename>, and
     <filename>server-key.pem</filename> are located in the
-    <filename>/etc/pki/qemu</filename> directory on the host, while the
-    client's certificates are distributed in the following locations on the
-    client:
+    <filename>/etc/pki/qemu</filename> directory on the host.
+    The client certificates can be placed in any custom directory, as Remmina
+    asks for their path on the connection start-up.
    </para>
-   <simplelist>
-    <member><filename>/etc/pki/CA/cacert.pem</filename>
-    </member>
-    <member><filename>/etc/pki/libvirt-vnc/clientcert.pem</filename>
-    </member>
-    <member><filename>/etc/pki/libvirt-vnc/private/clientkey.pem</filename>
-    </member>
-   </simplelist>
    <example xml:id="ex.running.vnc.secure.pwd">
     <title>Password Authentication</title>
 <screen>qemu-system-x86_64 [...] -vnc :5,password -monitor stdio</screen>
@@ -1958,7 +1915,7 @@ Password: ****
     </para>
    </example>
    <figure>
-    <title>Authentication Dialog in Vinagre</title>
+    <title>Authentication Dialog in Remmina</title>
     <mediaobject>
      <imageobject role="fo">
       <imagedata fileref="qemu_vnc_pwd.png" width="70%" format="PNG"/>

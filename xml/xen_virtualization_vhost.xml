@@ -4,7 +4,6 @@
   <!ENTITY % entities SYSTEM "entity-decl.ent">
     %entities;
 ]>
-<!-- Converted by suse-upgrade version 1.1 -->
 <chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha.xen.vhost">
  <title>Setting Up a Virtual Machine Host</title>
  <info>
@@ -18,9 +17,9 @@
  </para>
  <para>
   Usually, the hardware requirements for the &dom0; are the same as those for
-  the &productname; operating system. Additional CPU, disk, memory, and
-  network resources should be added to accommodate the resource demands of all
-  planned &vmguest; systems.
+  the &productname; operating system. Additional CPU, disk, memory, and network
+  resources should be added to accommodate the resource demands of all planned
+  &vmguest; systems.
  </para>
  <tip>
   <title>Resources</title>
@@ -29,7 +28,7 @@
    they run on faster processors and have access to more system memory.
   </para>
  </tip>
- <!-- <para>
+<!-- <para>
   &xen; virtualization technology is available in &productname; products based
   on code path 10 and later. Code path 10 products include Open Enterprise
   Server 2 Linux, &productname; 10, &sled; 10, and &opensuse; 10.x.
@@ -124,40 +123,44 @@
   <title>Managing &dom0; Memory</title>
 
   <para>
-   When the host is set up, a percentage of system memory is reserved for the
-   hypervisor, and all remaining memory is automatically allocated to &dom0;.
+   In a default &xen; installation, a small percentage of system memory is
+   reserved for the hypervisor, and all remaining memory is automatically
+   allocated to &dom0;. When virtual machines are created, memory is ballooned
+   out of &dom0; to provide memory for the virtual machine. This process is
+   called "autoballooning".
   </para>
 
   <para>
-   A better solution is to set a default amount of memory for &dom0;, so the
-   memory can be allocated appropriately to the hypervisor. An adequate amount
-   would be 20 percent of the total system memory up to 4 GiB. A recommended
-   minimum amount would be 512 MiB
+   SUSE recommends disabling autoballooning and configuring &dom0; with
+   adequate memory. Generally 10 percent of the total system memory is
+   sufficient, with a minimum of 1 GiB and a maximum of 64 GiB.
   </para>
 
   <warning>
-   <title>Minimum amount of Memory</title>
+   <title>Insufficient Memory for &dom0;</title>
    <para>
-    The minimum amount of memory heavily depends on how many &vmguest;(s) the
-    host should handle. So be sure you have enough memory to support all your
-    &vmguest;s. If the value is too low, the host system may hang when multiple
-    &vmguest;s use most of the memory.
+    The amount of memory reserved for &dom0; is a function of the number of
+    &vmguest;(s) running on the host since &dom0; provides backend network and
+    disk I/O services for each &vmguest;. Other workloads running in &dom0;
+    should also be considered when calculating &dom0; memory allocation. In
+    general, memory sizing of &dom0; should be determined like any other
+    virtual machine.
    </para>
   </warning>
 
   <sect2 xml:id="sec.xen.vhost.maxmem">
-   <title>Setting a Maximum Amount of Memory</title>
+   <title>Setting &dom0; Memory Allocation</title>
    <procedure>
     <step>
      <para>
-      Determine the amount of memory to set for &dom0;.
+      Determine memory allocation required for &dom0;.
      </para>
     </step>
     <step>
      <para>
       At &dom0;, type <command>xl info</command> to view the amount of memory
-      that is available on the machine. The memory that is currently allocated
-      by &dom0; can be determined with the command <command>xl list</command>.
+      that is available on the machine. &dom0;'s current memory allocation can
+      be determined with the <command>xl list</command> command.
      </para>
     </step>
     <step>
@@ -178,7 +181,7 @@
       <replaceable>MEM_AMOUNT</replaceable> is the maximum amount of memory to
       allocate to &dom0;. Add <command>K</command>, <command>M</command>, or
       <command>G</command>, to specify the size, for example,
-      <command>dom0_mem=768M</command>.
+      <command>dom0_mem=2G</command>.
      </para>
     </step>
     <step>
@@ -280,7 +283,7 @@
     reserve system memory for a recovery kernel in &dom0;, this memory need to
     be reserved by the hypervisor. Thus, it is necessary to add the parameter
     <systemitem>crashkernel=size</systemitem> to the <literal>kernel</literal>
-    line instead of using the line with the other boot options.
+    line instead of using the line with the other boot parameters.
    </para>
    <para>
     For more information on the crashkernel parameter, see
@@ -411,37 +414,37 @@
     <step>
      <para>
       Select a device to reassign to a &vmguest;. To do this, run
-      <command>lspci</command> and read the device number. For example, if
-      <command>lspci</command> contains the following line:
+      <command>lspci -k</command>, and read the device number and the name of
+      the original module that is assigned to the device:
      </para>
-<screen>06:01.0 Ethernet controller: Digital Equipment Corporation DECchip 21142/43 (rev 41)</screen>
+<screen>06:01.0 Ethernet controller: Intel Corporation Ethernet Connection I217-LM (rev 05)
+        Subsystem: Dell Device 0617
+        Kernel driver in use: e1000e
+        Kernel modules: e1000e</screen>
      <para>
-      In this case, the PCI number is <literal>(06:01.0)</literal>.
+      In this case, the PCI number is <literal>(06:01.0)</literal> and the
+      dependent kernel module is <literal>e1000e</literal>.
      </para>
     </step>
     <step>
      <para>
-      Run <menuchoice><guimenu>&yast;</guimenu><guimenu>System</guimenu>
-      <guimenu>Boot Loader</guimenu></menuchoice>.
+      Specify a module dependency to ensure that
+      <systemitem>xen_pciback</systemitem> is the first module to control the
+      device. Add the file named
+      <filename>/etc/modprobe.d/50-e1000e.conf</filename> with the following
+      content:
      </para>
+<screen>install e1000e /sbin/modprobe xen_pciback ; /sbin/modprobe \
+ --first-time --ignore-install e1000e</screen>
     </step>
     <step>
      <para>
-      Select the <literal>&xen;</literal> section and click
-      <guimenu>Edit</guimenu>.
+      Instruct the <systemitem>xen_pciback</systemitem> module to control the
+      device using the 'hide' option. Edit or create
+      <filename>/etc/modprobe.d/50-xen-pciback.conf</filename> with the
+      following content:
      </para>
-    </step>
-    <step>
-     <para>
-      Add the PCI number to the <guimenu>Optional Kernel Command Line
-      Parameter</guimenu> line:
-     </para>
-<screen>pciback.hide=(06:01.0)</screen>
-    </step>
-    <step>
-     <para>
-      Click <guimenu>OK</guimenu> and exit &yast;.
-     </para>
+<screen>options xen_pciback hide=(06:01.0)</screen>
     </step>
     <step>
      <para>
@@ -458,19 +461,19 @@
    <sect3 xml:id="config.hypervisor.pciback.xl">
     <title>Dynamic Assignment with xl</title>
     <para>
-     To avoid restarting the host system, you can use dynamic
-     assignment with xl to use &pciback;.
+     To avoid restarting the host system, you can use dynamic assignment with
+     xl to use &pciback;.
     </para>
     <para>
      Begin by making sure that dom0 has the pciback module loaded:
     </para>
-<screen>modprobe pciback</screen>
+<screen>&prompt.sudo;modprobe pciback</screen>
     <para>
      Then make a device assignable by using <command>xl
-     pci-assignable-add</command>. For example, to make the
-     device <emphasis>06:01.0</emphasis> available for guests, run the command:
+     pci-assignable-add</command>. For example, to make the device
+     <emphasis>06:01.0</emphasis> available for guests, run the command:
     </para>
-<screen>xl pci-assignable-add 06:01.0</screen>
+<screen>&prompt.sudo;xl pci-assignable-add 06:01.0</screen>
    </sect3>
   </sect2>
 
@@ -630,48 +633,80 @@ pci=['yy:zz.n']</screen>
    </itemizedlist>
   </sect2>
  </sect1>
-
  <sect1 xml:id="sec.xen.vhost.usbpass">
-  <title>USB Pass-Through with PVUSB</title>
-
-<!--
-https://trello.com/c/UYtqYllp/298-how-to-use-pvusb-with-xen-and-libvirt
-fate#316612: XEN: pvusb support
--->
+  <title>USB Pass-Through</title>
 
   <para>
-   PVUSB is a new high performance method for USB Pass-Through from dom0
-   to the virtualized guests.  PVUSB supports both USB 2.0 and USB 1.1
-   devices.  PVUSB uses a paravirtualized front- and back-end interface.
-
-
-   With PVUSB, there are two ways to add USB devices to a guest:
+   There are two methods for passing through individual host USB devices to a
+   guest. The first is via an emulated USB device controller, the second is
+   using PVUSB.
   </para>
-  <itemizedlist>
-   <listitem>
-    <para>
-     via the configuration file at domain creation time
-    </para>
-   </listitem>
-   <listitem>
-    <para>
-     via hotplug while the VM is running
-    </para>
-   </listitem>
-  </itemizedlist>
 
+  <sect2 xml:id="xen.usb.identify">
+   <title>Identify the USB Device</title>
+   <para>
+    Before you can pass through a USB device to the &vmguest;, you need to
+    identify it on the &vmhost;. Use the <command>lsusb</command> command to
+    list the USB devices on the host system:
+   </para>
+<screen>&prompt.root;lsusb
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 002 Device 003: ID 0461:4d15 Primax Electronics, Ltd Dell Optical Mouse
+Bus 002 Device 001: ID 1d6b:0001 Linux Foundation 1.1 root hub</screen>
+   <para>
+    To pass through the Dell mouse, for example, specify either the device tag
+    in the form <literal>vendor_id:device_id</literal> (0461:4d15) or the bus
+    address in the form <literal>bus.device</literal> (2.3). Remember to remove
+    leading zeros, otherwise <command>xl</command> would interpret the numbers
+    as octal values.
+   </para>
+  </sect2>
 
-  <para>
-   PVUSB uses a paravirtualized front- and back-end interface.
-   PVUSB supports USB 1.1 and USB 2.0, and it works for both PV and HVM
-   guests.
+  <sect2 xml:id="xen.usb.emulated">
+   <title>Emulated USB Device</title>
+   <para>
+    In emulated USB, the device model (&qemu;) presents an emulated USB
+    controller to the guest. The USB device is then controlled from &dom0;
+    while USB commands are translated between the &vmguest; and the host USB
+    device. This method is only available to fully virtualized domains (HVM).
+   </para>
+   <para>
+    Enable the emulated USB hub with the <option>usb=1</option> option. Then
+    specify devices among the list of devices in the config file along with
+    other emulated devices by using <literal>host:USBID</literal>. For example:
+   </para>
+<screen>
+usb=1
+usbdevice=['tablet','host:2.3','host:0424:460']
+</screen>
+  </sect2>
 
-   To use PVUSB, you need usbfront in your guest OS, and
-   usbback in dom0 or usb back-end in qemu. On &productname;, the usb back-end
-   comes with qemu.
-
-
-   <!--
+  <sect2 xml:id="xen.usb.pv">
+   <title>Pravirtualized PVUSB</title>
+   <para>
+    PVUSB is a new high performance method for USB Pass-Through from dom0 to
+    the virtualized guests. PVUSB supports both USB 2.0 and USB 1.1 devices.
+    PVUSB uses a paravirtualized front-end and back-end interfaces. With PVUSB,
+    there are two ways to add USB devices to a guest:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      via the configuration file at domain creation time
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      via hotplug while the VM is running
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    PVUSB uses a paravirtualized front- and back-end interface. PVUSB supports
+    USB 1.1 and USB 2.0, and it works for both PV and HVM guests. To use PVUSB,
+    you need usbfront in your guest OS, and usbback in dom0 or usb back-end in
+    qemu. On &productname;, the usb back-end comes with qemu.
+<!--
        Additionally, for easy use of PVUSB, you need support in the
        toolstack to get the two sides to talk to each
        other.
@@ -680,69 +715,43 @@ fate#316612: XEN: pvusb support
        more information.)
        -\->
    -->
-  </para>
-
-  <para>
-   Use <command>lsusb</command> to list the USB devices on the system:
-  </para>
-<screen>&prompt.root;lsusb
-Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
-Bus 002 Device 003: ID 0461:4d15 Primax Electronics, Ltd Dell Optical Mouse
-Bus 002 Device 001: ID 1d6b:0001 Linux Foundation 1.1 root hub</screen>
-<para>
-   To pass through the Dell mouse, for example, specify either
-   0461:4d15 or 2.3 (you must remove leading zeros, otherwise
-   <command>xl</command> would interpret the numbers as octal values).
-
-  </para>
-
-  <para>
-   As of Xen 4.7, <command>xl</command> PVUSB support and hotplug
-   support is introduced.
-  </para>
-  <para>
-   In the configuration file, specify USB controllers and USB host
-   devices with <literal>usbctrl</literal> and <literal>usbdev</literal>. For
-   example, in case of HVM guests:
-  </para>
-
-
-<screen>usbctrl=['type=qubs,version=2,ports=4', 'type=qubs,version=1,ports=4', ]
+   </para>
+   <para>
+    As of Xen 4.7, <command>xl</command> PVUSB support and hotplug support is
+    introduced.
+   </para>
+   <para>
+    In the configuration file, specify USB controllers and USB host devices
+    with <literal>usbctrl</literal> and <literal>usbdev</literal>. For example,
+    in case of HVM guests:
+   </para>
+<screen>usbctrl=['type=qusb,version=2,ports=4', 'type=qusb,version=1,ports=4', ]
 usbdev=['hostbus=2, hostaddr=1, controller=0,port=1', ]</screen>
-
-<!--
-    für den controller bei HVM-Gästen unbedingt "type=qusb" angeben
-    ist. Macht man das nicht, wird die Operation fehlschlagen (default
-    ist bei HVM-Gästen "devicemodel", und das geht erst in Xen 4.8).
--->
-<note>
- <para>
-  It is important to specify <literal>type=qusb</literal> for the
-  controller of HVM guests.
- </para>
-</note>
-
-<para>
- To manage hotpluggin PVUSB devices, use the
- <literal>usbctrl-attach</literal>, <literal>usbctrl-detach</literal>,
- <literal>usb-list</literal>, <literal>usbdev-attach</literal> and
- <literal>usb-detach</literal> subcommands.  For example:
-</para>
-<para>
-Create a USB controller which is version USB 1.1 and has 8 ports:
-</para>
+   <note>
+    <para>
+     It is important to specify <literal>type=qusb</literal> for the controller
+     of HVM guests.
+    </para>
+   </note>
+   <para>
+    To manage hotpluggin PVUSB devices, use the
+    <literal>usbctrl-attach</literal>, <literal>usbctrl-detach</literal>,
+    <literal>usb-list</literal>, <literal>usbdev-attach</literal> and
+    <literal>usb-detach</literal> subcommands. For example:
+   </para>
+   <para>
+    Create a USB controller which is version USB 1.1 and has 8 ports:
+   </para>
 <screen>&prompt.root;xl usbctrl-attach test_vm version=1 ports=8 type=qusb</screen>
-<para>
- Find the first available controller:port in the domain, and attach USB
- device whose busnum:devnum is 2:3 to it; you can also specify
- <literal>controller</literal> and <literal>port</literal>:
-</para>
-
+   <para>
+    Find the first available controller:port in the domain, and attach USB
+    device whose busnum:devnum is 2:3 to it; you can also specify
+    <literal>controller</literal> and <literal>port</literal>:
+   </para>
 <screen>&prompt.root;xl usbdev-attach test_vm hostbus=2 hostaddr=3</screen>
-
-<para>
- Show all USB controllers and USB devices in the domain:
-</para>
+   <para>
+    Show all USB controllers and USB devices in the domain:
+   </para>
 <screen>&prompt.root;xl usb-list test_vm
 Devid  Type   BE  state usb-ver ports
 0      qusb   0   1     1       8
@@ -754,24 +763,20 @@ Devid  Type   BE  state usb-ver ports
   Port 6:
   Port 7:
   Port 8:</screen>
-
-<para>
- Detach the USB device under controller 0 port 1:
-</para>
+   <para>
+    Detach the USB device under controller 0 port 1:
+   </para>
 <screen>&prompt.root;xl usbdev-detach test_vm 0 1</screen>
-
-<para>
- Remove the USB controller with the indicated <literal>dev_id</literal>,
- and all USB devices under it:
-</para>
-
+   <para>
+    Remove the USB controller with the indicated <literal>dev_id</literal>, and
+    all USB devices under it:
+   </para>
 <screen>&prompt.root;xl usbctrl-detach test_vm dev_id</screen>
-
-<para>
- For more information, see <link
+   <para>
+    For more information, see
+    <link
  xlink:href="https://wiki.xenproject.org/wiki/Xen_USB_Passthrough"/>.
-</para>
-
-  </sect1>
-
+   </para>
+  </sect2>
+ </sect1>
 </chapter>

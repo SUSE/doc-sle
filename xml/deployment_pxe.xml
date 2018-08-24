@@ -1,0 +1,680 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+
+<chapter version="5.0" role="General" xml:id="cha.deployment.prep_pxe"
+  xmlns="http://docbook.org/ns/docbook"
+  xmlns:xi="http://www.w3.org/2001/XInclude"
+  xmlns:xlink="http://www.w3.org/1999/xlink">
+ <title>Preparing Network Boot Environment</title>
+ <info>
+  <abstract>
+   <para>
+    This chapter describes how to configure a DHCP and a TFTP server
+    that provide the required infrastructure for booting with PXE.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  &productnamereg; can be installed via a Preboot Execution Environment
+  (PXE). The client hardware needs to support booting via PXE. The
+  network needs to provide a DHCP server and a TFTP server providing the
+  required data to the clients. This chapter guides you through setting
+  up the required servers.
+ </para>
+ <para>
+  PXE only boots a kernel and initrd. This can be used to boot into an
+  installation environment or into live systems. To set up the
+  installation sources, see <xref linkend="cha.deployment.instserver"
+  />.
+ </para>
+ <para>
+  This section covers the configuration tasks needed in complex boot
+  scenarios. It contains ready-to-apply configuration examples for
+  DHCP, PXE boot, TFTP, and Wake on LAN.
+ </para>
+ <para>
+  The examples assume that the DHCP, TFTP and NFS server reside on the
+  same machine with the IP <literal>192.168.1.1</literal>. All services
+  can reside on different machines without any problems. Make sure to
+  change the IP addresses as required.
+ </para>
+ <sect1 xml:id="sec.deployment.dhcp_server">
+  <title>Setting Up a DHCP Server</title>
+  <para>
+   In addition to providing automatic address allocation to your
+   network clients, the DHCP server announces the IP address of the
+   TFTP server and the paths to the Kernel and Initrd files. Which file
+   needs to be loaded depends on the architecture of the target machine
+   and whether legacy BIOS or UEFI boot is used. The clients transmit
+   their architecture type in the DHCP request. Based on this
+   information, the DHCP server can decide which files the client must
+   download for booting.
+  </para>
+  <procedure xml:id="pro.deployment.dhcp_server">
+   <step>
+    <para>
+     Log in as &rootuser; to the machine hosting the DHCP server.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enable the DHCP server by executing <command>systemctl enable
+     dhcpd</command>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Append the following lines to a subnet configuration of your DHCP
+     server's configuration file located under
+     <filename>/etc/dhcpd.conf</filename>:
+    </para>
+<screen># The following lines are optional
+option domain-name "my.lab";
+option domain-name-servers 192.168.1.1;
+option routers 192.168.1.1;
+option ntp-servers 192.168.1.1;
+ddns-update-style none;
+default-lease-time 3600;
+
+# The following lines are required
+option arch code 93 = unsigned integer 16; # RFC4578
+subnet 192.168.1.0 netmask 255.255.255.0 {
+ next-server 192.168.1.1;
+ range 192.168.1.100 192.168.1.199;
+ default-lease-time 3600;
+ max-lease-time 3600;
+ if option arch = 00:07 or option arch = 00:09 {
+   filename "/EFI/x86/grub.efi";
+ }
+ else if option arch = 00:0b {
+   filename "/EFI/aarch64/bootaa64.efi";
+ }
+ else  {
+   filename "/BIOS/x86/pxelinux.0";
+ }
+}</screen>
+    <para>
+     This configuration example uses the subnet <literal>192.168.1.0/24</literal> with the
+     DHCP, DNS and gateway on the server with the IP <literal>192.168.1.1</literal>. Make sure
+     that all used IP addresses are changed according to your network layout.
+     For more information about the options available in <filename>dhcpd.conf</filename>,
+     refer to the <systemitem>dhcpd.conf</systemitem> manual page.
+    </para>
+   </step>
+   <step>
+    <para>
+     Restart the DHCP server by executing <command>systemctl restart
+     dhcpd</command>.
+    </para>
+   </step>
+  </procedure>
+  <para>
+   If you plan to use SSH for the remote control of a PXE and Wake on LAN
+   installation, specify the IP address DHCP should provide to the
+   installation target. To achieve this, modify the above mentioned DHCP
+   configuration according to the following example:
+  </para>
+<screen>group {
+ host test {
+   hardware ethernet <replaceable>MAC_ADDRESS</replaceable>;
+   fixed-address <replaceable>IP_ADDRESS</replaceable>;
+   }
+}
+</screen>
+  <para>
+   The host statement introduces the host name of the installation target. To
+   bind the host name and IP address to a specific host, you must know and
+   specify the system's hardware (MAC) address. Replace all the variables used
+   in this example with the actual values that match your environment.
+  </para>
+  <para>
+   After restarting the DHCP server, it provides a static IP to the host
+   specified, enabling you to connect to the system via SSH.
+  </para>
+ </sect1>
+
+ <sect1 xml:id="sec.deployment.tftp_server">
+  <title>Setting Up a TFTP Server</title>
+  <para>
+   The following procedures describe how to prepare the server for target
+   machines with UEFI and BIOS on x86 architectures with 32 and 64 bits.
+   The prepared structure also already provides for &aarch64; systems.
+  </para>
+  <sect2 xml:id="sec.deployment.tftp_server.install">
+   <title>Installing TFTP Server</title>
+   <para>
+    To install a TFTP server, use the following procedure:
+   </para>
+
+   <procedure>
+    <step>
+     <para>
+      Install the <systemitem>tftp</systemitem> package.
+     </para>
+     <screen>&prompt.sudo;<command>zypper in tftp</command></screen>
+    </step>
+    <step>
+     <para>
+      Review the <systemitem class="daemon">tftpd</systemitem> configuration in
+      <filename>/etc/sysconfig/tftp</filename> and add or change options as
+      required. Refer to <command>man 8 tftpd</command> for more details.
+      The TFTP daemon works without changing the configuration. The default root
+      directory for the files is <filename>/srv/tftpboot</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Ensure that <systemitem class="daemon">tftpd</systemitem> is started at
+      boot time, and restart it to read the new configuration.
+     </para>
+     <screen>&prompt.sudo;<command>systemctl enable tftp.socket</command>
+&prompt.sudo;<command>systemctl restart tftp.socket</command></screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec.deployment.tftp_server.grub_package">
+   <title>Installing Files for Boot</title>
+   <para>
+    &productname; provides the required files for booting via a PXE on BIOS or
+    UEFI machines in an RPM. Install the files on the machine running the TFTP server:
+   </para>
+   <screen>&prompt.sudo;<command>zypper in tftpboot-installation-SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></command></screen>
+   <para>
+    Replace <replaceable>OS_VERSION</replaceable> with the version of your
+    &productname; installation, for example <literal>15</literal> and
+    <replaceable>ARCHITECTURE</replaceable> with the architecture of your
+    system, for example <literal>x86_64</literal>. You can use
+    <command>zypper se tftpboot</command> to search for all available
+    versions and architectures.
+   </para>
+   <para>
+    The files will be installed in
+    <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></filename>.
+    You can also copy the files for other versions and
+    architectures of &productname; to the
+    <filename>/srv/tftpboot</filename> directory.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec.deployment.tftp_server.pxelinux">
+   <title>Configuring PXELINUX</title>
+   <para>
+    Open the file
+    <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/net/pxelinux.cfg/default</filename>
+    in an editor. Replace the path for the <literal>install</literal>
+    parameter according to your setup as described in <xref
+    linkend="cha.deployment.instserver"/>. Also replace
+    <replaceable>TFTP_SERVER</replaceable> with the IP address of the
+    TFTP server. For an overview of the PXELINUX configuration options,
+    see <xref linkend="sec.deployment.prep_boot.pxeopts"/>.
+   </para>
+<screen>default linux
+
+# install
+label linux
+  ipappend 2
+  kernel boot/<replaceable>ARCHITECTURE</replaceable>/loader/linux
+  append initrd=boot/x86_64/<replaceable>ARCHITECTURE</replaceable>/initrd instsys=tftp://<replaceable>TFTP_SERVER</replaceable>/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/boot/<replaceable>ARCHITECTURE</replaceable>/root install=<replaceable>PROTOCOL</replaceable>://<replaceable>SERVER_IP</replaceable>:/<replaceable>PATH</replaceable>
+
+display  message
+implicit 1
+prompt  1
+timeout  50</screen>
+   <para>
+    For details about the boot parameters that are used in the <literal>append</literal> line,
+    see <xref linkend="sec.boot_parameters.list"/>.
+   </para>
+   <para>
+    If required, edit the
+    <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/net/pxelinux.cfg/message</filename>
+    to display a message in the boot menu.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec.deployment.tftp_server.efilinux_x86">
+   <title>Preparing PXE Boot for EFI with GRUB2</title>
+   <para>
+    There is no need to change the GRUB2 configuration files. However,
+    in the default settings no network source for the installation system
+    is provided. If you want to fully install &productname; via the
+    network, add the <option>install</option> parameter to the
+    <option>linuxefi</option> lines in the file
+    <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/EFI/BOOT/grub.cfg</filename>.
+    Set the <literal>install</literal>
+    parameter according to your setup as described in
+    <xref linkend="cha.deployment.instserver"/>. For details about other
+    boot parameters that are used in the <literal>efilinux</literal>
+    lines, see <xref linkend="sec.boot_parameters.list"/>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeopts">
+  <title>PXELINUX Configuration Options</title>
+
+  <para>
+   The options listed here are a subset of all the options available for the
+   PXELINUX configuration file.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><option>APPEND <replaceable>OPTIONS</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Adds one or more options to the kernel command line. These are added for
+      both automatic and manual boots. The options are added at the very
+      beginning of the kernel command line, usually permitting explicitly
+      entered kernel options to override them.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>APPEND -</option>
+    </term>
+    <listitem>
+     <para>
+      Appends nothing. <option>APPEND</option> with a single hyphen as argument
+      in a <option>LABEL</option> section can be used to override a global
+      <option>APPEND</option>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>DEFAULT <replaceable>KERNEL_OPTIONS</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      Sets the default kernel command line. If PXELINUX boots automatically, it
+      acts as if the entries after DEFAULT had been typed in at the boot
+      prompt, except the auto option is automatically added, indicating an
+      automatic boot.
+     </para>
+     <para>
+      If no configuration file exists or no DEFAULT entry is defined in the
+      configuration file, the default is the kernel name <quote>linux</quote>
+      with no options.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+<!-- FATE#313283 -->
+    <term><option>IFAPPEND <replaceable>FLAG</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Adds a specific option to the kernel command line depending on the
+      <replaceable>FLAG</replaceable> value. The <option>IFAPPEND</option>
+      option is available only on PXELINUX. <replaceable>FLAG</replaceable>
+      expects a value, described in
+      <xref linkend="tab.deployment.boot.pxeopts.ifappend"/>:
+     </para>
+     <table xml:id="tab.deployment.boot.pxeopts.ifappend">
+      <title>Generated and Added Kernel Command Line Options from <option>IFAPPEND</option></title>
+      <tgroup cols="2">
+       <colspec colwidth="1*"/>
+       <colspec colwidth="4*"/>
+       <thead>
+        <row>
+         <entry valign="middle">
+          <para>
+           Argument
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Generated Kernel Command Line / Description
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <option>1</option>
+          </para>
+         </entry>
+         <entry>
+<screen>ip=<replaceable>CLIENT_IP</replaceable>:<replaceable>BOOT_SERVER_IP</replaceable>:<replaceable>GW_IP</replaceable>:<replaceable>NETMASK</replaceable></screen>
+          <para>
+           The placeholders are replaced based on the input from the DHCP/BOOTP
+           or PXE boot server.
+          </para>
+          <para>
+           Note, this option is not a substitute for running a DHCP client in
+           the booted system. Without regular renewals, the lease acquired by
+           the PXE BIOS will expire, making the IP address available for reuse
+           by the DHCP server.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>2</option>
+          </para>
+         </entry>
+         <entry>
+<screen>BOOTIF=<replaceable>MAC_ADDRESS_OF_BOOT_INTERFACE</replaceable></screen>
+          <para>
+           This option is useful to avoid timeouts when the
+           installation server probes one LAN interface after another until
+           it gets a reply from a DHCP server. This option allows an
+           initrd program to determine from which interface the system has been
+           booted. linuxrc reads this option and uses this network interface.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>4</option>
+          </para>
+         </entry>
+         <entry>
+<screen>SYSUUID=<replaceable>SYSTEM_UUID</replaceable></screen>
+          <para>
+           Adds UUIDs in lowercase hexadecimals, see
+           <filename>/usr/share/doc/packages/syslinux/pxelinux.txt</filename>
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LABEL <replaceable>LABEL</replaceable> KERNEL <replaceable>IMAGE</replaceable>
+       APPEND <replaceable>OPTIONS</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      Indicates that if <replaceable>LABEL</replaceable> is entered as the
+      kernel to boot, PXELINUX should instead boot
+      <replaceable>IMAGE</replaceable> and the specified
+      <option>APPEND</option> options should be used. They replace the ones
+      specified in the global section of the file, before the first
+      <option>LABEL</option> command. The default for
+      <replaceable>IMAGE</replaceable> is the same as
+      <replaceable>LABEL</replaceable> and, if no <option>APPEND</option> is
+      given, the default is to use the global entry (if any). Up to 128
+      <option>LABEL</option> entries are permitted.
+     </para>
+<!-- fs 2014-02-07: The following seems unrelated in this context. Whatsmore,
+     Legacy GRUB is no longer shipped with SLE
+
+      <para>
+       Note that &grub; uses the following syntax:
+      </para>
+<screen>title mytitle
+  kernel <replaceable>MY_KERNEL</replaceable><replaceable>MY_KERNEL_OPTIONS</replaceable>
+  initrd <replaceable>MYINITRD</replaceable></screen>
+-->
+     <para>
+      PXELINUX uses the following syntax:
+     </para>
+<screen>label <replaceable>MYLABEL</replaceable>
+  kernel <replaceable>MYKERNEL</replaceable>
+  append <replaceable>MYOPTIONS</replaceable></screen>
+     <para>
+      Labels are mangled as if they were file names and they must be unique
+      after mangling. For example, the two labels <quote>v2.6.30</quote> and
+      <quote>v2.6.31</quote> would not be distinguishable under PXELINUX
+      because both mangle to the same DOS file name.
+     </para>
+     <para>
+      The kernel does not need to be a Linux kernel. It can also be a boot
+      sector or a COMBOOT file.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LOCALBOOT <replaceable>TYPE</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      On PXELINUX, specifying <option>LOCALBOOT 0</option> instead of a
+      <option>KERNEL</option> option means invoking this particular label and
+      causes a local disk boot instead of a kernel boot.
+     </para>
+     <informaltable frame="topbot" rowsep="0">
+      <tgroup cols="2">
+<!--<colspec colnum="1" colname="1" colwidth="20"/>
+        <colspec colnum="2" colname="2" colwidth="60"/>-->
+       <thead>
+        <row>
+         <entry>
+          <para>
+           Argument
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Description
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>0</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Perform a normal boot
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>4</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Perform a local boot with the Universal Network Driver Interface
+           (UNDI) driver still resident in memory
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>5</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Perform a local boot with the entire PXE stack, including the UNDI
+           driver, still resident in memory
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+     <para>
+      All other values are undefined. If you do not know what the UNDI or PXE
+      stacks are, specify <literal>0</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>TIMEOUT <replaceable>TIME-OUT</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Indicates how long to wait at the boot prompt until booting
+      automatically, in units of 1/10 second. The time-out is canceled when the
+      user types anything on the keyboard, assuming the user will complete the
+      command begun. A time-out of zero disables the time-out completely (this
+      is also the default). The maximum possible time-out value is 35996 (just
+      less than one hour).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>PROMPT<replaceable> flag_val</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      If <option>flag_val</option> is 0, displays the boot prompt only if
+      <keycap function="shift"/> or <keycap function="alt"/> is pressed or
+      <keycap>Caps Lock</keycap> or <keycap>Scroll Lock</keycap> is set (this
+      is the default). If <option>flag_val</option> is 1, always displays the
+      boot prompt.
+     </para>
+<screen>F2  <replaceable>FILENAME</replaceable>
+F1  <replaceable>FILENAME</replaceable>
+..etc...
+F9  <replaceable>FILENAME</replaceable>
+F10 <replaceable>FILENAME</replaceable></screen>
+     <para>
+      Displays the indicated file on the screen when a function key is pressed
+      at the boot prompt. This can be used to implement preboot online help
+      (presumably for the kernel command line options). For backward
+      compatibility with earlier releases, <keycap>F10</keycap> can be also
+      entered as <literal>F0</literal>. Note that there is currently no way to
+      bind file names to <keycap>F11</keycap> and <keycap>F12</keycap>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.pxeprep">
+  <title>Preparing the Target System for PXE Boot</title>
+
+  <para>
+   Prepare the system's BIOS for PXE boot by including the PXE option in the
+   BIOS boot order.
+  </para>
+
+  <warning>
+   <title>BIOS Boot Order</title>
+   <para>
+    Do not place the PXE option ahead of the hard disk boot parameter in the BIOS.
+    Otherwise this system would try to re-install itself every time you boot
+    it.
+   </para>
+  </warning>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolprep">
+  <title>Preparing the Target System for Wake on LAN</title>
+
+  <para>
+   Wake on LAN (WOL) requires the appropriate BIOS option to be enabled prior
+   to the installation. Also, note down the MAC address of the target system.
+   This data is needed to initiate Wake on LAN.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wol">
+  <title>Wake on LAN</title>
+
+  <para>
+   Wake on LAN allows a machine to be turned on by a special network packet
+   containing the machine's MAC address. Because every machine in the world has
+   a unique MAC identifier, you do not need to worry about accidentally turning
+   on the wrong machine.
+  </para>
+
+  <important>
+   <title>Wake on LAN across Different Network Segments</title>
+   <para>
+    If the controlling machine is not located on the same network segment as
+    the target of the WOL command, you have 2 options. Either configure the WOL
+    requests to be sent as multicasts, or remotely control a machine on that
+    network segment to act as the sender of these requests.
+   </para>
+  </important>
+
+  <para>
+   Users of &sls; can use a &yast; module called WOL to easily configure Wake
+   on LAN. Users of other versions of &suselinux;-based operating systems can
+   use a command line tool.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.wolyast">
+  <title>Wake on LAN with &yast;</title>
+  <para>
+   Use this procedure to configure Wake on LAN with &yast;.
+  </para>
+  <procedure xml:id="pro.deployment.prep_boot.wolyast">
+   <step>
+    <para>
+     Log in as &rootuser;.
+    </para>
+   </step>
+   <step>
+    <para>
+     Start <menuchoice> <guimenu>&yast;</guimenu> <guimenu>Network
+     Services</guimenu> <guimenu>WOL</guimenu></menuchoice>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>Add</guimenu> and enter the host name and MAC address of
+     the target system.
+    </para>
+   </step>
+   <step>
+    <para>
+     To turn on this machine, select the appropriate entry and click
+     <guimenu>Wake up</guimenu>.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec.deployment.prep_boot.mksusecd">
+  <title>Booting from CD or USB Drive Instead of PXE</title>
+  <para>
+   You can also use a CD, DVD or USB drive with a small system image instead of
+   booting via PXE. The necessary files will be fetched via NFS when the
+   kernel and initrd are loaded. A bootable image can be created with
+   <command>mksusecd</command>. This can be useful if the target machine does
+   not support PXE boot.
+  </para>
+  <para>
+   Install it with <command>sudo zypper in mksusecd</command>.
+   Use the following command to create a bootable ISO image:
+  </para>
+  <screen>&prompt.user;<command>mksusecd</command> --create image.iso \
+--net=nfs://192.168.1.1:/srv/install/<replaceable>ARCH</replaceable>/<replaceable>OS_VERSION</replaceable>/<replaceable>SP_VERSION</replaceable>/cd1  \
+/srv/tftpboot/EFI/<replaceable>ARCH</replaceable>/boot</screen>
+  <para>
+   Replace <replaceable>ARCH</replaceable> with the directory corresponding
+   to the target system architecture. Also replace <replaceable>OS_version</replaceable>
+   and <replaceable>SP_version</replaceable> according to your paths in
+   <xref linkend="sec.deployment.tftp_server" />.
+  </para>
+  <para>
+   Instead of using an NFS server for the <option>--net</option> option,
+   it is also possible to use an HTTP repository, for example the &opensuse;
+   repository:
+  </para>
+  <screen>&prompt.user;<command>mksusecd</command> --create image.iso \
+--net=http://download.opensuse.org/tumbleweed/repo/oss/suse \
+/srv/tftpboot/EFI/<replaceable>ARCH</replaceable>/boot</screen>
+  <para>
+   The <filename>image.iso</filename> can be written to a DVD or CD, or using <command>dd</command> to a USB stick:
+  </para>
+  <screen>&prompt.root;<command>dd</command> if=image.iso of=/dev/<replaceable>USB_DEVICE</replaceable></screen>
+  <para>
+   Replace <replaceable>USB_DEVICE</replaceable> with the device name of your
+   USB stick. Check the device name thoroughly to ensure that you are not
+   accidentally destroying data on another drive.
+  </para>
+ </sect1>
+</chapter>

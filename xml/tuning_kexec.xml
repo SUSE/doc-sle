@@ -483,7 +483,7 @@
   </procedure>
 
   <tip>
-   <title>Excluding Unused and Inactive CCW Devices on IBM &zseries;</title>
+   <title>Excluding Unused and Inactive CCW Devices on &zseries;</title>
    <para>
     Depending on the number of available devices the calculated amount of
     memory specified by the <option>crashkernel</option> kernel parameter may
@@ -498,7 +498,7 @@
       generate an appropriate stanza to ignore all devices, except the ones
       currently active or in use.
      </para>
-     <screen>&prompt.user;sudo cio_ignore -u -k
+     <screen>&prompt.sudo;cio_ignore -u -k
 cio_ignore=all,!da5d,!f500-f502</screen>
      <para>
       When you run <command>cio_ignore -u -k</command>, the blacklist will
@@ -536,83 +536,53 @@ cio_ignore=all,!da5d,!f500-f502</screen>
   <title>Basic &kexec; Usage</title>
 
   <para>
-   To verify if your &kexec; environment works properly, follow these
-   steps:
+   To use &kexec;, ensure the respective service is enabled and running:
   </para>
 
-  <procedure>
-   <step>
+  <itemizedlist>
+   <listitem>
     <para>
-     Make sure no users are currently logged in and no important services
-     are running on the system.
+     Make sure the &kexec; service is loaded at system start:
     </para>
-   </step>
-   <step>
+    <screen>&prompt.sudo;systemctl enable kexec-load.service</screen>
+   </listitem>
+   <listitem>
     <para>
-     Log in as &rootuser;.
+     Make sure the &kexec; service is running:
     </para>
-   </step>
-   <step>
-    <para>
-     Switch to the rescue target with <command>systemctl isolate
-     rescue.target</command>
-    </para>
-   </step>
-   <step xml:id="step.kexec.usage.load.kernel">
-    <para>
-     Load the new kernel to the address space of the production kernel with
-     the following command:
-    </para>
-<screen>&prompt.root;<command>kexec</command> -l <replaceable>/boot/vmlinuz</replaceable> --append=<replaceable>"$(cat /proc/cmdline)"</replaceable> \
---initrd=<replaceable>/boot/initrd</replaceable></screen>
-   </step>
-   <step>
-    <para>
-     Unmount all mounted file systems except the root file system with:
-    </para>
-<screen><command>umount</command> <option>-a</option></screen>
-    <important>
-     <title>Unmounting the Root File System</title>
-     <para>
-      Unmounting all file systems will most likely produce a <literal>device
-      is busy</literal> warning message. The root file system cannot be
-      unmounted if the system is running. Ignore the warning.
-     </para>
-    </important>
-   </step>
-   <step>
-    <para>
-     Remount the root file system in read-only mode:
-    </para>
-<screen>&prompt.root;<command>mount</command> -o remount,ro /</screen>
-   </step>
-   <step>
-    <para>
-     Initiate the reboot of the kernel that you loaded in
-     <xref linkend="step.kexec.usage.load.kernel"/> with:
-    </para>
-<screen>&prompt.root;<command>kexec</command> -e</screen>
-   </step>
-  </procedure>
+    <screen>&prompt.sudo;systemctl start kexec-load.service</screen>
+   </listitem>
+  </itemizedlist>
 
   <para>
-   It is important to unmount the previously mounted disk volumes in
-   read-write mode. The <systemitem>reboot</systemitem> system call acts
-   immediately upon calling. Hard disk volumes mounted in read-write mode
-   neither synchronize nor unmount automatically. The new kernel may find
-   them <quote>dirty</quote>. Read-only disk volumes and virtual file
-   systems do not need to be unmounted. Refer to
-   <filename>/etc/mtab</filename> to determine which file systems you need
-   to unmount.
+   To verify if your &kexec; environment works properly, try rebooting into a
+   new Kernel with &kexec;. Make sure no users are currently logged in and no
+   important services are running on the system. If this is the case, run the
+   following command:
   </para>
+
+  <screen>systemctl kexec</screen>
 
   <para>
    The new kernel previously loaded to the address space of the older kernel
    rewrites it and takes control immediately. It displays the usual start-up
    messages. When the new kernel boots, it skips all hardware and firmware
-   checks. Make sure no warning messages appear. All file systems are
-   supposed to be clean if they had been unmounted.
+   checks. Make sure no warning messages appear.
   </para>
+
+  <tip>
+   <title>Using &kexec; with the reboot command</title>
+   <para>
+    To make <command>reboot</command> use kexec; rather than performing a
+    regular reboot, run the following command:
+   </para>
+   <screen>ln -s /usr/lib/systemd/system/kexec.target /etc/systemd/system/reboot.target</screen>
+   <para>
+    You can revert this at any time by deleting
+    <filename>etc/systemd/system/reboot.target</filename>.
+   </para>
+  </tip>
+
  </sect1>
  <sect1 xml:id="cha.tuning.kexec.config">
   <title>How to Configure &kexec; for Routine Reboots</title>
@@ -934,6 +904,103 @@ KDUMP_NET_TIMEOUT=30</screen>
     the <guimenu>Expert Settings</guimenu> window. &kdump; is now
     configured.
    </para>
+  </sect2>
+
+  <sect2 xml:id="cha.tuning.kdump.ssh">
+   <title>&kdump; over SSH</title>
+   <para>
+    Dump files usually contain sensitive data which should be
+    protected from unauthorized disclosure. To allow transmission of
+    such data over an insecure network, &kdump; can save dump files to
+    a remote machine using the SSH protocol.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      The target host identity must be known to &kdump;. This is needed
+      to ensure that sensitive data is never sent to an imposter. When
+      &kdump; generates a new <systemitem>initrd</systemitem>, it runs
+      <command>ssh-keygen -F
+      <replaceable>TARGET_HOST</replaceable></command> to query the
+      target host's identity. This works only if
+      <replaceable>TARGET_HOST</replaceable> public key is already
+      known. An easy way to achieve that is to make an SSH connection
+      to <replaceable>TARGET_HOST</replaceable> as &rootuser; on the
+      &kdump; host.
+     </para>
+    </step>
+    <step>
+     <para>
+      &kdump; must be able to authenticate to the target machine. Only
+      public key authentication is currently available. By default,
+      &kdump; will use &rootuser;'s private key, but it is advisable to
+      make a separate key for &kdump;. This can be done with
+      <command>ssh-keygen</command>:
+     </para>
+     <substeps>
+      <step>
+       <screen>&prompt.root;<command>ssh-keygen</command> -f <replaceable>~/.ssh/kdump_key</replaceable></screen>
+      </step>
+      <step>
+       <para>
+        Press <keycap function="enter"/> when prompted for
+        passphrase (that is, do not use any passphrase).
+       </para>
+      </step>
+      <step>
+       <para>
+        Open <filename>/etc/sysconfig/kdump</filename> and set
+        <literal>KDUMP_SSH_IDENTITY</literal> to
+        <replaceable>kdump_key</replaceable>. You can use full path to
+        the file if it is not placed under <filename>~/.ssh</filename>.
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      Set up the &kdump; SSH key to authorize logins to the remote host.
+     </para>
+     <screen>&prompt.root;<command>ssh-copy-id</command> -i <replaceable>~/.ssh/kdump_key</replaceable> <replaceable>TARGET_HOST</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      Set up <literal>KDUMP_SAVEDIR</literal>. There are two
+      options:
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>Secure File Transfer Protocol (sftp)</term>
+       <listitem>
+        <para>
+         SFTP is the preferred method for transmitting files over
+         SSH. The target host must enable the sftp subsystem (&slea;
+         default). Example:
+        </para>
+        <screen>KDUMP_SAVEDIR=sftp://<replaceable>TARGET_HOST</replaceable><replaceable>/path/to/dumps</replaceable></screen>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>Secure Shell Protocol (ssh)</term>
+       <listitem>
+        <para>
+         Some other distributions use SSH to run some commands on the
+         target host. &productname; can also use this method. The
+         &kdump; user on the target host must have a login shell that
+         can execute these commands: <command>mkdir</command>,
+         <command>dd</command> and <command>mv</command>. Example:
+        </para>
+        <screen>KDUMP_SAVEDIR=ssh://<replaceable>TARGET_HOST</replaceable><replaceable>/path/to/dumps</replaceable></screen>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </step>
+    <step>
+     <para>
+      Restart the &kdump; service to use the new configuration.
+     </para>
+    </step>
+   </procedure>
   </sect2>
  </sect1>
  <sect1 xml:id="cha.tuning.kdump.analyze">
