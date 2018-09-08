@@ -118,6 +118,18 @@ linguas: LINGUAS
 LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
+DC_XML_SOURCES:
+	for DC_FILE in $(ls DC*); do \
+	echo -n "$(basename $DC_FILE):"; \
+	for SOURCE_FILE in $(daps -d $DC_FILE list-srcfiles); do \
+	echo $SOURCE_FILE | grep -v '.ent' | grep -q '/xml/'; \
+	if [ ${PIPESTATUS[2]} -eq "0" ]; \
+	then echo -n " $(basename -s .xml $SOURCE_FILE)"; \
+	fi; \
+	done; \
+	echo; \
+	done > DC_XML_SOURCES
+
 pot: $(POT_FILES)
 $(POT_FILES): $(XML_SOURCE_FILES)
 	$(ITSTOOL) -o $@ $(XML_SOURCE)
