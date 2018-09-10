@@ -82,20 +82,6 @@ DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLA
 DAPS_COMMAND_BASIC = daps -vv  
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d 
 
-# Gets the xml source starting from target POT, or xml destination
-XML_SOURCE = $(addprefix xml/,$(addsuffix .xml,$(basename $(@F))))
-# Gets the po template starting from target PO
-PO_TEMPLATE = $(addprefix 50-pot/,$(addsuffix .pot,$(basename $(basename $(@F)))))
-# Gets the input po starting from target MO
-PO_FILE = $(addsuffix .po,$(basename $@))
-# Gets the input mo starting from xml destination
-MO_FILE = $(addprefix $(subst xml,po,$(@D)/),$(addsuffix .mo,$(addsuffix .$(subst /xml,,$(@D)),$(basename $(@F)))))
-# Turns a space-separated prereq list into a comma-separated list
-COMMA := ,
-EMPTY :=
-SPACE := $(EMPTY) $(EMPTY)
-PREREQ_LIST_COMMA_SEPARATED = $(subst $(SPACE),$(COMMA),$^)
-
 ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 
 XSLTPROC_COMMAND = xsltproc \
@@ -157,9 +143,11 @@ mo: $(MO_FILES)
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DEST_FILES)
-$(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
-	if [ ! -d $(@D) ]; then mkdir -p $(@D); fi
-	$(ITSTOOL) -m $(MO_FILE) -o $(@D) $(XML_SOURCE)
+
+define translate_xml
+ $(1)/xml/%.xml: $(1)/po/%.$(1).mo xml/%.xml
+	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
+	$$(ITSTOOL) -m $$(MO_FILE) -o $$(@D) $$(XML_SOURCE)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
 #	  $@.0
@@ -173,11 +161,14 @@ $(XML_DEST_FILES): $(MO_FILES) $(XML_SOURCE_FILES)
 #	  fix-up.xsl $@.0 \
 #	  > $@
 #	rm $@.0
-	daps-xmlformat -i $@
+	daps-xmlformat -i $$@
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
+endef
+
+$(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
 
 $(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
-	ln -sf ../../$^ $(@D)
+	ln -sf ../../$< $(@D)
 	
 $(ENT_DEST_FILES): $(ENT_FILES)
 	for ENT_FILE in $^; do \
