@@ -163,20 +163,18 @@ define translate_xml
 #	rm $@.0
 	daps-xmlformat -i $$@
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
+
+ %/xml/schemas.xml: xml/schemas.xml
+	ln -sf ../../$$< $$(@D)
+	
+ $(1)/xml/%.ent: xml/%.ent
+	ln -sf ../../$$< $$(@D)
+
+ $(DC_DEST_FILES): $(1)/% %
+	cp $$(@F) $$(@D)
 endef
 
 $(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
-
-$(SCHEMAS_XML_DEST_FILES): xml/schemas.xml
-	ln -sf ../../$< $(@D)
-	
-$(ENT_DEST_FILES): $(ENT_FILES)
-	for ENT_FILE in $^; do \
-	ln -sf ../../$$ENT_FILE $(@D); \
-	done;
-
-$(DC_DEST_FILES): $(DC_SOURCE_FILES)
-	cp $(@F) $(@D)
 
 validate: $(DC_DEST_FILES)
 	for DC_FILE in $^; do \
