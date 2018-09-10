@@ -11,7 +11,12 @@
 
 .PHONY: clean_po_temp clean_mo clean_pot clean linguas po pot translate validate pdf text single-html translatedxml
 
+ifndef BOOKS
+# Set default books to be translated
+  BOOKS := DC-SLED-all DC-SLES-all DC-opensuse-all
+endif
 ifndef LANGS
+# Set translation languages. TO DO: rework the po-selector script 
   LANGS := $(shell cat LINGUAS)
 endif
   LANGSEN := $(LANGS) en
@@ -119,7 +124,7 @@ LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
 DC_XML_SOURCES:
-	for DC_FILE in $(ls DC*); do \
+	for DC_FILE in $(BOOKS); do \
 	echo -n "$(basename $DC_FILE):"; \
 	for SOURCE_FILE in $(daps -d $DC_FILE list-srcfiles); do \
 	echo $SOURCE_FILE | grep -v '.ent' | grep -q '/xml/'; \
