@@ -135,7 +135,7 @@ XML_SOURCES_PER_DC:
 	done | sort | uniq > XML_SOURCES_PER_DC
 
 pot: $(POT_FILES)
-pot/%.pot: xml/*.xml
+50-pot/%.pot: xml/*.xml
 	$(ITSTOOL) -o $@ $<
 
 po: $(PO_FILES)
