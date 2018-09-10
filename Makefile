@@ -142,10 +142,10 @@ po: $(PO_FILES)
 
 define update_po
 $(1)/%.po: 50-pot/%.pot
-	if [ -r $@ ]; then \
-	msgmerge  --previous --update $@ $<; \
+	if [ -r $$@ ]; then \
+	msgmerge  --previous --update $$@ $$<; \
 	else \
-	msgen -o $@ $<; \
+	msgen -o $$@ $$<; \
 	fi
 endef   
 
