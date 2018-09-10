@@ -147,7 +147,7 @@ translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DE
 define translate_xml
  $(1)/xml/%.xml: $(1)/po/%.$(1).mo xml/%.xml
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
-	$$(ITSTOOL) -m $$(MO_FILE) -o $$(@D) $$(XML_SOURCE)
+	$$(ITSTOOL) -m $$< -o $$(@D) $$(subst $(1)/,,$$@)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
 #	  $@.0
