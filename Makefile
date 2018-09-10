@@ -135,8 +135,8 @@ XML_SOURCES_PER_DC:
 	done | sort | uniq > XML_SOURCES_PER_DC
 
 pot: $(POT_FILES)
-$(POT_FILES): $(XML_SOURCE_FILES)
-	$(ITSTOOL) -o $@ $(XML_SOURCE)
+pot/%.pot: xml/*.xml
+	$(ITSTOOL) -o $@ $<
 
 po: $(PO_FILES)
 $(PO_FILES): $(POT_FILES)
@@ -147,8 +147,8 @@ $(PO_FILES): $(POT_FILES)
 	fi
 
 mo: $(MO_FILES)
-$(MO_FILES): $(PO_FILES)
-	msgfmt $(PO_FILE) -o $@
+$(MO_FILES): %.mo: %.po
+	msgfmt $< -o $@
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DEST_FILES)
