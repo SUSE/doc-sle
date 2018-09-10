@@ -11,9 +11,9 @@
 
 .PHONY: clean_po_temp clean_mo clean_pot clean linguas po pot translate validate pdf text single-html translatedxml
 
-ifndef BOOKS
+ifndef BOOKS_TO_TRANSLATE
 # Set default books to be translated
-  BOOKS := DC-SLED-all DC-SLES-all DC-opensuse-all
+  BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
 endif
 ifndef LANGS
 # Set translation languages. TO DO: rework the po-selector script 
@@ -73,7 +73,7 @@ MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG)
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(XML_SOURCE_FILES)))
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
-DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(wildcard DC-*)))
+DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLATE)))
 # PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
 # SINGLE_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/single-html/release-notes.$(l)/index.html)
 # TXT_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l).txt)
@@ -124,16 +124,15 @@ LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
 XML_SOURCES_PER_DC:
-	for DC_FILE in $(BOOKS); do \
-	echo -n "$$(basename $$DC_FILE):"; \
+	@echo "Finding XML sources of books selected for translation..."; \
+	for DC_FILE in $(BOOKS_TO_TRANSLATE); do \
 	for SOURCE_FILE in $$(daps -d $$DC_FILE list-srcfiles); do \
 	echo $$SOURCE_FILE | grep -v '.ent' | grep -q '/xml/'; \
 	if [ $${PIPESTATUS[2]} -eq "0" ]; \
-	then echo -n " $$(basename -s .xml $$SOURCE_FILE)"; \
+	then echo "xml/$$(basename $$SOURCE_FILE)"; \
 	fi; \
 	done; \
-	echo; \
-	done > XML_SOURCES_PER_DC
+	done | sort | unique > XML_SOURCES_PER_DC
 
 pot: $(POT_FILES)
 $(POT_FILES): $(XML_SOURCE_FILES)
