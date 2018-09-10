@@ -132,7 +132,7 @@ XML_SOURCES_PER_DC:
 	then echo "xml/$$(basename $$SOURCE_FILE)"; \
 	fi; \
 	done; \
-	done | sort | unique > XML_SOURCES_PER_DC
+	done | sort | uniq > XML_SOURCES_PER_DC
 
 pot: $(POT_FILES)
 $(POT_FILES): $(XML_SOURCE_FILES)
