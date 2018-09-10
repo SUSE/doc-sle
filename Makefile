@@ -135,13 +135,13 @@ XML_SOURCES_PER_DC:
 	done | sort | uniq > XML_SOURCES_PER_DC
 
 pot: $(POT_FILES)
-50-pot/%.pot: xml/*.xml
+50-pot/%.pot: xml/%.xml
 	$(ITSTOOL) -o $@ $<
 
 po: $(PO_FILES)
 
-define update_po =
- $(1)/%.po: 50-pot/%.pot
+define update_po
+ $(1)/po/%.$(1).po: 50-pot/%.pot
 	if [ -r $$@ ]; then \
 	msgmerge  --previous --update $$@ $$<; \
 	else \
@@ -149,7 +149,7 @@ define update_po =
 	fi
 endef   
 
-$(foreach LANG,$(LANG_LIST),$(eval $(call update_po,$(LANG)/po)))
+$(foreach LANG,$(LANG_LIST),$(eval $(call update_po,$(LANG))))
 
 mo: $(MO_FILES)
 %.mo: %.po
