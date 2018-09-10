@@ -139,15 +139,20 @@ pot: $(POT_FILES)
 	$(ITSTOOL) -o $@ $<
 
 po: $(PO_FILES)
-$(PO_FILES): $(POT_FILES)
+
+define update_po
+$(1)/%.po: 50-pot/%.pot
 	if [ -r $@ ]; then \
-	msgmerge  --previous --update $@ $(PO_TEMPLATE); \
+	msgmerge  --previous --update $@ $<; \
 	else \
-	msgen -o $@ $(PO_TEMPLATE); \
+	msgen -o $@ $<; \
 	fi
+endef   
+
+$(foreach LANG, $(LANG_LIST), $(eval $(call update_po, $(LANG)/po)))
 
 mo: $(MO_FILES)
-$(MO_FILES): %.mo: %.po
+%.mo: %.po
 	msgfmt $< -o $@
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
