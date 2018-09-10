@@ -123,7 +123,7 @@ linguas: LINGUAS
 LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
-DC_XML_SOURCES:
+XML_SOURCES_PER_DC:
 	for DC_FILE in $(BOOKS); do \
 	echo -n "$$(basename $$DC_FILE):"; \
 	for SOURCE_FILE in $$(daps -d $$DC_FILE list-srcfiles); do \
@@ -133,7 +133,7 @@ DC_XML_SOURCES:
 	fi; \
 	done; \
 	echo; \
-	done > DC_XML_SOURCES
+	done > XML_SOURCES_PER_DC
 
 pot: $(POT_FILES)
 $(POT_FILES): $(XML_SOURCE_FILES)
@@ -227,4 +227,4 @@ clean_pot:
 	rm -rf $(POT_FILES)
 	
 clean: clean_po_temp clean_mo clean_pot
-	rm -rf LINGUAS $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/xml/)) build/
+	rm -rf LINGUAS XML_SOURCES_PER_DC $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/xml/)) build/
