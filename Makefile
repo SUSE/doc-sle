@@ -168,7 +168,7 @@ define translate_xml
  $(1)/xml/%.ent: xml/%.ent
 	ln -sf ../../$$< $$(@D)
 
- $$(DC_DEST_FILES): $(1)/% %
+ $$(DC_DEST_FILES): $(1)/%: %
 	cp $$(@F) $$(@D)
 endef
 
