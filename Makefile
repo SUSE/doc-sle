@@ -140,8 +140,8 @@ pot: $(POT_FILES)
 
 po: $(PO_FILES)
 
-define update_po
-$(1)/%.po: 50-pot/%.pot
+define update_po =
+ $(1)/%.po: 50-pot/%.pot
 	if [ -r $$@ ]; then \
 	msgmerge  --previous --update $$@ $$<; \
 	else \
@@ -149,7 +149,7 @@ $(1)/%.po: 50-pot/%.pot
 	fi
 endef   
 
-$(foreach LANG, $(LANG_LIST), $(eval $(call update_po, $(LANG)/po)))
+$(foreach LANG,$(LANG_LIST),$(eval $(call update_po,$(LANG)/po)))
 
 mo: $(MO_FILES)
 %.mo: %.po
