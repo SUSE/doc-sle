@@ -17,7 +17,7 @@ ifndef BOOKS_TO_TRANSLATE
 endif
 ifndef LANGS
 # Set translation languages. TO DO: rework the po-selector script 
-  LANGS := $(shell cat LINGUAS)
+  LANGS = $(shell cat LINGUAS)
 endif
   LANGSEN := $(LANGS) en
 ifndef STYLEROOT
@@ -152,7 +152,7 @@ translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DE
 define translate_xml
  $(1)/xml/%.xml: $(1)/po/%.$(1).mo xml/%.xml
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
-	$$(ITSTOOL) -m $$< -o $$(@D) $$(subst $(1)/,,$$@)
+	$$(ITSTOOL) -m $$< -o $$(@D) $$(filter %.xml,$$^)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
 #	  $@.0
@@ -198,19 +198,19 @@ translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	  > xml/release-notes.en.xml
 
 pdf: $(PDF_FILES)
-$(PDF_FILES): LINGUAS translatedxml
+$(PDF_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
 	$(DAPS_COMMAND) pdf PROFCONDITION="general\;$(LIFECYCLE)"
 
 single-html: $(SINGLE_HTML_FILES)
-$(SINGLE_HTML_FILES): LINGUAS translatedxml
+$(SINGLE_HTML_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
 	$(DAPS_COMMAND) html --single \
 	--stringparam "homepage='https://www.opensuse.org'" \
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
 text: $(TXT_FILES)
-$(TXT_FILES): LINGUAS translatedxml
+$(TXT_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
 	LANG=$${lang} $(DAPS_COMMAND) text \
 	PROFCONDITION="general\;$(LIFECYCLE)"
