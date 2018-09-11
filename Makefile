@@ -176,7 +176,7 @@ define translate_xml
 	ln -sf ../../$$< $$(@D)
 
  $$(DC_DEST_FILES): $(1)/%: %
-	ln -sf ../$$< $$(@D)
+	cp $$< $$(@D)
 endef
 
 $(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
