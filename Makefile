@@ -17,7 +17,7 @@ ifndef BOOKS_TO_TRANSLATE
 endif
 ifndef LANGS
 # Set translation languages. TO DO: rework the po-selector script 
-  LANGS = $(shell cat LINGUAS)
+  LANGS = $(shell echo $$(cd 50-tools && ./po-selector)it)
 endif
   LANGSEN := $(LANGS) en
 ifndef STYLEROOT
@@ -109,7 +109,9 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 
 all: single-html pdf text
 
-linguas: LINGUAS
+linguas:
+	echo $(LANGS)
+
 LINGUAS: $(PO_FILES) 50-tools/po-selector
 	50-tools/po-selector
 
