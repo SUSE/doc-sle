@@ -11,34 +11,6 @@
 
 .PHONY: clean_po_temp clean_mo clean_pot clean linguas po pot translate validate pdf text single-html translatedxml
 
-ifndef BOOKS_TO_TRANSLATE
-# Set default books to be translated
-  BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
-endif
-ifndef LANGS
-# Set translation languages. TO DO: rework the po-selector script 
-  LANGS = $(shell echo $$(cd 50-tools && ./po-selector)it)
-endif
-  LANGSEN := $(LANGS) en
-ifndef STYLEROOT
-  STYLEROOT := /usr/share/xml/docbook/stylesheet/opensuse2013-ns
-endif
-ifndef VERSION
-  VERSION := unreleased
-endif
-ifndef DATE
-  DATE := $(shell date +%Y-%0m-%0d)
-endif
-
-# Allows for DocBook profiling (hiding/showing some text).
-LIFECYCLE_VALID := beta pre maintained unmaintained
-ifndef LIFECYCLE
-  LIFECYCLE := maintained
-endif
-ifneq "$(LIFECYCLE)" "$(filter $(LIFECYCLE),$(LIFECYCLE_VALID))"
-  override LIFECYCLE := maintained
-endif
-
 # The list of available languages is retrieved by searching for subdirs with
 # pattern lang/po and removing the '/po' suffix
 LANG_LIST := $(subst /po,,$(wildcard */po))
@@ -64,13 +36,46 @@ POT_FILES := $(foreach DOMAIN,$(DOMAIN_LIST),50-pot/$(DOMAIN).pot)
 # 'lang/po/domain.lang.po'
 PO_FILES := $(foreach DOMAIN,$(DOMAIN_LIST),$(subst _DOMAIN_NAME_,$(DOMAIN),$(foreach LANG,$(LANG_LIST),$(LANG)/po/_DOMAIN_NAME_.$(LANG).po)))
 
+# If not specified, the default books to be translated are DC-SLED-all, DC-SLES-all,
+# DC-opensuse-all
+ifndef BOOKS_TO_TRANSLATE
+  BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
+endif
+
+# Determine the sources necessary to build selected books
+SELECTED_SOURCES := $(shell 50-tools/xml-selector $(BOOKS_TO_TRANSLATE) | tee /dev/tty | sed '1d; s@XML sources of .*: @@; /^$/d' | tr ' ' '\n' | sort -u)
+
 # These are the xml files required for the selected books stored in the
 # variable "BOOKS_TO_TRANSLATE"
-SELECTED_XML_FILES := $(filter %.xml,$(shell cat XML_SOURCES_PER_DC))
+SELECTED_XML_FILES := $(filter %.xml,$(SELECTED_SOURCES))
 
 # These are the ent files required for the selected books stored in the
 # variable "BOOKS_TO_TRANSLATE"
-SELECTED_ENT_FILES := $(filter %.ent,$(shell cat XML_SOURCES_PER_DC))
+SELECTED_ENT_FILES := $(filter %.ent,$(SELECTED_SOURCES))
+
+ifndef LANGS
+# Set translation languages. TO DO: rework the po-selector script 
+  LANGS = $(shell echo $$(cd 50-tools && ./po-selector)it)
+endif
+  LANGSEN := $(LANGS) en
+ifndef STYLEROOT
+  STYLEROOT := /usr/share/xml/docbook/stylesheet/opensuse2013-ns
+endif
+ifndef VERSION
+  VERSION := unreleased
+endif
+ifndef DATE
+  DATE := $(shell date +%Y-%0m-%0d)
+endif
+
+# Allows for DocBook profiling (hiding/showing some text).
+LIFECYCLE_VALID := beta pre maintained unmaintained
+ifndef LIFECYCLE
+  LIFECYCLE := maintained
+endif
+ifneq "$(LIFECYCLE)" "$(filter $(LIFECYCLE),$(LIFECYCLE_VALID))"
+  override LIFECYCLE := maintained
+endif
 
 # If LANGS is not defined, for output, use only those files that have at least 60% translations
 MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(shell cat XML_SOURCES_PER_DC | sed 's@xml/@@; s@\.xml@@' ))))
