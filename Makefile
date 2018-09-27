@@ -36,6 +36,9 @@ FULL_POT_LIST := $(foreach DOMAIN,$(FULL_DOMAIN_LIST),50-pot/$(DOMAIN).pot)
 # 'lang/po/domain.lang.po'
 FULL_PO_LIST := $(foreach DOMAIN,$(FULL_DOMAIN_LIST),$(subst _DOMAIN_NAME_,$(DOMAIN),$(foreach LANG,$(FULL_LANG_LIST),$(LANG)/po/_DOMAIN_NAME_.$(LANG).po)))
 
+# The list of MO files is generated ...
+FULL_MO_LIST := $(foreach DOMAIN,$(FULL_DOMAIN_LIST),$(subst _DOMAIN_NAME_,$(DOMAIN),$(foreach LANG,$(FULL_LANG_LIST),$(LANG)/po/_DOMAIN_NAME_.$(LANG).po)))
+
 # If not specified, the default books to be translated are DC-SLED-all, DC-SLES-all,
 # DC-opensuse-all
 ifndef BOOKS_TO_TRANSLATE
@@ -58,31 +61,16 @@ SELECTED_ENT_FILES := $(filter %.ent,$(SELECTED_SOURCES))
 SELECTED_DOMAIN_LIST := $(basename $(notdir $(SELECTED_XML_FILES)))
 
 ifndef LANGS
-# Set translation languages. TO DO: rework the po-selector script 
+# If LANGS is not defined within the command line, for output use only those files that have at least 60% translations
+# TO DO: rework the po-selector script to limit the check only on the PO files necessary to translate the selected books
   LANGS = $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
 endif
-  LANGSEN := $(LANGS) en
-ifndef STYLEROOT
-  STYLEROOT := /usr/share/xml/docbook/stylesheet/opensuse2013-ns
-endif
-ifndef VERSION
-  VERSION := unreleased
-endif
-ifndef DATE
-  DATE := $(shell date +%Y-%0m-%0d)
-endif
 
-# Allows for DocBook profiling (hiding/showing some text).
-LIFECYCLE_VALID := beta pre maintained unmaintained
-ifndef LIFECYCLE
-  LIFECYCLE := maintained
-endif
-ifneq "$(LIFECYCLE)" "$(filter $(LIFECYCLE),$(LIFECYCLE_VALID))"
-  override LIFECYCLE := maintained
-endif
+# TO DO: check if LANGSEN is still necessary
+LANGSEN := $(LANGS) en
 
-# If LANGS is not defined, for output, use only those files that have at least 60% translations
-MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(shell echo $(SELECTED_XML_FILES) | sed 's@xml/@@; s@\.xml@@' ))))
+SELECTED_MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(SELECTED_DOMAIN_LIST))))
+
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(SELECTED_XML_FILES)))
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
@@ -90,6 +78,31 @@ DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLA
 # PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
 # SINGLE_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/single-html/release-notes.$(l)/index.html)
 # TXT_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l).txt)
+
+# TO DO: check if STYLEROOT is still necessary
+ifndef STYLEROOT
+  STYLEROOT := /usr/share/xml/docbook/stylesheet/opensuse2013-ns
+endif
+
+# TO DO: check if VERSION is still necessary
+ifndef VERSION
+  VERSION := unreleased
+endif
+
+# TO DO: check if DATE is still necessary
+ifndef DATE
+  DATE := $(shell date +%Y-%0m-%0d)
+endif
+
+# Allows for DocBook profiling (hiding/showing some text).
+# TO DO: check if still necessary
+LIFECYCLE_VALID := beta pre maintained unmaintained
+ifndef LIFECYCLE
+  LIFECYCLE := maintained
+endif
+ifneq "$(LIFECYCLE)" "$(filter $(LIFECYCLE),$(LIFECYCLE_VALID))"
+  override LIFECYCLE := maintained
+endif
 
 # Gets the language code: release-notes.en.xml => en
 DAPS_COMMAND_BASIC = daps -vv  
@@ -119,29 +132,11 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 all:
 	@echo -ne "SELECTED_SOURCES: $(SELECTED_SOURCES)\n\nSELECTED_XML_FILES: $(SELECTED_XML_FILES)\n\nSELECTED_ENT_FILES: $(SELECTED_ENT_FILES)\n\nSELECTED_DOMAIN_LIST: $(SELECTED_DOMAIN_LIST)"
 
-linguas:
-	echo $(LANGS)
-
-LINGUAS: $(PO_FILES) 50-tools/po-selector
-	50-tools/po-selector
-
-# Depending on the selected books, find the necessary sources
-XML_SOURCES_PER_DC:
-	@echo "Finding XML sources of books selected for translation..."; \
-	for DC_FILE in $(BOOKS_TO_TRANSLATE); do \
-	for SOURCE_FILE in $$(daps -d $$DC_FILE list-srcfiles); do \
-	echo $$SOURCE_FILE | grep -q '/xml/'; \
-	if [ $${PIPESTATUS[2]} -eq "0" ]; \
-	then echo "xml/$$(basename $$SOURCE_FILE)"; \
-	fi; \
-	done; \
-	done | sort | uniq > XML_SOURCES_PER_DC
-
-pot: $(POT_FILES)
+pot: $(FULL_POT_LIST)
 50-pot/%.pot: xml/%.xml
 	$(ITSTOOL) -o $@ $<
 
-po: $(PO_FILES)
+po: $(FULL_PO_LIST)
 
 define update_po
  $(1)/po/%.$(1).po: 50-pot/%.pot
@@ -152,7 +147,7 @@ define update_po
 	fi
 endef   
 
-$(foreach LANG,$(LANG_LIST),$(eval $(call update_po,$(LANG))))
+$(foreach LANG,$(FULL_LANG_LIST),$(eval $(call update_po,$(LANG))))
 
 mo: $(MO_FILES)
 %.mo: %.po
@@ -228,13 +223,13 @@ $(TXT_FILES): translatedxml
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
 clean_po_temp:
-	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/~*))
+	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/*.po~))
 	
 clean_mo:
-	rm -rf $(MO_FILES)
+	rm -rf $(FULL_MO_LIST)
 
 clean_pot:
-	rm -rf $(POT_FILES)
+	rm -rf $(FULL_POT_LIST)
 	
 clean: clean_po_temp clean_mo clean_pot
-	rm -rf LINGUAS XML_SOURCES_PER_DC $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/xml/)) build/
+	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/xml/)) build/
