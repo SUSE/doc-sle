@@ -63,7 +63,7 @@ SELECTED_DOMAIN_LIST := $(basename $(notdir $(SELECTED_XML_FILES)))
 ifndef LANGS
 # If LANGS is not defined within the command line, for output use only those files that have at least 60% translations
 # TO DO: rework the po-selector script to limit the check only on the PO files necessary to translate the selected books
-  LANGS = $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
+  LANGS := $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
 endif
 
 # TO DO: check if LANGSEN is still necessary
