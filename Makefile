@@ -15,6 +15,9 @@
 # pattern lang/po and removing the '/po' suffix
 FULL_LANG_LIST := $(subst /po,,$(wildcard */po))
 
+# The list of available books is retrieved by searching for pattern DC-*
+FULL_BOOK_LIST := $(wildcard DC-*)
+
 # The list of source files is represented by all '.xml' files in xml/ dir
 # except schemas.xml which does not contain translatable strings
 FULL_XML_LIST := $(filter-out xml/schemas.xml,$(wildcard xml/*.xml))
