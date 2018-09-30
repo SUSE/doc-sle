@@ -51,8 +51,8 @@ endif
 
 # It is necessary to find the selected sources only if target is one of
 # mo, translate, validate, pdf, single-html, text
-TARGET_CHECK := $(or $(filter mo,$(MAKECMDGOALS)),$(filter translate,$(MAKECMDGOALS)),$(filter validate,$(MAKECMDGOALS)),$(filter pdf,$(MAKECMDGOALS)),$(filter single-html,$(MAKECMDGOALS)),$(filter text,$(MAKECMDGOALS)))
-ifdef TARGET_CHECK
+CHECK_IF_TO_BE_TRANSLATED := $(or $(filter mo,$(MAKECMDGOALS)),$(filter translate,$(MAKECMDGOALS)),$(filter validate,$(MAKECMDGOALS)),$(filter pdf,$(MAKECMDGOALS)),$(filter single-html,$(MAKECMDGOALS)),$(filter text,$(MAKECMDGOALS)))
+ifdef CHECK_IF_TO_BE_TRANSLATED
   # Determine the sources necessary to build selected books
   SELECTED_SOURCES := $(shell 50-tools/xml-selector $(BOOKS_TO_TRANSLATE) | tee /dev/tty | sed '1d; s@XML sources of .*: @@; /^$$/d' | tr ' ' '\n' | sort -u)
 endif
@@ -71,10 +71,13 @@ SELECTED_DOMAIN_LIST := $(basename $(notdir $(SELECTED_XML_FILES)))
 
 
 ifndef LANGS
-ifdef TARGET_CHECK
+ifdef CHECK_IF_TO_BE_TRANSLATED
 # If LANGS is not defined within the command line, for output use only those files that have at least 60% translations
 # TO DO: rework the po-selector script to limit the check only on the PO files necessary to translate the selected books
   LANGS := $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
+  ifeq ($(strip $(LANGS)),)
+  $(error No language passed selection!)
+  endif
 endif
 endif
 
@@ -299,7 +302,7 @@ clean%: LANGS := ""
 clean%: SELECTED_SOURCES := ""
 
 clean_po_temp:
-	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/*.po~))
+	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/po/*.po~))
 	
 clean_mo:
 	rm -rf $(FULL_MO_LIST)
@@ -307,5 +310,8 @@ clean_mo:
 clean_pot:
 	rm -rf $(FULL_POT_LIST)
 
-clean: clean_po_temp clean_mo clean_pot
+clean: clean_po_temp clean_mo
 	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/xml/)) build/
+
+cleanall: clean clean_pot
+
