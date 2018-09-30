@@ -49,8 +49,13 @@ ifndef BOOKS_TO_TRANSLATE
   BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
 endif
 
-# Determine the sources necessary to build selected books
-SELECTED_SOURCES := $(shell 50-tools/xml-selector $(BOOKS_TO_TRANSLATE) | tee /dev/tty | sed '1d; s@XML sources of .*: @@; /^$$/d' | tr ' ' '\n' | sort -u)
+# It is necessary to find the selected sources only if target is one of
+# mo, translate, validate, pdf, single-html, text
+TARGET_CHECK := $(or $(filter mo,$(MAKECMDGOALS)),$(filter translate,$(MAKECMDGOALS)),$(filter validate,$(MAKECMDGOALS)),$(filter pdf,$(MAKECMDGOALS)),$(filter single-html,$(MAKECMDGOALS)),$(filter text,$(MAKECMDGOALS)))
+ifdef TARGET_CHECK
+  # Determine the sources necessary to build selected books
+  SELECTED_SOURCES := $(shell 50-tools/xml-selector $(BOOKS_TO_TRANSLATE) | tee /dev/tty | sed '1d; s@XML sources of .*: @@; /^$$/d' | tr ' ' '\n' | sort -u)
+endif
 
 # These are the xml files required for the selected books stored in the
 # variable "BOOKS_TO_TRANSLATE"
@@ -64,10 +69,13 @@ SELECTED_ENT_FILES := $(filter %.ent,$(SELECTED_SOURCES))
 # variable "BOOKS_TO_TRANSLATE"
 SELECTED_DOMAIN_LIST := $(basename $(notdir $(SELECTED_XML_FILES)))
 
+
 ifndef LANGS
+ifdef TARGET_CHECK
 # If LANGS is not defined within the command line, for output use only those files that have at least 60% translations
 # TO DO: rework the po-selector script to limit the check only on the PO files necessary to translate the selected books
   LANGS := $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
+endif
 endif
 
 # TO DO: check if LANGSEN is still necessary
@@ -135,7 +143,7 @@ ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/rele
 
 all:
 	@echo -ne "FULL_LANG_LIST: $(FULL_LANG_LIST)\n\nFULL_POT_LIST: $(FULL_POT_LIST)\n\nFULL_BOOK_LIST: $(FULL_BOOK_LIST)\n\n"
-	@echo -ne "SELECTED_SOURCES: $(SELECTED_SOURCES)\n\nSELECTED_XML_FILES: $(SELECTED_XML_FILES)\n\nSELECTED_ENT_FILES: $(SELECTED_ENT_FILES)\n\nSELECTED_DOMAIN_LIST: $(SELECTED_DOMAIN_LIST)"
+	@echo -ne "SELECTED_SOURCES: $(SELECTED_SOURCES)\n\nSELECTED_XML_FILES: $(SELECTED_XML_FILES)\n\nSELECTED_ENT_FILES: $(SELECTED_ENT_FILES)\n\nSELECTED_DOMAIN_LIST: $(SELECTED_DOMAIN_LIST)\n\n"
 	@echo -ne "LANGS: $(LANGS)\n\n"
 
 pot: $(FULL_POT_LIST)
@@ -149,13 +157,13 @@ define update_po
 	if [ -r $$@ ]; then \
 	msgmerge  --previous --update $$@ $$<; \
 	else \
-	msgen -o $$@ $$<; \
+	msginit -o $$@ -i $$< --no-translator -l $(1); \
 	fi
 endef   
 
 $(foreach LANG,$(FULL_LANG_LIST),$(eval $(call update_po,$(LANG))))
 
-mo: $(MO_FILES)
+mo: $(SELECTED_MO_FILES)
 %.mo: %.po
 	msgfmt $< -o $@
 
@@ -228,6 +236,9 @@ $(TXT_FILES): translatedxml
 	LANG=$${lang} $(DAPS_COMMAND) text \
 	PROFCONDITION="general\;$(LIFECYCLE)"
 
+clean%: LANGS := ""
+clean%: SELECTED_SOURCES := ""
+
 clean_po_temp:
 	rm -rf $(foreach LANG,$(LANG_LIST),$(addprefix $(LANG),/po/*.po~))
 	
@@ -236,6 +247,6 @@ clean_mo:
 
 clean_pot:
 	rm -rf $(FULL_POT_LIST)
-	
+
 clean: clean_po_temp clean_mo clean_pot
 	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/xml/)) build/
