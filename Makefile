@@ -49,8 +49,10 @@ ifndef BOOKS_TO_TRANSLATE
   BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
 endif
 
-# It is necessary to find the selected sources only if target is one of
-# mo, translate, validate, pdf, single-html, text
+# The variable 'SELECTED_SOURCES" is necessary only for targets that are related to the translation of
+# the XMLs. It relies on the 'xml-selector' script which in turn relies on the command 'daps list-srcfiles'.
+# Since this operation is time consuming, it is performed # only for a subset of targets (specifically 'mo', 
+# 'translate', 'validate', 'pdf', 'single-html', 'text'). See variable 'CHECK_IF_TO_BE_TRANSLATED'.
 CHECK_IF_TO_BE_TRANSLATED := $(or $(filter mo,$(MAKECMDGOALS)),$(filter translate,$(MAKECMDGOALS)),$(filter validate,$(MAKECMDGOALS)),$(filter pdf,$(MAKECMDGOALS)),$(filter single-html,$(MAKECMDGOALS)),$(filter text,$(MAKECMDGOALS)))
 ifdef CHECK_IF_TO_BE_TRANSLATED
   # Determine the sources necessary to build selected books
@@ -69,12 +71,14 @@ SELECTED_ENT_FILES := $(filter %.ent,$(SELECTED_SOURCES))
 # variable "BOOKS_TO_TRANSLATE"
 SELECTED_DOMAIN_LIST := $(basename $(notdir $(SELECTED_XML_FILES)))
 
-
 ifndef LANGS
+# If LANGS is not defined within the command line, for output use only those files that are at least 60% translated.
+# This check is made through the script 'po-selector'. However, since this operation is time consuming, it is performed
+# only for a subset of targets. See variable 'CHECK_IF_TO_BE_TRANSLATED'.
 ifdef CHECK_IF_TO_BE_TRANSLATED
-# If LANGS is not defined within the command line, for output use only those files that have at least 60% translations
-# TO DO: rework the po-selector script to limit the check only on the PO files necessary to translate the selected books
+# TO DO: rework the po-selector script so that 60% translation is not calculated on the single PO, but overall.
   LANGS := $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
+  # If no language is suitable, print an error message and quit
   ifeq ($(strip $(LANGS)),)
   $(error No language passed selection!)
   endif
@@ -84,6 +88,9 @@ endif
 # TO DO: check if LANGSEN is still necessary
 LANGSEN := $(LANGS) en
 
+# The list of MO files necessary for the translation of the selected sources is generated as follows.
+# For each selected language, the file name is built by adding the suffix '.lang.mo' to the list of
+# selected domains, then it is added the prefix 'lang/po/' as dir name.
 SELECTED_MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(SELECTED_DOMAIN_LIST))))
 
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(SELECTED_XML_FILES)))
