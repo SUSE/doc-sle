@@ -93,10 +93,12 @@ LANGSEN := $(LANGS) en
 # selected domains, then it is added the prefix 'lang/po/' as dir name.
 SELECTED_MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(SELECTED_DOMAIN_LIST))))
 
+# The list of destination DC-, XML and ENT files is made by prefixing the lang code
 XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(SELECTED_XML_FILES)))
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
 DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLATE)))
+
 # PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
 # SINGLE_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/single-html/release-notes.$(l)/index.html)
 # TXT_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l).txt)
@@ -126,12 +128,12 @@ ifneq "$(LIFECYCLE)" "$(filter $(LIFECYCLE),$(LIFECYCLE_VALID))"
   override LIFECYCLE := maintained
 endif
 
-# Gets the language code: release-notes.en.xml => en
 DAPS_COMMAND_BASIC = daps -vv  
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d 
 
 ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 
+# TO DO: check if still necessary
 XSLTPROC_COMMAND = xsltproc \
 --stringparam generate.toc "book toc" \
 --stringparam generate.section.toc.level 0 \
@@ -217,6 +219,7 @@ validate: $(DC_DEST_FILES)
 	$(DAPS_COMMAND) $$DC_FILE validate; \
 	done; 
 
+# TO DO: check if target 'translatedxml' is still necessary
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	xsltproc \
 	  --stringparam 'version' "$(VERSION)" \
@@ -228,23 +231,27 @@ translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	  fix-up.xsl $< \
 	  > xml/release-notes.en.xml
 
-pdf: $(PDF_FILES)
+pdf: translate validate
 $(PDF_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
-	$(DAPS_COMMAND) pdf PROFCONDITION="general\;$(LIFECYCLE)"
+	$(DAPS_COMMAND) pdf 
+# TO DO: check if the following argument is still necessary
+# PROFCONDITION="general\;$(LIFECYCLE)"
 
-single-html: $(SINGLE_HTML_FILES)
+single-html: translate validate
 $(SINGLE_HTML_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
-	$(DAPS_COMMAND) html --single \
-	--stringparam "homepage='https://www.opensuse.org'" \
-	PROFCONDITION="general\;$(LIFECYCLE)"
+	$(DAPS_COMMAND) html --single 
+# TO DO: check if the following arguments are still necessary
+# --stringparam "homepage='https://www.opensuse.org'" \
+# PROFCONDITION="general\;$(LIFECYCLE)"
 
-text: $(TXT_FILES)
+text: translate validate
 $(TXT_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
-	LANG=$${lang} $(DAPS_COMMAND) text \
-	PROFCONDITION="general\;$(LIFECYCLE)"
+	LANG=$${lang} $(DAPS_COMMAND) text
+# TO DO: check if the following argument is still necessary
+# PROFCONDITION="general\;$(LIFECYCLE)"
 
 clean%: LANGS := ""
 clean%: SELECTED_SOURCES := ""
