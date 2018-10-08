@@ -107,7 +107,7 @@ WHICH_TEXT = $(shell 50-tools/output-retriever --dc-name $1 --text-name)
 
 PDF_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_PDF,$(BOOK)))))
 SINGLE_HTML_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_HTML,$(BOOK)))))
-TEXT_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call TEXT_PDF,$(BOOK)))))
+TEXT_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_TEXT,$(BOOK)))))
 
 
 # TO DO: check if STYLEROOT is still necessary
@@ -298,13 +298,16 @@ translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	  fix-up.xsl $< \
 	  > xml/release-notes.en.xml
 
-define generate_output
- pdf: validate $(PDF_FILES)
- $(PDF_FILES): translatedxml
-	lang=$(LANG_COMMAND) ; \
-	$(DAPS_COMMAND) pdf 
+pdf: validate $(PDF_FILES)
+
+define generate_pdf
+ $(2): $(1)
+	$(DAPS_COMMAND) $< pdf 
  # TO DO: check if the following argument is still necessary
  # PROFCONDITION="general\;$(LIFECYCLE)"
+ endef
+ 
+$(foreach LANG,$(LANGS),$(foreach BOOK, $(BOOKS_TO_TRANSLATE),$(eval $(call generate_pdf,$(BOOK),$(addprefix $(LANG)/,$(call WHICH_PDF,$(BOOK)))))))
 
  single-html: validate $(HTML_FILES)
  $(SINGLE_HTML_FILES): translatedxml
@@ -320,8 +323,6 @@ define generate_output
 	LANG=$${lang} $(DAPS_COMMAND) text
  # TO DO: check if the following argument is still necessary
  # PROFCONDITION="general\;$(LIFECYCLE)"
-endef
-
 
 clean%: LANGS := ""
 clean%: SELECTED_SOURCES := ""
