@@ -94,14 +94,21 @@ LANGSEN := $(LANGS) en
 SELECTED_MO_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/po/,$(addsuffix .$(LANG).mo,$(SELECTED_DOMAIN_LIST))))
 
 # The list of destination DC-, XML and ENT files is made by prefixing the lang code
-XML_DEST_FILES := $(foreach LANG, $(LANGS), $(addprefix $(LANG)/,$(SELECTED_XML_FILES)))
+XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_XML_FILES)))
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
 DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLATE)))
 
-# PDF_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l)_color_$(l).pdf)
-# SINGLE_HTML_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/single-html/release-notes.$(l)/index.html)
-# TXT_FILES := $(foreach l, $(LANGSEN), build/release-notes.$(l)/release-notes.$(l).txt)
+
+WHICH_PDF = $(shell 50-tools/output-retriever --dc-name $1 --pdf-name)
+WHICH_HTML = $(shell 50-tools/output-retriever --dc-name $1 --html-name)
+WHICH_TEXT = $(shell 50-tools/output-retriever --dc-name $1 --text-name)
+
+
+PDF_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_PDF,$(BOOK)))))
+SINGLE_HTML_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_HTML,$(BOOK)))))
+TEXT_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call TEXT_PDF,$(BOOK)))))
+
 
 # TO DO: check if STYLEROOT is still necessary
 ifndef STYLEROOT
@@ -152,11 +159,11 @@ PRODUCT = `xmllint --noent --xpath "$(XPATHPREFIX)='product']/text()" xml/releas
 COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/release-notes.xml`
 ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
 
-
 all:
-	@echo -ne "FULL_LANG_LIST: $(FULL_LANG_LIST)\n\nFULL_POT_LIST: $(FULL_POT_LIST)\n\nFULL_BOOK_LIST: $(FULL_BOOK_LIST)\n\n"
-	@echo -ne "SELECTED_SOURCES: $(SELECTED_SOURCES)\n\nSELECTED_XML_FILES: $(SELECTED_XML_FILES)\n\nSELECTED_ENT_FILES: $(SELECTED_ENT_FILES)\n\nSELECTED_DOMAIN_LIST: $(SELECTED_DOMAIN_LIST)\n\n"
-	@echo -ne "LANGS: $(LANGS)\n\n"
+	@echo '$(PDF_FILES) | $(SINGLE_HTML_FILES) | $(TEXT_FILES)'
+#	@echo -ne "FULL_LANG_LIST: $(FULL_LANG_LIST)\n\nFULL_POT_LIST: $(FULL_POT_LIST)\n\nFULL_BOOK_LIST: $(FULL_BOOK_LIST)\n\n"
+#	@echo -ne "SELECTED_SOURCES: $(SELECTED_SOURCES)\n\nSELECTED_XML_FILES: $(SELECTED_XML_FILES)\n\nSELECTED_ENT_FILES: $(SELECTED_ENT_FILES)\n\nSELECTED_DOMAIN_LIST: $(SELECTED_DOMAIN_LIST)\n\n"
+#	@echo -ne "LANGS: $(LANGS)\n\n"
 
 pot: $(FULL_POT_LIST)
 50-pot/%.pot: xml/%.xml
@@ -214,10 +221,11 @@ endef
 
 $(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
 
-validate: $(DC_DEST_FILES)
-	for DC_FILE in $^; do \
-	$(DAPS_COMMAND) $$DC_FILE validate; \
-	done; 
+validate: translate
+	@for DC_FILE in $(DC_DEST_FILES); do \
+	echo -n "$$DC_FILE: "; \
+	daps -d $$DC_FILE validate; \
+	done
 
 # TO DO: check if target 'translatedxml' is still necessary
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
@@ -231,27 +239,30 @@ translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	  fix-up.xsl $< \
 	  > xml/release-notes.en.xml
 
-pdf: translate validate
-$(PDF_FILES): translatedxml
+define generate_output
+ pdf: validate $(PDF_FILES)
+ $(PDF_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
 	$(DAPS_COMMAND) pdf 
-# TO DO: check if the following argument is still necessary
-# PROFCONDITION="general\;$(LIFECYCLE)"
+ # TO DO: check if the following argument is still necessary
+ # PROFCONDITION="general\;$(LIFECYCLE)"
 
-single-html: translate validate
-$(SINGLE_HTML_FILES): translatedxml
+ single-html: validate $(HTML_FILES)
+ $(SINGLE_HTML_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
 	$(DAPS_COMMAND) html --single 
-# TO DO: check if the following arguments are still necessary
-# --stringparam "homepage='https://www.opensuse.org'" \
-# PROFCONDITION="general\;$(LIFECYCLE)"
+ # TO DO: check if the following arguments are still necessary
+ # --stringparam "homepage='https://www.opensuse.org'" \
+ # PROFCONDITION="general\;$(LIFECYCLE)"
 
-text: translate validate
-$(TXT_FILES): translatedxml
+ text: validate $(TEXT_FILES)
+ $(TXT_FILES): translatedxml
 	lang=$(LANG_COMMAND) ; \
 	LANG=$${lang} $(DAPS_COMMAND) text
-# TO DO: check if the following argument is still necessary
-# PROFCONDITION="general\;$(LIFECYCLE)"
+ # TO DO: check if the following argument is still necessary
+ # PROFCONDITION="general\;$(LIFECYCLE)"
+endef
+
 
 clean%: LANGS := ""
 clean%: SELECTED_SOURCES := ""
