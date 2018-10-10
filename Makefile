@@ -284,7 +284,7 @@ define translate_xml
 
  $$(IMAGE_DEST_FILES): $(1)/%: %
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
-	if [ ! -L $$@ -a ! -f $$@ ]; then ln -s ../../../../$$< $$@
+	if [ ! -L $$@ -a ! -f $$@ ]; then ln -s ../../../../$$< $$@; fi
 endef
 
 $(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
