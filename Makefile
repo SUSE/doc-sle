@@ -145,23 +145,23 @@ DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d
 ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 
 # TO DO: check if still necessary
-XSLTPROC_COMMAND = xsltproc \
---stringparam generate.toc "book toc" \
---stringparam generate.section.toc.level 0 \
---stringparam section.autolabel 1 \
---stringparam section.label.includes.component.label 2 \
---stringparam variablelist.as.blocks 1 \
---stringparam toc.max.depth 3 \
---stringparam show.comments 0 \
---xinclude --nonet
+#XSLTPROC_COMMAND = xsltproc \
+#--stringparam generate.toc "book toc" \
+#--stringparam generate.section.toc.level 0 \
+#--stringparam section.autolabel 1 \
+#--stringparam section.label.includes.component.label 2 \
+#--stringparam variablelist.as.blocks 1 \
+#--stringparam toc.max.depth 3 \
+#--stringparam show.comments 0 \
+#--xinclude --nonet
 
 # Fetch correct Report Bug link values, so translations get the correct
 # version
-XPATHPREFIX := //*[local-name()='docmanager']/*[local-name()='bugtracker']/*[local-name()
-URL = `xmllint --noent --xpath "$(XPATHPREFIX)='url']/text()" xml/release-notes.xml`
-PRODUCT = `xmllint --noent --xpath "$(XPATHPREFIX)='product']/text()" xml/release-notes.xml`
-COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/release-notes.xml`
-ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
+#XPATHPREFIX := //*[local-name()='docmanager']/*[local-name()='bugtracker']/*[local-name()
+#URL = `xmllint --noent --xpath "$(XPATHPREFIX)='url']/text()" xml/release-notes.xml`
+#PRODUCT = `xmllint --noent --xpath "$(XPATHPREFIX)='product']/text()" xml/release-notes.xml`
+#COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/release-notes.xml`
+#ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
 
 all:
 	@echo '$(PDF_FILES) | $(SINGLE_HTML_FILES) | $(TEXT_FILES)'
