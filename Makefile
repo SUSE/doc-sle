@@ -215,17 +215,17 @@ define translate_xml
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
  %/xml/schemas.xml: xml/schemas.xml
-	[ ! -L $$@ ] && ln -sf ../../$$< $$@
+	ln -sf ../../$$< $$@
 	
  $(1)/xml/%.ent: xml/%.ent
-	[ ! -L $$@ ] && ln -sf ../../$$< $$@
+	ln -sf ../../$$< $$@
 
  $$(DC_DEST_FILES): $(1)/%: %
 	cp $$< $$(@D)
 
  $$(IMAGE_DEST_FILES): $(1)/%: %
-	[ ! -d $$(@D) ] && mkdir -p $$(@D)
-	[ ! -L $$@ ] && [ ! -f $$@ ] && ln -s ../../../../$$< $$@
+	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
+	if [ ! -L $$@ -a ! -f $$@ ]; then ln -s ../../../../$$< $$@
 endef
 
 $(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
