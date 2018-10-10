@@ -274,18 +274,17 @@ define translate_xml
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
  %/xml/schemas.xml: xml/schemas.xml
-	ln -sf ../../$$< $$(@D)
+	[ ! -L $$@ ] && ln -sf ../../$$< $$@
 	
  $(1)/xml/%.ent: xml/%.ent
-	ln -sf ../../$$< $$(@D)
+	[ ! -L $$@ ] && ln -sf ../../$$< $$@
 
  $$(DC_DEST_FILES): $(1)/%: %
 	cp $$< $$(@D)
 
-#TO DO: use symlinks and only for unavailable images
  $$(IMAGE_DEST_FILES): $(1)/%: %
-	mkdir -p $$(@D)
-	cp $$< $$(@D)
+	[ ! -d $$(@D) ] && mkdir -p $$(@D)
+	[ ! -L $$@ ] && [ ! -f $$@ ] && ln -s ../../../../$$< $$@
 endef
 
 $(foreach LANG,$(LANGS),$(eval $(call translate_xml,$(LANG))))
