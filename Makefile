@@ -293,7 +293,7 @@ clean_pot:
 
 clean: clean_po_temp clean_mo
 	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/xml/))
-	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/$(FULL_BOOK_LIST)))
+	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG)/,$(FULL_BOOK_LIST)))
 	rm -rf $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG),/build/))
 	rm -rf build/
 
