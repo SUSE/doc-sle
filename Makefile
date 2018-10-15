@@ -82,7 +82,7 @@ ifdef CHECK_IF_TO_BE_TRANSLATED
   LANGS := $(shell 50-tools/po-selector $(SELECTED_DOMAIN_LIST) | tee /dev/tty | sort -u)
   # If no language is suitable, print an error message and quit
   ifeq ($(strip $(LANGS)),)
-  $(error No language passed selection!)
+  $(error No language passed selection! Eventually, force one or more languages by passing LANG="lang_code1 lang_code2 ..." on the command line.)
   endif
 endif
 endif
@@ -100,7 +100,7 @@ XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_XML_FI
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
 DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLATE)))
-#TO DO: select only necessary images via 'daps list-srcfiles'
+# TO DO: select only necessary images via 'daps list-srcfiles'
 IMAGE_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(FULL_IMAGE_LIST)))
 
 # The XML sources to be translated to create the requested output are retrieved by parsing the output of
@@ -108,7 +108,7 @@ IMAGE_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(FULL_IMAGE_LI
 # and output generation fail because daps requires all XML files listed in the <xi:include href="file_name.xml"/>
 # tags. To be on the safe side, create a symlink for all unselected sources prior to validation.
 # The list of unselected sources is obtained by filtering out the selected sources from the full list.
-# to that is prepended each selected lang dir.
+# To that it is prepended each selected lang dir.
 # TO DO: check whether to obtain 100% output translation it is necessary to have also the additional files
 # translated
 UNSELECTED_XML_SOURCES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(filter-out $(SELECTED_SOURCES),$(FULL_XML_LIST))))
@@ -174,12 +174,7 @@ ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 #COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/release-notes.xml`
 #ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
 
-all:
-	@echo '$(PDF_FILES) | $(SINGLE_HTML_FILES) | $(TEXT_FILES)'
-	@echo '$(FULL_IMAGE_LIST)'
-#	@echo -ne "FULL_LANG_LIST: $(FULL_LANG_LIST)\n\nFULL_POT_LIST: $(FULL_POT_LIST)\n\nFULL_BOOK_LIST: $(FULL_BOOK_LIST)\n\n"
-#	@echo -ne "SELECTED_SOURCES: $(SELECTED_SOURCES)\n\nSELECTED_XML_FILES: $(SELECTED_XML_FILES)\n\nSELECTED_ENT_FILES: $(SELECTED_ENT_FILES)\n\nSELECTED_DOMAIN_LIST: $(SELECTED_DOMAIN_LIST)\n\n"
-#	@echo -ne "LANGS: $(LANGS)\n\n"
+all: pdf single-html text
 
 <<<<<<< HEAD
 linguas:
