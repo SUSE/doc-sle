@@ -100,19 +100,30 @@ XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_XML_FI
 ENT_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(SELECTED_ENT_FILES)))
 SCHEMAS_XML_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/xml/,schemas.xml))
 DC_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(BOOKS_TO_TRANSLATE)))
-#TO DO: select only necessary images
+#TO DO: select only necessary images via 'daps list-srcfiles'
 IMAGE_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(FULL_IMAGE_LIST)))
 
+# The XML sources to be translated to create the requested output are retrieved by parsing the output of
+# daps list-srcfiles, however when a book depends on — let's say — MAIN.*.xml (e.g. DC-SLES-tuning), validation
+# and output generation fail because daps requires all XML files listed in the <xi:include href="file_name.xml"/>
+# tags. To be on the safe side, create a symlink for all unselected sources prior to validation.
+# The list of unselected sources is obtained by filtering out the selected sources from the full list.
+# to that is prepended each selected lang dir.
+# TO DO: check whether to obtain 100% output translation it is necessary to have also the additional files
+# translated
+UNSELECTED_XML_SOURCES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(filter-out $(SELECTED_SOURCES),$(FULL_XML_LIST))))
+UNSELECTED_ENT_SOURCES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(filter-out $(SELECTED_SOURCES),$(FULL_ENT_LIST))))
 
+# Functions to retrieve the path and file name of pdf/single html/text output
+# TO DO: check why daps seems to ignore that xml files are translated into languages other than English
 WHICH_PDF = $(shell 50-tools/output-retriever --dc-name $1 --pdf-name)
 WHICH_HTML = $(shell 50-tools/output-retriever --dc-name $1 --html-name)
 WHICH_TEXT = $(shell 50-tools/output-retriever --dc-name $1 --text-name)
 
-
+# List of output files depending on selected languages and books to translate
 PDF_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_PDF,$(BOOK)))))
 SINGLE_HTML_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_HTML,$(BOOK)))))
 TEXT_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_TEXT,$(BOOK)))))
-
 
 # TO DO: check if STYLEROOT is still necessary
 ifndef STYLEROOT
@@ -251,10 +262,10 @@ mo: $(SELECTED_MO_FILES)
 	msgfmt $< -o $@
 
 # FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
-translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(DC_DEST_FILES) $(IMAGE_DEST_FILES)
+translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(UNSELECTED_XML_SOURCES) $(UNSELECTED_ENT_SOURCES) $(DC_DEST_FILES) $(IMAGE_DEST_FILES)
 
 define translate_xml
- $(1)/xml/%.xml: $(1)/po/%.$(1).mo xml/%.xml
+ $$(XML_DEST_FILES): $(1)/xml/%.xml: $(1)/po/%.$(1).mo xml/%.xml
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	$$(ITSTOOL) -l $(1) -m $$< -o $$(@D) $$(filter %.xml,$$^)
 #	sed -i -r \
@@ -274,10 +285,20 @@ define translate_xml
 #	$(DAPS_COMMAND_BASIC) -m $@ validate
 
  %/xml/schemas.xml: xml/schemas.xml
-	ln -sf ../../$$< $$@
+	ln -s ../../$$< $$@
 	
- $(1)/xml/%.ent: xml/%.ent
-	ln -sf ../../$$< $$@
+ $$(ENT_DEST_FILES): $(1)/xml/%.ent: xml/%.ent
+	ln -s ../../$$< $$@
+ 
+ ifneq ($$(strip $$(UNSELECTED_XML_SOURCES)),)
+ $$(UNSELECTED_XML_SOURCES): $(1)/xml/%.xml: xml/%.xml
+	ln -s ../../$$< $$@
+ endif
+ 
+ ifneq ($$(strip $$(UNSELECTED_ENT_SOURCES)),)
+ $$(UNSELECTED_ENT_SOURCES): $(1)/xml/%.ent: xml/%.ent
+	ln -s ../../$$< $$@
+ endif
 
  $$(DC_DEST_FILES): $(1)/%: %
 	cp $$< $$(@D)
