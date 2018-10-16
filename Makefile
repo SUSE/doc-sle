@@ -58,7 +58,7 @@ endif
 # the XMLs. It relies on the 'xml-selector' script which in turn relies on the command 'daps list-srcfiles'.
 # Since this operation is time consuming, it is performed # only for a subset of targets (specifically 'mo', 
 # 'translate', 'validate', 'pdf', 'single-html', 'text'). See variable 'CHECK_IF_TO_BE_TRANSLATED'.
-CHECK_IF_TO_BE_TRANSLATED := $(or $(filter mo,$(MAKECMDGOALS)),$(filter translate,$(MAKECMDGOALS)),$(filter validate,$(MAKECMDGOALS)),$(filter pdf,$(MAKECMDGOALS)),$(filter single-html,$(MAKECMDGOALS)),$(filter text,$(MAKECMDGOALS)))
+CHECK_IF_TO_BE_TRANSLATED := $(or $(filter all,$(MAKECMDGOALS)),$(filter mo,$(MAKECMDGOALS)),$(filter translate,$(MAKECMDGOALS)),$(filter validate,$(MAKECMDGOALS)),$(filter pdf,$(MAKECMDGOALS)),$(filter single-html,$(MAKECMDGOALS)),$(filter text,$(MAKECMDGOALS)))
 ifdef CHECK_IF_TO_BE_TRANSLATED
   # Determine the sources necessary to build selected books
   SELECTED_SOURCES := $(shell 50-tools/xml-selector $(BOOKS_TO_TRANSLATE) | tee /dev/tty | sed '1d; s@XML sources of .*: @@; /^$$/d' | tr ' ' '\n' | sort -u)
@@ -90,7 +90,7 @@ ifdef CHECK_IF_TO_BE_TRANSLATED
 endif
 endif
 
-# TO DO: check if LANGSEN is still necessary
+# TO DO: check if LANGSEN is still necessary (legacy from release-notes project)
 LANGSEN := $(LANGS) en
 
 # The list of MO files necessary for the translation of the selected sources is generated as follows.
