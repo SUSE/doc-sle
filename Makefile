@@ -5,11 +5,14 @@
 #
 
 # How to use this makefile:
-# * After updating the XML: $ make po
-# * When creating output:   $ make linguas; make all
-# * To clean up:            $ make clean
+# * After updating the XML:		$ make po
+# * When creating output:		$ make all
+# * To specify to type of output:	$ make pdf | text | single-html
+# * To specify the books to build:	$ make BOOKS_TO_TRANSLATE="book1 book2 book3" (default="DC-SLED-all DC-SLES-all DC-opensuse-all")
+# * To specify the langs to build:	$ make LANGS="lang_code1 lang_code2 lang_code3" (default: langs with at least 60% translation)
+# * To clean up:			$ make clean
 
-.PHONY: clean_po_temp clean_mo clean_pot clean linguas po pot translate validate pdf text single-html translatedxml
+.PHONY: clean_po_temp clean_mo clean_pot clean all po pot translate validate pdf text single-html
 
 # The list of available languages is retrieved by searching for subdirs with
 # pattern lang/po and removing the '/po' suffix
@@ -125,23 +128,18 @@ PDF_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOK
 SINGLE_HTML_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_HTML,$(BOOK)))))
 TEXT_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOOKS_TO_TRANSLATE), $(call WHICH_TEXT,$(BOOK)))))
 
-# TO DO: check if STYLEROOT is still necessary
-ifndef STYLEROOT
-  STYLEROOT := /usr/share/xml/docbook/stylesheet/opensuse2013-ns
-endif
-
-# TO DO: check if VERSION is still necessary
+# TO DO: check if VERSION is still necessary (legacy from release-notes project)
 ifndef VERSION
   VERSION := unreleased
 endif
 
-# TO DO: check if DATE is still necessary
+# TO DO: check if DATE is still necessary (legacy from release-notes project)
 ifndef DATE
   DATE := $(shell date +%Y-%0m-%0d)
 endif
 
 # Allows for DocBook profiling (hiding/showing some text).
-# TO DO: check if still necessary
+# TO DO: check if still necessary (legacy from release-notes project)
 LIFECYCLE_VALID := beta pre maintained unmaintained
 ifndef LIFECYCLE
   LIFECYCLE := maintained
@@ -155,7 +153,7 @@ DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d
 
 ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 
-# TO DO: check if still necessary
+# TO DO: check if still necessary (legacy from release-notes project)
 #XSLTPROC_COMMAND = xsltproc \
 #--stringparam generate.toc "book toc" \
 #--stringparam generate.section.toc.level 0 \
@@ -167,7 +165,7 @@ ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
 #--xinclude --nonet
 
 # Fetch correct Report Bug link values, so translations get the correct
-# version
+# version (legacy from release-notes project)
 #XPATHPREFIX := //*[local-name()='docmanager']/*[local-name()='bugtracker']/*[local-name()
 #URL = `xmllint --noent --xpath "$(XPATHPREFIX)='url']/text()" xml/release-notes.xml`
 #PRODUCT = `xmllint --noent --xpath "$(XPATHPREFIX)='product']/text()" xml/release-notes.xml`
@@ -204,6 +202,7 @@ define translate_xml
  $$(XML_DEST_FILES): $(1)/xml/%.xml: $(1)/po/%.$(1).mo xml/%.xml
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	$$(ITSTOOL) -l $(1) -m $$< -o $$(@D) $$(filter %.xml,$$^)
+# TO DO: check if still necessary (legacy from release-notes project)
 #	sed -i -r \
 #	  -e 's_\t+_ _' -e 's_\s+$$__' \
 #	  $@.0
@@ -218,7 +217,6 @@ define translate_xml
 #	  > $@
 #	rm $@.0
 	daps-xmlformat -i $$@
-#	$(DAPS_COMMAND_BASIC) -m $@ validate
 
  %/xml/schemas.xml: xml/schemas.xml
 	ln -s ../../$$< $$@
@@ -252,7 +250,7 @@ validate: translate
 	daps -d $$DC_FILE validate; \
 	done
 
-# TO DO: check if target 'translatedxml' is still necessary
+# TO DO: check if target 'translatedxml' is still necessary (legacy from release-notes project)
 translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
 	xsltproc \
 	  --stringparam 'version' "$(VERSION)" \
