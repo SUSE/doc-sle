@@ -136,9 +136,6 @@ OBSOLETE_PO_LIST := $(foreach DOMAIN,$(OBSOLETE_DOMAIN_LIST),$(subst _DOMAIN_NAM
 OBSOLETE_IMAGE_LIST := $(filter-out $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG)/,$(FULL_IMAGE_LIST))), $(wildcard */images/src/*/*))
 OBSOLETE_FILE_LIST := $(OBSOLETE_POT_LIST) $(OBSOLETE_PO_LIST) $(OBSOLETE_IMAGE_LIST)
 
-$(info First part: $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG)/,$(FULL_IMAGE_LIST))))
-$(info Second part: $(wildcard */images/src/*/*))
-
 # TO DO: check if VERSION is still necessary (legacy from release-notes project)
 ifndef VERSION
   VERSION := unreleased
@@ -323,7 +320,7 @@ clean: clean_po_temp clean_mo
 	rm -rf build/
 
 clean_obsolete:
-	-rm -rf $(OBSOLETE_FILE_LIST)
+	@if [ " $(strip $(OBSOLETE_FILE_LIST))" == " " ]; then echo "No obsolete files detected!"; else rm -rf $(OBSOLETE_FILE_LIST); fi
 	
-cleanall: clean clean_pot
+cleanall: clean clean_pot clean_obsolete
 
