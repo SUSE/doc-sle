@@ -379,7 +379,10 @@ clean: clean_po_temp clean_mo
 	rm -rf build/
 
 clean_obsolete:
-	@if [ " $(strip $(OBSOLETE_FILE_LIST))" == " " ]; then echo "No obsolete files detected!"; else rm -rf $(OBSOLETE_FILE_LIST); fi
+	@if [ " $(strip $(OBSOLETE_FILE_LIST))" == " " ]; then \
+	echo "No obsolete files detected!"; \
+	else rm -rf $(OBSOLETE_FILE_LIST) && echo "Removed: $(OBSOLETE_FILE_LIST)"; \
+	fi
 	
 cleanall: clean clean_pot clean_obsolete
 
