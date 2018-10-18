@@ -133,7 +133,7 @@ TEXT_FILES := $(foreach LANG,$(LANGS),$(addprefix $(LANG)/,$(foreach BOOK, $(BOO
 OBSOLETE_POT_LIST := $(filter-out $(FULL_POT_LIST), $(wildcard 50-pot/*.pot))
 OBSOLETE_DOMAIN_LIST := $(basename $(notdir $(OBSOLETE_POT_LIST)))
 OBSOLETE_PO_LIST := $(foreach DOMAIN,$(OBSOLETE_DOMAIN_LIST),$(subst _DOMAIN_NAME_,$(DOMAIN),$(foreach LANG,$(FULL_LANG_LIST),$(LANG)/po/_DOMAIN_NAME_.$(LANG).po)))
-OBSOLETE_IMAGE_LIST := $(filter-out $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG)/, $(FULL_IMAGE_LIST)), $(wildcard */images/src/*/*))
+OBSOLETE_IMAGE_LIST := $(filter-out $(foreach LANG,$(FULL_LANG_LIST),$(addprefix $(LANG)/, $(FULL_IMAGE_LIST)), $(wildcard */images/src/*/*)))
 OBSOLETE_FILE_LIST := $(OBSOLETE_POT_LIST) $(OBSOLETE_PO_LIST) $(OBSOLETE_IMAGE_LIST)
 
 # TO DO: check if VERSION is still necessary (legacy from release-notes project)
