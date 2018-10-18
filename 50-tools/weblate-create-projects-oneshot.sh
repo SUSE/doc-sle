@@ -49,7 +49,7 @@ EOF
 
 pushd $WORKDIR/50-pot
 
-generate a
+generate MAIN.opensuse
 for POT in *.pot ; do
 	DOMAIN=${POT%.pot}
 	# base must be created first
