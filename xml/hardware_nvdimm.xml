@@ -44,6 +44,8 @@
 
   <para>
    This new storage subsystem is defined in version 6 of the ACPI standard.
+   However, NVDIMMs already existed before the standard was defined. These can
+   be used in the same way.
   </para>
   
   <para>
@@ -95,6 +97,7 @@
   <title>Terms</title>
 
   <variablelist>
+   
    <varlistentry>
     <term>Region</term>
     <listitem>
@@ -106,48 +109,93 @@
      </para>
     </listitem>
    </varlistentry>
+   
    <varlistentry>
     <term>Namespace</term>
     <listitem>
      <para>
-      Each NVDIMM usually appears in the server's <filename>/dev</filename>
-      directory as a block device. The storage must be assigned to one or more
-      <emphasis>namespace</emphasis>s for it to be used. Depending on the
-      method of access required, namespaces can either amalgamate storage from
-      separate NVDIMMs into larger volumes, or allow it to be partitioned into
-      smaller volumes, just like disk drives.
+      A single contiguously-address range of non-volatile storage, comparable to
+      those on NVM Express PCIe SSDs or to a SCSI Logical Unit (LUN). Each
+      NVDIMM usually appears in the server's <filename>/dev</filename> directory
+      as a separate block device. This storage must be assigned to one or more 
+      namespaces for it to be used. Depending on the method of access required,
+      namespaces can either amalgamate storage from separate NVDIMMs into larger
+      volumes, or allow it to be partitioned into smaller volumes, similarly to
+      disk drives.
      </para>
     </listitem>
    </varlistentry>
+   
    <varlistentry>
     <term>Mode</term>
     <listitem>
      <para>
       Each namespace also has a <emphasis>mode</emphasis> that defines which
-      NVDIMM features are enabled for that namespace. Namespace modes include
-      <literal>raw</literal>, <literal>sector</literal>,
-      <literal>memory</literal> and <literal>DAX</literal>. Sibling namespaces
+      NVDIMM features are enabled for that namespace. Sibling namespaces
       of the same parent region will always have the same type, but might be
-      configured to have different modes.
+      configured to have different modes. Namespace modes include:
      </para>
+     <variablelist>
+      <varlistentry>
+       <term>raw</term>
+       <listitem>
+        <para>
+         A memory disk. Does not support DAX. Compatible with other operating
+         systems.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>sector</term>
+       <listitem>
+        <para>
+         For legacy filesystems which do not checksum metadata. Suitable for
+         small boot volumes. Compatible with other operating systems.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>fsdax</term>
+       <listitem>
+        <para>
+         Filesystem-DAX mode. Default if no other mode is specified. Creates a
+         block device (<filename>/dev/pmem<replaceable>X</replaceable>
+          [.<replaceable>Y</replaceable>]</filename>) which supports DAX for
+         <literal>ext4</literal> or <literal>XFS</literal>.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>devdax</term>
+       <listitem>
+        <para>
+         Device-DAX mode. Creates a single-character device file (<filename>
+          /dev/dax<replaceable>X</replaceable>.<replaceable>Y</replaceable>
+         </filename>). Does <emphasis>not</emphasis> require filesystem
+         creation. Suitable to register PMEM for RDMA or for assigning it to
+         virtual machines, or for mapping blocks too large to fit into RAM.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
     </listitem>
    </varlistentry>
+   
    <varlistentry>
     <term>Type</term>
     <listitem>
      <para>
-      Each namespace and region has a type that defines the way in which the
-      persistent memory associated with that namespace or region can be
-      accessed. A namespace always has the same type as its parent region.
-      There are two different types: <literal>PMEM</literal> and
-      <literal>BLK</literal>.
+      Each namespace and region has a <emphasis>type</emphasis> that defines the
+      way in which the persistent memory associated with that namespace or
+      region can be accessed. A namespace always has the same type as its parent
+      region. There are two different types: Persistent Memory and Block Mode.
      </para>
      <variablelist>
       <varlistentry>
-       <term>PMEM</term>
+       <term>Persistent Memory (PMEM)</term>
        <listitem>
         <para>
-         PMEM storage, like DRAM, offers byte-level access. This enables Direct
+         PMEM storage offers byte-level access, just like RAM. This enables Direct
          Access (DAX), meaning that accessing the memory bypasses the kernel's
          page cache and goes direct to the medium. Additionally, using PMEM, a
          single namespace can include multiple interleaved NVDIMMs, allowing
@@ -156,12 +204,12 @@
        </listitem>
       </varlistentry>
       <varlistentry>
-       <term>BLK</term>
+       <term>Block Mode (BLK)</term>
        <listitem>
         <para>
          BLK access is in sectors, usually of 512 bytes, through a defined
          access window, the <emphasis>aperture</emphasis>. This behaviour is
-         more like a traditional disk drive, and means that both reads and
+         more like a traditional disk drive. This also means that both reads and
          writes are cached by the kernel. With BLK access, each NVDIMM is
          accessed as a separate namespace.
         </para>
@@ -174,13 +222,19 @@
       accessed using PMEM and some using BLK.
      </para>
      <para>
-      Either way, each namespace must be formatted with a filesystem, just as
-      with a conventional drive. &productname; supports the
-      <literal>ext2</literal>, <literal>ext4</literal> and
+      Apart from <literal>devdax</literal> namespaces, all other types must be
+      formatted with a filesystem, just as with a conventional drive.
+      &productname; supports the <literal>ext2</literal>, <literal>ext4</literal> and
       <literal>XFS</literal> filesystems for this.
      </para>
+     <note>
+      <para>
+       The <literal>ext2</literal> filesystem does not support DAX.
+      </para>
+     </note>
     </listitem>
    </varlistentry>
+   
    <varlistentry>
     <term>Direct Access (DAX)</term>
     <listitem>
@@ -189,16 +243,27 @@
      </para>
     </listitem>
    </varlistentry>
+   
    <varlistentry>
     <term>DIMM Physical Address (DPA)</term>
     <listitem>
      <para>
-      DIMM-relative offset - relative to the memory controller's interleave.
-      For NVDIMMs which are not part of an interleaved set, the relationship
-      between the physical address and the DPA is always 1:1.
+      A memory address as an offset into a single DIMM's memory; that is,
+      starting from zero as the lowest addressable byte on that DIMM.
      </para>
     </listitem>
    </varlistentry>
+   
+   <varlistentry>
+    <term>Label</term>
+    <listitem>
+     <para>
+      Metadata stored on the NVDIMM, such as namespace definitions. This can be
+      accessed using DSMs.
+     </para>
+    </listitem>
+   </varlistentry>
+   
    <varlistentry>
     <term>Device-specific method (DSM)</term>
     <listitem>
@@ -207,14 +272,7 @@
      </para>
     </listitem>
    </varlistentry>
-   <varlistentry>
-    <term>Label</term>
-    <listitem>
-     <para>
-      Metadata on the NVDIMM for legacy (MBR or GPT) disk emulation.
-     </para>
-    </listitem>
-   </varlistentry>
+   
   </variablelist>
  </sect1>
  <sect1 xml:id="sec.nvdimm.tools">
@@ -245,7 +303,7 @@
    </listitem>
    <listitem>
     <para>
-     Both PMEM and BLK
+     Simultaneous PMEM and BLK
     </para>
    </listitem>
   </itemizedlist>
