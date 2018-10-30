@@ -1,6 +1,7 @@
 #
 # Copyright (c) 2014 Rick Salevsky <rsalevsky@suse.de>
 # Copyright (c) 2016 Stefan Knorr <sknorr@suse.de>
+# Copyright (c) 2017 Guo Yunhe
 # Copyright (c) 2018 Alessio Adamo <alessio@alessioadamo.com>
 #
 
