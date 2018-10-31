@@ -157,7 +157,7 @@ endif
 DAPS_COMMAND_BASIC = daps -vv  
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d 
 
-ITSTOOL = itstool -i /usr/share/itstool/its/docbook5.its
+ITSTOOL = itstool -i suse.its
 
 # Fetch correct Report Bug link values, so translations get the correct
 # version (legacy from release-notes project)
