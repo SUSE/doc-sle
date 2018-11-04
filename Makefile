@@ -63,6 +63,7 @@ endif
 # the XMLs. It relies on the 'xml-selector' script which in turn relies on the command 'daps list-srcfiles'.
 # Since this operation is time consuming, it is performed # only for a subset of targets (specifically 'mo', 
 # 'translate', 'validate', 'pdf', 'single-html', 'text'). See variable 'CHECK_IF_TO_BE_TRANSLATED'.
+CHECK_IF_TO_BE_TRANSLATED := $(filter all mo translate validate pdf single-html text,$(MAKECMDGOALS))
 ifdef CHECK_IF_TO_BE_TRANSLATED
   # Determine the sources necessary to build selected books
   SELECTED_SOURCES := $(shell 50-tools/xml-selector $(BOOKS_TO_TRANSLATE) | tee /dev/tty | sed '1d; s@XML sources of .*: @@; /^$$/d' | tr ' ' '\n' | sort -u)
@@ -118,8 +119,8 @@ IMAGE_DEST_FILES := $(foreach LANG,$(LANGS),$(addprefix locale/$(LANG)/,$(FULL_I
 # To that it is prepended each selected lang dir.
 # TO DO: check whether to obtain 100% output translation it is necessary to have also the additional files
 # translated
-UNSELECTED_XML_SOURCES := $(foreach LANG,$(LANGS),$(addprefix locale/$(LANG)/,$(filter-out $(SELECTED_SOURCES),$(FULL_XML_LIST))))
-UNSELECTED_ENT_SOURCES := $(foreach LANG,$(LANGS),$(addprefix locale/$(LANG)/,$(filter-out $(SELECTED_SOURCES),$(FULL_ENT_LIST))))
+UNSELECTED_XML_SOURCES := $(foreach LANG,$(LANGS),$(addprefix locale/$(LANG)/,$(filter-out $(SELECTED_XML_FILES),$(FULL_XML_LIST))))
+UNSELECTED_ENT_SOURCES := $(foreach LANG,$(LANGS),$(addprefix locale/$(LANG)/,$(filter-out $(SELECTED_ENT_FILES),$(FULL_ENT_LIST))))
 
 # Functions to retrieve the path and file name of pdf/single html/text output
 # TO DO: check why daps seems to ignore that xml files are translated into languages other than English
@@ -157,15 +158,8 @@ endif
 DAPS_COMMAND_BASIC = daps -vv  
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d 
 
-ITSTOOL = itstool -i suse.its
+ITSTOOL = itstool -i suse.its 
 
-# Fetch correct Report Bug link values, so translations get the correct
-# version (legacy from release-notes project)
-#XPATHPREFIX := //*[local-name()='docmanager']/*[local-name()='bugtracker']/*[local-name()
-#URL = `xmllint --noent --xpath "$(XPATHPREFIX)='url']/text()" xml/release-notes.xml`
-#PRODUCT = `xmllint --noent --xpath "$(XPATHPREFIX)='product']/text()" xml/release-notes.xml`
-#COMPONENT = `xmllint --noent --xpath "$(XPATHPREFIX)='component']/text()" xml/release-notes.xml`
-#ASSIGNEE = `xmllint --noent --xpath "$(XPATHPREFIX)='assignee']/text()" xml/release-notes.xml`
 
 all: pdf single-html text
 
@@ -190,42 +184,31 @@ mo: $(SELECTED_MO_FILES)
 %.mo: %.po
 	msgfmt $< -o $@
 
-# FIXME: Enable use of its:translate attribute in GeekoDoc/DocBook...
 translate: $(XML_DEST_FILES) $(SCHEMAS_XML_DEST_FILES) $(ENT_DEST_FILES) $(UNSELECTED_XML_SOURCES) $(UNSELECTED_ENT_SOURCES) $(DC_DEST_FILES) $(IMAGE_DEST_FILES)
 
 define translate_xml
  $$(XML_DEST_FILES): locale/$(1)/xml/%.xml: locale/$(1)/po/%.$(1).mo xml/%.xml
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	$$(ITSTOOL) -l $(1) -m $$< -o $$(@D) $$(filter %.xml,$$^)
-# TO DO: check if still necessary (legacy from release-notes project)
-#	sed -i -r \
-#	  -e 's_\t+_ _' -e 's_\s+$$__' \
-#	  $@.0
-#	xsltproc \
-#	  --stringparam 'version' "$(VERSION)" \
-#	  --stringparam 'dmurl' "$(URL)" \
-#	  --stringparam 'dmproduct' "$(PRODUCT)" \
-#	  --stringparam 'dmcomponent' "$(COMPONENT)" \
-#	  --stringparam 'dmassignee' "$(ASSIGNEE)" \
-#	  --stringparam 'date' "$(DATE)" \
-#	  fix-up.xsl $@.0 \
-#	  > $@
-#	rm $@.0
 	daps-xmlformat -i $$@
 
  locale/%/xml/schemas.xml: xml/schemas.xml
+	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	ln -s ../../../$$< $$@
 	
  $$(ENT_DEST_FILES): locale/$(1)/xml/%.ent: xml/%.ent
+	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	ln -s ../../../$$< $$@
  
  ifneq ($$(strip $$(UNSELECTED_XML_SOURCES)),)
  $$(UNSELECTED_XML_SOURCES): locale/$(1)/xml/%.xml: xml/%.xml
+	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	ln -s ../../../$$< $$@
  endif
  
  ifneq ($$(strip $$(UNSELECTED_ENT_SOURCES)),)
  $$(UNSELECTED_ENT_SOURCES): locale/$(1)/xml/%.ent: xml/%.ent
+	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	ln -s ../../../$$< $$@
  endif
 
@@ -245,17 +228,7 @@ validate: translate
 	daps -d $$DC_FILE validate; \
 	done
 
-# TO DO: check if target 'translatedxml' is still necessary (legacy from release-notes project)
-#translatedxml: xml/release-notes.xml xml/release-notes.ent $(XML_FILES)
-#	xsltproc \
-#	  --stringparam 'version' "$(VERSION)" \
-#	  --stringparam 'dmurl' "$(URL)" \
-#	  --stringparam 'dmproduct' "$(PRODUCT)" \
-#	  --stringparam 'dmcomponent' "$(COMPONENT)" \
-#	  --stringparam 'dmassignee' "$(ASSIGNEE)" \
-#	  --stringparam 'date' "$(DATE)" \
-#	  fix-up.xsl $< \
-#	  > xml/release-notes.en.xml
+# TO DO: Handle 'en' output.
 
 pdf: validate $(PDF_FILES)
 
