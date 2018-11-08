@@ -18,12 +18,14 @@
 
 .PHONY: all po pot translate validate pdf text single-html clean_po_temp clean_mo clean_pot clean clean_obsolete cleanall
 
-MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@')
+# Make sure that 'doc-sle' project and 'doc-sle-translations' subproject are
+# on the same branch
+MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@'
 SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) &>/dev/null; git branch | head -1 | sed 's@ @@; s@\*@@')
 
-# ifneq ($(MAIN_PROJECT_BRANCH),$(SUBPROJECT_BRANCH))
- $(error Main project branch is '$(MAIN_PROJECT_BRANCH)' while subproject branch is '$(SUBPROJECT_BRANCH)'. Failed to check out branch '$(MAIN_PROJECT_BRANCH)' in subproject!)
-# endif
+ifneq ($(MAIN_PROJECT_BRANCH),$(SUBPROJECT_BRANCH))
+ $(error Main project branch is '$(MAIN_PROJECT_BRANCH)' while subproject branch is '$(SUBPROJECT_BRANCH)'. Failed to check out branch '$(MAIN_PROJECT_BRANCH)' in subproject)
+endif
 
 # The list of available languages is retrieved by searching for subdirs with
 # pattern lang/po and removing the '/po' suffix
