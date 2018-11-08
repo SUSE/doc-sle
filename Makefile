@@ -18,6 +18,11 @@
 
 .PHONY: all po pot translate validate pdf text single-html clean_po_temp clean_mo clean_pot clean clean_obsolete cleanall
 
+MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@')
+SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) && git branch | head -1 | sed 's@ @@; s@\*@@')
+
+$(error subproject branch: $(MAIN_PROJECT_BRANCH); $(SUBPROJECT_BRANCH))
+
 # The list of available languages is retrieved by searching for subdirs with
 # pattern lang/po and removing the '/po' suffix
 FULL_LANG_LIST := $(patsubst locale/%/po,%,$(wildcard locale/*/po))
