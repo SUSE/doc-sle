@@ -19,9 +19,11 @@
 .PHONY: all po pot translate validate pdf text single-html clean_po_temp clean_mo clean_pot clean clean_obsolete cleanall
 
 MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@')
-SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) && git branch | head -1 | sed 's@ @@; s@\*@@')
+SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) &>/dev/null; git branch | head -1 | sed 's@ @@; s@\*@@')
 
-$(error subproject branch: $(MAIN_PROJECT_BRANCH); $(SUBPROJECT_BRANCH))
+# ifneq ($(MAIN_PROJECT_BRANCH),$(SUBPROJECT_BRANCH))
+ $(error Main project branch is '$(MAIN_PROJECT_BRANCH)' while subproject branch is '$(SUBPROJECT_BRANCH)'. Failed to check out branch '$(MAIN_PROJECT_BRANCH)' in subproject!)
+# endif
 
 # The list of available languages is retrieved by searching for subdirs with
 # pattern lang/po and removing the '/po' suffix
@@ -61,7 +63,7 @@ FULL_MO_LIST := $(patsubst %.po,%.mo,$(FULL_PO_LIST))
 # If not specified, the default books to be translated are DC-SLED-all, DC-SLES-all,
 # DC-opensuse-all
 ifndef BOOKS_TO_TRANSLATE
-  BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
+ BOOKS_TO_TRANSLATE := DC-SLED-all DC-SLES-all DC-opensuse-all
 endif
 
 # The variable 'SELECTED_SOURCES" is necessary only for targets that are related to the translation of
@@ -206,13 +208,13 @@ define translate_xml
 	ln -s ../../../$$< $$@
 
  ifneq ($$(strip $$(UNSELECTED_XML_SOURCES)),)
- $$(UNSELECTED_XML_SOURCES): locale/$(1)/xml/%.xml: xml/%.xml
+  $$(UNSELECTED_XML_SOURCES): locale/$(1)/xml/%.xml: xml/%.xml
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	ln -s ../../../$$< $$@
  endif
 
  ifneq ($$(strip $$(UNSELECTED_ENT_SOURCES)),)
- $$(UNSELECTED_ENT_SOURCES): locale/$(1)/xml/%.ent: xml/%.ent
+  $$(UNSELECTED_ENT_SOURCES): locale/$(1)/xml/%.ent: xml/%.ent
 	if [ ! -d $$(@D) ]; then mkdir -p $$(@D); fi
 	ln -s ../../../$$< $$@
  endif
