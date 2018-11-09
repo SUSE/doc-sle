@@ -6,9 +6,6 @@ If there are relevant Bugzilla or FATE entries, reference them.
 Check all items that apply.
 
 - [ ] Minor edit (does not require Doc Update)
-- [ ] Doc Update section has been added in separate commit
-- [ ] Backport required for maintenance/SLE12
-- [ ] Backport required for maintenance/SLE12SP1
-- [ ] Backport required for maintenance/SLE12SP2
-- [ ] Backport required for maintenance/SLE12SP3
-- [ ] Backport required for maintenance/SLE12SP4
+- [ ] Doc Update section has been added in separate commits
+- [ ] Backport to maintenance/SLE12SP3 required
+- [ ] Backport to maintenance/SLE12SP4 required
