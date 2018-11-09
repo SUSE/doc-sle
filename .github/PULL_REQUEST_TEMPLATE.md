@@ -1,11 +1,11 @@
 ### Description
-A few sentences describing the overall goals of the pull request's
-commits. Refer to the Bugzilla or FATE number if available.
+A few sentences describing the overall goals of this pull request.
+If there are relevant Bugzilla or FATE entries, reference them.
 
 ### Checks
-Check items that apply.
+Check all items that apply.
 
-- [ ] Minor edit (does not required Doc Update)
+- [ ] Minor edit (does not require Doc Update)
 - [ ] Doc Update section has been added in separate commit
 - [ ] Backport required for maintenance/SLE12
 - [ ] Backport required for maintenance/SLE12SP1
