@@ -20,7 +20,7 @@
 
 # Make sure that 'doc-sle' project and 'doc-sle-translations' subproject are
 # on the same branch
-MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@'
+MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@')
 SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) &>/dev/null; git branch | head -1 | sed 's@ @@; s@\*@@')
 
 ifneq ($(MAIN_PROJECT_BRANCH),$(SUBPROJECT_BRANCH))
