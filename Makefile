@@ -20,8 +20,8 @@
 
 # Make sure that 'doc-sle' project and 'doc-sle-translations' subproject are
 # on the same branch
-MAIN_PROJECT_BRANCH := $(shell git branch | head -1 | sed 's@ @@; s@\*@@')
-SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) &>/dev/null; git branch | head -1 | sed 's@ @@; s@\*@@')
+MAIN_PROJECT_BRANCH := $(shell git branch | grep \* | sed 's@ @@; s@\*@@')
+SUBPROJECT_BRANCH := $(shell cd locale && git checkout $(MAIN_PROJECT_BRANCH) &>/dev/null; git branch | grep \* | sed 's@ @@; s@\*@@')
 
 ifneq ($(MAIN_PROJECT_BRANCH),$(SUBPROJECT_BRANCH))
  $(error Main project branch is '$(MAIN_PROJECT_BRANCH)' while subproject branch is '$(SUBPROJECT_BRANCH)'. Failed to check out branch '$(MAIN_PROJECT_BRANCH)' in subproject)
@@ -167,7 +167,7 @@ endif
 DAPS_COMMAND_BASIC = daps -vv
 DAPS_COMMAND = $(DAPS_COMMAND_BASIC) -d
 
-ITSTOOL = itstool -i suse.its
+ITSTOOL = itstool -i 50-tools/suse.its
 
 
 all: pdf single-html text
