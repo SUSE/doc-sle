@@ -7,7 +7,7 @@ If there are relevant Bugzilla or FATE entries, reference them.
 
 *Is a Doc Update section necessary and has it been created?*
 
-- [ ] Minor edit without associated FATE/Bugzilla (no Doc Update required)
+- [ ] Minor edit without associated FATE/Bugzilla: no Doc Update required
 - [ ] All other edits: Doc Update section has been added, in a separate commit
 
 *Are backports required?*
