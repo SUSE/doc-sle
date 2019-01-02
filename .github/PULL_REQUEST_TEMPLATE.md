@@ -14,3 +14,4 @@ If there are relevant Bugzilla or FATE entries, reference them.
 
 - [ ] To maintenance/SLE12SP3
 - [ ] To maintenance/SLE12SP4
+- [ ] To maintenance/SLE15SP0
