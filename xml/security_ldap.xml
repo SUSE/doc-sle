@@ -610,7 +610,109 @@ dn: uid=&exampleuserII;,ou=people,dc=example,dc=com
    </step>
   </procedure>
  </sect2>
-</sect1>
+
+ <sect2 xml:id="sec.security.ldap.server.sssd">
+  <title>Setting Up SSSD</title>
+  <para>
+   SSSD (System Security Services Daemon) provides a set of daemons to manage
+   access to remote directories and authentication mechanisms such as LDAP or
+   Kerberos. With SSSD, you use a separate server to authenticate users and learn
+   their group memberships.
+  </para>
+  <procedure>
+   <!--<title></title>-->
+   <!--<para></para>-->
+   <step>
+     <para>Install the <systemitem>sssd</systemitem> package:
+     </para>
+    <screen>&prompt.sudo;zypper in sssd</screen>
+   </step>
+   <step>
+    <para>
+     Disable and stop the <systemitem class="daemon">nscd</systemitem> daemon
+     because it conflicts with <systemitem class="daemon">sssd</systemitem>:
+    </para>
+    <screen>&prompt.sudo;systemctl disable nscd &amp;&amp; systemctl stop nscd</screen>
+   </step>
+   <step>
+    <para>
+     Create the SSSD configuration and specify the group <systemitem
+     class="groupname">server_admins</systemitem>.
+    </para>
+    <screen>&prompt.sudo;dsidm localhost client_config sssd.conf server_admins</screen>
+    <para>
+     <remark>taroth 2019-06-18: @wbrown: when running this command, I got the following message
+     on my test machine: Error: no objects exist given the filter criteria server_admins</remark>
+     Only members of this group can log in to this system.
+    </para>
+   </step>
+   <step>
+    <para>
+     Save the following to <filename>/etc/sssd/sssd.conf</filename> and use it as a starting points.
+     Modify the file according to your needs:
+    </para>
+    <screen>[sssd]
+services = nss, pam, ssh, sudo
+config_file_version = 2
+domains = default
+
+[nss]
+homedir_substring = /home
+
+[domain/default]
+# If you have large groups (IE 50+ members), you should set this to True
+ignore_group_members = False
+debug_level=3
+cache_credentials = True
+id_provider = ldap
+auth_provider = ldap
+access_provider = ldap
+chpass_provider = ldap
+ldap_schema = rfc2307bis
+ldap_search_base = dc=example,dc=com
+# We strongly recommend ldaps here.
+ldap_uri = ldaps://ldap.example.com
+ldap_tls_reqcert = demand
+ldap_tls_cacert = /etc/openldap/ldap.crt
+ldap_access_filter = (|(memberof=cn=&lt;login group>,ou=Groups,dc=example,dc=com))
+enumerate = false
+access_provider = ldap
+ldap_user_member_of = memberof
+ldap_user_gecos = cn
+ldap_user_uuid = nsUniqueId
+ldap_group_uuid = nsUniqueId
+# This is really important as it allows SSSD to respect nsAccountLock
+ldap_account_expire_policy = rhds
+ldap_access_order = filter, expire
+
+# Setup for ssh keys
+# Inside /etc/ssh/sshd_config add the lines:
+#   AuthorizedKeysCommand /usr/bin/sss_ssh_authorizedkeys
+#   AuthorizedKeysCommandUser nobody
+# You can test with the command: sss_ssh_authorizedkeys &lt;username>
+# The objectClass: nsAccount holds this attribute.
+ldap_user_ssh_public_key = nsSshPublicKey
+    </screen>
+   </step>
+   <step>
+    <para>
+     To configure the certificates on your client, copy <filename>ca.crt</filename>
+     from the LDAP server to your client:</para>
+    <screen>&prompt.sudo;mkdir -p /etc/openldap/certs
+cp [...]>/ca.crt /etc/openldap/certs/
+/usr/bin/c_rehash /etc/openldap/certs</screen>
+   </step>
+   <step>
+    <para>
+     Enable and start SSSD :
+    </para>
+    <screen>&prompt.sudo;systemctl enable sssd
+systemctl start sssd</screen>
+   </step>
+  </procedure>
+ </sect2>
+
+ </sect1>
 
 <sect1 xml:id="sec.security.ldap.yast.usergr">
   <title>Configuring LDAP Users and Groups in &yast;</title>
