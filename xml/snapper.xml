@@ -2512,6 +2512,11 @@ TIMELINE_MIN_AGE="1800"</screen>
     always applies to the Btrfs subvolume defined in the respective Snapper
     configuration.
    </para>
+   <para> 
+       Btrfs quotas are applied to subvolumes, not to users. You may apply 
+       disk space quotas to users and groups (for example, with the 
+       <command>quota</command> command) in addition to using Btrfs quotas.
+   </para>
    <para>
     If Snapper was enabled during the installation, quota support is
     automatically enabled. In case you manually enable Snapper at a later point
@@ -2588,7 +2593,98 @@ TIMELINE_MIN_AGE="1800"</screen>
     </listitem>
    </itemizedlist>
   </sect2>
+</sect1>
+ 
+  <sect1>
+      <title>Showing Exclusive Disk Space Used by Snapshots</title>
+     <para>
+      Snapshots share data, for efficient use of storage space, so using ordinary
+      commands like <command>du</command> and <command>df</command> won't measure
+      used disk space accurately. When you want to free up disk space on Btrfs 
+      with quotas enabled, you need to know how much exclusive disk space is 
+      used by each snapshot, rather than shared space. Snapper 0.6 and up reports 
+      the used disk space for each snapshot in the
+    <literal>Used Space</literal> column:
+</para>
+<screen>&prompt.root;snapper--iso list
+  # | Type   | Pre # | Date                | User | Used Space | Cleanup | Description           | Userdata     
+----+--------+-------+---------------------+------+------------+---------+-----------------------+--------------
+ 0  | single |       |                     | root |            |         | current               |              
+ 1* | single |       | 2019-07-22 13:08:38 | root |  16.00 KiB |         | first root filesystem |              
+ 2  | single |       | 2019-07-22 14:21:05 | root |  14.23 MiB | number  | after installation    | important=yes
+ 3  | pre    |       | 2019-07-22 14:26:03 | root | 144.00 KiB | number  | zypp(zypper)          | important=no 
+ 4  | post   |     3 | 2019-07-22 14:26:04 | root | 112.00 KiB | number  |                       | important=no 
+ 5  | pre    |       | 2019-07-23 08:19:36 | root | 128.00 KiB | number  | zypp(zypper)          | important=no 
+ 6  | post   |     5 | 2019-07-23 08:19:43 | root |  80.00 KiB | number  |                       | important=no 
+ 7  | pre    |       | 2019-07-23 08:20:50 | root | 256.00 KiB | number  | yast sw_single        |              
+ 8  | pre    |       | 2019-07-23 08:23:22 | root | 112.00 KiB | number  | zypp(ruby.ruby2.5)    | important=no 
+ 9  | post   |     8 | 2019-07-23 08:23:35 | root |  64.00 KiB | number  |                       | important=no 
+10  | post   |     7 | 2019-07-23 08:24:05 | root |  16.00 KiB | number  |                       |              
+</screen>
+<para>
+    The <command>btrfs</command> command provides another view of space used by 
+    snapshots:
+</para>
+<screen>
+&prompt.root;btrfs qgroup show -p /
+qgroupid         rfer         excl parent  
+--------         ----         ---- ------  
+0/5          16.00KiB     16.00KiB ---     
+[...]    
+0/272         3.09GiB     14.23MiB 1/0     
+0/273         3.11GiB    144.00KiB 1/0     
+0/274         3.11GiB    112.00KiB 1/0     
+0/275         3.11GiB    128.00KiB 1/0     
+0/276         3.11GiB     80.00KiB 1/0     
+0/277         3.11GiB    256.00KiB 1/0     
+0/278         3.11GiB    112.00KiB 1/0     
+0/279         3.12GiB     64.00KiB 1/0     
+0/280         3.12GiB     16.00KiB 1/0     
+1/0           3.33GiB    222.95MiB --- 
+</screen>
+<para>
+    The <literal>qgroupid</literal> column displays the identification number for
+    each subvolume, assigning a qgroup level/ID combination.
+</para> 
+<para>
+    The <literal>rfer</literal> column displays the total amount of data 
+    referred to in the subvolume.
+</para>
+<para>
+    The <literal>excl</literal> column displays the exclusive data in each
+    subvolume. 
+</para>
+<para>
+    The <literal>parent</literal> column shows the parent qgroup of the subvolumes.
+</para>
+<para>    
+    The final item, <literal>1/0</literal>, shows the totals for the parent 
+    qgroup. In the above example, 222.95 MiB will be freed if all subvolumes
+    are removed. Run the following command to see which snapshots are associated
+    with each subvolume:
+</para>
+<screen>&prompt.root;btrfs subvolume list -st /
+ID	gen	top level	path	
+--	---	---------	----	
+267	298	266		@/.snapshots/1/snapshot
+272	159	266		@/.snapshots/2/snapshot
+273	170	266		@/.snapshots/3/snapshot
+274	171	266		@/.snapshots/4/snapshot
+275	287	266		@/.snapshots/5/snapshot
+276	288	266		@/.snapshots/6/snapshot
+277	292	266		@/.snapshots/7/snapshot
+278	296	266		@/.snapshots/8/snapshot
+279	297	266		@/.snapshots/9/snapshot
+280	298	266		@/.snapshots/10/snapshot
+</screen>
+     <para>
+      Doing an upgrade from one service pack to another results in snapshots
+      occupying a lot of disk space on the system subvolumes. Manually deleting 
+      these snapshots after they are no longer needed is recommended. See
+      <xref linkend="sec.snapper.manage.delete"/> for details.
+     </para>
  </sect1>
+
  <sect1 xml:id="sec.snapper.faqs">
   <title>Frequently Asked Questions</title>
 
@@ -2605,62 +2701,6 @@ TIMELINE_MIN_AGE="1800"</screen>
       For some directories we decided to exclude them from snapshots. See
       <xref linkend="snapper.dir-excludes"/> for a list and reasons. To exclude
       a path from snapshots we create a subvolume for that path.
-     </para>
-    </answer>
-   </qandaentry>
-   <qandaentry>
-    <question>
-     <para>
-      How much disk space is used by snapshots? How to free disk space?
-     </para>
-    </question>
-    <answer>
-     <para>
-      Displaying the amount of disk space a snapshot allocates is currently not
-      supported by the <literal>Btrfs</literal> tools. However, if you have
-      quota enabled, it is possible to determine how much space would be freed
-      if <emphasis>all</emphasis> snapshots would be deleted:
-     </para>
-     <procedure>
-      <step>
-       <para>
-        Get the quota group ID (<literal>1/0</literal> in the following
-        example):
-       </para>
-<screen>&prompt.sudo;snapper -c root get-config | grep QGROUP
-QGROUP                 | 1/0</screen>
-      </step>
-      <step>
-       <para>
-        Rescan the subvolume quotas:
-       </para>
-<screen>&prompt.sudo;btrfs quota rescan -w /</screen>
-      </step>
-      <step>
-       <para>
-        Show the data of the quota group (<literal>1/0</literal> in the
-        following example):
-       </para>
-<screen>&prompt.sudo;btrfs qgroup show / | grep "1/0"
-1/0           4.80GiB    108.82MiB</screen>
-       <para>
-        The third column shows the amount of space that would be freed when
-        deleting all snapshots (<literal>108.82MiB</literal>).
-       </para>
-      </step>
-     </procedure>
-     <para>
-      To free space on a <literal>Btrfs</literal> partition containing
-      snapshots you need to delete unneeded snapshots rather than files. Older
-      snapshots occupy more space than recent ones. See
-      <xref linkend="sec.snapper.setup.customize.archiving"/> for details.
-     </para>
-     <para>
-      Doing an upgrade from one service pack to another results in snapshots
-      occupying a lot of disk space on the system subvolumes, because a lot of
-      data gets changed (package updates). Manually deleting these snapshots
-      after they are no longer needed is recommended. See
-      <xref linkend="sec.snapper.manage.delete"/> for details.
      </para>
     </answer>
    </qandaentry>
