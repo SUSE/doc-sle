@@ -825,6 +825,268 @@ I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
    </para>
   </sect2>
  </sect1>
+ 
+ <sect1 xml:id="sec-nvdimm-troubleshoot">
+  <title>Troubleshooting</title>
+  
+  <para>
+   Persistent memory is more durable than SSD storage, but it can wear out. If
+   an NVDIMM fails, it is necessary to isolate which individual module has 
+   developed a fault so that the remaining data can be recovered and the
+   hardware replaced. Three pieces of information must be found:
+  </para>
+  <orderedlist>
+   <listitem>
+    <para>
+     Which NVDIMM module has failed: the physical location of the defective
+     module.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Which namespace (<filename>/dev/pmem<replaceable>X</replaceable></filename>)
+     now contains bad blocks.  
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     What other namespaces or regions also use that physical module.
+    </para>
+   </listitem>
+  </orderedlist>
+
+  <para>
+   After the faulty module has been determined along with whatever namespaces
+   and regions use it, then the data in other, unaffected namespaces can be
+   backed up, the server shut down and the NVDIMM replaced. 
+  </para>
+  <sect2>
+   <title>Locating a Failed Module</title>
+   <para>
+    A set of NVDIMMs are located in DIMM slots on the motherboard of the server.
+   </para>
+   <para>
+    In the resultant space, the operating system creates one or more namespaces,
+    such as <filename>region0</filename>.   
+   </para>
+   <para>
+    Then within those regions, certain namespaces are defined, for example
+    <filename>/dev/pmem1</filename> or <filename>/dev/dax0</filename>.
+   </para>
+   <para>
+    For example, imagine a single region made up of space from three NVDIMMs
+    which has been configured as three namespaces, as follows: 
+   </para>
+   <informaltable>
+    <tgroup cols="4">
+    <colspec colname="col1"/>
+    <colspec colname="col2"/>
+    <colspec colname="col3"/>
+    <colspec colname="col4"/>
+     
+     <tbody>
+     <row>
+      <entry>
+       <para>
+        NVDIMM 0
+       </para>
+      </entry>
+      <entry>
+       <para>
+        region0
+       </para>
+      </entry>
+      <entry>
+       <para>
+        /dev/pmem1
+       </para>
+      </entry>
+      <entry></entry>
+     </row>
+     
+     <row>
+      <entry>
+       <para>
+        NVDIMM 1
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <emphasis>[X]</emphasis>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        /dev/pmem2s
+       </para>
+      </entry>
+      <entry></entry>
+     </row>
+     
+     <row>
+      <entry>
+       <para>
+        NVDIMM 2
+       </para>
+      </entry>
+      <entry>
+       <para>
+        /dev/dax0
+       </para>
+      </entry>
+      <entry namest="col3" nameend="col4"></entry>
+     </row>
+     
+    </tbody>
+    </tgroup>
+   </informaltable>
+   
+   <para>
+    In our example, the part of <filename>region0</filename> labeled as
+    <emphasis>[X]</emphasis> has been damaged or become defective.
+   </para>
+   <para>
+    You must:
+   </para>
+   <orderedlist>
+    <listitem>
+     <para>
+      Identify which NVDIMM module(s) contain the affected region.
+     </para>
+     <para>
+      This is particularly important if the region is interleaved across more
+      than one NVDIMM.
+     </para>
+    </listitem>
+    
+    <listitem>
+     <para>
+      Back up the contents of any other namespaces on the affected NVDIMM.
+     </para>
+     <para>
+      In this example, you must back up the contents of <filename>/dev/pmem2s</filename>.
+     </para>
+    </listitem>
+    
+    <listitem>
+     <para>
+      Identify the relationship between the namespaces and the physical position
+      of the NVDIMM (in which motherboard memory slot it is located).
+     </para>
+     <para>
+      The server must be shut down, its cover
+      removed, and the defective modules found, removed and replaced.
+     </para>
+    </listitem>
+   </orderedlist>
+  </sect2>
+  <sect2 xml:id="sec-nvdimm-testing">
+   <title>Testing Persistent Memory</title>
+   <note>
+    <title>Prerequisites for Fault-Finding</title>
+    <para>
+     For testing, the <filename>nfit_test</filename> kernel module is required.
+    </para>
+   </note> 
+   <para>
+    The testing procedure is described in detail on the GitHub page for the
+    <command>ndctl</command> command, in steps 1&mdash;4 of the section
+    <literal>Unit test</literal>. See <xref linkend="sec-nvdimm-moreinfo"/> at
+    the end of this chapter.
+   </para>
+   <procedure>
+    <title>
+     Testing Procedure
+    </title>
+    <step>
+     <para>
+      Execute the <command>ndctl</command> command with the parameters
+      <command>list -RM</command>.
+     </para>
+     <para>
+      This shows the list of bad blocks.
+     </para>
+     <screen> &prompt.sudo;ndctl list -RM 
+  :
+  :
+ { 
+   "dev":"region5", 
+   "size":33554432, 
+   "available_size":33554432, 
+   "type":"pmem", 
+   "iset_id":4676476994879183020, 
+   "badblock_count":8, 
+   "badblocks":[ 
+     { 
+       "offset":32768, 
+       "length":8, 
+       "dimms":[ 
+          "nmem1" <co xml:id="sec-nvdimm-co1"/>  
+       ] 
+     } 
+   ] 
+ }, 
+ :</screen>
+     <calloutlist>
+      <callout arearefs="sec-nvdimm-co1">
+       <para>
+        The specific NVDIMM is identified here.
+       </para>
+      </callout>
+     </calloutlist>
+    </step>
+    
+    <step>
+     <para>
+      Execute the <command>ndctl</command> command with the parameters
+      <command>list -Du</command>.
+     </para>
+     <para>
+      This shows the <emphasis>handle</emphasis> of the DIMM.
+     </para>
+     <screen>  &prompt.sudo;ndctl list -Du
+  { 
+     "dev":"nmem1", 
+     "id":"cdab-0a-07e0-feffffff", 
+     "handle":"0x1", <co xml:id="sec-nvdimm-co2"/> 
+     "phys_id":"0x1"     
+  }, 
+   : 
+   :</screen>
+     <calloutlist>
+      <callout arearefs="sec-nvdimm-co2">
+       <para>
+        This is the handle of the NVDIMM.
+       </para>
+      </callout>
+     </calloutlist>
+    </step>
+
+    <step>
+     <para>
+      Execute the <command>ndctl</command> command with the parameters
+      <command>list --d <replaceable>DIMM name</replaceable></command>.
+     </para>
+     <screen> &prompt.sudo;ndctl list -R -d nmem1 
+ [ 
+   { 
+     "dev":"region5", 
+     "size":33554432, 
+     "available_size":33554432, 
+     "type":"pmem", 
+     "iset_id":4676476994879183020, 
+     "badblock_count":8 
+    }, 
+   : 
+   :
+     </screen>
+    </step>
+   </procedure>
+  </sect2>
+  
+   
+ </sect1>
+ 
  <sect1 xml:id="sec-nvdimm-moreinfo">
   <title>For More Information</title>
 
