@@ -1381,7 +1381,7 @@ o- / ...........................................................................
   o- backstores .................................................................................................... [...]
   | o- block ........................................................................................ [Storage Objects: 0]
   | o- fileio ....................................................................................... [Storage Objects: 1]
-  | | o- test-disc ...................................................... [/root/test.img (1.0GiB) write-back deactivated]
+  | | o- test-disc ....................................................... [/alt/test.img (1.0GiB) write-back deactivated]
   | |   o- alua ......................................................................................... [ALUA Groups: 1]
   | |     o- default_tg_pt_gp ............................................................. [ALUA state: Active/optimized]
   | o- pscsi ........................................................................................ [Storage Objects: 0]
@@ -1403,6 +1403,100 @@ o- / ...........................................................................
     generated IQN
     <literal>iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456</literal>
    </para>
+   <para>
+    Note that targetcli has also created and enabled the default target portal
+    group <literal>tpg1</literal>. This is done because the variables
+    <literal> auto_add_default_portal</literal> and
+    <literal>auto_enable_tpgt</literal> at the root level are set to
+    <literal>true</literal> by default.
+   </para>
+   <para>
+    The command also created the default portal* with the
+    <literal>0.0.0.0</literal> IPv4 wildcard. This means that any IPv4 address
+    can access the configured target.
+   </para>
+   <para>
+    Next step is to create a LUN (Logical Unit Number) for the iSCSI
+    target. While it's possible to do this manually, you can let targetcli to
+    assign the next available LUN automatically. This is done by switching to
+    the directory of the iSCSI target, and then use the
+    <command>create</command> command in the <filename>lun</filename> directory
+    to assign a LUN to the back store.
+   </para>
+<screen>/> cd /iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/
+/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456> cd tpg1
+/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/tpg1> luns/
+create /backstores/fileio/test-disc</screen>
+  <para>
+   Run the <command>ls</command> command to see the changes:
+  </para>
+<screen>/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/tpg1> ls
+o- tpg1 .................................................................................... [no-gen-acls, no-auth]
+      o- acls ........................................................................................... [ACLs: 0]
+      o- luns ........................................................................................... [LUNs: 1]
+      | o- lun0 ............................................. [fileio/test-disc (/alt/test.img) (default_tg_pt_gp)]
+      o- portals ..................................................................................... [Portals: 1]
+        o- 0.0.0.0:3260 ...................................................................................... [OK]</screen>
+   <para>
+    There is now an iSCSI target that has a 1GB file-based back-store. The
+    target has the
+    <literal>iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456</literal>
+    name, and it can be accessed from any network port of the system.
+   </para>
+   <para>
+    Finally, you need to ensure that initiators have access to configured
+    target. One way to do this is to create an ACL rule for each initiator that
+    allows them to connect to the target. In this case, you must list each
+    desired initiator using its IQN. The IQNs of the existing initiators can be
+    found in the <filename>/etc/iscsi/initiatorname.iscsi</filename> file. Use
+    the following command to add the desired initiator (in this case, it's iqn.1996-04.de.suse:01:54cab487975b):
+   </para>
+<screen>/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/tpg1> acls/ create iqn.1996-04.de.suse:01:54cab487975b
+Created Node ACL for iqn.1996-04.de.suse:01:54cab487975b
+Created mapped LUN 0.
+/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/tpg1></screen>
+   <para>
+    Alternatively, is to run the target in a demo mode with no access
+    restrictions. This method is less secure, but it can be useful for
+    demonstration purposes and running on closed networks. To enable the demo
+    mode, run the following commands:
+   </para>
+<screen>/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/tpg1> set attribute generate_node_acls=1
+/iscsi/iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456/tpg1> set attribute demo_mode_write_protect=0</screen>
+   <para>
+    The lat step is to save the created configuration using the
+    <command>saveconfig</command> command available in the root directory:
+   </para>
+<screen>/> saveconfig /etc/target/example.json</screen>
+   <para>
+    If at some point you need to restore configuration from the saved file, you
+    need to clear the current configuration first. Keep in mind that clearing
+the current configuration results in data loss unless you save
+your configuration first. Use the following command to clear and reload the configuration:
+   </para>
+<screen>/> clearconfig
+    As a precaution, confirm=True needs to be set
+    /> clearconfig confirm=true
+    All configuration cleared
+    /> restoreconfig /etc/target/example.json
+    Configuration restored from /etc/target/example.json
+    /></screen>   
+    <para>
+     To test whether the configured target is working, connect to it using the
+     <package>open-iscsi</package> iSCSI initiator installed on the same
+     system (replace <replaceable>HOSTNAME</replaceable> with hostname of the
+     local machine):
+    </para>
+<screen>&prompt.user;iscsiadm -m discovery -t st -p <replaceable>HOSTNAME</replaceable></screen>
+   <para>
+    This command returns a list of found targets, for example:
+   </para>
+<screen>192.168.20.3:3260,1 iqn.2003-01.org.linux-iscsi.e83.x8664:sn.8b35d04dd456</screen>
+    <para>
+     You can then connect to the listed target using the
+     <command>login</command> iSCSI command. This makes the target available as
+     a local disk.
+    </para>
  </sect1>
  
  <sect1 xml:id="sec-iscsi-installation">
