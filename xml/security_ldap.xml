@@ -307,32 +307,13 @@ objectclass (2.16.840.1.113730.3.2.333 NAME 'nsPerson' <co xml:id="co-ldap-schem
     the following command:</para>
     <screen>&prompt.sudo;zypper install 389-ds</screen>
     <para>
-     After installation, you can set up the server either manually or with &yast;.
-     Also, you can manage LDAP users and groups and configure an LDAP client with
-     &yast;:
+     After installation, you can set up the server either manually
+     <phrase os="sles;osuse">(as described in <xref linkend="sec-security-ldap-server"
+      xrefstyle="select:label"/>)</phrase> or create a
+     very basic setup with &yast; <phrase os="sles;osuse">(as described in
+      <xref linkend="sec-security-ldap-server-yast"
+      xrefstyle="select:label"/>)</phrase>.
     </para>
-   <itemizedlist os="sles;osuse">
-    <listitem>
-     <para>
-      <xref linkend="sec-security-ldap-server"/>
-     </para>
-    </listitem>
-   <listitem>
-    <para>
-     <xref linkend="sec-security-auth-yast"/>
-    </para>
-   </listitem>
-   <listitem>
-    <para>
-     <xref linkend="sec-security-ldap-yast-usergr"/>
-    </para>
-   </listitem>
-   <listitem>
-    <para>
-     <xref linkend="sec-security-ldap-yast-client"/>
-    </para>
-   </listitem>
-  </itemizedlist>
  </sect1>
 
  <sect1 xml:id="sec-security-ldap-server" os="sles;osuse">
@@ -341,10 +322,16 @@ objectclass (2.16.840.1.113730.3.2.333 NAME 'nsPerson' <co xml:id="co-ldap-schem
    Setting up the &ds389; takes the following basic steps:
   </para>
   <procedure>
-    <step>
+   <step>
     <para>
      <!--Creating the Directory Server Instance-->
      <xref linkend="sec-security-ldap-server-instance" xrefstyle="select:title"/>
+    </para>
+   </step>
+   <step>
+    <para>
+     <!--Using CA Certificates for TSL Connections-->
+      <xref linkend="sec-security-ldap-server-ca" xrefstyle="select:title"/>
     </para>
    </step>
    <step>
@@ -499,6 +486,85 @@ instance 'Localhost' is running</screen>
   </procedure>
  </sect2>
 
+<sect2 xml:id="sec-security-ldap-server-ca">
+ <title>Using CA Certificates for TSL</title>
+ <para>
+  You can manage the CA certificates for &ds389; with the following command
+  line tools: <command>certutil</command>, <command>openssl</command>, and
+  <command>pk12util</command>.
+ </para>
+ <para>
+  For testing purposes, you can create a self-signed certificate with
+  <command>dscreate</command>. Find the certificate at
+  <filename>/etc/dirsrv/slapd-localhost/ca.crt</filename>. For remote administration,
+  copy the certificate to a readable location. For production environments,
+  contact a CA authority of your organization's choice and request a server
+  certificate, a client certificate, and a root certificate.
+ </para>
+ <para>
+ Make sure to meet the following requirements before executing the procedure below:
+ </para>
+ <itemizedlist>
+  <listitem>
+   <para>
+    You have a server certificate and a private key to use for the TSL connection.
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    You have set up an NSS (Network Security Services) database (for example,
+    with the <command>certutil</command> command).
+   </para>
+  </listitem>
+ </itemizedlist>
+
+ <procedure>
+  <para>
+  Before you can import an existing private key and certificate into the NSS
+  (Network Security Services) database, you need to create a bundle of the
+  private key and the server certificate. This results in a <filename>*.p12</filename>
+  file.
+  </para>
+  <important>
+  <title><filename>*.p12</filename> File and Friendly Name</title>
+  <para>
+   When creating the PKCS12 bundle, you must encode a <quote>friendly name</quote>
+   in the <filename>*.p12</filename> file.
+  </para>
+  <para>
+   Make sure to use <literal>Server-Cert</literal> as friendly name. Otherwise
+   the TLS connection will fail, because the &ds389; searches for this exact string.
+  </para>
+  <para>
+   As soon as you have imported the <filename>*.p12</filename> file in the NSS
+   database, the friendly name cannot be changed any more.
+  </para>
+ </important>
+ <step>
+  <para>
+   To create the PKCS12 bundle with the required friendly name:
+  </para>
+ <screen>&prompt.root;openssl pkcs12 -export -in <replaceable>SERVER.crt</replaceable> \
+  -inkey <replaceable>SERVER.key</replaceable> -out <replaceable>SERVER.p12</replaceable> \
+  -name Server-Cert</screen>
+  <para>
+   Replace <replaceable>SERVER.crt</replaceable> with the server certificate
+   and <replaceable>SERVER.key</replaceable> with the private key to be bundled.
+   With <option>-out</option>, specify the name of the <filename>*.p12</filename>
+   file. Use <option>-name</option> to set the friendly name to use,
+   <literal>Server-Cert</literal>.
+  </para>
+ </step>
+ <step>
+  <para>
+   After you have created the required <replaceable>SERVER.p12</replaceable> file,
+   import the file into your NSS database:
+  </para>
+  <screen>pk12util -i <replaceable>SERVER.p12</replaceable> -d <replaceable>PATH_TO_NSS_DB</replaceable></screen>
+ </step>
+ </procedure>
+</sect2>
+
  <sect2 xml:id="sec-security-ldap-server-credentials">
   <title>Configuring Admin Credentials for Remote/Local Access</title>
    <para>
@@ -517,7 +583,7 @@ instance 'Localhost' is running</screen>
 uri = ldaps://localhost <co xml:id="co-ldap-server-dsrc-remote-localhost"/>
 basedn = dc=example,dc=com
 binddn = cn=Directory Manager
-tls_cacertdir = /etc/dirsrv/slapd-localhost/ <co xml:id="co-ldap-server-dsrc-remote-cert"/></screen>
+tls_cacertdir = PATH_TO_CERTDIR <co xml:id="co-ldap-server-dsrc-remote-cert"/></screen>
    <calloutlist>
     <callout arearefs="co-ldap-server-dsrc-remote-localhost">
      <para>
@@ -527,19 +593,8 @@ tls_cacertdir = /etc/dirsrv/slapd-localhost/ <co xml:id="co-ldap-server-dsrc-rem
     </callout>
     <callout arearefs="co-ldap-server-dsrc-remote-cert">
      <para>
-      For test purposes, you can use <command>dscreate</command> to generate
-      a self-signed certificate which you can trust. Find the certificate at
-      <filename>/etc/dirsrv/slapd-localhost/ca.crt</filename>. Copy it to a
-      readable location or to the client machine from which you use the
-      <command>ds*</command> commands.
-     </para>
-     <para>
-      For production environments, contact the CA authority of your organization's
-      choice to receive a server, a client and a root certificate.
-      <remark>taroth 2020-01-17: @firstyear: after receiving them, where to put
-       them? how to adjust the example above for a production environment? and
-       last but not least: is there more to add on how to create a request for
-       and how to use a certificate from a trusted CA?</remark>
+      Path to the certificate at a readable location or on the client machine from
+      which you use the <command>ds*</command> commands.
      </para>
     </callout>
    </calloutlist>
@@ -564,12 +619,12 @@ binddn = cn=Directory Manager
        <!--Question: “When I use ldapi on the server that has the DS instance,
        why don’t I need to provide my password?”--> When using <literal>ldapi</literal>
        on the server where the &ds389; instance is running, your UID/GID will be
-       detected. If it is <literal>0/0 </literal> (which means you are logged
+       detected. If it is <literal>0/0</literal> (which means you are logged
        in as &rootuser; user), the <literal>ldapi</literal> binds the local
        &rootuser; as the directory server root dn (<literal>cn=Directory Manager</literal>)
        of the instance. This allows local administration of the server, but also
        allows you to set a machine-generated password for <literal>cn=Directory
-       Manager</literal>) that no human knows. Whoever has administrator rights
+       Manager</literal> that no human knows. Whoever has administrator rights
        on the server hosting the &ds389; instance, can access the instance as
        <literal>cn=Directory Manager</literal>.
       </para>
@@ -782,9 +837,131 @@ systemctl start sssd</screen>
    </step>
   </procedure>
  </sect2>
- </sect1>
+</sect1>
 
-<sect1 xml:id="sec-security-ldap-yast-usergr">
+<sect1 xml:id="sec-security-ldap-server-yast" os="sles;osuse">
+ <title>Setting Up a &ds389; with &yast;</title>
+  <para>
+   You can use &yast; to quickly create a very basic setup of the &ds389;.
+  </para>
+ <sect2 xml:id="sec-security-ldap-server-yast-create">
+  <title>Creating an &ds389; Instance with &yast;</title>
+  <procedure>
+   <step>
+   <para>
+    In &yast;, click <menuchoice>
+    <guimenu>Network Services</guimenu>
+    <guimenu>Create New Directory Server</guimenu>
+   </menuchoice>. Alternatively, start the module from command line with
+   <command>yast2 ldap-server</command>.
+   </para>
+   <para>
+    In the window that opens, you need to fill in all mandatory text fields.
+   </para>
+  </step>
+  <step>
+   <para>
+    Enter the <guimenu>Fully qualified domain name</guimenu> of the &ds389;.
+    It must be resolvable from the host.
+   </para>
+  </step>
+  <step>
+   <para>
+    In <guimenu>Directory server instance name</guimenu>, enter a local name for
+    the LDAP server instance.</para>
+   <note>
+    <title>Instance Name</title>
+    <para>
+     The instance name <emphasis>cannot</emphasis> be changed after the instance
+     has been created. If you plan for only one LDAP server, use the default
+     instance name <literal>localhost</literal>. However, if you plan to host
+     multiple LDAP servers, use meaningful names for the individual instances.
+    </para>
+   </note>
+  </step>
+  <step>
+   <para>
+   In <guimenu>Directory suffix</guimenu>, enter the base domain name of the LDAP
+   tree. It is your domain name split by component. For example,
+   <literal>example.com</literal> becomes <literal>dc=example,dc=com</literal>.
+   </para>
+  </step>
+  <step>
+   <para>
+    In the mandatory security options, enter the password for the directory manager
+    (LDAP's root/admin account) and repeat the password in the next step. The
+    password must be at least 8 characters long.
+   </para>
+  </step>
+    <step>
+     <para>
+      To run &ds389; with a CA certificate, specify both of the following options:
+     </para>
+     <substeps>
+      <step>
+       <para>
+        Enter the path to the <guimenu>Server TLS certificate authority in PEM
+        format</guimenu>, with which the server certificates have been signed.
+        <remark>taroth 2020-01-22: string may be simplified in the future, see
+         https://github.com/yast/yast-auth-server/issues/55</remark>
+       </para>
+      </step>
+      <step>
+       <para>
+        Enter the path to the <guimenu>Server TLS certificate and key in PKCS12
+        format with friendly name "Server-Cert"</guimenu>. The
+        <filename>*.p12</filename> file contains the server's private key and
+        certificate. These must have been signed by the CA in PEM format that you
+        have specified above. The <guimenu>friendly name</guimenu> must be
+        <literal>Server-Cert</literal>, see <xref linkend="sec-security-ldap-server-ca"/>
+        for details.
+        <remark>taroth 2020-01-22: string may be  simplified in the future, see
+        https://github.com/yast/yast-auth-server/issues/55</remark>
+       </para>
+       <para>
+        If you do not specify a CA certificate here, a self-signed certificate
+        will be created automatically. After the instance has been created,
+        find the related files in
+        <filename>/etc/dirsrv/slapd-<replaceable>INSTANCENAME</replaceable></filename>.
+       </para>
+      </step>
+     </substeps>
+    </step>
+   <step>
+   <para>
+    If you are ready to create the instance, click <guimenu>OK</guimenu>.
+   </para>
+   <informalfigure>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="yast2-ldap-server.png" width="95%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="yast2-ldap-server.png" width="90%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </informalfigure>
+   <para>&yast; displays a message whether the creation was successful and where
+    to find the log files.
+   </para>
+  </step>
+  </procedure>
+
+ <!--taroth 2020-01-28: disabling reference to commented section-->
+ <!--
+ <para>
+  After you have created the instance, you can configure LDAP users and groups
+  as shown in <xref linkend="sec-security-ldap-yast-usergr" xrefstyle="select:label"/>.
+ </para>-->
+ <para>
+  The setup with &yast; provides only a very basic configuration of the &ds389;.
+  To fine-tune more settings, see <xref linkend="sec-security-ldap-server"/>
+  or the documentation mentioned in <xref linkend="sec-security-ldap-info"/>.
+ </para>
+</sect2>
+
+<!--taroth 2020-01-27: commenting this section for now as agreed with firstyear-->
+<!--<sect2 xml:id="sec-security-ldap-yast-usergr">
   <title>Configuring LDAP Users and Groups in &yast;</title>
   <procedure>
    <step>
@@ -804,6 +981,8 @@ systemctl start sssd</screen>
      Select <menuchoice><guimenu>Set Filter</guimenu>
      <guimenu>LDAP Users</guimenu></menuchoice> and enter the password for
      Root DN.
+     <remark>taroth 2020-01-24: argh, this does not work for me, need to check
+     with firstyear</remark>
     </para>
    </step>
    <step>
@@ -823,10 +1002,10 @@ systemctl start sssd</screen>
        Check the <guimenu>Details</guimenu> tab for the group membership,
        login shell, and home directory of the new user. If necessary, change
        the default to values that better suit your needs.
-<!-- The default values
+<!-\- The default values
        (as well as those of the password settings) can be defined with the
        procedure described in
-       <xref linkend="sec-security-auth-yast-client-conf-mod"/>.-->
+       <xref linkend="sec-security-auth-yast-client-conf-mod"/>.-\->
       </para>
      </step>
      <step>
@@ -839,8 +1018,8 @@ systemctl start sssd</screen>
        Enter the <guimenu>Plug-Ins</guimenu> tab, select the LDAP plug-in,
        and click <guimenu>Launch</guimenu> to configure additional LDAP
        attributes assigned to the new user.
-<!-- (see
-       <xref linkend="fig-ldap-y2-adset"/>).-->
+<!-\- (see
+       <xref linkend="fig-ldap-y2-adset"/>).-\->
       </para>
      </step>
     </substeps>
@@ -857,7 +1036,7 @@ systemctl start sssd</screen>
   You can administer groups in a similar way on the <guimenu>Groups</guimenu>
   tab.
 </para>
-<!--
+<!-\-
   <figure id="fig-ldap-y2-adset">
    <title>&yast;: Additional LDAP Settings</title>
    <mediaobject>
@@ -869,7 +1048,7 @@ systemctl start sssd</screen>
     </imageobject>
    </mediaobject>
   </figure>
-  -->
+  -\->
 
   <para>
    The initial input form of user administration offers <guimenu>LDAP
@@ -878,9 +1057,9 @@ systemctl start sssd</screen>
    LDAP users and groups by selecting <guimenu>LDAP User and Group
    Configuration</guimenu>.
   </para>
- </sect1>
-
-<sect1 xml:id="sec-security-ldap-yast-client">
+ </sect2>
+-->
+<sect2 xml:id="sec-security-ldap-yast-client">
   <title>Configuring an LDAP Client with &yast;</title>
   <para>
    &yast; includes the module <guimenu>LDAP and Kerberos Client</guimenu>
@@ -1066,6 +1245,7 @@ systemctl start sssd</screen>
     </para>
    </step>
   </procedure>
+ </sect2>
 </sect1>
 
  <sect1 xml:id="sec-security-ldap-data" os="sles;osuse">
