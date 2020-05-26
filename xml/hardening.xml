@@ -1982,14 +1982,14 @@
    <title>&selnx;</title>
    <para>
     &selnx; provides finer granularity to access controls, beyond the traditional
-    read, write or execute permissions. For example, you may control who can unlink, 
+    read, write or execute permissions. For example, you may control who can unlink,
     append, or move a file. You may control access to many resources other than files,
     such as network resources and interprocess communication.  It is
     included with basic enablement in &productname;
-    &productnumber;.  The SELinux framework is supported on SUSE Linux 
-    Enterprise Server;  SLES provides all binaries and libraries 
+    &productnumber;.  The SELinux framework is supported on SUSE Linux
+    Enterprise Server;  SLES provides all binaries and libraries
     needed to use &selnx; on your server. See the
-    <quote>Configuring &selnx;</quote> chapter of 
+    <quote>Configuring &selnx;</quote> chapter of
     <xref linkend="part-selinux"/> for more  information.
    </para>
   </sect1>
@@ -3056,64 +3056,132 @@ drwxrwxrwt 18 root root 16384 Dec 23 22:20 /tmp</screen>
     keep these files up to date.
    </para>
   </sect1>
-<!-- ============================================================== -->
+  <!-- ============================================================== -->
   <sect1 xml:id="sec-sec-prot-general-removable-media">
-   <title>Restricting Access to Removable Media</title>
+    <title>Restricting Access to Removable Media</title>
 
 <!-- fate#312966 -->
 
-   <para>
-    In some environments it is required to restrict access to removable media
-    such as USB storage or optical devices. The tools coming with the
-    <systemitem>udisks2</systemitem> package help with such a configuration.
-   </para>
+    <para>
+     In some environments it is required to restrict access to removable
+     media such as USB storage or optical devices. The tools coming with the
+     <systemitem>udisks2</systemitem> package help with such a
+     configuration.
+    </para>
 
-   <procedure>
-    <step>
-     <para>
-      Create a rules file
-      <filename>/etc/polkit-1/rules.d/01-restrict-removable-media.rules</filename>
-      similar to the following:
-     </para>
-<screen>// Allow users in group 'mmedia_all' to mount/unmount all type of drives
-// Allow users in group 'mmedia_removable' to mount/umount USB storage drives
-// Allow users in group 'mmedia_optical' to mount/unmount Optical drives
+    <procedure>
+     <step>
+      <para>
+       Create a user group whose users will be allowed to mount and eject
+       removable devices, for example <replaceable>mmedia_all</replaceable>:
+      </para>
+<screen>&prompt.sudo;groupadd <replaceable>mmedia_all</replaceable></screen>
+     </step>
+     <step>
+      <para>
+       Add a specific user &exampleuser; to the new group:
+      </para>
+<screen>&prompt.sudo;usermod -a -G <replaceable>mmedia_all</replaceable> &exampleuser;</screen>
+     </step>
+     <step>
+      <para>
+       Create the <filename>/etc/polkit-1/rules.d/10-mount.rules</filename>
+       file with the following content:
+      </para>
+<screen>
+&prompt.user;cat /etc/polkit-1/rules.d/10-mount.rules
 polkit.addRule(function(action, subject) {
-  if (/^org\.freedesktop\.udisks2\.filesystem-.*mount.*$/.test(action.id) &amp;&amp;
-  action.lookup("drive.removable") == "true") {
-    if (subject.isInGroup("mmedia_all")) {
-      return polkit.Result.YES;
-    } else {
-      if (/.*optical.*/.test(action.lookup("drive.removable.media"))) {
-        if (subject.isInGroup("mmedia_optical"))
-        return polkit.Result.YES;
-      } else if (action.lookup("drive.removable.bus") == "usb") {
-        if (subject.isInGroup("mmedia_removable"))
-        return polkit.Result.YES;
-      }
-      return polkit.Result.NO;
-    }
+ if (action.id =="org.freedesktop.udisks2.eject-media"
+  &amp;&amp; subject.isInGroup("<replaceable>mmedia_all</replaceable>")) {
+   return polkit.Result.YES;
   }
-});</screen>
-     <important>
-      <title>Naming of the Rules File</title>
+});
+
+polkit.addRule(function(action, subject) {
+ if (action.id =="org.freedesktop.udisks2.filesystem-mount"
+  &amp;&amp; subject.isInGroup("<replaceable>mmedia_all</replaceable>")) {
+   return polkit.Result.YES;
+  }
+});
+</screen>
+      <important>
+       <title>Naming of the Rules File</title>
+       <para>
+        The name of a rules file must start with a digit, otherwise it
+        will be ignored.
+       </para>
+       <para>
+        Rules files are processed in alphabetical order. Functions are called
+        in the order they were added until one of the functions returns a
+        value. Therefore, to add an authorization rule that is processed before
+        other rules, put it in a file in /etc/polkit-1/rules.d with a name
+        that sorts before other rules files, for example
+        <filename>/etc/polkit-1/rules.d/10-mount.rules</filename>. Each function
+        should return a value from <literal>polkit.Result</literal>.
+       </para>
+      </important>
+     </step>
+     <step>
       <para>
-       Rules files are processed in alphabetical order. Functions are called
-       in the order they were added until one of the functions returns a
-       value. Hence, to add an authorization rule that is processed before
-       other rules, put it in a file in /etc/polkit-1/rules.d with a name that
-       sorts before other rules files, for example
-       <filename>01-restrict-removable-media.rules</filename>. Each function
-       should return a value from <literal>polkit.Result</literal>.
+       Restart <systemitem>udisks2</systemitem>:
       </para>
+<screen>&prompt.root;systemctl restart udisks2</screen>
+     </step>
+     <step>
       <para>
-<!-- http://doccomments.provo.novell.com/comments/29432 -->
-       The name of a rules file must start with a digit, otherwise it will be
-       ignored.
+       Restart <systemitem>polkit</systemitem>
       </para>
-     </important>
-    </step>
-    <step>
+<screen>&prompt.root;systemctl restart polkit</screen>
+     </step>
+    </procedure>
+   </sect1>
+<!-- ============================================================== -->
+   <sect1 xml:id="sec-sec-prot-general-accounts">
+    <title>Various Account Checks</title>
+
+    <para/>
+
+    <sect2 xml:id="sec-sec-prot-general-accounts-unlocked">
+     <title>Unlocked Accounts</title>
+     <para>
+      It is important that all system and vendor accounts that are not used
+      for logins are locked. To get a list of unlocked accounts on your
+      system, you can check for accounts that do <emphasis>not</emphasis>
+      have an encrypted password string starting with <literal>!</literal>
+      or <literal>*</literal> in the <filename>/etc/shadow</filename> file.
+      If you lock an account using <command>passwd</command>
+      <option>-l</option>, it will put a <literal>!!</literal> in front of
+      the encrypted password, effectively disabling the password. If you
+      lock an account using <command>usermod</command> <option>-L</option>,
+      it will put a <literal>!</literal> in front of the encrypted password.
+      Many system and shared accounts are usually locked by default by
+      having a <literal>*</literal> or <literal>!!</literal> in the password
+      field which renders the encrypted password into an invalid string.
+      Hence, to get a list of all unlocked (encryptable) accounts, run
+      (<command>egrep</command> is used to allow use of
+      regular-expressions):
+     </para>
+<screen>&prompt.root;egrep -v ':\*|:\!' /etc/shadow | awk -F: '{print $1}'</screen>
+     <para>
+      Also make sure all accounts have a <literal>x</literal> in the
+      password field in <filename>/etc/passwd</filename>. The following
+      command lists all accounts that do not have a <literal>x</literal> in
+      the password field:
+     </para>
+<screen>&prompt.root;grep -v ':x:' /etc/passwd</screen>
+     <para>
+      An <literal>x</literal> in the password fields means that the password
+      has been shadowed, for example the encrypted password needs to be
+      looked up in the <filename>/etc/shadow</filename> file. If the
+      password field in <filename>/etc/passwd</filename> is empty, then the
+      system will not look up the shadow file and it will not prompt the user
+      for a password at the login prompt.
+     </para>
+    </sect2>
+
+    <sect2 xml:id="sec-sec-prot-general-accounts-unused">
+     <title>Unused Accounts</title>
+>>>>>>> dca25a881... Unmount removable devices (bsc#1079637) (#594)
      <para>
       Restart <systemitem>udisks2</systemitem>:
      </para>
