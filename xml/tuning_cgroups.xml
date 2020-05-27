@@ -29,10 +29,9 @@
   <title>Overview</title>
   <para>
    Every process is assigned exactly one administrative cgroup. cgroups are ordered
-   in a hierarchical tree structure. Resource limitations can be set
-   for single processes or for whole branches of the hierarchy tree.
-   Limitations for CPU, memory, disk I/O, or network bandwidth usage
-   can be set.
+   in a hierarchical tree structure. You can set resource limitations, such as
+   CPU, memory, disk I/O, or network bandwidth usage,for single processes or for 
+   whole branches of the hierarchy tree.
   </para>
   <para>
    On &productname;, &systemd; uses cgroups to organize all
@@ -221,8 +220,130 @@
    systemd.resource-control</command>.
   </para>
  </sect1>
- <sect1 xml:id="sec-tuning-cgroups-info">
-  <title>For More Information</title>
+ 
+ <sect1 xml:id="sec-tuning-cgroups-tasksmax">
+  <title>Preventing Fork Bombs with TasksMax</title>
+  <para>
+      &systemd; 228 shipped with a <literal>DefaultTasksMax</literal> 
+      limit of 512, which is set in 
+      <filename>/etc/systemd/system.conf</filename>. This limits the
+      number of tasks any &systemd; unit can create at one time to
+      512. Previous versions had no default limit. The goal was to
+      improve security by preventing runaway processes from creating
+      excessive forks, or spawning enough threads to exhaust
+      system resources.
+  </para>
+  <para>
+      However, it soon became apparent that there is not a single
+      default that applies to all use cases. 512 is not low enough
+      to prevent a runaway process from crashing a system, and not
+      high enough for processes that create a lot of threads, such
+      as databases. In &systemd; 234 the default was changed to 15%, 
+      which is 4915 tasks (15% of the kernel limit of 32768, 
+      see <command>cat /proc/sys/kernel/pid_max</command>).
+  </para>
+  <para>
+      &sle; ships with a custom configuration that overrides the upstream
+      default. 
+      <filename>/usr/lib/systemd/system.conf.d/20-suse-defaults.conf</filename>
+      overrides the default limit with the following configuration:
+  </para>
+  <screen>
+[Manager]
+DefaultTasksMax=infinity
+  </screen>
+  <para>
+      When you query the value with <command>systemctl</command> it looks like
+      this:
+  </para>
+  <screen>&prompt.user;systemctl show --property DefaultTasksMax
+DefaultTasksMax=18446744073709551615</screen>
+  <para>
+       This is the same as having no limit. It is not a requirement to change the 
+       default, but setting some limits may help to prevent system crashes
+       from runaway processes.
+   </para>
+   <para>
+       Change the global default in
+       <filename>/etc/systemd/system.conf</filename> by uncommenting the 
+       <literal>DefaultTasksMax</literal> line, and changing the value either
+       to a number of tasks, or a percentage, like the following examples:
+   </para>
+   <screen>DefaultTasksMax=128
+DefaultTasksMax=7%
+</screen>
+   <para>
+       Load the new setting, then verify that it changed:
+   </para>
+   <screen>&prompt.sudo;systemctl daemon-reload
+&prompt.user;systemctl show --property DefaultTasksMax
+DefaultTasksMax=128
+   </screen>
+   <para>
+       Now you can set higher limits on individual services as needed. This
+       example is for MariaDB. <command>systemctl</command> has at least two
+       ways of checking the current value:
+   </para>
+   <screen>&prompt.user;systemctl show -p TasksMax mariadb.service
+TasksMax=128
+
+&prompt.user;systemctl status mariadb.service
+  ● mariadb.service - MariaDB database server
+   Loaded: loaded (/usr/lib/systemd/system/mariadb.service; disabled; vendor pr>
+   Active: active (running) since Tue 2020-05-26 14:15:03 PDT; 27min ago
+     Docs: man:mysqld(8)
+           https://mariadb.com/kb/en/library/systemd/
+ Main PID: 11845 (mysqld)
+   Status: "Taking your SQL requests now..."
+    Tasks: 30 (limit: 128)
+   CGroup: /system.slice/mariadb.service
+           └─11845 /usr/sbin/mysqld --defaults-file=/etc/my.cnf --user=mysql
+   </screen>
+   <para>
+       The Tasks line shows that MariaDB currently has 30 tasks running, and
+       an upper limit of 128. The following example demonstrates how to raise
+       MariaDB's limit to 1024:
+   </para>
+   <screen>
+&prompt.sudo;systemctl edit --system mariadb.service
+[System]
+TasksMax=1024
+</screen>
+   <para>
+       This creates an override file, 
+       <filename>/etc/systemd/system/mariadb.service.d/override.conf</filename>.
+       If you prefer to edit the full service file, use the 
+       <command>--full</command> option:
+   </para>
+   <screen>&prompt.sudo;systemctl edit --system --full mariadb.service</screen>
+   <para>    
+       Then load the new value:
+   </para>
+   <screen>&prompt.sudo;systemctl daemon-reload</screen>
+   <para>
+       You may also wish to set custom values for user processes. The &sle; default
+       for user slices is also infinity, set in
+       <filename>/usr/lib/systemd/system/user-.slice.d/20-suse-defaults.conf</filename>.
+       Verify this the same way as for system services:
+   </para>
+   <screen>&prompt.user;systemctl show -p TasksMax user-1000.slice
+TasksMax=18446744073709551615
+   </screen>
+   <para>
+       Change this for <literal>user-1000.slice</literal> to 256:
+   </para>
+   <screen>&prompt.sudo;systemctl edit user@1001.service
+[Service]
+TasksMax=256
+   </screen>
+   <para>
+       The new value takes effect at the next user login. For more information
+       see systemd.resource-control(5).   
+   </para>   
+</sect1>
+
+<sect1>
+    <title>For More Information</title>
 
   <itemizedlist mark="bullet" spacing="normal">
    <listitem>
