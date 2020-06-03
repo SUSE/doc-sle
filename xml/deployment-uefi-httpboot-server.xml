@@ -1,0 +1,1002 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+
+<chapter version="5.0" role="General" xml:id="cha-deployment-prep-uefi-httpboot"
+  xmlns="http://docbook.org/ns/docbook"
+  xmlns:xi="http://www.w3.org/2001/XInclude"
+  xmlns:xlink="http://www.w3.org/1999/xlink">
+ <title>Preparing Network Boot Environment</title>
+ <info>
+  <abstract>
+   <para>
+    This chapter describes how to set up and configure UEFI HTTP Boot server.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+<section xml:id="introduction">
+  <title>Introduction</title>
+  <para>
+    HTTP Boot is a client-server combination of DHCP, DNS, and HTTP
+    that provides the capability for system deployment over the
+    network. HTTP Boot can be used as a high-performance replacement
+    for PXE. HTTP Boot allows to boot a server from a URI over HTTP,
+    quickly transferring large files, such as Linux kernel and root
+    file system from servers outside of your local network.
+  </para>
+</section>
+<section xml:id="httpboot-setup-server-client">
+  <title>Setting up Server and Client</title>
+    <para>
+      Install the following packages on the machine that will act as a
+      HTTPBoot server: <package>dhcp-server</package>,
+      <package>apache2</package> (or <package>lighttpd</package>), and
+      <package>dnsmasq</package>.
+    </para>
+    <para>
+      The described scenario uses 192.168.111.0/24 (IPv4) and
+      2001:db8:f00f:cafe::/64 (IPv6) IP subnets and the server IP
+      addresses are 192.168.111.1(IPv4) and 2001:db8:f00f:cafe::1/64
+      (IPv6) as examples. Adjust these values to match your specific
+      situation.
+    </para>
+    <para>
+      Enable HTTP Boot on a physical client machine. The exact
+      procedure of enabling HTTP Boot is vendor specific. Consult the
+      documentation for your specific machine.
+    </para>
+      <para>
+        To set up a virtual machine with the latest UEFI, the host
+        needs to use &qemu; and OVMF. OVMF is the UEFI implementation
+        for &qemu;. For the better support of HTTP Boot, use OVMF
+        version r18743 or higher.
+      </para>
+      <para>
+        The latest OVMF is available in
+        <link xlink:href="https://build.opensuse.org/package/show/Virtualization/ovmf">https://build.opensuse.org/package/show/Virtualization/ovmf</link>
+      </para>
+      <para>
+        Just install qemu-ovmf-x86_64 which contains the firmware files
+        for qemu.
+      </para>
+    </section>
+  <section xml:id="os_image">
+    <title>OS Image</title>
+    <para>
+      SUSE Linux Enterprise starts to support HTTP Boot since 12-SP3 and
+      HTTPS Boot since 15. For openSUSE, you need Leap 15.0 or higher to
+      support HTTP Boot and HTTPS Boot.
+    </para>
+  </section>
+  <section xml:id="network_environment">
+    <title>Network Environment</title>
+    <para>
+      There are lots of possible networking scenarios. For the beginner,
+      it's recommended to start with the isolated network to avoid
+      breaking the physical network.
+    </para>
+    <section xml:id="isolated_network_within_the_host">
+      <title>Isolated Network Within The Host</title>
+      <para>
+        There are several networking settings in qemu. The tap
+        networking is the best choice since it utilizes the virtual
+        interface to achieve the two way communication between the host
+        and the guest. It provides a completely isolated network as long
+        as we don't bridge the virtual interface with any real one, so
+        that our testing dhcp server won't mess up the local network.
+      </para>
+      <para>
+        In this scenario, we assume the host is the HTTPBoot server and
+        the guest is the client.
+      </para>
+      <para>
+        [host] &lt;--&gt; (tap0) &lt;--&gt; [guest]
+      </para>
+      <para>
+        First, we set up the a tap interface for the communication
+        between the host and the guest.
+      </para>
+      <para>
+        <literal> # ip tuntap add mode tap user </literal><username><literal> name tap0</literal>
+      </para>
+      <para>
+        If the firewall is enabled, it's recommended to add
+        <emphasis>tap0</emphasis> to the &quot;Internal&quot; or
+        &quot;Trusted&quot; zone to avoid the port blocking.
+      </para>
+      <para>
+        Add the IP address with <emphasis role="strong">ip</emphasis>:
+      </para>
+<literallayout><literal> # ip link set dev tap0 up</literal>
+<literal> # ip addr add 192.168.111.1/24 dev tap0</literal>
+<literal> # ip addr -6 add 2001:db8:f00f:cafe::1/64 dev tap0</literal></literallayout>
+      <para>
+        In case <emphasis role="strong">ip</emphasis> complains
+        &quot;Permission Denied&quot; when adding the ipv6 address, try
+        to enable ipv6 for tap0 with
+      </para>
+      <para>
+        <literal> # sysctl net.ipv6.conf.tap0.disable_ipv6=0</literal>
+      </para>
+      <para>
+        NOTE: When using the isolated network, remember to replace
+        <emphasis role="strong">eth0</emphasis> with
+        <emphasis role="strong">tap0</emphasis> in the server
+        configuration later.
+      </para>
+    </section>
+    <section xml:id="physical_network">
+      <title>Physical Network</title>
+      <para>
+        A HTTPBoot server acts as a normal DHCP server in the physical
+        network except providing the image download function. Please
+        adapt the related settings in the following sections for your
+        network settings.
+      </para>
+      <para>
+        For the client, there are two choices: a physical machine or a
+        bridged virtual machine.
+      </para>
+      <section xml:id="physical_machine_as_the_client">
+        <title>Physical Machine As The Client</title>
+        <para>
+          Just check the firmware manual or UI to see if it supports
+          HTTPBoot or not.
+        </para>
+      </section>
+      <section xml:id="bridged_virtual_machine_as_the_client">
+        <title>Bridged Virtual Machine As The Client</title>
+        <para>
+          In case you don't have any new-enough machine as the HTTPBoot
+          client, one choice is to bridge the virtual machine to the
+          physical network. Assume that the host connects to the network
+          with <emphasis>eth0</emphasis>, we can bridge
+          <emphasis>eth0</emphasis> and <emphasis>tap0</emphasis> with
+          <emphasis>br0</emphasis>, and then the virtual machine can
+          send/receive packets through
+          <emphasis>br0</emphasis>/<emphasis>eth0</emphasis>.
+        </para>
+        <para>
+          [host]--(eth0)&lt;--&gt;(br0)&lt;--&gt;(tap0)--[guest]
+        </para>
+        <para>
+          It's recommended to use YaST to create and manage both tap and
+          bridge interfaces. See the section in Leap document
+          (<link xlink:href="https://doc.opensuse.org/documentation/leap/virtualization/html/book.virt/cha.libvirt.networks.html#libvirt.networks.bridged.yast">Managing
+          Network Bridges with YaST</link>) for more information.
+        </para>
+        <para>
+          Of course, you can do it manually ;-)
+        </para>
+        <para>
+          First, create the bridge(<emphasis>br0</emphasis>) and tap:
+        </para>
+<literallayout><literal> # ip link add name br0 type bridge</literal>
+<literal> # ip link set br0 up</literal>
+<literal> # ip tuntap add mode tap user </literal><username><literal> name tap0</literal></literallayout>
+        <para>
+          Bridge the interfaces:
+        </para>
+<literallayout><literal> # ip link set eth0 up</literal>
+<literal> # ip link set tap0 up</literal>
+<literal> # ip link set eth0 master br0</literal>
+<literal> # ip link set tap0 master br0</literal></literallayout>
+        <para>
+          Once the bridge(<emphasis>br0</emphasis>) is set up, configure
+          the network settings on <emphasis>br0</emphasis> and then both
+          the host and the guest can access the network.
+        </para>
+      </section>
+    </section>
+  </section>
+</section>
+<section xml:id="configure_the_server">
+  <title>Configure The Server</title>
+  <section xml:id="dns_server">
+    <title>DNS Server</title>
+    <para>
+      DNS is optional but it's nice to give your server a well-known
+      name. To set up the DNS server, add the following lines to
+      /etc/dnsmasq.conf
+    </para>
+<literallayout><literal> interface=eth0</literal>
+<literal> addn-hosts=/etc/dnsmasq.d/hosts.conf</literal></literallayout>
+    <para>
+      Then, create the mapping of the domain name of the IP address in
+      /etc/dnsmasq.d/hosts.conf
+    </para>
+<literallayout><literal> 192.168.111.1 www.httpboot.local</literal>
+<literal> 2001:db8:f00f:cafe::1 www.httpboot.local</literal></literallayout>
+    <para>
+      Now, it's time to start the DNS server.
+    </para>
+    <para>
+      <literal> # systemctl start dnsmasq</literal>
+    </para>
+    <para>
+      NOTE: UEFI 2.7 changes the device path of HTTPBoot and inserts a
+      DNS node, and it's recommended to use shim bootloaders from
+      SLE15/openSUSE Leap 15 or newer to avoid the potential errors due
+      to the additional DNS node.
+    </para>
+  </section>
+  <section xml:id="dhcpv4_server">
+    <title>DHCPv4 Server</title>
+    <para>
+      Before setting the DHCP servers, remember to specify the interface
+      for the DHCP servers in
+      <emphasis role="strong">/etc/sysconfig/dhcpd</emphasis>:
+    </para>
+<literallayout><literal> DHCPD_INTERFACE=&quot;eth0&quot;</literal>
+<literal> DHCPD6_INTERFACE=&quot;eth0&quot;</literal></literallayout>
+    <para>
+      Then, the DHCP servers will only provide the service on
+      <emphasis role="strong">eth0</emphasis>.
+    </para>
+    <para>
+      Here we will set up the mixed DHCPv4 server for both PXEBoot and
+      HTTPBoot. Add the following lines to /etc/dhcpd.conf:
+    </para>
+<literallayout><literal> option domain-name-servers 192.168.111.1;</literal>
+<literal> option routers 192.168.111.1;</literal>
+<literal> default-lease-time 14400;</literal>
+<literal> ddns-update-style none;</literal>
+<literal> subnet 192.168.111.0 netmask 255.255.255.0 {</literal>
+<literal>   range dynamic-bootp 192.168.111.100 192.168.111.120;</literal>
+<literal>   default-lease-time 14400;</literal>
+<literal>   max-lease-time 172800;</literal>
+<literal>   class &quot;pxeclients&quot; {</literal>
+<literal>     match if substring (option vendor-class-identifier, 0, 9) = &quot;PXEClient&quot;;</literal>
+<literal>     next-server 192.168.111.1;</literal>
+<literal>     filename &quot;/bootx64.efi&quot;;</literal>
+<literal>   }</literal>
+<literal>   class &quot;httpclients&quot; {</literal>
+<literal>     match if substring (option vendor-class-identifier, 0, 10) = &quot;HTTPClient&quot;;</literal>
+<literal>     option vendor-class-identifier &quot;HTTPClient&quot;;</literal>
+<literal>     filename &quot;</literal><link xlink:href="http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi"><literal>http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi</literal></link><literal>&quot;;</literal>
+<literal>   }</literal>
+<literal> }</literal></literallayout>
+    <para>
+      First, we match the identifier from the client to tell what kind
+      of service it requests. For HTTPBoot, the DHCPv4 server MUST use
+      &quot;HTTPClient&quot; for option 60 since the client use it to
+      identify whether this is a HTTPBoot offer or not.
+    </para>
+    <para>
+      Start the dhcp daemon:
+    </para>
+    <para>
+      <literal> # systemctl start dhcpd</literal>
+    </para>
+    <para>
+      <emphasis role="strong">NOTE</emphasis>: Due to a bug(*) in shim,
+      you might see &quot;Invalid Parameter&quot; from shim if the
+      gateway (option routers) is not set.
+    </para>
+    <para>
+      (*)
+      <link xlink:href="https://github.com/rhboot/shim/pull/136">https://github.com/rhboot/shim/pull/136</link>
+    </para>
+  </section>
+  <section xml:id="dhcpv6_server">
+    <title>DHCPv6 Server</title>
+    <para>
+      To set up the DHCPv6 server, add the following lines to
+      /etc/dhcpd6.conf:
+    </para>
+<literallayout><literal> option dhcp6.bootfile-url code 59 = string;</literal>
+<literal> option dhcp6.vendor-class code 16 = {integer 32, integer 16, string};</literal>
+<literal> subnet6 2001:db8:f00f:cafe::/64 {</literal>
+<literal>         range6 2001:db8:f00f:cafe::42:10 2001:db8:f00f:cafe::42:99;</literal>
+<literal>         option dhcp6.bootfile-url &quot;</literal><link xlink:href="http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi"><literal>http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi</literal></link><literal>&quot;;</literal>
+<literal>         option dhcp6.name-servers 2001:db8:f00f:cafe::1;</literal>
+<literal>         option dhcp6.vendor-class 0 10 &quot;HTTPClient&quot;;</literal>
+<literal> }</literal></literallayout>
+    <para>
+      First, we define the type of the boot URL and the vendor class and
+      then set the details. Like the DHCPv4 settings, we have to assign
+      the boot URL. Please note that we have to use the IPv6 name in the
+      boot URL. Similar to option 60 in DHCPv4, we have to specify the
+      vendor class. The vendor class option in DHCPv6 consists of the
+      enterprise number and the vendor class data (length and the
+      content). The HTTPBoot driver doesn't care the enterprise number,
+      so we just use 0. The content of the vendor class data has to be
+      &quot;HTTPClient&quot;, or the client will just ignore the offer.
+    </para>
+    <para>
+      For the older HTTPBoot implementation, it doesn't follow RFC 3315
+      and will need a different setting like this:
+    </para>
+<literallayout><literal> option dhcp6.bootfile-url code 59 = string;</literal>
+<literal> option dhcp6.vendor-class code 16 = string;</literal>
+<literal> subnet6 2001:db8:f00f:cafe::/64 {</literal>
+<literal>         range6 2001:db8:f00f:cafe::42:10 2001:db8:f00f:cafe::42:99;</literal>
+<literal>         option dhcp6.bootfile-url &quot;</literal><link xlink:href="http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi"><literal>http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi</literal></link><literal>&quot;;</literal>
+<literal>         option dhcp6.name-servers 2001:db8:f00f:cafe::1;</literal>
+<literal>         option dhcp6.vendor-class &quot;HTTPClient&quot;;</literal>
+<literal> }</literal></literallayout>
+    <para>
+      Now start the DHCPv6 daemon.
+    </para>
+    <para>
+      <literal> # systemctl start dhcpd6</literal>
+    </para>
+    <para>
+      It's also possible to setup a DHCP6 server for both PXEBoot and
+      HTTPBoot. Like this:
+    </para>
+<literallayout><literal> option dhcp6.bootfile-url code 59 = string;</literal>
+<literal> option dhcp6.vendor-class code 16 = {integer 32, integer 16, string};</literal>
+<literal> </literal>
+<literal> subnet6 2001:db8:f00f:cafe::/64 {</literal>
+<literal>         range6 2001:db8:f00f:cafe::42:10 2001:db8:f00f:cafe::42:99;</literal>
+<literal> </literal>
+<literal>         class &quot;PXEClient&quot; {</literal>
+<literal>                 match substring (option dhcp6.vendor-class, 6, 9);</literal>
+<literal>         }</literal>
+<literal> </literal>
+<literal>         subclass &quot;PXEClient&quot; &quot;PXEClient&quot; {</literal>
+<literal>                 option dhcp6.bootfile-url &quot;</literal><link xlink:href="tftp://%5B2001:db8:f00f:cafe"><literal>tftp://[2001:db8:f00f:cafe</literal></link><literal>::1]/bootloader.efi&quot;;</literal>
+<literal>         }</literal>
+<literal> </literal>
+<literal>         class &quot;HTTPClient&quot; {</literal>
+<literal>                 match substring (option dhcp6.vendor-class, 6, 10);</literal>
+<literal>         }</literal>
+<literal> </literal>
+<literal>         subclass &quot;HTTPClient&quot; &quot;HTTPClient&quot; {</literal>
+<literal>                 option dhcp6.bootfile-url &quot;</literal><link xlink:href="http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi"><literal>http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi</literal></link><literal>&quot;;</literal>
+<literal>                 option dhcp6.name-servers 2001:db8:f00f:cafe::1;</literal>
+<literal>                 option dhcp6.vendor-class 0 10 &quot;HTTPClient&quot;;</literal>
+<literal>         }</literal>
+<literal> }</literal></literallayout>
+    <para>
+      It could also go further to match the vendor-class for different
+      architecture. For example, &quot;HTTPClient:Arch:00016&quot; means
+      a x86_64 HTTPBoot client, and it can be rewritten as:
+    </para>
+<literallayout><literal>         class &quot;HTTPClient&quot; {</literal>
+<literal>                 match substring (option dhcp6.vendor-class, 6, 21);</literal>
+<literal>         }</literal>
+<literal> </literal>
+<literal>         subclass &quot;HTTPClient&quot; &quot;HTTPClient:Arch:00016&quot; {</literal>
+<literal>                 option dhcp6.bootfile-url &quot;</literal><link xlink:href="http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi"><literal>http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi</literal></link><literal>&quot;;</literal>
+<literal>                 option dhcp6.name-servers 2001:db8:f00f:cafe::1;</literal>
+<literal>                 option dhcp6.vendor-class 0 10 &quot;HTTPClient&quot;;</literal>
+<literal>         }</literal></literallayout>
+    <para>
+      Then the server can serve different architectures at the same
+      time.
+    </para>
+    <para>
+      Reference:
+      <link xlink:href="https://www.mail-archive.com/edk2-devel@lists.01.org/msg14683.html">https://www.mail-archive.com/edk2-devel@lists.01.org/msg14683.html</link>
+    </para>
+    <section xml:id="firewall">
+      <title>Firewall</title>
+      <para>
+        The DHCP6 packets may be dropped by the firewall due to the RP
+        filter in SLE/openSUSE Leap 15+. If you found
+        &quot;rpfilter_DROP&quot; in the firewall log, edit
+        /etc/firewalld/firewalld.conf:
+      </para>
+      <para>
+        <literal> IPv6_rpfilter=no</literal>
+      </para>
+    </section>
+  </section>
+  <section xml:id="tftp_serveroptional">
+    <title>TFTP server(Optional)</title>
+    <para>
+      In case you need to support both PXE and HTTPBoot, a tftp server
+      is necessary. Just install <emphasis>tftp</emphasis> and start the
+      service:
+    </para>
+<literallayout><literal> # systemctl start tftp.socket</literal>
+<literal> # systemctl start tftp.service</literal></literallayout>
+    <para>
+      openSUSE/SLE now provide a special package, tftpboot-installation,
+      for PXE. For example, just install
+      <emphasis>tftpboot-installation-openSUSE-Tumbleweed-x86_64</emphasis>
+      and the Tumbleweed bootloader and copy the whole directory to the
+      tftp root directory.
+    </para>
+    <para>
+      <literal> # cp -r /usr/share/tftpboot-installation/openSUSE-Tumbleweed-x86_64 /srv/tftpboot</literal>
+    </para>
+    <para>
+      Read
+      /usr/share/tftpboot-installation/openSUSE-Tumbleweed-x86_64/README
+      for more information.
+    </para>
+  </section>
+  <section xml:id="http_server">
+    <title>HTTP Server</title>
+    <para>
+      For the complete SLE/openSUSE HTTPBoot installation, copy every
+      file in the first iso image to /srv/www/htdocs/sle/ or
+      /srv/www/htdocs/opensuse/. Then, edit
+      /srv/www/htdocs/sle/EFI/BOOT/grub.cfg to fit your needs. An
+      example of grub.cfg:
+    </para>
+<literallayout><literal> timeout=60</literal>
+<literal> default=1</literal>
+<literal> </literal>
+<literal> menuentry 'Installation IPv4' --class opensuse --class gnu-linux --class gnu --class os {</literal>
+<literal>   set gfxpayload=keep</literal>
+<literal>   echo 'Loading kernel ...'</literal>
+<literal>   linuxefi /sle/boot/x86_64/loader/linux install=</literal><link xlink:href="http://www.httpboot.local/sle"><literal>http://www.httpboot.local/sle</literal></link>
+<literal>   echo 'Loading initial ramdisk ...'</literal>
+<literal>   initrdefi /sle/boot/x86_64/loader/initrd</literal>
+<literal> }</literal>
+<literal> </literal>
+<literal> menuentry 'Installation IPv6' --class opensuse --class gnu-linux --class gnu --class os {</literal>
+<literal>   set gfxpayload=keep</literal>
+<literal>   echo 'Loading kernel ...'</literal>
+<literal>   linuxefi /sle/boot/x86_64/loader/linux install=</literal><link xlink:href="http://www.httpboot.local/sle"><literal>http://www.httpboot.local/sle</literal></link><literal> ipv6only=1 ifcfg=*=dhcp6,DHCLIENT6_MODE=managed</literal>
+<literal>   echo 'Loading initial ramdisk ...'</literal>
+<literal>   initrdefi /sle/boot/x86_64/loader/initrd</literal>
+<literal> }</literal></literallayout>
+    <para>
+      The SLE Deployment Guide(*) may provide more information for the
+      installation server setup.
+    </para>
+    <para>
+      (*)
+      <link xlink:href="https://www.suse.com/documentation/sles-12/book_sle_deployment/data/part_installserver.html">https://www.suse.com/documentation/sles-12/book_sle_deployment/data/part_installserver.html</link>
+    </para>
+    <section xml:id="lighttpd">
+      <title>lighttpd</title>
+      <para>
+        There are some modification is necessary to make lighttpd
+        support both IPv4 and IPv6. Edit /etc/lighttpd/lighttpd.conf
+      </para>
+<literallayout><literal> ##</literal>
+<literal> ## Use IPv6?</literal>
+<literal> ##</literal>
+<literal> #server.use-ipv6 = &quot;enable&quot;</literal>
+<literal> $SERVER[&quot;socket&quot;] == &quot;[::]:80&quot; {  }</literal></literallayout>
+      <para>
+        When server.use-ipv6 is enabled, it would make lighttpd only
+        listen to IPv6, so we remove it and add an new IPv6 section with
+        the default options.
+      </para>
+      <para>
+        Start the lighttpd daemon:
+      </para>
+      <para>
+        <literal> # systemctl start lighttpd</literal>
+      </para>
+    </section>
+    <section xml:id="apache2">
+      <title>apache2</title>
+      <para>
+        Start the apache daemon:
+      </para>
+      <para>
+        <literal> # systemctl start apache2</literal>
+      </para>
+    </section>
+  </section>
+  <section xml:id="ssl_support_for_http_serveroptional">
+    <title>SSL Support for HTTP Server(Optional)</title>
+    <para>
+      The TLS protocol was written in the UEFI spec since 2.5, and the
+      latest OVMF already supports HTTPS Boot. For testing, we can
+      create a self-signed certificate with
+      <emphasis role="strong">openssl</emphasis>:
+    </para>
+    <para>
+      <literal> $ openssl req -newkey rsa:4096 -nodes -keyout server.key -x509 -days 365 -out server.crt</literal>
+    </para>
+    <para>
+      Since we choose &quot;www.httpboot.local&quot; as our domain name,
+      please use &quot;www.httpboot.local&quot; for &quot;Common
+      Name&quot;.
+    </para>
+    <para>
+      Convert the certificate into DER format for the client:
+    </para>
+    <para>
+      <literal> $ openssl x509 -in server.crt -outform der -out server.der</literal>
+    </para>
+    <para>
+      Please note that this certificate is <emphasis role="strong">only
+      for testing</emphasis> and
+      <emphasis role="strong">NEVER</emphasis> use this certificate in
+      the production machine.
+    </para>
+    <section xml:id="enroll_the_server_certificate_into_the_client_firmware">
+      <title>Enroll The Server Certificate into The Client
+      Firmware</title>
+      <para>
+        You have to enroll the server certificate (server.der) in the
+        client side before using HTTPS Boot or the client would fail to
+        connect to the server. The method to enroll the server
+        certificate depends on the implementation of the client
+        firmware.
+      </para>
+      <section xml:id="physical_machine_1">
+        <title>Physical Machine</title>
+        <para>
+          To enroll the server certificate into a physical machine, you
+          may need to plug in a USB stick which contains the certificate
+          file and enroll it manually with the firmware UI. On the other
+          hand, some high-end servers with Redfish support can enroll
+          the certificate remotely. For example, the HPE iLO5 manual
+          provides the
+          <link xlink:href="https://hewlettpackard.github.io/ilo-rest-api-docs/ilo5/#https-boot-tls-configuration">instructions</link>
+          to enroll the certificate through its Restful API.
+        </para>
+      </section>
+      <section xml:id="virtual_machine_1">
+        <title>Virtual Machine</title>
+        <para>
+          OVMF provides a menu in &quot;Device Manager&quot; -&gt;
+          &quot;Tls Auth Configuration&quot;, and the user can enroll
+          the server certificate from a file accessible to OVMF.
+        </para>
+        <para>
+          Besides enrolling the certificate manually, it's possible to
+          configure the trusted certificates for OVMF with
+          &quot;-fw_cfg&quot;. Since
+          <link xlink:href="https://github.com/tianocore/edk2/commit/9c7d0d499296e444e39e9b6b34d8c121a325b295">9c7d0d49929</link>,
+          OVMF supports reading the certificate list from the fw_cfg
+          entry,
+          <emphasis role="strong">etc/edk2/https/cacerts</emphasis>. The
+          certificate list has to be in the format of Signature
+          Database.
+        </para>
+        <para>
+          To create the certificate list with
+          <emphasis role="strong">efisiglist</emphasis>:
+        </para>
+        <para>
+          <literal> $ efisiglist -a server.der -o certs.db</literal>
+        </para>
+        <para>
+          After creating the certificate list, append the following
+          command to specify the fw_cfg entry:
+        </para>
+        <para>
+          <literal> $ qemu ... -fw_cfg name=etc/edk2/https/cacerts,file=certs.db</literal>
+        </para>
+        <para>
+          Check more details in the &quot;HTTPS Boot&quot; section of
+          <link xlink:href="https://github.com/tianocore/edk2/blob/master/OvmfPkg/README">OVMF
+          README</link>.
+        </para>
+      </section>
+    </section>
+    <section xml:id="lighttpd_1">
+      <title>lighttpd</title>
+      <para>
+        Since lighttpd needs the private key and the certificate in the
+        same file, we have to unify them first.
+      </para>
+      <para>
+        <literal> $ cat server.crt server.key &gt; server-almighty.pem</literal>
+      </para>
+      <para>
+        Copy &quot;server-almighty.pem&quot; to /etc/ssl/private/.
+      </para>
+<literallayout><literal> # cp server-almighty.pem /etc/ssl/private/</literal>
+<literal> # chown -R root:lighttpd /etc/ssl/private/server-almighty.pem</literal>
+<literal> # chmod 640 /etc/ssl/private/server-almighty.pem</literal></literallayout>
+      <para>
+        Then, check /etc/lighttpd/modules.conf whether
+        &quot;mod_openssl&quot; is in the &quot;server.modules&quot;
+        section or not. For example:
+      </para>
+<literallayout><literal> server.modules = (</literal>
+<literal>   &quot;mod_access&quot;,</literal>
+<literal>   &quot;mod_openssl&quot;,</literal>
+<literal> )</literal></literallayout>
+      <para>
+        <emphasis role="strong">NOTE:</emphasis> Due to the change of
+        packaging, openSUSE Leap 15.0 or the higher need to enable the
+        openssl module explicitly while lighttpd in openSUSE Leap 42.3
+        or the lower builds in the openssl module in the lighttpd
+        binary.
+      </para>
+      <para>
+        Next, add the following lines to &quot;SSL Support&quot; section
+        in /etc/lighttpd/lighttpd.conf:
+      </para>
+<literallayout><literal>  # For IPv4</literal>
+<literal>  $SERVER[&quot;socket&quot;] == &quot;:443&quot; {</literal>
+<literal>      ssl.engine                 = &quot;enable&quot;</literal>
+<literal>      ssl.pemfile                = &quot;/etc/ssl/private/server-almighty.pem&quot;</literal>
+<literal>  }</literal>
+<literal>  # For IPv6</literal>
+<literal>  $SERVER[&quot;socket&quot;] == &quot;[::]:443&quot; {</literal>
+<literal>      ssl.engine                 = &quot;enable&quot;</literal>
+<literal>      ssl.pemfile                = &quot;/etc/ssl/private/server-almighty.pem&quot;</literal>
+<literal>  }</literal></literallayout>
+      <para>
+        Restart lighttpd to activate SSL support.
+      </para>
+      <para>
+        <literal> # systemctl restart lighttpd</literal>
+      </para>
+    </section>
+    <section xml:id="apache2_1">
+      <title>apache2</title>
+      <para>
+        Before we start to configure apache, we have to check
+        <emphasis role="strong">/etc/sysconfig/apache2</emphasis> first.
+      </para>
+      <para>
+        The SSL support of apache is controlled by
+        <emphasis role="strong">APACHE_SERVER_FLAGS</emphasis>, so we
+        have to add the <emphasis role="strong">SSL</emphasis> flag.
+      </para>
+      <para>
+        <literal> APACHE_SERVER_FLAGS=&quot;SSL&quot;</literal>
+      </para>
+      <para>
+        Besides, make sure that <emphasis role="strong">ssl</emphasis>
+        is in <emphasis role="strong">APACHE_MODULES</emphasis>. For
+        example:
+      </para>
+      <para>
+        <literal> APACHE_MODULES=&quot;actions alias auth_basic authn_file authz_host authz_groupfile authz_core authz_user autoindex cgi dir env expires include log_config mime negotiation setenvif </literal><emphasis role="strong"><literal>ssl</literal></emphasis><literal> socache_shmcb userdir reqtimeout authn_core headers proxy proxy_http proxy_wstunnel&quot;</literal>
+      </para>
+      <para>
+        Next, copy the private key and the certificate to /etc/apache2/.
+      </para>
+<literallayout><literal> # cp server.key /etc/apache2/ssl.key/</literal>
+<literal> # chown wwwrun /etc/apache2/ssl.key/server.key</literal>
+<literal> # chmod 600 /etc/apache2/ssl.key/server.key</literal>
+<literal> # cp server.crt /etc/apache2/ssl.crt/</literal></literallayout>
+      <para>
+        Create the ssl vhost configuration.
+      </para>
+<literallayout><literal> # cd /etc/apache2/vhosts.d</literal>
+<literal> # cp vhost-ssl.template vhost-ssl.conf</literal></literallayout>
+      <para>
+        Edit /etc/apache2/vhosts.d/vhost-ssl.conf to change the private
+        key and the certificate:
+      </para>
+<literallayout><literal> SSLCertificateFile /etc/apache2/ssl.crt/server.crt</literal>
+<literal> SSLCertificateKeyFile /etc/apache2/ssl.key/server.key</literal></literallayout>
+      <para>
+        Restart apache to activate the SSL support:
+      </para>
+      <para>
+        <literal> # systemctl restart apache2</literal>
+      </para>
+    </section>
+    <section xml:id="modify_dhcp_configuration">
+      <title>Modify DHCP configuration</title>
+      <para>
+        Last, remember to replace the
+        &quot;<link xlink:href="http://">http://</link>&quot; prefix
+        with &quot;<link xlink:href="https://">https://</link>&quot; in
+        the dhcpd.conf/dhcpd6.conf and restart the dhcp server.
+      </para>
+<literallayout><literal> # systemctl restart dhcpd</literal>
+<literal> # systemctl restart dhcpd6</literal></literallayout>
+    </section>
+    <section xml:id="changes_in_grub.cfg">
+      <title>Changes in grub.cfg</title>
+      <para>
+        Since we create a self-signed certificate for our HTTPS server,
+        if we specify the HTTPS url in grub.cfg, the SLE/openSUSE
+        installation system may fail to verify the certificate and
+        refuse to download files from our HTTPS server.
+      </para>
+      <para>
+        There are two possible solutions.
+      </para>
+      <para>
+        1. Add <emphasis role="strong">ssl.certs=0</emphasis> to disable
+        the certificate verification. For example:
+      </para>
+      <para>
+        <literal> linuxefi /sle/boot/x86_64/loader/linux install=</literal><emphasis role="strong"><link xlink:href="https://www.httpboot.local/sle"><literal>https://www.httpboot.local/sle</literal></link></emphasis><literal> </literal><emphasis role="strong"><literal>ssl.certs=0</literal></emphasis>
+      </para>
+      <para>
+        2. Create an initrd containing the server certificate. By
+        default, the installation system searches the trusted
+        certificates in /var/lib/ca-certificates/openssl/ and
+        /var/lib/ca-certificates/pem/, so we have to create an initrd
+        containing our server certificate in those directory. Here is
+        the example of commands:
+      </para>
+<literallayout><literal> ## Create new directories containing the target path</literal>
+<literal> $ mkdir -p initrd-new/var/lib/ca-certificates/openssl/</literal>
+<literal> $ mkdir -p initrd-new/var/lib/ca-certificates/pem/</literal>
+<literal> </literal>
+<literal> ## Copy our server certificate to the target paths</literal>
+<literal> $ cp server.crt initrd-new/var/lib/ca-certificates/openssl/my-ca.pem</literal>
+<literal> $ cp server.crt initrd-new/var/lib/ca-certificates/pem/my-ca.pem</literal>
+<literal> </literal>
+<literal> ## Create the link file, </literal><hash><literal>.0, to make the certificate be trusted</literal>
+<literal> $ ln -sr initrd-new/var/lib/ca-certificates/openssl/my-ca.pem initrd-new/var/lib/ca-certificates/openssl/`openssl x509 -hash -noout -in server.crt`.0</literal>
+<literal> $ ln -sr initrd-new/var/lib/ca-certificates/pem/my-ca.pem initrd-new/var/lib/ca-certificates/pem/`openssl x509 -hash -noout -in server.crt`.0</literal>
+<literal> </literal>
+<literal> ## Change the working directory to 'initrd-new'</literal>
+<literal> $ cd initrd-new</literal>
+<literal> </literal>
+<literal> ## Make sure the whole path is owned by root</literal>
+<literal> $ sudo chown -R root:root var</literal>
+<literal> </literal>
+<literal> ## Create initrd (ssl.img)</literal>
+<literal> $ find . | cpio --quiet -H newc -o | gzip -9 -n &gt; ../ssl.img</literal>
+<literal> </literal>
+<literal> ## Back to the upper directory for the further actions</literal>
+<literal> $ cd ..</literal></literallayout>
+      <para>
+        You can check the content of ssl.img with
+        <emphasis role="strong">lsinitrd</emphasis>. For example:
+      </para>
+<literallayout><literal> $ lsinitrd ssl.img</literal>
+<literal> Image: ssl.img: 4.0K</literal>
+<literal> ========================================================================</literal>
+<literal> Version: </literal>
+<literal> </literal>
+<literal> Arguments: </literal>
+<literal> dracut modules:</literal>
+<literal> ========================================================================</literal>
+<literal> drwxr-xr-x   3 johndoe  users           0 Sep  3 10:09 .</literal>
+<literal> drwxr-xr-x   3 root     root            0 Sep  3 16:27 var</literal>
+<literal> drwxr-xr-x   3 root     root            0 Sep  3 16:27 var/lib</literal>
+<literal> drwxr-xr-x   3 root     root            0 Sep  3 16:27 var/lib/ca-certificates</literal>
+<literal> drwxr-xr-x   2 root     root            0 Sep  3 16:28 var/lib/ca-certificates/openssl</literal>
+<literal> lrwxrwxrwx   1 root     root            9 Sep  3 16:28 var/lib/ca-certificates/openssl/c6bea024.0 -&gt; my-ca.pem</literal>
+<literal> -rw-r--r--   1 root     root         2114 Sep  3 16:28 var/lib/ca-certificates/openssl/my-ca.pem</literal>
+<literal> drwxr-xr-x   2 root     root            0 Sep  3 16:28 var/lib/ca-certificates/pem</literal>
+<literal> lrwxrwxrwx   1 root     root            9 Sep  3 16:28 var/lib/ca-certificates/pem/c6bea024.0 -&gt; my-ca.pem</literal>
+<literal> -rw-r--r--   1 root     root         2114 Sep  3 16:28 var/lib/ca-certificates/pem/my-ca.pem</literal>
+<literal> ========================================================================</literal></literallayout>
+      <para>
+        Now we need to copy <emphasis role="strong">ssl.img</emphasis>
+        to the directory of initrd, e.g.
+        /srv/www/htdocs/sle/boot/x86_64/loader/, and modify
+        <emphasis role="strong">grub.cfg</emphasis> to add ssl.img. For
+        example:
+      </para>
+<literallayout><literal> echo 'Loading kernel ...'</literal>
+<literal> linuxefi /sle/boot/x86_64/loader/linux install=</literal><emphasis role="strong"><link xlink:href="https://www.httpboot.local/sle"><literal>https://www.httpboot.local/sle</literal></link></emphasis>
+<literal> echo 'Loading initial ramdisk ...'</literal>
+<literal> initrdefi /sle/boot/x86_64/loader/initrd </literal><emphasis role="strong"><literal>/sle/boot/x86_64/loader/ssl.img</literal></emphasis></literallayout>
+      <para>
+        NOTE: A simple bash script to create initrd is available:
+        <link xlink:href="https://github.com/lcp/uefi-fun/blob/master/packcert/packcert.sh">https://github.com/lcp/uefi-fun/blob/master/packcert/packcert.sh</link>
+      </para>
+      <para>
+        Usage:
+      </para>
+      <para>
+        <literal> $ sh packcert.sh server.crt ssl.img</literal>
+      </para>
+    </section>
+  </section>
+  <section xml:id="container_services">
+    <title>Container Services</title>
+    <para>
+      For the quick test, mightyboot(*) can create the services with
+      containers. Just edit <emphasis role="strong">env</emphasis> to
+      match the host network configuration and type
+    </para>
+    <para>
+      <literal> $ docker-compose up</literal>
+    </para>
+    <para>
+      If the settings are good, it will bring up dhcp, dhcp6, dnsmasq,
+      and lighttpd services on the given network interface and make them
+      ready to test.
+    </para>
+    <para>
+      (*)
+      <link xlink:href="https://github.com/lcp/mightyboot">https://github.com/lcp/mightyboot</link>
+    </para>
+  </section>
+</section>
+<section xml:id="launch_the_client">
+  <title>Launch The Client</title>
+  <section xml:id="physical_machine_2">
+    <title>Physical Machine</title>
+    <para>
+      If the firmware already supports HTTPBoot, just plug in the cable
+      and choose the correct boot option.
+    </para>
+  </section>
+  <section xml:id="virtual_machine_2">
+    <title>Virtual Machine</title>
+    <para>
+      Now it's time to set up a virtual machine as the HTTPBoot client.
+      There are a few qemu options needed to create a UEFI virtual
+      machine.
+    </para>
+    <orderedlist spacing="compact">
+      <listitem>
+        <para>
+          Specify the firmware
+        </para>
+      </listitem>
+    </orderedlist>
+<literallayout><literal> -drive if=pflash,format=raw,readonly,file=/usr/share/qemu/ovmf-x86_64-code.bin \</literal>
+<literal> -drive if=pflash,format=raw,file=ovmf-x86_64-vars.bin</literal></literallayout>
+    <para>
+      Please note that ovmf-x86_64-vars.bin must be writable. Just copy
+      /usr/share/qemu/ovmf-x86_64-vars.bin to the working directory.
+    </para>
+    <orderedlist spacing="compact">
+      <listitem>
+        <para>
+          Specify the network device
+        </para>
+      </listitem>
+    </orderedlist>
+<literallayout><literal> -netdev tap,id=hostnet0,ifname=tap0,script=no,downscript=no \</literal>
+<literal> -device virtio-net-pci,romfile=,netdev=hostnet0</literal></literallayout>
+    <para>
+      Since the host uses tap0 to communicate with the guest, we must
+      specify the interface. &quot;romfile=&quot; is to disable the iPXE
+      support so the virtual machine will use the native PXE and
+      HTTPBoot functions from OVMF instead from iPXE.
+    </para>
+    <para>
+      The complete qemu command would be like this:
+    </para>
+<literallayout><literal> $ qemu-system-x86_64 -enable-kvm \</literal>
+<literal>                      -drive if=pflash,format=raw,readonly,file=/usr/share/qemu/ovmf-x86_64-code.bin \</literal>
+<literal>                      -drive if=pflash,format=raw,file=ovmf-vars.bin \</literal>
+<literal>                      -hda fat:hda-contents/ -monitor stdio \</literal>
+<literal>                      -netdev tap,id=hostnet0,ifname=tap0,script=no,downscript=no \</literal>
+<literal>                      -device virtio-net-pci,romfile=,netdev=hostnet0</literal></literallayout>
+    <para>
+      If you are using libvirt, then you can use &quot;rom bar&quot; to
+      disable iPXE support. For example:
+    </para>
+    <programlisting language="xml">
+    &lt;interface type='bridge'&gt;
+      &lt;mac address='00:11:22:33:44:55'/&gt;
+      &lt;source bridge='br0'/&gt;
+      &lt;model type='virtio'/&gt;
+      &lt;rom bar='off'/&gt;
+      &lt;address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/&gt;
+    &lt;/interface&gt;
+</programlisting>
+    <para>
+      When the TianoCore logo shows, press &quot;ESC&quot; to enter the
+      firmware menu.
+    </para>
+    <para>
+      Image:Boot-logo.png
+    </para>
+    <para>
+      Press &quot;DOWN&quot; to go to &quot;Boot Manager&quot; and press
+      &quot;Enter&quot;.
+    </para>
+    <para>
+      Image:Boot-manager.png
+    </para>
+    <para>
+      There will be several boot options. Choose the boot option with
+      the &quot;HTTP&quot; prefix.
+    </para>
+    <para>
+      For example:
+    </para>
+    <para>
+      HTTPBoot IPv4
+    </para>
+    <para>
+      Image:Httpv4.png
+    </para>
+    <para>
+      HTTPBoot IPv6
+    </para>
+    <para>
+      Image:Httpv6.png
+    </para>
+    <para>
+      Just choose one of the boot options, and the firmware will start
+      to download your UEFI application and execute it!
+    </para>
+    <para>
+      Another way to test http boot is to download a iso image from a
+      URL. The benefit of this way is that you don't need to setup DHCP
+      on host machine, and it only needs http server.
+    </para>
+    <para>
+      The first step is putting iso file to /srv/www/htdocs on server
+      side:
+    </para>
+    <para>
+      e.g. /srv/www/htdocs/openSUSE-Leap-42.1-NET-x86_64.iso
+    </para>
+    <para>
+      On client code, you should launch UEFI firmware UI:
+    </para>
+    <para>
+      Device Manager -&gt; Network Device List
+    </para>
+    <para>
+      Image:Uefi-http-boot-iso-0001.png
+    </para>
+    <para>
+      e.g. IPv4
+    </para>
+    <para>
+      Image:Uefi-http-boot-iso-0002.png
+    </para>
+    <para>
+      Enable DHCP or you can set static ip
+    </para>
+    <para>
+      Image:Uefi-http-boot-iso-0003.png
+    </para>
+    <para>
+      Create a boot option by &quot;HTTP Boot Configuration&quot;
+    </para>
+    <para>
+      Image:Uefi-http-boot-iso-0004.png
+    </para>
+    <para>
+      Edit &quot;Boot URI&quot;, point to the position of ISO file
+    </para>
+    <para>
+      Image:Uefi-http-boot-iso-0005.png
+    </para>
+    <para>
+      Select &quot;UEFI HTTP&quot; to boot to the ISO image
+    </para>
+    <para>
+      Image:Uefi-http-boot-iso-0006.png
+    </para>
+  </section>
+</section>
+<section xml:id="see_also">
+  <title>See also</title>
+  <section xml:id="related_articles">
+    <title>Related articles</title>
+    <itemizedlist spacing="compact">
+      <listitem>
+        <para>
+          <link xlink:href="openSUSE:UEFI_Secure_boot_using_qemu-kvm">openSUSE:UEFI_Secure_boot_using_qemu-kvm</link>
+        </para>
+      </listitem>
+    </itemizedlist>
+  </section>
+  <section xml:id="external_links">
+    <title>External links</title>
+    <itemizedlist spacing="compact">
+      <listitem>
+        <para>
+          <link xlink:href="http://www.tianocore.org/ovmf/">OVMF</link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="http://www.linux-kvm.org/downloads/lersek/ovmf-whitepaper-c770f8c.txt">Open
+          Virtual Machine Firmware (OVMF) Status Report</link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="https://fedoraproject.org/wiki/Using_UEFI_with_QEMU">fedora:
+          Using UEFI with QEMU</link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="https://lkml.org/lkml/2016/6/3/85">LKML:
+          libnvdimm, nfit: treat volatile virtual CD region as read-only
+          pmem</link>
+        </para>
+      </listitem>
+    </itemizedlist>
+  </section>
+</section>
+</chapter>
