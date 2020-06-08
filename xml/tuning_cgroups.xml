@@ -223,63 +223,65 @@
  
  <sect1 xml:id="sec-tuning-cgroups-tasksmax">
   <title>Preventing Fork Bombs with TasksMax</title>
-  <para>
+   <para>
       &systemd; 228 shipped with a <literal>DefaultTasksMax</literal> 
-      limit of 512, which is set in 
-      <filename>/etc/systemd/system.conf</filename>. This limits the
-      number of tasks any &systemd; unit can create at one time to
-      512. Previous versions had no default limit. The goal was to
-      improve security by preventing runaway processes from creating
-      excessive forks, or spawning enough threads to exhaust
-      system resources.
-  </para>
-  <para>
+      limit of 512. This limited the number of processes any system unit 
+      can create at one time to 512. Previous versions had no default 
+      limit. The goal was to improve security by preventing runaway 
+      processes from creating excessive forks, or spawning enough 
+      threads to exhaust system resources.
+   </para> 
+   <para>
       However, it soon became apparent that there is not a single
       default that applies to all use cases. 512 is not low enough
       to prevent a runaway process from crashing a system, especially 
       when other resources such as CPU and RAM are not restricted, 
       and not high enough for processes that create a lot of threads, 
       such as databases. In &systemd; 234 the default was changed to 15%, 
-      which is 4915 tasks (15% of the kernel limit of 32768, 
-      see <command>cat /proc/sys/kernel/pid_max</command>).
-  </para>
-  <para>
-      &sle; ships with a custom configuration that overrides the upstream
-      default. 
+      which is 4915 tasks (15% of the kernel limit of 32768; 
+      see <command>cat /proc/sys/kernel/pid_max</command>). This default is
+      compiled, and can be changed in configuration files. The compiled
+      defaults are documented in
+      <filename>/etc/systemd/system.conf</filename>. You can edit this file
+      to override the defaults, though there are other methods we will
+      show in the following sections.
+   </para>
+  
+ <sect2 xml:id="sec-tasksmax-defaults">
+  <title>Finding the Current Default TasksMax Values</title>
+   <para>
+      &sle; ships with two custom configurations that override the upstream
+      defaults for system units and for user slices, and sets them both to 
+      <literal>infinity</literal>.  
       <filename>/usr/lib/systemd/system.conf.d/20-suse-defaults.conf</filename>
-      overrides the default limit with the following configuration:
-  </para>
-  <screen>
+      contains these lines:
+   </para>
+   <screen>
 [Manager]
 DefaultTasksMax=infinity
-  </screen>
-  <para>
-      When you query the value with <command>systemctl</command> it looks like
-      this:
-  </para>
-  <screen>&prompt.user;systemctl show --property DefaultTasksMax
-DefaultTasksMax=18446744073709551615</screen>
-  <para>
-       This is the same as having no limit. It is not a requirement to change the 
-       default, but setting some limits may help to prevent system crashes
-       from runaway processes.
-   </para>
-   <para>
-       Start by disabling the &sle; default by linking 
-       <filename>20-suse-defaults.conf</filename> to 
-       <filename>/dev/null</filename>, and putting the link in
-       <filename>/etc/systemd/system.conf.d/</filename>. First create
-       <filename>system.conf.d/</filename> if it does not exist, then 
-       create the link:
-   </para>
-   <screen>&prompt.root;mkdir /etc/systemd/system.conf.d/
-&prompt.root;ln -s /dev/null /etc/systemd/system.conf.d/20-suse-defaults.conf
    </screen>
    <para>
-       Then change the global default by creating a new override
-       file, <filename>/etc/systemd/system.conf.d/50-tasksmax.conf</filename>,
-       and write the following lines to set new global limit of 256 tasks per 
-       systemd unit:
+      <filename>/usr/lib/systemd/system/user-.slice.d/20-suse-defaults.conf</filename>
+      contains these lines:
+   </para>
+   <screen>[Slice]
+TasksMax=infinity
+   </screen>
+  <para>
+      <literal>infinity</literal> means having no limit. It is not a 
+      requirement to change the default, but setting some limits may help to 
+      prevent system crashes from runaway processes.
+  </para>
+</sect2>
+
+<sect2 xml:id="sec-edit-taskmax-default">
+ <title>Overriding the DefaultTasksMax Value</title>
+  <para>
+      Change the global <literal>DefaultTasksMax</literal> value by creating 
+      a new override file, 
+      <filename>/etc/systemd/system.conf.d/10-system-tasksmax.conf</filename>,
+      and write the following lines to set new default limit of 256 tasks per 
+      system unit:
    </para>
    <screen>
 [Manager]
@@ -288,19 +290,19 @@ DefaultTasksMax=256
    <para>
        Load the new setting, then verify that it changed:
    </para>
-   <screen>&prompt.root;systemctl daemon-reload
+   <screen>&prompt.sudo;systemctl daemon-reload
 &prompt.user;systemctl show --property DefaultTasksMax
 DefaultTasksMax=256
    </screen>
    <para>
-       You may adjust this value to suit your needs. Now you can set higher 
+       Adjust this default value to suit your needs. You can set higher 
        limits on individual services as needed. This example is for MariaDB. 
        First check the current active value:
    </para>
    <screen>
 &prompt.user;systemctl status mariadb.service
   ● mariadb.service - MariaDB database server
-   Loaded: loaded (/usr/lib/systemd/system/mariadb.service; disabled; vendor pr>
+   Loaded: loaded (/usr/lib/systemd/system/mariadb.service; disabled; vendor preset>
    Active: active (running) since Tue 2020-05-26 14:15:03 PDT; 27min ago
      Docs: man:mysqld(8)
            https://mariadb.com/kb/en/library/systemd/
@@ -312,81 +314,76 @@ DefaultTasksMax=256
    </screen>
    <para>
        The Tasks line shows that MariaDB currently has 30 tasks running, and has
-       an upper limit of 256. The following example demonstrates how to raise
-       MariaDB's limit to 8096. Create a new override file,
-       <filename>/etc/systemd/system.conf.d/30-mariadb.conf</filename>, 
-       with the following lines, then reload:
+       an upper limit of the default 256, which is inadequate for a database. The 
+       following example demonstrates how to raise MariaDB's limit to 8192. Create a new override file with <command>systemctl edit</command>, and enter the new value:
    </para>
-   <screen>
+   <screen>&prompt.sudo;systemctl edit mariadb.service
+       
 [Service]
-TasksMax=8096
+TasksMax=8192
+
+&prompt.user;systemctl status mariadb.service 
+● mariadb.service - MariaDB database server
+   Loaded: loaded (/usr/lib/systemd/system/mariadb.service; disabled; vendor preset: disab>
+  Drop-In: /etc/systemd/system/mariadb.service.d
+           └─override.conf
+   Active: active (running) since Tue 2020-06-02 17:57:48 PDT; 7min ago
+     Docs: man:mysqld(8)
+           https://mariadb.com/kb/en/library/systemd/
+  Process: 3446 ExecStartPre=/usr/lib/mysql/mysql-systemd-helper upgrade (code=exited, sta>
+  Process: 3440 ExecStartPre=/usr/lib/mysql/mysql-systemd-helper install (code=exited, sta>
+ Main PID: 3452 (mysqld)
+   Status: "Taking your SQL requests now..."
+    Tasks: 30 (limit: 8192)
+   CGroup: /system.slice/mariadb.service
+           └─3452 /usr/sbin/mysqld --defaults-file=/etc/my.cnf --user=mysql
    </screen>
-   <screen>&prompt.root;systemctl daemon-reload</screen>
    <para>
-       The value does not have to be 8096, but can be whatever limit seems
-       appropriate for your workloads, including <literal>infinity</literal>.
+       <command>systemctl edit</command> creates an override file, 
+       <filename>/etc/systemd/system/mariadb.service.d/override.conf</filename>, 
+       that contains only the changes you want to apply to the existing unit file.
+       The value does not have to be 8192, but should be whatever limit is
+       appropriate for your workloads.
    </para>
+</sect2>
+   
+<sect2>
+    <title>Deafult TasksMax Limit on Users</title>
    <para>
-       You may also set custom values for user processes. The &sle; default
-       is <literal>infinity</literal>, set in
-       <filename>/usr/lib/systemd/system/user-.slice.d/20-suse-defaults.conf</filename>.
-       Disable this default by linking it to <filename>/dev/null</filename>
-       in <filename>/etc/systemd/user-.slice.d/</filename>:
-   </para>
-   <screen>&prompt.root;mkdir /etc/systemd/user-.slice.d/
-&prompt.root;ln -s /dev/null /etc/systemd/user-.slice.d/20-suse-defaults.conf     
-   </screen>
-   <para>
-       Create a new override file, 
-       <filename>/etc/systemd/system/user-.slice.d/30-users-tasksmax.conf</filename>,
-       with these lines:
+       The default limit on users should be fairly high, because user sessions need more 
+       resources. Set your own default for users by creating a new file, for
+       example
+       <filename>/etc/systemd/system/user-.slice.d/user-taskmask.conf</filename>.
+       The following example sets a default of 16284:
    </para>
    <screen>
 [Slice]
-TasksMax=8096
+TasksMax=16284
    </screen>
    <para>
-       If there is a <literal>UserTasksMax</literal> setting in
-       <filename>/etc/systemd/logind.conf</filename>, comment it out.
-       Then run <command>systemctl daemon-reload</command> to load the new value.
+       Then reload systemd to load the new value, and verify the change:
    </para>
-   <para>
-       To set a custom value for an individual user create an override file, for
-       example 
-       <filename>/etc/systemd/system/user-1000.slice.d/50-user-tasksmax.conf</filename>,
-       with these lines:
-   </para>
-   <screen>
-[Slice]
-TasksMax=8096
+   <screen>&prompt.sudo;systemctl daemon-reload
+       
+&prompt.user;systemctl show --property TasksMax user-.slice
+TasksMax=16284
+
+&prompt.user;systemctl show --property TasksMax user-1000.slice
+TasksMax=16284
    </screen>
-   <para>
-       Verify the new value:
-   </para>
-   <screen>&prompt.user;systemctl show --property TasksMax user-1000.slice
-TasksMax=8096
-   </screen>
-   <para>
-       The new value takes effect at the next user login.
-   </para>
    <para>
        How do you know what values to use? This varies according to your workloads,
-       system resources, and other resource configurations. When your user TasksMax 
+       system resources, and other resource configurations. When your TasksMax 
        value is too low, you will see error messages like "Failed to fork (Resources
-       temporarily unavailable)". Test this by setting the user TasksMax value
-       to 128, then open some applications. To recover, close all apps 
-       (except your terminal) and change the setting.
-   </para>
-   <para>
-       System services will throw error messages like "Can't create thread to handle 
+       temporarily unavailable)", "Can't create thread to handle 
        new connection" and "Error: Function call 'fork' failed with error code 11, 
-       'Resource temporarily unavailable'", depending on which service has run out
-       of tasks.
+       'Resource temporarily unavailable'".
    </para>
    <para>
        For more information on configuring system resources in systemd, see
        <literal>systemd.resource-control (5)</literal>.
    </para>
+</sect2>
 </sect1>
 
 <sect1>
@@ -420,3 +417,6 @@ TasksMax=8096
   </itemizedlist>
  </sect1>
 </chapter>
+
+
+
