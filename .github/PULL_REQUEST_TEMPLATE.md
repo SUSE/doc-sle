@@ -7,6 +7,8 @@ If there are relevant Bugzilla or FATE entries, reference them.
 
 *Are backports required?*
 
-- [ ] To maintenance/SLE12SP3
-- [ ] To maintenance/SLE12SP4
+- [ ] To maintenance/SLE15SP1
 - [ ] To maintenance/SLE15SP0
+- [ ] To maintenance/SLE12SP5
+- [ ] To maintenance/SLE12SP4
+- [ ] To maintenance/SLE12SP3
