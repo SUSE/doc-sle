@@ -80,68 +80,6 @@
    schema.
   </para>
  </sect1>
- <sect1 xml:id="sec-libvirt-config-maxgrantframes-virsh">
-  <title>Managing Guest Memory Allocation (&xen; only)</title>
-
-  <para>
-   <command>libvirt</command> now includes support for adjusting memory
-   allocation per guest with &virsh;. &xen; paravirtual devices connect to the
-   <literal>xenbus</literal> controller, which is analogous to a physical
-   device bus such as a PCI controller. &xen;'s
-   <literal>max_grant_frames</literal> attribute sets how many frames, which
-   are analogous to memory, are allocated to the <literal>xenbus </literal>
-   controller for each guest.
-  </para>
-
-  <para>
-   The default is 32, and this can be increased as needed, up to the amount set
-   for dom0, or decreased. How much is enough? This depends on the number of
-   devices and workload demand, such as a saturated network interface or heavy
-   I/O. Use <command>xen-diag</command> to see your current used and maximum
-   <literal>max_grant_frames</literal> values for dom0 and your guests. The
-   guests must be running:
-  </para>
-
-<screen>&prompt.sudo;virsh list
- Id   Name             State
---------------------------------
- 0    Domain-0         running
- 3    sle15sp1         running
-
- &prompt.sudo;xen-diag gnttab_query_size 0
-domid=0: nr_frames=1, max_nr_frames=256
-
-&prompt.sudo;xen-diag gnttab_query_size 3
-domid=3: nr_frames=3, max_nr_frames=32
-</screen>
-
-  <para>
-   The sle15sp1 guest is using only 3 frames out of 32. If you are seeing
-   performance issues, and log entries that point to insufficient frames,
-   increase the value with &virsh;. Look for the <literal>&lt;controller
-   type='xenbus'</literal> line in the guest's configuration file and add the
-   <literal>maxGrantFrames</literal> control element:
-  </para>
-
-<screen>&prompt.sudo;virsh edit sle15sp1
- &lt;controller type='xenbus' index='0' maxGrantFrames='40'/>
-</screen>
-
-  <para>
-   Save your changes and restart the guest. Now it should show your change:
-  </para>
-
-<screen>&prompt.sudo;xen-diag gnttab_query_size 3
-domid=3: nr_frames=3, max_nr_frames=40
-</screen>
-
-  <para>
-   See the <citetitle>Controllers</citetitle> section of the libvirt
-   <citetitle>Domain XML format</citetitle> manual at
-   <link xlink:href="https://libvirt.org/formatdomain.html#elementsControllers"/>
-   for more information.
-  </para>
- </sect1>
  <sect1 xml:id="sec-libvirt-config-machinetype-virsh">
   <title>Changing the Machine Type</title>
 
@@ -223,6 +161,39 @@ Product Name: Standard PC (Q35 + ICH9, 2009)</screen>
     definitions, and ensures better future compatibility.
    </para>
   </tip>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-hypervisor-features-virsh">
+  <title>Configuring Hypervisor Features</title>
+
+  <para>
+   <command>libvirt</command> automatically enables a default set of hypervisor features that
+   are sufficient in most circumstances, but also allows enabling and disabling
+   features as needed. As an example, Xen does not support enabling PCI
+   passthrough by default. It must be enabled with the
+   <literal>passthrough</literal> setting. Hypervisor features can be configured
+   with &virsh;. Look for the <tag>&lt;features&gt;</tag> element in the
+   &vmguest;'s configuration file and adjust the various features as required.
+   Continuing with the &xen; passthrough example:
+  </para>
+
+<screen>&prompt.sudo;virsh edit sle15sp1
+ &lt;features&gt;
+    &lt;xen&gt;
+      &lt;passthrough/&gt;
+    &lt;/xen&gt;
+ &lt;/features&gt;
+</screen>
+
+  <para>
+   Save your changes and restart the &vmguest;.
+  </para>
+
+  <para>
+   See the <citetitle>Hypervisor features</citetitle> section of the libvirt
+   <citetitle>Domain XML format</citetitle> manual at
+   <link xlink:href="https://libvirt.org/formatdomain.html#elementsFeatures"/>
+   for more information.
+  </para>
  </sect1>
  <sect1 xml:id="libvirt-cpu-virsh">
   <title>Configuring CPU Allocation</title>
@@ -1271,6 +1242,93 @@ pci_0000_04_11_5</screen>
 
   <para>
    Your new storage device should be available in the &vmguest; OS.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-config-controllers-virsh">
+  <title>Configuring Controller Devices</title>
+
+  <para>
+   <command>libvirt</command> generally manages controllers automatically
+   based on the type of virtual devices used by the &vmguest;. If the &vmguest;
+   contains PCI and SCSI devices, PCI and SCSI controllers will be created and
+   managed automatically. <command>libvirt</command> will also model controllers
+   that are hypervisor-specific, for example, a <literal>virtio-serial</literal> controller for KVM
+   &vmguest;s or a <literal>xenbus</literal> controller for Xen &vmguest;s. Although the default
+   controllers and their configuration are generally fine, there may be use cases
+   where controllers or their attributes need to be adjusted manually. For example
+   a virtio-serial controller may need more ports, or a xenbus controller may need
+   more memory or more virtual interrupts.
+  </para> 
+
+  <para>
+   The xenbus controller is unique, in that it serves as the controller for
+   all Xen paravirtual devices. If a &vmguest; has many disk and/or network
+   devices the controller may need more memory. Xen's
+   <literal>max_grant_frames</literal> attribute sets how many grant frames, or
+   blocks of shared memory, are allocated to the <literal>xenbus</literal>
+   controller for each &vmguest;.
+  </para>
+
+  <para>
+   The default of 32 is enough in most circumstances, but a &vmguest; with a large
+   number of I/O devices and an I/O-intensive workload may experience performance
+   issues due to grant frame exhaustion. The <command>xen-diag</command> can be
+   used to check the current and maximum <literal>max_grant_frames</literal>
+   values for dom0 and your &vmguest;s. The &vmguest;s must be running:
+  </para>
+
+<screen>&prompt.sudo;virsh list
+ Id   Name             State
+--------------------------------
+ 0    Domain-0         running
+ 3    sle15sp1         running
+
+ &prompt.sudo;xen-diag gnttab_query_size 0
+domid=0: nr_frames=1, max_nr_frames=256
+
+&prompt.sudo;xen-diag gnttab_query_size 3
+domid=3: nr_frames=3, max_nr_frames=32
+</screen>
+
+  <para>
+   The <literal>sle15sp1</literal> guest is using only three frames out of 32. If you are seeing
+   performance issues, and log entries that point to insufficient frames,
+   increase the value with &virsh;. Look for the <literal>&lt;controller
+   type='xenbus'&gt;</literal> line in the guest's configuration file, and add the
+   <literal>maxGrantFrames</literal> control element:
+  </para>
+
+<screen>&prompt.sudo;virsh edit sle15sp1
+ &lt;controller type='xenbus' index='0' maxGrantFrames='40'/>
+</screen>
+
+  <para>
+   Save your changes and restart the guest. Now it should show your change:
+  </para>
+
+<screen>&prompt.sudo;xen-diag gnttab_query_size 3
+domid=3: nr_frames=3, max_nr_frames=40
+</screen>
+
+  <para>
+   Similar to maxGrantFrames, the xenbus controller also supports
+   <option>maxEventChannels</option>. Event channels are like paravirtual interrupts, and in
+   conjunction with grant frames, form a data transfer mechanism for paravirtual
+   drivers. They are also used for inter-processor interrupts. &vmguest;s
+   with a large number of vcpus and/or many paravirtual devices many need to
+   increase the maximum default value of 1023. maxEventChannels can be changed
+   similar to maxGrantFrames:
+  </para>
+
+<screen>&prompt.sudo;virsh edit sle15sp1
+ &lt;controller type='xenbus' index='0' maxGrantFrames='128' maxEventChannels='2047'/>
+</screen>
+
+  <para>
+   See the <citetitle>Controllers</citetitle> section of the libvirt
+   <citetitle>Domain XML format</citetitle> manual at
+   <link xlink:href="https://libvirt.org/formatdomain.html#elementsControllers"/>
+   for more information.
   </para>
  </sect1>
  <sect1 xml:id="libvirt-video-virsh">
