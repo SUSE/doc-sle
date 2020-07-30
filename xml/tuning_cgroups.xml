@@ -3,6 +3,12 @@
 [
   <!ENTITY % entities SYSTEM "entity-decl.ent">
   %entities;
+  <!ENTITY reader1 "reader1:/io-cgroup #">
+  <!ENTITY prompt.reader1 "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[reader1] host1:/io-cgroup # </prompt>">
+  <!ENTITY prompt.reader2 "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[reader2] host1:/io-cgroup # </prompt>">
+  <!ENTITY prompt.io-controller "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[io-controller] host1:/io-cgroup # </prompt>">
+  <!ENTITY prompt.io-cgroup "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>host1:/io-cgroup # </prompt>">
+  <!ENTITY prompt.plain-root "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>host1:~ # </prompt>">
 ]>
 
 <chapter xmlns="http://docbook.org/ns/docbook"
@@ -389,14 +395,43 @@ TasksMax=16284
 
  <sect1>
   <title>Controlling I/O with Proportional Weight Policy</title>
+  <para>
+      This section introduces using the Linux kernel's block I/O controller to 
+      prioritize I/O operations. The cgroup blkio subsystem controls and monitors 
+      access to I/O on block devices. State objects that contain the subsystem 
+      parameters for a cgroup are represented as pseudofiles within the cgroup 
+      virtual file system, also called a pseudo-filesystem.
+  </para>
+  <para>      
+      The examples in this section show how writing values to some of these 
+      pseudo-files limits access or bandwidth, and reading values from some of 
+      these pseudo-files provides information on I/O operations. Examples are 
+      provided for both cgroup-v1 and cgroup-v2.
+  </para>
+  <para>
+      You need a test directory containing two files for testing performance and changed settings. A quick way to create test files fully-populated
+      with text is using the <command>yes</command> command. The following example 
+      commands create a test directory, and then populate it with two 500 MB text
+      files:
+      </para> 
+  <screen>&prompt.plain-root;mkdir /io-cgroup
+&prompt.plain-root;cd /io-cgroup
+&prompt.plain-root;yes this is a test file | head -c 500MB > file1.txt
+&prompt.plain-root;yes this is a test file | head -c 500MB > file2.txt
+</screen>
+  <para>
+    To run the examples open three command shells. Two shells are for reader 
+    processes, and one shell is for running the steps that control I/O. In the 
+    examples, each command prompt is labeled to indicate if it represents 
+    one of the reader processes, or I/O.
+  </para>
 
   <sect2>
    <title>Using cgroup-v1</title>
-
    <para>
-    The following proportional weight policy files can be used to grant a reader process a
-    higher priority for I/O operations than other reader processes
-    accessing the same disk.
+    The following proportional weight policy files can be used to grant a reader 
+    process a higher priority for I/O operations than other reader processes
+    accessing the same disk. 
    </para>
    <itemizedlist mark="bullet" spacing="normal">
     <listitem>
@@ -413,27 +448,27 @@ TasksMax=16284
     </listitem>
    </itemizedlist>
    <para>
-    Run a single reader process (reading from SSD) without
-    controlling its I/O:
+    To test this, run a single reader process (in the examples,reading 
+    from a SSD) without controlling its I/O, using 
+    <filename>file2.txt</filename>:
    </para>
-<screen>
-&prompt.user;cd /mnt/tests/io-cgroup  
-&prompt.sudo;su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
-&prompt.user;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 1.33049 s, 404 MB/s
+<screen> 
+&prompt.io-controller;sync; echo 3 > /proc/sys/vm/drop_caches
+&prompt.io-controller;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
+8967
+122070+1 records in
+122070+1 records out
+500000000 bytes (500 MB, 477 MiB) copied, 2.6367 s, 190 MB/s
 </screen>
    <para>
     Now run a background process reading from the same disk:
    </para>
 <screen>
-&prompt.sudo;su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
-&prompt.user;echo $$; dd if=file1 of=/dev/null bs=4k
+&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
+&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
 5220
 ...
-&prompt.user;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
+&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
 5251
 131072+0 records in
 131072+0 records out
@@ -442,33 +477,32 @@ TasksMax=16284
    <para>
     Each process gets half of the throughput for I/O operations.
     Next, set up two control groups&mdash;one for each
-    process&mdash;and make sure that BFQ is used, and set different weights:
+    process&mdash;verify that BFQ is used, and set different weights:
    </para>
 <screen>
-&prompt.user;cd /sys/fs/cgroup/blkio/
-&prompt.sudo;mkdir reader1
-&prompt.sudo;mkdir reader2
-&prompt.sudo;su -c "echo 5220 > reader1/cgroup.procs"
-&prompt.sudo;su -c "echo 5251 > reader2/cgroup.procs"
-&prompt.user;cat /sys/block/sda/queue/scheduler
+&prompt.io-controller;cd /sys/fs/cgroup/blkio/
+&prompt.io-controller;mkdir reader1
+&prompt.io-controller;mkdir reader2
+&prompt.io-controller;echo 5220 > reader1/cgroup.procs
+&prompt.io-controller;echo 5251 > reader2/cgroup.procs
+&prompt.io-controller;cat /sys/block/sda/queue/scheduler
 mq-deadline kyber [bfq] none
-&prompt.user;cat reader1/blkio.bfq.weight
+&prompt.io-controller;cat reader1/blkio.bfq.weight
 100
-&prompt.sudo;su -c "echo 200 >reader1/blkio.bfq.weight"
-&prompt.user;cat reader2/blkio.bfq.weight
+&prompt.io-controller;echo 200 >reader1/blkio.bfq.weight
+&prompt.io-controller;cat reader2/blkio.bfq.weight
 200
 </screen>
    <para>
-    With this settings and reader1 in background, reader2 should
+    With these settings and reader1 in the background, reader2 should
     have higher throughput than previously:
    </para>
 <screen>
-&prompt.user;cd /mnt/tests/io-cgroup/ 
-&prompt.sudo;su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
-&prompt.user;echo $$; dd if=file1 of=/dev/null bs=4k
+&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
+&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
 5220
 ...
-&prompt.user;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
+&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
 5251
 131072+0 records in
 131072+0 records out
@@ -479,23 +513,21 @@ mq-deadline kyber [bfq] none
     Now double its weight again:
    </para>
 <screen>
-&prompt.user;cd /sys/fs/cgroup/blkio 
-&prompt.user;cat reader1/blkio.bfq.weight
+&prompt.io-controller;cat reader1/blkio.bfq.weight
 100
-&prompt.sudo;su -c "echo 400 >reader1/blkio.bfq.weight"
-&prompt.user;cat reader2/blkio.bfq.weight
+&prompt.io-controller;echo 400 > reader1/blkio.bfq.weight
+&prompt.io-controller;cat reader2/blkio.bfq.weight
 400
 </screen>
    <para>
     This results in another increase in throughput for reader2:
    </para>
 <screen>
-&prompt.user;cd /mnt/tests/io-cgroup/ 
-&prompt.sudo;su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
-&prompt.user;echo $$; dd if=file1 of=/dev/null bs=4k
+&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
+&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
 5220
 ...
-&prompt.user;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
+&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
 5251
 131072+0 records in
 131072+0 records out
@@ -505,57 +537,62 @@ mq-deadline kyber [bfq] none
   <sect2>
    <title>Using cgroup-v2</title>
    <para>
-    First, make sure that Block IO controller is not active
+    First, make sure that the Block IO controller is not active
     under cgroup-v1. To do this, boot with kernel parameter
-    <option>cgroup_no_v1=blkio</option>. Block IO controller is
-    inactive in cgroup-v1, and IO controller shows up as an option for
-    cgroup-v2.
+    <option>cgroup_no_v1=blkio</option>. You should have a 
+    <filename>/sys/fs/cgroup/blkio/</filename> populated with
+    <filename>blkio.*</filename> files, and IO controller shows 
+    up as an option for cgroup-v2.
    </para>
 <screen>
-&prompt.user;cat /proc/cmdline
+&prompt.io-controller;cat /proc/cmdline
 BOOT_IMAGE=... cgroup_no_v1=blkio ...
-&prompt.user;ls /sys/fs/cgroup/blkio/
-&prompt.user;cat /sys/fs/cgroup/unified/cgroup.controllers
+&prompt.io-controller;ls /sys/fs/cgroup/blkio/
+blkio.bfq.io_service_bytes
+blkio.bfq.io_service_bytes_recursive
+blkio.bfq.io_serviced
+[...]
+&prompt.io-controller;cat /sys/fs/cgroup/unified/cgroup.controllers
 io
 </screen>
  <para>
-   Next, enable IO controller, create 2 control groups,
-   ensure that BFQ is used, and set weights:
+   Next, enable the IO controller, create two control groups,
+   ensure that BFQ is used (the active controller is enclosed in
+   square brackets), and set weights:
    </para>
 <screen>
-&prompt.user;cd /sys/fs/cgroup/unified/
-&prompt.sudo;su -c "echo '+io' > cgroup.subtree_control"
-&prompt.user;cat cgroup.subtree_control
+&prompt.io-controller;cd /sys/fs/cgroup/unified/
+&prompt.io-controller;echo '+io' > cgroup.subtree_control
+&prompt.io-controller;cat cgroup.subtree_control
 io
-&prompt.sudo;mkdir reader1
-&prompt.sudo;mkdir reader2
-&prompt.sudo;su -c "echo 3712 > reader1/cgroup.procs"
-&prompt.sudo;su -c "echo 3744 >reader2/cgroup.procs"
-&prompt.user;cat /sys/block/sda/queue/scheduler
+&prompt.io-controller;mkdir reader1
+&prompt.io-controller;mkdir reader2
+&prompt.io-controller;echo 3712 > reader1/cgroup.procs
+&prompt.io-controller;echo 3744 > reader2/cgroup.procs
+&prompt.io-controller;cat /sys/block/sda/queue/scheduler
 mq-deadline kyber [bfq] none
-&prompt.user;cat reader1/io.bfq.weight
+&prompt.io-controller;cat reader1/io.bfq.weight
 default 100
-&prompt.sudo;su -c "echo 400 >reader2/io.bfq.weight"
-&prompt.sudo;cat reader2/io.bfq.weight
+&prompt.io-controller;echo 400 >reader2/io.bfq.weight
+&prompt.io-controller;cat reader2/io.bfq.weight
 default 400
 </screen>
    <para>
-    With these settings, throughput looks like:
+    With these settings, throughput looks like the following:
    </para>
 <screen>
-&prompt.user;cd /mnt/tests/io-cgroup/ 
-&prompt.sudo;su -c "sync; echo 3 > /proc/sys/vm/drop_caches"
-&prompt.user;echo $$; dd if=file1 of=/dev/null bs=4k
+&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
+&prompt.reader1;echo $$; dd if=file1 of=/dev/null bs=4k
 3712
 ...
-&prompt.user;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
+&prompt.reader2;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
 3744
 131072+0 records in
 131072+0 records out
 536870912 bytes (537 MB, 512 MiB) copied, 1.75746 s, 305 MB/s
 </screen>
   </sect2>
- </sect1>
+  </sect1>
  <sect1>
   <title>For More Information</title>
 
