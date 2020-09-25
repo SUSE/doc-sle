@@ -9,21 +9,20 @@ Describe the overall goals of this pull request.
 * jsc#SLE-...
 
 
-### Is this feature exclusive to SLE 15 SP3 (or Leap 15.3)?
+### To which product versions do the changes apply?
 
-We are currently **only merging documentation relevant for SLE 15 SP2**
-(and Leap 15.2) or lower.
+The first column is to be filled by the requester, the second column is to be filled by the doc team after the changes have been backported to the maintenance branches.
 
-- [ ] This PR only applies to SLE 15 SP3 or higher
-- [ ] This PR applies to older releases as well.
+| Code 15     | Backport Done
+| ----------  | ---------- 
+| [ ] 15 SP3  | (`master` only)   
+| [ ] 15 SP2  | [ ] 
+| [ ] 15 SP1  | [ ] 
+| [ ] 15 SP0  | [ ] 
 
-
-### Are backports required?
-
-- [ ] To maintenance/SLE15SP2
-- [ ] To maintenance/SLE15SP1
-- [ ] To maintenance/SLE15SP0
-- [ ] To maintenance/SLE12SP5
-- [ ] To maintenance/SLE12SP4
-- [ ] To maintenance/SLE12SP3
-- [ ] To maintenance/SLE12SP2
+| Code 12     | Backport Done
+| ----------  | ---------- 
+| [ ] 12 SP5  | [ ] 
+| [ ] 12 SP4  | [ ] 
+| [ ] 12 SP3  | [ ] 
+| [ ] 12 SP2  | [ ] 
