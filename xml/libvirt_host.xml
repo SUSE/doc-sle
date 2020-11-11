@@ -61,9 +61,9 @@
     <listitem>
      <para>
       A storage volume is a storage device that can be assigned to a
-      guest&mdash;a virtual disk or a CD/DVD/floppy image. Physically (on the
-      &vmhost;) it can be a block device (a partition, a logical volume, etc.)
-      or a file.
+      guest&mdash;a virtual disk or a CD/DVD/floppy image. Physically, it can
+      be a block device&mdash;for example, a partition or a logical
+      volume&mdash;or a file on the &vmhost;.
      </para>
     </listitem>
    </varlistentry>
@@ -118,7 +118,7 @@
        <listitem>
         <para>
          Set up a pool on an iSCSI target. You need to have been logged in to
-         the volume once before, to use it with &libvirt;. Use the &yast;
+         the volume once before to use it with &libvirt;. Use the &yast;
          <guimenu>iSCSI Initiator</guimenu> to detect and log in to a
          volume<phrase os="sles">, see <xref linkend="book-storage"/> for
          details</phrase>. Volume creation on iSCSI pools is not supported,
@@ -127,7 +127,7 @@
          label before you can use it. If missing, use <command>fdisk</command>
          to add it:
         </para>
-<screen>~ # fdisk -cu /dev/disk/by-path/ip-&wsIip;:3260-iscsi-iqn.2010-10.com.example:[...]-lun-2
+<screen>&prompt.sudo;fdisk -cu /dev/disk/by-path/ip-&wsIip;:3260-iscsi-iqn.2010-10.com.example:[...]-lun-2
 Device contains neither a valid DOS partition table, nor Sun, SGI
 or OSF disklabel
 Building a new DOS disklabel with disk identifier 0xc15cdc4e.
@@ -234,9 +234,338 @@ Syncing disks.</screen>
    </para>
   </warning>
 
-  <sect1 xml:id="sec-libvirt-storage-vmm">
-   <title>Managing Storage with &vmm;</title>
+  <sect2 xml:id="sec-libvirt-storage-virsh">
+   <title>Managing Storage with <command>virsh</command></title>
+   <para>
+    Managing storage from the command line is also possible by using
+    <command>virsh</command>. However, creating storage pools is currently not
+    supported by &suse;. Therefore, this section is restricted to documenting
+    functions like starting, stopping and deleting pools and volume management.
+   </para>
+   <para>
+    A list of all <command>virsh</command> subcommands for managing pools and
+    volumes is available by running <command>virsh help pool</command> and
+    <command>virsh help volume</command>, respectively.
+   </para>
+   <sect3 xml:id="sec-libvirt-storage-virsh-list-pools">
+    <title>Listing Pools and Volumes</title>
+    <para>
+     List all pools currently active by executing the following command. To
+     also list inactive pools, add the option <option>--all</option>:
+    </para>
+<screen>&prompt.user;virsh pool-list --details</screen>
+    <para>
+     Details about a specific pool can be obtained with the
+     <literal>pool-info</literal> subcommand:
+    </para>
+<screen>&prompt.user;virsh pool-info <replaceable>POOL</replaceable></screen>
+    <para>
+     Volumes can only be listed per pool by default. To list all volumes from a
+     pool, enter the following command.
+    </para>
+<screen>&prompt.user;virsh vol-list --details <replaceable>POOL</replaceable></screen>
+    <para>
+     At the moment <command>virsh</command> offers no tools to show whether a
+     volume is used by a guest or not. The following procedure describes a way
+     to list volumes from all pools that are currently used by a &vmguest;.
+    </para>
+    <procedure xml:id="pro-libvirt-storage-virsh-list-vols">
+     <title>Listing all Storage Volumes Currently Used on a &vmhost;</title>
+     <step>
+      <para>
+       Create an XSLT style sheet by saving the following content to a file,
+       for example, ~/libvirt/guest_storage_list.xsl:
+      </para>
+<screen>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;xsl:stylesheet version="1.0"
+  xmlns:xsl="http://www.w3.org/1999/XSL/Transform"&gt;
+  &lt;xsl:output method="text"/&gt;
+  &lt;xsl:template match="text()"/&gt;
+  &lt;xsl:strip-space elements="*"/&gt;
+  &lt;xsl:template match="disk"&gt;
+    &lt;xsl:text&gt;  &lt;/xsl:text&gt;
+    &lt;xsl:value-of select="(source/@file|source/@dev|source/@dir)[1]"/&gt;
+    &lt;xsl:text&gt;&amp;#10;&lt;/xsl:text&gt;
+  &lt;/xsl:template&gt;
+&lt;/xsl:stylesheet&gt;</screen>
+     </step>
+     <step>
+      <para>
+       Run the following commands in a shell. It is assumed that the guest's
+       XML definitions are all stored in the default location
+       (<filename>/etc/libvirt/qemu</filename>). <command>xsltproc</command> is
+       provided by the package
+       <systemitem class="resource">libxslt</systemitem>.
+      </para>
+<screen>SSHEET="$HOME/libvirt/guest_storage_list.xsl"
+cd /etc/libvirt/qemu
+for FILE in *.xml; do
+  basename $FILE .xml
+  xsltproc $SSHEET $FILE
+done</screen>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-virsh-start-pools">
+    <title>Starting, Stopping and Deleting Pools</title>
+    <para>
+     Use the <command>virsh</command> pool subcommands to start, stop or delete
+     a pool. Replace <replaceable>POOL</replaceable> with the pool's name or
+     its UUID in the following examples:
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>Stopping a Pool</term>
+      <listitem>
+<screen>&prompt.user;virsh pool-destroy <replaceable>POOL</replaceable></screen>
+       <note>
+        <title>A Pool's State Does not Affect Attached Volumes</title>
+        <para>
+         Volumes from a pool attached to &vmguest;s are always available,
+         regardless of the pool's state (<guimenu>Active</guimenu> (stopped) or
+         <guimenu>Inactive</guimenu> (started)). The state of the pool solely
+         affects the ability to attach volumes to a &vmguest; via remote
+         management.
+        </para>
+       </note>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Deleting a Pool</term>
+      <listitem>
+<screen>&prompt.user;virsh pool-delete <replaceable>POOL</replaceable></screen>
+       <warning>
+        <title>Deleting Storage Pools</title>
+        <para>
+         See <xref linkend="deleting-storage-pools"/>
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Starting a Pool</term>
+      <listitem>
+<screen>&prompt.user;virsh pool-start <replaceable>POOL</replaceable></screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Enable Autostarting a Pool</term>
+      <listitem>
+<screen>&prompt.user;virsh pool-autostart <replaceable>POOL</replaceable></screen>
+       <para>
+        Only pools that are marked to autostart will automatically be started
+        if the &vmhost; reboots.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Disable Autostarting a Pool</term>
+      <listitem>
+<screen>&prompt.user;virsh pool-autostart <replaceable>POOL</replaceable> --disable</screen>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-virsh-add-volumes">
+    <title>Adding Volumes to a Storage Pool</title>
+    <para>
+     <command>virsh</command> offers two ways to add volumes to storage pools:
+     either from an XML definition with <literal>vol-create</literal> and
+     <literal>vol-create-from</literal> or via command line arguments with
+     <literal>vol-create-as</literal>. The first two methods are currently not
+     supported by &suse;, therefore this section focuses on the subcommand
+     <literal>vol-create-as</literal>.
+    </para>
+    <para>
+     To add a volume to an existing pool, enter the following command:
+    </para>
+<screen>&prompt.user;virsh vol-create-as <replaceable>POOL</replaceable><co xml:id="co-vol-create-as-pool"/><replaceable>NAME</replaceable><co xml:id="co-vol-create-as-name"/> 12G --format<co xml:id="co-vol-create-as-capacity"/><replaceable>raw|qcow2</replaceable><co xml:id="co-vol-create-as-format"/> --allocation 4G<co xml:id="co-vol-create-as-alloc"/></screen>
+    <calloutlist>
+     <callout arearefs="co-vol-create-as-pool">
+      <para>
+       Name of the pool to which the volume should be added
+      </para>
+     </callout>
+     <callout arearefs="co-vol-create-as-name">
+      <para>
+       Name of the volume
+      </para>
+     </callout>
+     <callout arearefs="co-vol-create-as-capacity">
+      <para>
+       Size of the image, in this example 12 gigabytes. Use the suffixes k, M,
+       G, T for kilobyte, megabyte, gigabyte, and terabyte, respectively.
+      </para>
+     </callout>
+     <callout arearefs="co-vol-create-as-format">
+      <para>
+       Format of the volume. &suse; currently supports <literal>raw</literal>,
+       and <literal>qcow2</literal>.
+      </para>
+     </callout>
+     <callout arearefs="co-vol-create-as-alloc">
+      <para>
+       Optional parameter. By default <command>virsh </command>creates a sparse
+       image file that grows on demand. Specify the amount of space that should
+       be allocated with this parameter (4 gigabytes in this example). Use the
+       suffixes k, M, G, T for kilobyte, megabyte, gigabyte, and terabyte,
+       respectively.
+      </para>
+      <para>
+       When not specifying this parameter, a sparse image file with no
+       allocation will be generated. To create a non-sparse volume, specify the
+       whole image size with this parameter (would be <literal>12G</literal> in
+       this example).
+      </para>
+     </callout>
+    </calloutlist>
+    <sect4 xml:id="sec-libvirt-storage-virsh-add-volumes-clone">
+     <title>Cloning Existing Volumes</title>
+     <para>
+      Another way to add volumes to a pool is to clone an existing volume. The
+      new instance is always created in the same pool as the original.
+     </para>
+<screen>&prompt.user;virsh vol-clone <replaceable>NAME_EXISTING_VOLUME</replaceable><co xml:id="co-vol-clone-existing"/><replaceable>NAME_NEW_VOLUME</replaceable><co xml:id="co-vol-clone-new"/> --pool <replaceable>POOL</replaceable><co xml:id="co-vol-clone-pool"/></screen>
+     <calloutlist>
+      <callout arearefs="co-vol-clone-existing">
+       <para>
+        Name of the existing volume that should be cloned
+       </para>
+      </callout>
+      <callout arearefs="co-vol-clone-new">
+       <para>
+        Name of the new volume
+       </para>
+      </callout>
+      <callout arearefs="co-vol-clone-pool">
+       <para>
+        Optional parameter. &libvirt; tries to locate the existing volume
+        automatically. If that fails, specify this parameter.
+       </para>
+      </callout>
+     </calloutlist>
+    </sect4>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-virsh-del-volumes">
+    <title>Deleting Volumes from a Storage Pool</title>
+    <para>
+     To permanently delete a volume from a pool, use the subcommand
+     <literal>vol-delete</literal>:
+    </para>
+<screen>&prompt.user;virsh vol-delete <replaceable>NAME</replaceable> --pool <replaceable>POOL</replaceable></screen>
+    <para>
+     <option>--pool</option> is optional. &libvirt; tries to locate the volume
+     automatically. If that fails, specify this parameter.
+    </para>
+    <warning>
+     <title>No Checks Upon Volume Deletion</title>
+     <para>
+      A volume will be deleted in any case, regardless of whether it is
+      currently used in an active or inactive &vmguest;. There is no way to
+      recover a deleted volume.
+     </para>
+     <para>
+      Whether a volume is used by a &vmguest; can only be detected by using by
+      the method described in
+      <xref linkend="pro-libvirt-storage-virsh-list-vols"/>.
+     </para>
+    </warning>
+   </sect3>
+   <sect3 xml:id="libvirt-storage-virsh-attach-volumes">
+    <title>Attaching Volumes to a &vmguest;</title>
+    <para>
+     After you create a volume as described in
+     <xref
+     linkend="sec-libvirt-storage-virsh-add-volumes"/>, you can
+     attach it to a virtual machine and use it as a hard disk:
+    </para>
+<screen>&prompt.user;virsh attach-disk <replaceable>DOMAIN</replaceable> <replaceable>SOURCE_IMAGE_FILE</replaceable> <replaceable>TARGET_DISK_DEVICE</replaceable></screen>
+    <para>
+     For example:
+    </para>
+<screen>&prompt.user;virsh attach-disk sles12sp3 /virt/images/example_disk.qcow2 sda2</screen>
+    <para>
+     To check if the new disk is attached, inspect the result of the
+     <command>virsh dumpxml</command> command:
+    </para>
+<screen>&prompt.root;virsh dumpxml sles12sp3
+[...]
+&lt;disk type='file' device='disk'>
+ &lt;driver name='qemu' type='raw'/>
+ &lt;source file='/virt/images/example_disk.qcow2'/>
+ &lt;backingStore/>
+ &lt;target dev='sda2' bus='scsi'/>
+ &lt;alias name='scsi0-0-0'/>
+ &lt;address type='drive' controller='0' bus='0' target='0' unit='0'/>
+&lt;/disk>
+[...]</screen>
+    <sect4>
+     <title>Hotplug or Persistent Change</title>
+     <para>
+      You can attach disks to both active and inactive domains. The attachment
+      is controlled by the <option>--live</option> and
+      <option>--config</option> options:
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><option>--live</option></term>
+       <listitem>
+        <para>
+         Hotplugs the disk to an active domain. The attachment is not saved in
+         the domain configuration. Using <option>--live</option> on an inactive
+         domain is an error.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><option>--config</option></term>
+       <listitem>
+        <para>
+         Changes the domain configuration persistently. The attached disk is
+         then available after the next domain start.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><option>--live</option><option>--config</option></term>
+       <listitem>
+        <para>
+         Hotplugs the disk and adds it to the persistent domain configuration.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <tip>
+      <title><command>virsh attach-device</command></title>
+      <para>
+       <command>virsh attach-device</command> is the more generic form of
+       <command>virsh attach-disk</command>. You can use it to attach other
+       types of devices to a domain.
+      </para>
+     </tip>
+    </sect4>
+   </sect3>
+   <sect3 xml:id="libvirt-storage-virsh-detach-volumes">
+    <title>Detaching Volumes from a &vmguest;</title>
+    <para>
+     To detach a disk from a domain, use <command>virsh detach-disk</command>:
+    </para>
+<screen>&prompt.root;virsh detach-disk <replaceable>DOMAIN</replaceable> <replaceable>TARGET_DISK_DEVICE</replaceable></screen>
+    <para>
+     For example:
+    </para>
+<screen>&prompt.root;virsh detach-disk sles12sp3 sda2</screen>
+    <para>
+     You can control the attachment with the <option>--live</option> and
+     <option>--config</option> options as described in
+     <xref
+     linkend="libvirt-storage-virsh-attach-volumes"/>.
+    </para>
+   </sect3>
+  </sect2>
 
+  <sect2 xml:id="sec-libvirt-storage-vmm">
+   <title>Managing Storage with &vmm;</title>
    <para>
     The &vmm; provides a graphical interface&mdash;the Storage Manager&mdash;to
     manage storage volumes and pools. To access it, either right-click a
@@ -244,7 +573,6 @@ Syncing disks.</screen>
     and choose <menuchoice> <guimenu>Edit</guimenu> <guimenu>Connection
     Details</guimenu> </menuchoice>. Select the <guimenu>Storage</guimenu> tab.
    </para>
-
    <informalfigure>
     <mediaobject>
      <imageobject role="fo">
@@ -255,8 +583,7 @@ Syncing disks.</screen>
      </imageobject>
     </mediaobject>
    </informalfigure>
-
-   <sect2 xml:id="sec-libvirt-storage-vmm-addpool">
+   <sect3 xml:id="sec-libvirt-storage-vmm-addpool">
     <title>Adding a Storage Pool</title>
     <para>
      To add a storage pool, proceed as follows:
@@ -563,9 +890,8 @@ Syncing disks.</screen>
       </para>
      </step>
     </procedure>
-   </sect2>
-
-   <sect2 xml:id="sec-libvirt-storage-vmm-manage">
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-vmm-manage">
     <title>Managing Storage Pools</title>
     <para>
      &vmm;'s Storage Manager lets you create or delete volumes in a pool. You
@@ -573,7 +899,7 @@ Syncing disks.</screen>
      pools. Changing the basic configuration of a pool is currently not
      supported by &suse;.
     </para>
-    <sect3 xml:id="sec-libvirt-storage-vmm-manage-pool">
+    <sect4 xml:id="sec-libvirt-storage-vmm-manage-pool">
      <title>Starting, Stopping and Deleting Pools</title>
      <para>
       The purpose of storage pools is to provide block devices located on the
@@ -632,8 +958,8 @@ Syncing disks.</screen>
        pool are lost.
       </para>
      </warning>
-    </sect3>
-    <sect3 xml:id="sec-libvirt-storage-vmm-manage-volume-add">
+    </sect4>
+    <sect4 xml:id="sec-libvirt-storage-vmm-manage-volume-add">
      <title>Adding Volumes to a Storage Pool</title>
      <para>
       &vmm; lets you create volumes in all storage pools, except in pools of
@@ -681,8 +1007,8 @@ Syncing disks.</screen>
        </para>
       </step>
      </procedure>
-    </sect3>
-    <sect3 xml:id="sec-libvirt-storage-vmm-manage-volume-delete">
+    </sect4>
+    <sect4 xml:id="sec-libvirt-storage-vmm-manage-volume-delete">
      <title>Deleting Volumes From a Storage Pool</title>
      <para>
       Deleting a volume can only be done from the Storage Manager, by selecting
@@ -700,346 +1026,8 @@ Syncing disks.</screen>
        <guimenu>Used By</guimenu> column in the Storage Manager.
       </para>
      </warning>
-    </sect3>
-   </sect2>
-  </sect1>
-
-  <sect1 xml:id="sec-libvirt-storage-virsh">
-   <title>Managing Storage with <command>virsh</command></title>
-
-   <para>
-    Managing storage from the command line is also possible by using
-    <command>virsh</command>. However, creating storage pools is currently not
-    supported by &suse;. Therefore, this section is restricted to documenting
-    functions like starting, stopping and deleting pools and volume management.
-   </para>
-
-   <para>
-    A list of all <command>virsh</command> subcommands for managing pools and
-    volumes is available by running <command>virsh help pool</command> and
-    <command>virsh help volume</command>, respectively.
-   </para>
-
-   <sect2 xml:id="sec-libvirt-storage-virsh-list-pools">
-    <title>Listing Pools and Volumes</title>
-    <para>
-     List all pools currently active by executing the following command. To
-     also list inactive pools, add the option <option>--all</option>:
-    </para>
-<screen>&prompt.user;virsh pool-list --details</screen>
-    <para>
-     Details about a specific pool can be obtained with the
-     <literal>pool-info</literal> subcommand:
-    </para>
-<screen>&prompt.user;virsh pool-info <replaceable>POOL</replaceable></screen>
-    <para>
-     Volumes can only be listed per pool by default. To list all volumes from a
-     pool, enter the following command.
-    </para>
-<screen>&prompt.user;virsh vol-list --details <replaceable>POOL</replaceable></screen>
-    <para>
-     At the moment <command>virsh</command> offers no tools to show whether a
-     volume is used by a guest or not. The following procedure describes a way
-     to list volumes from all pools that are currently used by a &vmguest;.
-    </para>
-    <procedure xml:id="pro-libvirt-storage-virsh-list-vols">
-     <title>Listing all Storage Volumes Currently Used on a &vmhost;</title>
-     <step>
-      <para>
-       Create an XSLT style sheet by saving the following content to a file,
-       for example, ~/libvirt/guest_storage_list.xsl:
-      </para>
-<screen>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
-&lt;xsl:stylesheet version="1.0"
-  xmlns:xsl="http://www.w3.org/1999/XSL/Transform"&gt;
-  &lt;xsl:output method="text"/&gt;
-  &lt;xsl:template match="text()"/&gt;
-  &lt;xsl:strip-space elements="*"/&gt;
-  &lt;xsl:template match="disk"&gt;
-    &lt;xsl:text&gt;  &lt;/xsl:text&gt;
-    &lt;xsl:value-of select="(source/@file|source/@dev|source/@dir)[1]"/&gt;
-    &lt;xsl:text&gt;&amp;#10;&lt;/xsl:text&gt;
-  &lt;/xsl:template&gt;
-&lt;/xsl:stylesheet&gt;</screen>
-     </step>
-     <step>
-      <para>
-       Run the following commands in a shell. It is assumed that the guest's
-       XML definitions are all stored in the default location
-       (<filename>/etc/libvirt/qemu</filename>). <command>xsltproc</command> is
-       provided by the package
-       <systemitem class="resource">libxslt</systemitem>.
-      </para>
-<screen>SSHEET="$HOME/libvirt/guest_storage_list.xsl"
-cd /etc/libvirt/qemu
-for FILE in *.xml; do
-  basename $FILE .xml
-  xsltproc $SSHEET $FILE
-done</screen>
-     </step>
-    </procedure>
-   </sect2>
-
-   <sect2 xml:id="sec-libvirt-storage-virsh-start-pools">
-    <title>Starting, Stopping and Deleting Pools</title>
-    <para>
-     Use the <command>virsh</command> pool subcommands to start, stop or delete
-     a pool. Replace <replaceable>POOL</replaceable> with the pool's name or
-     its UUID in the following examples:
-    </para>
-    <variablelist>
-     <varlistentry>
-      <term>Stopping a Pool</term>
-      <listitem>
-<screen>&prompt.user;virsh pool-destroy <replaceable>POOL</replaceable></screen>
-       <note>
-        <title>A Pool's State Does not Affect Attached Volumes</title>
-        <para>
-         Volumes from a pool attached to &vmguest;s are always available,
-         regardless of the pool's state (<guimenu>Active</guimenu> (stopped) or
-         <guimenu>Inactive</guimenu> (started)). The state of the pool solely
-         affects the ability to attach volumes to a &vmguest; via remote
-         management.
-        </para>
-       </note>
-      </listitem>
-     </varlistentry>
-     <varlistentry>
-      <term>Deleting a Pool</term>
-      <listitem>
-<screen>&prompt.user;virsh pool-delete <replaceable>POOL</replaceable></screen>
-       <warning>
-        <title>Deleting Storage Pools</title>
-        <para>
-         See <xref linkend="deleting-storage-pools"/>
-        </para>
-       </warning>
-      </listitem>
-     </varlistentry>
-     <varlistentry>
-      <term>Starting a Pool</term>
-      <listitem>
-<screen>&prompt.user;virsh pool-start <replaceable>POOL</replaceable></screen>
-      </listitem>
-     </varlistentry>
-     <varlistentry>
-      <term>Enable Autostarting a Pool</term>
-      <listitem>
-<screen>&prompt.user;virsh pool-autostart <replaceable>POOL</replaceable></screen>
-       <para>
-        Only pools that are marked to autostart will automatically be started
-        if the &vmhost; reboots.
-       </para>
-      </listitem>
-     </varlistentry>
-     <varlistentry>
-      <term>Disable Autostarting a Pool</term>
-      <listitem>
-<screen>&prompt.user;virsh pool-autostart <replaceable>POOL</replaceable> --disable</screen>
-      </listitem>
-     </varlistentry>
-    </variablelist>
-   </sect2>
-
-   <sect2 xml:id="sec-libvirt-storage-virsh-add-volumes">
-    <title>Adding Volumes to a Storage Pool</title>
-    <para>
-     <command>virsh</command> offers two ways to add volumes to storage pools:
-     either from an XML definition with <literal>vol-create</literal> and
-     <literal>vol-create-from</literal> or via command line arguments with
-     <literal>vol-create-as</literal>. The first two methods are currently not
-     supported by &suse;, therefore this section focuses on the subcommand
-     <literal>vol-create-as</literal>.
-    </para>
-    <para>
-     To add a volume to an existing pool, enter the following command:
-    </para>
-<screen>&prompt.user;virsh vol-create-as <replaceable>POOL</replaceable><co xml:id="co-vol-create-as-pool"/><replaceable>NAME</replaceable><co xml:id="co-vol-create-as-name"/> 12G --format<co xml:id="co-vol-create-as-capacity"/><replaceable>raw|qcow2</replaceable><co xml:id="co-vol-create-as-format"/> --allocation 4G<co xml:id="co-vol-create-as-alloc"/></screen>
-    <calloutlist>
-     <callout arearefs="co-vol-create-as-pool">
-      <para>
-       Name of the pool to which the volume should be added
-      </para>
-     </callout>
-     <callout arearefs="co-vol-create-as-name">
-      <para>
-       Name of the volume
-      </para>
-     </callout>
-     <callout arearefs="co-vol-create-as-capacity">
-      <para>
-       Size of the image, in this example 12 gigabytes. Use the suffixes k, M,
-       G, T for kilobyte, megabyte, gigabyte, and terabyte, respectively.
-      </para>
-     </callout>
-     <callout arearefs="co-vol-create-as-format">
-      <para>
-       Format of the volume. &suse; currently supports <literal>raw</literal>,
-       and <literal>qcow2</literal>.
-      </para>
-     </callout>
-     <callout arearefs="co-vol-create-as-alloc">
-      <para>
-       Optional parameter. By default <command>virsh </command>creates a sparse
-       image file that grows on demand. Specify the amount of space that should
-       be allocated with this parameter (4 gigabytes in this example). Use the
-       suffixes k, M, G, T for kilobyte, megabyte, gigabyte, and terabyte,
-       respectively.
-      </para>
-      <para>
-       When not specifying this parameter, a sparse image file with no
-       allocation will be generated. To create a non-sparse volume, specify the
-       whole image size with this parameter (would be <literal>12G</literal> in
-       this example).
-      </para>
-     </callout>
-    </calloutlist>
-    <sect3 xml:id="sec-libvirt-storage-virsh-add-volumes-clone">
-     <title>Cloning Existing Volumes</title>
-     <para>
-      Another way to add volumes to a pool is to clone an existing volume. The
-      new instance is always created in the same pool as the original.
-     </para>
-<screen>&prompt.user;virsh vol-clone <replaceable>NAME_EXISTING_VOLUME</replaceable><co xml:id="co-vol-clone-existing"/><replaceable>NAME_NEW_VOLUME</replaceable><co xml:id="co-vol-clone-new"/> --pool <replaceable>POOL</replaceable><co xml:id="co-vol-clone-pool"/></screen>
-     <calloutlist>
-      <callout arearefs="co-vol-clone-existing">
-       <para>
-        Name of the existing volume that should be cloned
-       </para>
-      </callout>
-      <callout arearefs="co-vol-clone-new">
-       <para>
-        Name of the new volume
-       </para>
-      </callout>
-      <callout arearefs="co-vol-clone-pool">
-       <para>
-        Optional parameter. &libvirt; tries to locate the existing volume
-        automatically. If that fails, specify this parameter.
-       </para>
-      </callout>
-     </calloutlist>
-    </sect3>
-   </sect2>
-
-   <sect2 xml:id="sec-libvirt-storage-virsh-del-volumes">
-    <title>Deleting Volumes from a Storage Pool</title>
-    <para>
-     To permanently delete a volume from a pool, use the subcommand
-     <literal>vol-delete</literal>:
-    </para>
-<screen>&prompt.user;virsh vol-delete <replaceable>NAME</replaceable> --pool <replaceable>POOL</replaceable></screen>
-    <para>
-     <option>--pool</option> is optional. &libvirt; tries to locate the volume
-     automatically. If that fails, specify this parameter.
-    </para>
-    <warning>
-     <title>No Checks Upon Volume Deletion</title>
-     <para>
-      A volume will be deleted in any case, regardless of whether it is
-      currently used in an active or inactive &vmguest;. There is no way to
-      recover a deleted volume.
-     </para>
-     <para>
-      Whether a volume is used by a &vmguest; can only be detected by using by
-      the method described in
-      <xref linkend="pro-libvirt-storage-virsh-list-vols"/>.
-     </para>
-    </warning>
-   </sect2>
-
-   <sect2 xml:id="libvirt-storage-virsh-attach-volumes">
-    <title>Attaching Volumes to a &vmguest;</title>
-    <para>
-     After you create a volume as described in
-     <xref
-     linkend="sec-libvirt-storage-virsh-add-volumes"/>, you can
-     attach it to a virtual machine and use it as a hard disk:
-    </para>
-<screen>&prompt.user;virsh attach-disk <replaceable>DOMAIN</replaceable> <replaceable>SOURCE_IMAGE_FILE</replaceable> <replaceable>TARGET_DISK_DEVICE</replaceable></screen>
-    <para>
-     For example:
-    </para>
-<screen>&prompt.user;virsh attach-disk sles12sp3 /virt/images/example_disk.qcow2 sda2</screen>
-    <para>
-     To check if the new disk is attached, inspect the result of the
-     <command>virsh dumpxml</command> command:
-    </para>
-<screen>&prompt.root;virsh dumpxml sles12sp3
-[...]
-&lt;disk type='file' device='disk'>
- &lt;driver name='qemu' type='raw'/>
- &lt;source file='/virt/images/example_disk.qcow2'/>
- &lt;backingStore/>
- &lt;target dev='sda2' bus='scsi'/>
- &lt;alias name='scsi0-0-0'/>
- &lt;address type='drive' controller='0' bus='0' target='0' unit='0'/>
-&lt;/disk>
-[...]</screen>
-    <sect3>
-     <title>Hotplug or Persistent Change</title>
-     <para>
-      You can attach disks to both active and inactive domains. The attachment
-      is controlled by the <option>--live</option> and
-      <option>--config</option> options:
-     </para>
-     <variablelist>
-      <varlistentry>
-       <term><option>--live</option></term>
-       <listitem>
-        <para>
-         Hotplugs the disk to an active domain. The attachment is not saved in
-         the domain configuration. Using <option>--live</option> on an inactive
-         domain is an error.
-        </para>
-       </listitem>
-      </varlistentry>
-      <varlistentry>
-       <term><option>--config</option></term>
-       <listitem>
-        <para>
-         Changes the domain configuration persistently. The attached disk is
-         then available after the next domain start.
-        </para>
-       </listitem>
-      </varlistentry>
-      <varlistentry>
-       <term><option>--live</option><option>--config</option></term>
-       <listitem>
-        <para>
-         Hotplugs the disk and adds it to the persistent domain configuration.
-        </para>
-       </listitem>
-      </varlistentry>
-     </variablelist>
-     <tip>
-      <title><command>virsh attach-device</command></title>
-      <para>
-       <command>virsh attach-device</command> is the more generic form of
-       <command>virsh attach-disk</command>. You can use it to attach other
-       types of devices to a domain.
-      </para>
-     </tip>
-    </sect3>
-   </sect2>
-
-   <sect2 xml:id="libvirt-storage-virsh-detach-volumes">
-    <title>Detaching Volumes from a &vmguest;</title>
-    <para>
-     To detach a disk from a domain, use <command>virsh detach-disk</command>:
-    </para>
-<screen>&prompt.root;virsh detach-disk <replaceable>DOMAIN</replaceable> <replaceable>TARGET_DISK_DEVICE</replaceable></screen>
-    <para>
-     For example:
-    </para>
-<screen>&prompt.root;virsh detach-disk sles12sp3 sda2</screen>
-    <para>
-     You can control the attachment with the <option>--live</option> and
-     <option>--config</option> options as described in
-     <xref
-     linkend="libvirt-storage-virsh-attach-volumes"/>.
-    </para>
-   </sect2>
-  </sect1>
+    </sect4>
+   </sect3>
+  </sect2>
  </sect1>
 </chapter>
