@@ -35,22 +35,14 @@
    device hosting a database.
   </para>
 
+
   <para>
    The default I/O scheduler is chosen for each device based on whether the
-   device reports to be rotational disk or not. For non-rotational disks
-   <systemitem class="resource">DEADLINE</systemitem> I/O scheduler is picked.
-   Other devices default to
-   <systemitem class="resource">CFQ</systemitem> (Completely Fair Queuing).
-   To change this default, use the following boot parameter:
-  </para>
-
-<screen>elevator=<replaceable>SCHEDULER</replaceable></screen>
-
-  <para>
-   Replace <replaceable>SCHEDULER</replaceable> with one of the values
-   <option>cfq</option>, <option>noop</option>, or
-   <option>deadline</option>. See <xref linkend="cha-tuning-io-schedulers"/>
-   for details.
+   device reports to be rotational disk or not. For rotational disks, the
+   <systemitem class="resource">BFQ</systemitem> I/O scheduler is picked.
+   Other devices default to <systemitem
+   class="resource">MQ-DEADLINE</systemitem> or <systemitem
+   class="resource">NONE</systemitem>.
   </para>
 
   <para>
@@ -62,14 +54,15 @@
 
   <para>
    Here, <replaceable>SCHEDULER</replaceable> is one of
-   <option>cfq</option>, <option>noop</option>, or <option>deadline</option>.
+   <option>bfq</option>, <option>none</option>,
+   <option>kyber</option>, or <option>mq-deadline</option>.
    <replaceable>DEVICE</replaceable> is the block device
    (<systemitem>sda</systemitem> for example). Note that this change will not
    persist during reboot. For permanent I/O scheduler change for a particular
    device either place the command switching the I/O scheduler into init
    scripts or add appropriate udev rule into
    <filename>/lib/udev/rules.d/</filename>. See
-   <filename>/lib/udev/rules.d/60-ssd-scheduler.rules</filename> for an example
+   <filename>/lib/udev/rules.d/60-io-scheduler.rules</filename> for an example
    of such tuning.
   </para>
 
@@ -80,396 +73,302 @@
     set by the device driver.
    </para>
   </note>
+
+  <note os="sles" arch="x86_64">
+   <title>Change Due to Use of Multi-Queue (blk-mq) I/O path</title>
+   <para>
+     The <literal>elevator</literal> boot parameter no longer applies to
+     devices using blk-mq I/O path.
+   </para>
+  </note>
+
  </sect1>
- <sect1 xml:id="cha-tuning-io-schedulers">
-  <title>Available I/O Elevators</title>
+
+ <sect1 xml:id="cha-tuning-io-schedulers-blkmq">
+   <title>Available I/O Elevators with blk-mq I/O path</title>
+     <para>
+       Below is a list of elevators available on &productname; for devices
+       that use the blk-mq I/O path.
+       If an elevator has tunable parameters, they can be set with the
+       command:
+     </para>
+
+<screen>echo <replaceable>VALUE</replaceable> &gt; /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/<replaceable>TUNABLE</replaceable></screen>
 
   <para>
-   In the following elevators available on &productname; are listed. Each
-   elevator has a set of tunable parameters, which can be set with the
-   following command:
-  </para>
-
-<screen>&prompt.sudo;echo <replaceable>VALUE</replaceable> &gt; /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/<replaceable>TUNABLE</replaceable></screen>
-
-  <para>
-   where <replaceable>VALUE</replaceable> is the desired value for the
-   <replaceable>TUNABLE</replaceable> and <replaceable>DEVICE</replaceable>
+   In the command above, <replaceable>VALUE</replaceable> is the desired value for the
+   <replaceable>TUNABLE</replaceable> and <replaceable>DEVICE</replaceable> is
    the block device.
   </para>
 
   <para>
-   To find out which elevator is the current default, run the following
-   command. The currently selected scheduler is listed in brackets:
+   To find out what elevators are available for a device
+   (<systemitem>sda</systemitem> for example), run the following
+   command (the currently selected scheduler is listed in brackets):
   </para>
 
-<screen>&wsI;:~ # cat /sys/block/sda/queue/scheduler
-noop deadline [cfq]</screen>
+<screen>&prompt.user;cat /sys/block/sda/queue/scheduler
+[mq-deadline] kyber bfq none</screen>
 
-  <para>
-  This file can also contain the string <literal>none</literal> meaning that
-  I/O scheduling does not happen for this device. This is usually because the
-  device uses a multi-queue queuing mechanism (refer to <xref
-  linkend="cha-tuning-io-scsimq"/>).
-  </para>
+  <note os="sles" arch="x86_64">
+    <title>Scheduler Options When Switching from
+    Legacy Block to blk-mq I/O path</title>
+    <para>
+      When switching from legacy block to blk-mq I/O path for a device,
+      the <option>none</option> option is roughly comparable to
+      <option>noop</option>, <option>mq-deadline</option> is comparable
+      to <option>deadline</option>, and <option>bfq</option> is
+      comparable to <option>cfq</option>.
+     </para>
+  </note>
 
-  <sect2 xml:id="sec-tuning-io-schedulers-cfq">
-   <title><systemitem class="resource">CFQ</systemitem> (Completely Fair Queuing)</title>
+  <sect2 xml:id="sec-tuning-io-schedulers-mqdeadline">
+   <title><systemitem class="resource">MQ-DEADLINE</systemitem></title>
    <para>
-    <systemitem class="resource">CFQ</systemitem> is a fairness-oriented
-    scheduler and is used by default on &productname;. The algorithm
-    assigns each thread a time slice in which it is allowed to submit I/O to
-    disk. This way each thread gets a fair share of I/O throughput. It also
-    allows assigning tasks I/O priorities which are taken into account
-    during scheduling decisions (see
-    <xref linkend="cha-tuning-resources-disk-ionice"/>). The
-    <systemitem class="resource">CFQ</systemitem> scheduler has the
-    following tunable parameters:
+     <systemitem class="resource">MQ-DEADLINE</systemitem> is a
+     latency-oriented I/O scheduler. <systemitem
+     class="resource">MQ-DEADLINE</systemitem> has the following
+     tunable parameters:
    </para>
-   <variablelist>
-    <varlistentry>
-     <term><filename>
-      /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/slice_idle_us
-     </filename>
-     </term>
-     <listitem>
-      <para>
-       When a task has no more I/O to submit in its time slice, the I/O
-       scheduler waits for a while before scheduling the next thread.
-       The <filename>slice_idle_us</filename> is
-       the time in microseconds the I/O scheduler waits. File
-       <filename>slice_idle</filename> controls the same tunable but in
-       millisecond units. Waiting for more I/O from a thread can
-       improve locality of I/O. Additionally, it avoids starving processes
-       doing dependent I/O.
-       A process does dependent I/O if it needs a result of one I/O
-       to submit another I/O. For example, if you first need to read an index
-       block to find out a data block to read, these two reads form
-       a dependent I/O.
-      </para>
-      <para>For media where locality does not play a big role (SSDs, SANs
-       with lots of disks) setting  <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/slice_idle_us</filename>
-       to <literal>0</literal> can improve the throughput considerably.
-      </para>
-     </listitem>
-    </varlistentry>
-    <varlistentry>
-     <term><filename>
-      /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/quantum
-     </filename>
-     </term>
-     <listitem>
-      <para>
-       This option limits the maximum number of requests that are being
-       processed at once by the device. The default value is
-       <literal>4</literal>. For a storage with several disks, this setting
-       can unnecessarily limit parallel processing of requests. Therefore,
-       increasing the value can improve performance. However, it can also
-       cause latency of certain I/O operations to increase because more
-       requests are buffered inside the storage. When changing this value,
-       you can also consider tuning
-       <filename>/sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/slice_async_rq</filename>
-       (the default value is <literal>2</literal>). This limits the maximum
-       number of asynchronous requests&mdash;usually write
-       requests&mdash;that are submitted in one time slice.
-      </para>
-     </listitem>
-    </varlistentry>
-    <varlistentry>
-     <term><filename>/sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/low_latency</filename>
-     </term>
-     <listitem>
-      <para>
-       When enabled (which is the default on &productname;) the scheduler
-       may dynamically adjust the length of the time slice by aiming to meet
-       a tuning parameter called the <literal>target_latency</literal>. Time
-       slices are recomputed to meet this <literal>target_latency</literal>
-       and ensure that processes get fair access within a bounded length of
-       time.
-      </para>
-     </listitem>
-    </varlistentry>
-    <varlistentry>
-     <term><filename>/sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/target_latency</filename>
-     </term>
-     <listitem>
-      <para>
-       Contains an estimated latency time for the
-       <systemitem class="resource">CFQ</systemitem>.
-       <systemitem class="resource">CFQ</systemitem> will use it to
-       calculate the time slice used for every task.
-      </para>
-     </listitem>
-    </varlistentry>
-     <varlistentry>
-       <term><filename>/sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/group_idle_us</filename></term>
-       <listitem>
-         <para>To avoid starving of blkio cgroups doing dependent I/O, CFQ
-           waits a bit after completion of I/O for one blkio cgroup before
-           scheduling I/O for a different blkio cgroup. When
-           <literal>slice_idle_us</literal> is set, this parameter does not
-           have a big impact. However, for fast media, the overhead of
-           <literal>slice_idle_us</literal> is generally undesirable.
-           Disabling <literal>slice_idle_us</literal> and setting
-           <literal>group_idle_us</literal> is a method to avoid starvation
-           of blkio cgroups doing dependent I/O with lower overhead. Note that
-           the file <filename>group_idle</filename> controls the same tunable
-           however with millisecond granularity.
-         </para>
-       </listitem>
-     </varlistentry>
-   </variablelist>
-   <example>
-    <title>Increasing individual thread throughput using <systemitem class="resource">CFQ</systemitem></title>
-    <para>
-     In &productname; &productnumber;, the <literal>low_latency</literal>
-     tuning parameter is enabled by default to ensure that processes get fair
-     access within a bounded length of time. (Note that this parameter was not
-     enabled in versions prior to <phrase os="sles;sled">&sle;
-     12</phrase><phrase os="osuse">&opensuse; Leap</phrase>.)
-    </para>
-    <para>
-     This is usually preferred in a server scenario where processes are
-     executing I/O as part of transactions, as it makes the time needed for each
-     transaction predictable. However, there are scenarios where that is not the
-     desired behavior:
-    </para>
-    <itemizedlist>
-     <listitem>
-      <para>
-       If the performance metric of interest is the peak performance of a single
-       process when there is I/O contention.
-      </para>
-     </listitem>
-     <listitem>
-      <para>
-       If a workload must complete as quickly as possible and there are multiple
-       sources of I/O. In this case, unfair treatment from the I/O scheduler may
-       allow the transactions to complete faster: Processes take their full
-       slice and exit quickly, resulting in reduced overall contention.
-      </para>
-     </listitem>
-    </itemizedlist>
-    <para>
-     To address this, there are two options&mdash;increase
-     <literal>target_latency</literal> or disable
-     <literal>low_latency</literal>. As with all tuning parameters it is
-     important to verify your workload behaves as expected before and after
-     the tuning modification. Take careful note of whether your workload
-     depends on individual process peak performance or scales better with
-     fairness. It should also be noted that the performance will depend on
-     the underlying storage and the correct tuning option for one
-     installation may not be universally true.
-    </para>
-    <para>
-     Find below an example that does not control when I/O starts but is
-     simple enough to demonstrate the point. 32 processes are writing a
-     small amount of data to disk in parallel. Using the &productname;
-     default (enabling <literal>low_latency</literal>), the result looks as
-     follows:
-    </para>
-<screen>&prompt.root;echo 1 &gt; /sys/block/sda/queue/iosched/low_latency
-&prompt.root;time ./dd-test.sh
-10485760 bytes (10 MB) copied, 2.62464 s, 4.0 MB/s
-10485760 bytes (10 MB) copied, 3.29624 s, 3.2 MB/s
-10485760 bytes (10 MB) copied, 3.56341 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.56908 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.53043 s, 3.0 MB/s
-10485760 bytes (10 MB) copied, 3.57511 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.53672 s, 3.0 MB/s
-10485760 bytes (10 MB) copied, 3.5433 s, 3.0 MB/s
-10485760 bytes (10 MB) copied, 3.65474 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.63694 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.90122 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 3.88507 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 3.86135 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 3.84553 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 3.88871 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 3.94943 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 4.12731 s, 2.5 MB/s
-10485760 bytes (10 MB) copied, 4.15106 s, 2.5 MB/s
-10485760 bytes (10 MB) copied, 4.21601 s, 2.5 MB/s
-10485760 bytes (10 MB) copied, 4.35004 s, 2.4 MB/s
-10485760 bytes (10 MB) copied, 4.33387 s, 2.4 MB/s
-10485760 bytes (10 MB) copied, 4.55434 s, 2.3 MB/s
-10485760 bytes (10 MB) copied, 4.52283 s, 2.3 MB/s
-10485760 bytes (10 MB) copied, 4.52682 s, 2.3 MB/s
-10485760 bytes (10 MB) copied, 4.56176 s, 2.3 MB/s
-10485760 bytes (10 MB) copied, 4.62727 s, 2.3 MB/s
-10485760 bytes (10 MB) copied, 4.78958 s, 2.2 MB/s
-10485760 bytes (10 MB) copied, 4.79772 s, 2.2 MB/s
-10485760 bytes (10 MB) copied, 4.78004 s, 2.2 MB/s
-10485760 bytes (10 MB) copied, 4.77994 s, 2.2 MB/s
-10485760 bytes (10 MB) copied, 4.86114 s, 2.2 MB/s
-10485760 bytes (10 MB) copied, 4.88062 s, 2.1 MB/s
 
-real    0m4.978s
-user    0m0.112s
-sys     0m1.544s</screen>
-    <para>
-     Note that each process completes in similar times. This is the
-     <systemitem class="resource">CFQ</systemitem> scheduler meeting its
-     <literal>target_latency</literal>: Each process has fair access
-     to storage.
-    </para>
-    <para>
-     Note that the earlier processes complete somewhat faster.
-     This happens because the start time of the processes is not identical.
-     In a more complicated example, it is possible to control for this.
-    </para>
-    <para>
-     This is what happens when low_latency is disabled:
-    </para>
-<screen>&prompt.root;echo 0 &gt; /sys/block/sda/queue/iosched/low_latency
-&prompt.root;time ./dd-test.sh
-10485760 bytes (10 MB) copied, 0.813519 s, 12.9 MB/s
-10485760 bytes (10 MB) copied, 0.788106 s, 13.3 MB/s
-10485760 bytes (10 MB) copied, 0.800404 s, 13.1 MB/s
-10485760 bytes (10 MB) copied, 0.816398 s, 12.8 MB/s
-10485760 bytes (10 MB) copied, 0.959087 s, 10.9 MB/s
-10485760 bytes (10 MB) copied, 1.09563 s, 9.6 MB/s
-10485760 bytes (10 MB) copied, 1.18716 s, 8.8 MB/s
-10485760 bytes (10 MB) copied, 1.27661 s, 8.2 MB/s
-10485760 bytes (10 MB) copied, 1.46312 s, 7.2 MB/s
-10485760 bytes (10 MB) copied, 1.55489 s, 6.7 MB/s
-10485760 bytes (10 MB) copied, 1.64277 s, 6.4 MB/s
-10485760 bytes (10 MB) copied, 1.78196 s, 5.9 MB/s
-10485760 bytes (10 MB) copied, 1.87496 s, 5.6 MB/s
-10485760 bytes (10 MB) copied, 1.9461 s, 5.4 MB/s
-10485760 bytes (10 MB) copied, 2.08351 s, 5.0 MB/s
-10485760 bytes (10 MB) copied, 2.28003 s, 4.6 MB/s
-10485760 bytes (10 MB) copied, 2.42979 s, 4.3 MB/s
-10485760 bytes (10 MB) copied, 2.54564 s, 4.1 MB/s
-10485760 bytes (10 MB) copied, 2.6411 s, 4.0 MB/s
-10485760 bytes (10 MB) copied, 2.75171 s, 3.8 MB/s
-10485760 bytes (10 MB) copied, 2.86162 s, 3.7 MB/s
-10485760 bytes (10 MB) copied, 2.98453 s, 3.5 MB/s
-10485760 bytes (10 MB) copied, 3.13723 s, 3.3 MB/s
-10485760 bytes (10 MB) copied, 3.36399 s, 3.1 MB/s
-10485760 bytes (10 MB) copied, 3.60018 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.58151 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.67385 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.69471 s, 2.8 MB/s
-10485760 bytes (10 MB) copied, 3.66658 s, 2.9 MB/s
-10485760 bytes (10 MB) copied, 3.81495 s, 2.7 MB/s
-10485760 bytes (10 MB) copied, 4.10172 s, 2.6 MB/s
-10485760 bytes (10 MB) copied, 4.0966 s, 2.6 MB/s
-
-real    0m3.505s
-user    0m0.160s
-sys     0m1.516s</screen>
-    <para>
-     Note that the time processes take to complete is spread much wider as
-     processes are not getting fair access. Some processes complete faster
-     and exit, allowing the total workload to complete faster, and some
-     processes measure higher apparent I/O performance. It is also important
-     to note that this example may not behave similarly on all systems as
-     the results depend on the resources of the machine and the underlying
-     storage.
-    </para>
-    <para>
-     It is important to emphasize that neither tuning option is inherently
-     better than the other. Both are best in different circumstances and it
-     is important to understand the requirements of your workload and tune
-     accordingly.
-    </para>
-   </example>
+   <table xml:id="tab-tunables-mq-deadline">
+     <title><systemitem class="resource">MQ-DEADLINE</systemitem> tunable parameters</title>
+     <tgroup cols="2">
+       <colspec colnum="1" colname="1" colwidth="3000*"/>
+       <colspec colnum="2" colname="2" colwidth="7000*"/>
+       <thead>
+	 <row>
+	   <entry><para>File</para></entry>
+	   <entry><para>Description</para></entry>
+	 </row>
+       </thead>
+       <tbody>
+	 <row>
+	   <entry><para><filename>writes_starved</filename></para></entry>
+	   <entry><para> Controls how many times reads are preferred
+	   over writes. A value of <literal>3</literal> means that
+	   three read operations can be done before writes and reads
+	   are dispatched on the same selection criteria.
+	   </para><para>Default is <literal>3</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>read_expire</filename></para></entry>
+	   <entry><para> Sets the deadline (current time plus the
+	   <literal>read_expire</literal> value) for read operations in milliseconds.
+	   </para><para>Default is <literal>500</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>write_expire</filename></para></entry>
+	   <entry><para> Sets the deadline (current time plus the
+	   <literal>write_expire</literal> value) for write operations in
+	   milliseconds.
+	   </para><para>Default is <literal>5000</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>front_merges</filename></para></entry>
+	   <entry><para> Enables (1) or disables (0) attempts to front
+	   merge requests.
+	   </para><para>Default is <literal>1</literal>.</para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>fifo_batch</filename></para></entry>
+	   <entry><para> Sets the maximum number of requests per batch
+	   (deadline expiration is only checked for batches). This
+	   parameter allows to balance between latency and
+	   throughput. When set to <literal>1</literal> (that is, one
+	   request per batch), it results in "first come, first served"
+	   behavior and usually lowest latency. Higher values usually
+	   increase throughput.
+	   </para><para>Default is <literal>16</literal>.
+	   </para></entry>
+	 </row>
+       </tbody>
+     </tgroup>
+   </table>
   </sect2>
 
-  <sect2 xml:id="sec-tuning-io-schedulers-noop">
-   <title><systemitem class="resource">NOOP</systemitem></title>
+  <sect2 xml:id="sec-tuning-io-schedulers-none">
+   <title><systemitem class="resource">NONE</systemitem></title>
    <para>
-    A trivial scheduler that only passes down the I/O that comes to it.
-    Useful for checking whether complex I/O scheduling decisions of other
-    schedulers are causing I/O performance regressions.
+     When <systemitem class="resource">NONE</systemitem> is selected
+     as I/O elevator option for blk-mq, no I/O scheduler
+     is used, and I/O requests are passed down to the
+     device without further I/O scheduling interaction.
    </para>
    <para>
-    This scheduler is recommended for setups with devices that do I/O scheduling
-    themselves, such as intelligent storage or in multipathing environments.
-    If you choose a more complicated scheduler on the host, the scheduler of
-    the host and the scheduler of the storage device compete with each other.
-    This can decrease performance.
-    The storage device can usually determine best how to schedule I/O.
+     <systemitem class="resource">NONE</systemitem> is the default for
+     NVM Express devices. With no overhead compared to other I/O
+     elevator options, it is considered the fastest way of passing down
+     I/O requests on multiple queues to such devices.
    </para>
    <para>
-    For similar reasons, this scheduler is also recommended for use within
-    virtual machines.
-   </para>
-   <para>
-    The <systemitem class="resource">NOOP</systemitem> scheduler can be
-    useful for devices that do not depend on mechanical movement, like SSDs.
-    Usually, the
-    <systemitem class="resource">DEADLINE</systemitem> I/O scheduler is a
-    better choice for these devices. However,
-    <systemitem class="resource">NOOP</systemitem> creates less overhead and
-    thus can on certain workloads increase performance.
+     There are no tunable parameters for <systemitem
+     class="resource">NONE</systemitem>.
    </para>
   </sect2>
 
-  <sect2 xml:id="sec-tuning-io-schedulers-deadline">
-   <title><systemitem class="resource">DEADLINE</systemitem></title>
+  <sect2 xml:id="sec-tuning-io-schedulers-bfq">
+   <title><systemitem class="resource">BFQ</systemitem> (Budget Fair Queueing)</title>
    <para>
-    <systemitem class="resource">DEADLINE</systemitem> is a latency-oriented
-    I/O scheduler. Each I/O request is assigned a deadline. Usually,
-    requests are stored in queues (read and write) sorted by sector numbers.
-    The <systemitem class="resource">DEADLINE</systemitem> algorithm
-    maintains two additional queues (read and write) in which requests are
-    sorted by deadline. As long as no request has timed out, the
-    <quote>sector</quote> queue is used. When timeouts occur, requests from
-    the <quote>deadline</quote> queue are served until there are no more
-    expired requests. Generally, the algorithm prefers reads over writes.
+     <systemitem class="resource">BFQ</systemitem> is a
+     fairness-oriented scheduler. It is described as "a
+     proportional-share storage-I/O scheduling algorithm based on the
+     slice-by-slice service scheme of CFQ. But BFQ assigns budgets,
+     measured in number of sectors, to processes instead of time
+     slices." (Source: <!-- This is a permalink for https://github.com/torvalds/linux/blob/v4.12/block/bfq-iosched.c#L31 -->
+     <link xlink:href="https://github.com/torvalds/linux/blob/6f7da290413ba713f0cdd9ff1a2a9bb129ef4f6c/block/bfq-iosched.c#L31">linux-4.12/block/bfq-iosched.c</link>)
    </para>
    <para>
-    This scheduler can provide a superior throughput over the
-    <systemitem class="resource">CFQ</systemitem> I/O scheduler in cases
-    where several threads read and write and fairness is not an issue. For
-    example, for several parallel readers from a SAN and for databases
-    (especially when using <quote>TCQ</quote> disks). The
-    <systemitem class="resource">DEADLINE</systemitem> scheduler has the
-    following tunable parameters:
+     <systemitem class="resource">BFQ</systemitem> allows to assign
+     I/O priorities to tasks which are taken into account during
+     scheduling decisions (see <xref
+     linkend="cha-tuning-resources-disk-ionice"/>).
    </para>
-   <variablelist>
-    <varlistentry>
-     <term><filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/writes_starved</filename>
-     </term>
-     <listitem>
-      <para>
-       Controls how many reads can be sent to disk before it is possible to
-       send writes. A value of <literal>3</literal> means, that three read
-       operations are carried out for one write operation.
-      </para>
-     </listitem>
-    </varlistentry>
-    <varlistentry>
-     <term><filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/read_expire</filename>
-     </term>
-     <listitem>
-      <para>
-       Sets the deadline (current time plus the read_expire value) for read
-       operations in milliseconds. The default is 500.
-      </para>
-     </listitem>
-    </varlistentry>
-    <varlistentry>
-     <term><filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/write_expire</filename>
-     </term>
-     <listitem>
-      <para>
-       <filename>/sys/block/<replaceable>&lt;device&gt;</replaceable>/queue/iosched/read_expire</filename>
-       Sets the deadline (current time plus the read_expire value) for read
-       operations in milliseconds. The default is 500.
-      </para>
-     </listitem>
-    </varlistentry>
-   </variablelist>
+   <para>
+     <systemitem class="resource">BFQ</systemitem> scheduler has the
+     following tunable parameters:
+   </para>
+   <table xml:id="tab-tunables-bfq">
+     <title><systemitem class="resource">BFQ</systemitem> tunable parameters</title>
+     <tgroup cols="2">
+       <colspec colnum="1" colname="1" colwidth="3000*"/>
+       <colspec colnum="2" colname="2" colwidth="7000*"/>
+       <thead>
+	 <row>
+	   <entry><para>File</para></entry>
+	   <entry><para>Description</para></entry>
+	 </row>
+       </thead>
+       <tbody>
+	 <row>
+	   <entry><para><filename>slice_idle</filename></para></entry>
+	   <entry><para>Value in milliseconds specifies how long to
+	   idle, waiting for next request on an empty queue.
+	   </para><para>Default is <literal>8</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>slice_idle_us</filename></para></entry>
+	   <entry><para>Same as <filename>slice_idle</filename> but in
+	   microseconds.
+	   </para><para>Default is <literal>8000</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>low_latency</filename></para></entry>
+	   <entry><para>Enables (1) or disables (0) <systemitem
+	   class="resource">BFQ</systemitem>'s low latency mode. This
+	   mode prioritizes certain applications (for example, if interactive)
+	   such that they observe lower latency.
+	   </para><para>Default is <literal>1</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>back_seek_max</filename></para></entry>
+	   <entry><para> Maximum value (in Kbytes) for backward seeking.
+	   </para><para>Default is <literal>16384</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>back_seek_penalty</filename></para></entry>
+	   <entry><para> Used to compute the cost of backward seeking.
+	   </para><para>Default is <literal>2</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>fifo_expire_async</filename></para></entry>
+	   <entry><para> Value (in milliseconds) is used to set the
+	   timeout of asynchronous requests.
+	   </para><para>Default is <literal>250</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>fifo_expire_sync</filename></para></entry>
+	   <entry><para> Value in milliseconds specifies the
+	   timeout of synchronous requests.
+	   </para><para>Default is <literal>125</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>timeout_sync</filename></para></entry>
+	   <entry><para> Maximum time in milliseconds that a task
+	   (queue) is serviced after it has been selected.
+	   </para><para>Default is <literal>124</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>max_budget</filename></para></entry>
+	   <entry><para> Limit for number of sectors that are served
+	   at maximum within <literal>timeout_sync</literal>. If set to
+	   <literal>0</literal> <systemitem
+	   class="resource">BFQ</systemitem> internally calculates a
+	   value based on <filename>timeout_sync</filename> and an
+	   estimated peak rate.
+	   </para><para>Default is <literal>0</literal>
+	   (set to auto-tuning). </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>strict_guarantees</filename></para></entry>
+	   <entry><para> Enables (1) or disables (0) <systemitem
+	   class="resource">BFQ</systemitem> specific queue handling
+	   required to give stricter bandwidth sharing guarantees
+	   under certain conditions.
+	   </para><para>Default is <literal>0</literal>.
+	   </para></entry>
+	 </row>
+       </tbody>
+     </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-io-schedulers-kyber">
+   <title><systemitem class="resource">KYBER</systemitem></title>
+   <para>
+    <systemitem class="resource">KYBER</systemitem> is a
+    latency-oriented I/O scheduler. It makes it possible to set target latencies
+    for reads and synchronous writes and throttles I/O requests in
+    order to try to meet these target latencies.
+   </para>
+   <table xml:id="tab-tunables-kyber">
+     <title><systemitem class="resource">KYBER</systemitem> tunable parameters</title>
+     <tgroup cols="2">
+       <colspec colnum="1" colname="1" colwidth="3000*"/>
+       <colspec colnum="2" colname="2" colwidth="7000*"/>
+       <thead>
+	 <row>
+	   <entry><para>File</para></entry>
+	   <entry><para>Description</para></entry>
+	 </row>
+       </thead>
+       <tbody>
+	 <row>
+	   <entry><para><filename>read_lat_nsec</filename></para></entry>
+	   <entry><para>Sets the target latency for read operations in
+	   nanoseconds.
+	   </para><para>Default is <literal>2000000</literal>.
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>write_lat_nsec</filename></para></entry>
+	   <entry><para>Sets the target latency for write operations in
+	   nanoseconds.
+	   </para><para>Default is <literal>10000000</literal>.
+	   </para></entry>
+	 </row>
+       </tbody>
+     </tgroup>
+   </table>
+
   </sect2>
  </sect1>
  <sect1 xml:id="cha-tuning-io-barrier">
   <title>I/O Barrier Tuning</title>
 
   <para>
-   <remark>sknorr, 2014-07-24: This might need updating to include Btrfs.</remark>
-   Most file systems (such as XFS, Ext3, or Ext4) send write
+   Some file systems (for example, Ext3 or Ext4) send write
    barriers to disk after fsync or during transaction commits. Write
    barriers enforce proper ordering of writes, making volatile disk write
    caches safe to use (at some performance penalty). If your disks are
@@ -492,31 +391,4 @@ sys     0m1.516s</screen>
   </warning>
  </sect1>
 
- <sect1 xml:id="cha-tuning-io-scsimq">
-  <title>Enable blk-mq I/O Path for SCSI by Default</title>
-
-  <para>
-   Block multiqueue (blk-mq) is a multi-queue block I/O queuing
-   mechanism. Blk-mq uses per-cpu software queues to queue I/O
-   requests. The software queues are mapped to one or more hardware
-   submission queues. Blk-mq significantly reduces lock contention. In
-   particular blk-mq improves performance for devices that support a
-   high number of input/output operations per second (IOPS).  Blk-mq
-   is already the default for some devices, for example, NVM Express devices.
-  </para>
-
-  <para>
-   Currently blk-mq has no I/O scheduling support (no CFQ, no deadline
-   I/O scheduler). This lack of I/O scheduling can cause significant
-   performance degradation when spinning disks are used. Therefore
-   blk-mq is not enabled by default for SCSI devices.
-  </para>
-
-  <para>
-   If you have fast SCSI devices (for example, SSDs) instead of SCSI
-   hard disks attached to your system, consider switching to
-   blk-mq for SCSI. This is done using the kernel command line option
-   <literal>scsi_mod.use_blk_mq=1</literal>.
-  </para>
- </sect1>
 </chapter>

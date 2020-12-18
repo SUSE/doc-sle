@@ -11,7 +11,7 @@
  <info>
   <abstract>
    <para>
-    This chapter contains additional information about using &productname; with
+    This chapter contains additional information about using &sle; with
     non-volatile main memory, also known as <emphasis>Persistent Memory</emphasis>,
     comprising one or more NVDIMMs.
    </para>
@@ -31,9 +31,15 @@
   </para>
 
   <para>
-   Like conventional RAM, it is installed directly into motherboard memory
-   slots. As such, it is supplied in the same physical form factor as RAM&mdash;as
-   DIMMs. These are known as NVDIMMs: non-volatile dual inline memory modules.
+   &suse; currently supports the use of persistent memory with &sls; on machines
+   with the &x86-64; and &power; architectures.
+  </para>
+  
+  <para>
+   Like conventional RAM, persistent memory is installed directly into
+   motherboard memory slots. As such, it is supplied in the same physical form
+   factor as RAM&mdash;as DIMMs. These are known as NVDIMMs: non-volatile dual
+   inline memory modules.
   </para>
 
   <para>
@@ -223,7 +229,7 @@
           </listitem>
          </varlistentry>
          <varlistentry>
-          <term>PMEM with BTT</term>
+          <term>PMEM with Block Translation Table (BTT)</term>
           <listitem>
            <para>
             A PMEM namespace configured to operate in BTT mode is accessed on a
@@ -232,10 +238,12 @@
             mechanism batches accesses into sector-sized units.
            </para>
            <para>
-            The advantages of BTT are that the storage subsystem ensures that
-            each sector is completely written to the underlying medium, and if
-            a write fails for some reason, it will be unrolled. Thus a given
-            sector cannot be partially written.
+            The advantage of BTT is data protection. The storage subsystem
+            ensures that each sector is completely written to the underlying
+            medium. If a sector cannot be completely written (that is, if the
+            write operation fails for some reason), then the whole sector will
+            be rolled back to its previous state. Thus a given sector cannot be
+            partially written. 
            </para>
            <para>
             Additionally, access to BTT namespaces is cached by the kernel.
@@ -341,7 +349,10 @@
    <title>PMEM with BTT</title>
    <para>
     This is useful when you want to use the persistent memory on a set of
-    NVDIMMs as a disk-like pool of very fast storage.
+    NVDIMMs as a disk-like pool of very fast storage. For example, placing
+    the filesystem journal on PMEM with BTT increase the reliability 
+    of filesystem recovery after a power failure or other sudden
+    interruption (see <xref linkend="sec-nvdimm-setup-btt"/>).
    </para>
    <para>
     To applications, such devices just appear as very fast SSDs and can be used
@@ -352,10 +363,11 @@
     The advantage of BTT is that sector write atomicity is guaranteed, so even
     sophisticated applications that depend on data integrity will keep
     working. Media error reporting works through standard error-reporting
-    channels.
+    channels. 
    </para>
   </sect2>
  </sect1>
+
  <sect1 xml:id="sec-nvdimm-tools">
   <title>Tools for Managing Persistent Memory</title>
 
@@ -394,13 +406,13 @@
    <command>man</command> pages, accessible with the command:
   </para>
 
-<screen><command>ndctl help <replaceable>subcommand</replaceable></command></screen>
+<screen>&prompt.user;<command>ndctl help <replaceable>subcommand</replaceable></command></screen>
 
   <para>
    To see a list of available subcommands, use:
   </para>
 
-<screen><command>ndctl --list-cmds</command></screen>
+<screen>&prompt.user;<command>ndctl --list-cmds</command></screen>
 
   <para>
    The available subcommands include:
@@ -688,9 +700,14 @@ destroyed 1 namespace</screen>
   <sect2 xml:id="sec-nvdimm-setup-btt">
    <title>Creating a PMEM Namespace with BTT</title>
    <para>
-    In the next example, we create a PMEM namespace that uses BTT.
+     BTT provides sector write atomicity, which makes it a good choice
+     when you need data protection, for example for Ext4 and XFS journals. 
+     If there is a power failure, the journals
+     are protected and should be recoverable. The following examples
+     show how to create a PMEM namespace with BTT in sector mode, and how
+     to place the filesystem journal in this namespace.
    </para>
-<screen>&prompt.root;<command>ndctl create-namespace --type=<replaceable>pmem</replaceable> --mode=<replaceable>sector</replaceable></command>
+<screen>&prompt.root;<command>ndctl create-namespace --type=pmem --mode=sector</command>
 {
  "dev":"namespace3.0",
  "mode":"sector",
@@ -710,7 +727,7 @@ I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
     Like the DAX-capable PMEM namespace we previously configured, this
     BTT-capable PMEM namespace consumes all the available storage on the
     NVDIMMs.
-   </para>
+   </para>   
    <note>
     <para>
      The trailing <literal>s</literal> in the device name
@@ -739,9 +756,38 @@ I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
     However, <literal>mmap</literal> mappings for files on this block device
     will use the page cache.
    </para>
-
   </sect2>
+  
+  <sect2 xml:id="sec-nvdimm-fs-journal">
+      <title>Placing the Filesystem Journal on PMEM/BTT</title>
+   <para>
+      When you place the filesystem journal on a separate device, it
+      must use the same filesystem block size as the filesystem. Most 
+      likely this is 4096, and you can find the block size with this 
+      command:
+  </para>
+  <screen>&prompt.root;<command>blockdev --getbsz /dev/<replaceable>sda3</replaceable></command></screen>
+  <para>
+      The following example creates a new Ext4 journal on a separate 
+      NVDIMM device, creates the filesystem on a SATA device, then 
+      attaches the new filesystem to the journal:
+ </para>
+ <screen>
+&prompt.root;<command>mke2fs -b 4096 -O journal_dev /dev/<replaceable>pmem3s</replaceable></command>
+&prompt.root;<command>mkfs.ext4 -J device=/dev/<replaceable>pmem3s</replaceable> /dev/<replaceable>sda3</replaceable></command>
+</screen>
+  <para>
+      The following example creates a new XFS filesystem on a SATA drive,
+      and creates the journal on a separate NVDIMM device:
+  </para>
+<screen>&prompt.root;<command>mkfs.xfs -l logdev=/dev/<replaceable>pmem3s </replaceable> /dev/<replaceable>sda3</replaceable></command>  
+</screen>
+<para>
+    See <command>man 8 mkfs.ext4</command> and <command>man 8 mkfs.ext4</command> for detailed information about options.
+</para>
+</sect2>
  </sect1>
+
  <sect1 xml:id="sec-nvdimm-moreinfo">
   <title>For More Information</title>
 

@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" 
+         xmlns:xi="http://www.w3.org/2001/XInclude" 
+         xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0"
+         xml:id="cha-tuning-systemd-coredump">
+ <title>Using &systemdcd; to Debug Application Crashes</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+  </dm:docmanager>
+ </info>
+ <para>
+  &systemdcd; collects and displays kernel core dumps, for analyzing
+  application crashes. When a process crashes (or all processes belonging to an
+  application), its default is to log the core dump to the &systemd; journal,
+  including a backtrace if possible, and to store the core dump in a file in
+  <filename>/var/lib/systemd/coredump</filename>. You also have the option to
+  examine the dump file with other tools such as <command>gdb</command> or
+  <command>crash</command> (see <xref linkend="cha-tuning-kdump-analyze"/>).
+  There is an option to not store core dumps, but to log only to the journal,
+  which may be useful to minimize the collection and storage of sensitive
+  information.
+ </para>
+ <sect1 xml:id="sect-sys-coredump-default">
+  <title>Use and Configuration</title>
+
+  <para>
+   &systemdcd; is enabled and ready to run by default. The default
+   configuration is in <filename>/etc/systemd/coredump.conf</filename>:
+  </para>
+
+<screen>[Coredump]
+#Storage=external
+#Compress=yes
+#ProcessSizeMax=2G
+#ExternalSizeMax=2G
+#JournalSizeMax=767M
+#MaxUse=
+#KeepFree=
+</screen>
+
+  <para>
+   The following example shows how to use Vim for simple testing, by creating a
+   segfault to generate journal entries and a core dump. 
+  </para>
+
+  <procedure xml:id="pro-test-coredump">
+   <title>Creating a core dump with Vim</title>
+    <step>
+   <para>
+     Enable the <systemitem>debuginfo-pool</systemitem> and
+     <systemitem>debuginfo-update</systemitem> repositories
+    </para>
+   </step>
+   <step>
+    <para>
+     Install <package>vim-debuginfo</package>
+    </para>
+   </step>
+   <step>
+    <para>
+     Launch <command>vim testfile</command> and type a few characters
+    </para>
+   </step>
+   <step>
+    <para>
+     Get the PID and generate a segfault:
+    </para>
+<screen>&prompt.user;ps ax | grep vim
+2345 pts/3    S+     0:00 vim testfile               
+                 
+&prompt.root;kill -s SIGSEGV 2345</screen>
+<para>
+    Vim will emit error messages:
+</para>
+<screen>Vim: Caught deadly signal SEGV
+Vim: Finished.
+Segmentation fault (core dumped)</screen>
+   </step>
+   <step>
+    <para>
+     List your core dumps, then examine them:
+    </para>
+<screen>&prompt.root;coredumpctl
+TIME                        PID  UID  GID SIG PRESENT EXE
+Wed 2019-11-12 11:56:47 PST 2345 1000 100 11  *       /bin/vim
+
+&prompt.root;coredumpctl info
+PID: 2345 (vim)
+UID: 0 (root)
+GID: 0 (root)
+Signal: 11 (SEGV)
+Timestamp: Wed 2019-11-12 11:58:05 PST
+Command Line: vim testfile
+Executable: /bin/vim
+Control Group: /user.slice/user-1000.slice/session-1.scope
+    Unit: session-1.scope
+    Slice: user-1000.slice
+    Session: 1
+    Owner UID: 1000 (tux)
+    Boot ID: b5c251b86ab34674a2222cef102c0c88
+    Machine ID: b43c44a64696799b985cafd95dc1b698
+    Hostname: linux-uoch
+    Coredump: /var/lib/systemd/coredump/core.vim.0.b5c251b86ab34674a2222cef102
+    Message: Process 2345 (vim) of user 0 dumped core.
+                
+         Stack trace of thread 2345:
+         #0  0x00007f21dd87e2a7 kill (libc.so.6)
+         #1  0x000000000050cb35 may_core_dump (vim)
+         #2  0x00007f21ddbfec70 __restore_rt (libpthread.so.0)
+         #3  0x00007f21dd92ea33 __select (libc.so.6)
+         #4  0x000000000050b4e3 RealWaitForChar (vim)
+         #5  0x000000000050b86b mch_inchar (vim)
+[...]                                             
+</screen>
+   </step>
+  </procedure>
+
+  <para>
+   When you have multiple core dumps, <command>coredumpctl info</command>
+   displays all of them. Filter them by <literal>PID</literal>,
+   <literal>COMM</literal> (command), or <literal>EXE</literal> (full path to
+   the executable), for example, all core dumps for Vim:
+  </para>
+
+<screen>&prompt.root;coredumpctl info /bin/vim</screen>
+
+  <para>
+   See a single core dump by <literal>PID</literal>:
+  </para>
+
+<screen>
+&prompt.root;coredumpctl info 2345</screen>
+
+  <para>
+      Output the selected core to <command>gdb</command>:
+  </para>
+
+<screen>
+&prompt.root;coredumpctl gdb 2345</screen>
+
+  <para>
+   The asterisk in the <literal>PRESENT</literal> column indicates that a
+   stored core dump is present. If the field is empty there is no stored core
+   dump, and <command>coredumpctl</command> retrieves crash information from
+   the journal. You can control this behavior in
+   <filename>/etc/systemd/coredump.conf</filename> with the
+   <literal>Storage</literal> option:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <literal>Storage=none</literal>&mdash;core dumps are logged in the journal, but
+     not stored. This is useful to minimize collecting and storing sensitive
+     information, for example for General Data Protection Regulation (GDPR)
+     compliance.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <literal>Storage=external</literal>&mdash;cores are stored in
+     <filename>/var/lib/systemd/coredump</filename>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <literal>Storage=journal</literal>&mdash;cores are stored in the &systemd;
+     journal
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   A new instance of &systemdcd; is invoked for every core dump, so
+   configuration changes are applied with the next core dump, and there is no
+   need to restart any services.
+  </para>
+
+  <para>
+   Core dumps are not preserved after a system restart. You may save them
+   permanently with <command>coredumpctl</command>. The following example
+   filters by the <literal>PID</literal> and stores the core in
+   <filename>vim.dump</filename>:
+  </para>
+
+<screen>&prompt.root;coredumpctl -o vim.dump dump 2345</screen>
+
+  <para>
+   See <command>man systemd-coredump</command>, <command>man
+   coredumpctl</command>, and <command>man coredump.conf</command> for complete
+   command and option listings.
+  </para>
+ </sect1>
+</chapter>

@@ -31,31 +31,7 @@
   system state and more. See <link
   xlink:href="http://www.freedesktop.org/wiki/Software/systemd/"/> for details.
  </para>
-<!-- fs 2012-06-20:
-       according to fcrozat:
-        * too complex
-        * it is up to packagers to enable such behavior (socket activation on
-          demand) and we don't have a lot of packages doing so atm
 
-  <para>
-   Services depend on each other. For example the <systemitem
-   class="daemon">sshd</systemitem> daemon requires the network to be set up
-   before it can be started. Each service provides a socket accepting
-   connections or a mount point in the file system. Starting <systemitem
-   class="daemon">sshd</systemitem> is only successful if all sockets it
-   connects to, are available. Using System V results in serializing the
-   services start-up&mdash;a service is not started until all other services it
-   depends on, have been successfully started.
-  </para>
-  <para>
-   &systemd; has a different approach. It provides provide sockets and mount
-   points for all services. Afterward all services are started at once and
-   get <quote>their</quote> socket passed on execution.  This allows to
-   considerably speed up the boot process by starting all services in
-   parallel.
-  </para>
-
-  -->
  <sect1 xml:id="sec-boot-systemd-concept">
   <title>The systemd Concept</title>
 
@@ -1137,7 +1113,7 @@
    <para>
     systemd offers the means to analyze the system start-up process. You can
     review the list of all services and their status (rather than having to
-    parse <filename>/varlog/</filename>). systemd also allows you to scan the
+    parse <filename>/var/log/</filename>). systemd also allows you to scan the
     start-up procedure to find out how much time each service start-up
     consumes.
    </para>
@@ -1422,7 +1398,7 @@ WantedBy=multi-user.target<co xml:id="co-service-wrapper-target"/></screen>
   </warning>
  </sect1>
  <sect1 xml:id="sec-boot-systemd-custom">
-  <title>Customization of <systemitem>systemd</systemitem></title>
+  <title>Customizing <systemitem>systemd</systemitem></title>
 
   <para>
    The following sections contain some examples for
@@ -1430,10 +1406,11 @@ WantedBy=multi-user.target<co xml:id="co-service-wrapper-target"/></screen>
   </para>
 
   <warning>
-   <title>Avoiding Overwritten Customization</title>
+   <title>Avoiding Your Customization from Being Overwritten</title>
    <para>
-    Always do systemd customization in <filename>/etc/systemd/</filename>,
-    <emphasis>never</emphasis> in <filename>/usr/lib/systemd/</filename>.
+    When customizing systemd, always use the directory
+    <filename>/etc/systemd/</filename>,
+    <emphasis>never</emphasis> use <filename>/usr/lib/systemd/</filename>.
     Otherwise your changes will be overwritten by the next update of systemd.
    </para>
   </warning>
@@ -1441,39 +1418,62 @@ WantedBy=multi-user.target<co xml:id="co-service-wrapper-target"/></screen>
   <sect2 xml:id="sec-boot-systemd-custom-service">
    <title>Customizing Unit Files</title>
    <para>
-    The systemd unit files are located in
-    <filename>/usr/lib/systemd/system</filename>. If you want to customize
-    them, proceed as follows:
+    The recommended way to customize unit files is to use the
+    <command>systemctl edit <replaceable>SERVICE</replaceable></command>
+    command. This command starts the default text editor and creates a
+    directory with the <filename>override.conf</filename> file in
+    <filename>/etc/systemd/system/<replaceable>NAME</replaceable>.service.d/</filename>. The
+    command also ensures that the running systemd process is notified
+    about the changes.
    </para>
-   <procedure>
-    <step>
-     <para>
-      Copy the files you want to modify from
-      <filename>/usr/lib/systemd/system</filename> to
-      <filename>/etc/systemd/system</filename>. Keep the file names identical
-      to the original ones.
-     </para>
-    </step>
-    <step>
-     <para>
-      Modify the copies in <filename>/etc/systemd/system</filename> according
-      to your needs.
-     </para>
-    </step>
-    <step>
-     <para>
-      For an overview of your configuration changes, use the
-      <command>systemd-delta</command> command. It can compare and identify
-      configuration files that override other configuration files. For details,
-      refer to the <command>systemd-delta</command> man page.
-     </para>
-    </step>
-   </procedure>
    <para>
-    The modified files in <filename>/etc/systemd</filename> will take
-    precedence over the original files in
-    <filename>/usr/lib/systemd/system</filename>, provided that their file name
-    is the same.
+    Alternatively, you can open a copy of the original
+    file for editing instead of a blank file by running
+    <command>systemctl edit --full <replaceable>SERVICE</replaceable></command>.
+    When editing the file, make sure that you do not remove any of the
+    existing sections.
+   </para>
+   <para>
+    As an exercise, change how long the system waits for &mariadb; to start.
+    As root, run <command>systemctl edit --full mariadb.service</command>.
+    The file opened will look similar to the following:
+   </para>
+<screen>
+[Unit]
+Description=MySQL server
+Wants=basic.target
+Conflicts=mariadb.target
+After=basic.target network.target
+
+[Install]
+WantedBy=multi-user.target
+Alias=mysql.service
+
+[Service]
+Restart=on-abort
+Type=notify
+ExecStartPre=/usr/lib/mysql/mysql-systemd-helper  install
+ExecStartPre=/usr/lib/mysql/mysql-systemd-helper  upgrade
+ExecStart=/usr/lib/mysql/mysql-systemd-helper     start
+
+# Configures the time to wait for start-up/stop
+TimeoutSec=300
+
+# Prevent writes to /usr, /boot, and /etc
+ProtectSystem=full
+
+# Prevent accessing /home, /root and /run/user
+ProtectHome=true
+
+UMask=007</screen>
+   <para>
+    Adjust the <literal>TimeoutSec</literal> value and save the
+    changes. To enable the changes, as root, run
+    <command>systemctl daemon-reload</command>.
+   </para>
+   <para>
+    For further information, refer to the man pages that can be
+    evoked with the <command>man 1 systemctl</command> command.
    </para>
    <sect3 xml:id="systemd-xinetd-conversion">
     <title>Converting <systemitem>xinetd</systemitem> Services to &systemd;</title>
@@ -1929,28 +1929,44 @@ WantedBy=multi-user.target
      </listitem>
     </varlistentry>
    </variablelist>
-   <warning>
-    <title>Terminating or Restarting the D-Bus Service Is Not Supported</title>
-    <para>
+  </sect2>
+  <sect2 xml:id="sec-boot-systemd-dbus">
+   <title>Important Notes on the D-Bus Service</title>
+
+   <para>
      The D-Bus service is the message bus for communication between systemd
      clients and the systemd manager that is running as pid 1. Even though
      <systemitem class="daemon">dbus</systemitem> is a stand-alone daemon, it
-     is an integral part of the initialization infrastructure.
-    </para>
+     is an integral part of the init infrastructure.
+   </para>
+
     <para>
-     Terminating <systemitem
-     class="daemon">dbus</systemitem> or
-     restarting it in the running system is similar to an attempt to terminate
-     or restart pid 1. It will break systemd client/server communication and
-     make most systemd functions unusable.
+     Terminating <systemitem class="daemon">dbus</systemitem> or restarting it
+     in the running system is similar to an attempt to terminate or restart pid
+     1. It will break systemd client/server communication and make most systemd
+     functions unusable.
     </para>
+
     <para>
      Therefore, terminating or restarting
      <systemitem
      class="daemon">dbus</systemitem> is neither recommended
      nor supported.
     </para>
-   </warning>
+
+    <para>
+     Updating the <systemitem>dbus</systemitem> or
+     <systemitem>dbus</systemitem>-related packages requires a reboot. When in
+     doubt whether a reboot is necessary, run the <command>sudo zypper ps
+     -s</command>. If <literal>dbus</literal> appears among the listed
+     services, you need to reboot the system.
+    </para>
+
+    <para>
+     Keep in mind that <systemitem>dbus</systemitem> is updated even when
+     automatic updates are configured to skip the packages that require reboot.
+    </para>
+
   </sect2>
 
 <!-- debug section should be at the end to be more positive -->
