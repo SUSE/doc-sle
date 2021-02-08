@@ -4,7 +4,6 @@
   <!ENTITY % entities SYSTEM "entity-decl.ent">
     %entities;
 ]>
-
 <chapter xmlns="http://docbook.org/ns/docbook" version="5.0"
  xmlns:xi="http://www.w3.org/2001/XInclude"
  xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -24,382 +23,315 @@
   </abstract>
  </info>
  <para>
-  &klpa; is a live patching technology for runtime patching of the Linux kernel,
-  without stopping the kernel. This maximizes system uptime, and thus system
-  availability, which is important for mission-critical systems. By enabling
-  dynamic patching of the kernel, the technology also encourages users to
-  install critical security updates without deferring them to a scheduled
-  downtime.
+  &klpa; makes it possible to apply the latest security updates to Linux kernels
+  without rebooting. This maximizes system uptime and availability, which is
+  especially important for mission-critical systems.
  </para>
  <para>
-   Enabling &klpa; requires no special steps other than enabling the Live
-   Patching service, and then applying the patches as they become available.
-   The service is part of the normal software management system, and patches are
-   installed (or removed) with the usual package management tools. There is no
-   need to install or manually select special kernels.
-</para>
- <para>
-  A &klpa; patch is a kernel module, intended for replacing whole functions in
-  the kernel. &klp; primarily offers in-kernel infrastructure for integration of
-  the patched code with the base kernel code at runtime.
- </para>
- <para>
-  The information provided in this document relates to the &amd64;/&intel64;
-  and &power; architectures. &klpa; is supported on the Xen hypervisor.
+  The information provided in this document relates to the &amd64;/&intel64;,
+  &power; and &zseries; architectures. &klpa; is supported on the Xen
+  hypervisor.
  </para>
  <sect1 xml:id="sec-klp-advantages">
   <title>Advantages of &klp;</title>
 
   <para>
-   &klp; using &klpa; is for quick emergency response, when serious 
-   vulnerabilities or system stability issues are known 
-   and should be fixed as quickly as possible. It is not used for 
-   scheduled updates where time is not critical.
+   &klpa; offers several benefits.
   </para>
 
-  <para>
-   Typical use cases for &klp; include systems like memory databases with huge
-   amounts of RAM, where boot-up times of 15 minutes or more are not uncommon,
-   large simulations that need weeks or months without a restart, or
-   infrastructure building blocks providing continuous service to many
-   customers.
-  </para>
-
-  <para>
-   The main advantage of &klp; is that it never requires stopping the kernel,
-   not even for a short time period.
-  </para>
-
-  <para>
-   A &klpa; patch is a <filename>.ko</filename> kernel module in an RPM package.
-   It is inserted into the kernel using the <command>insmod</command> command
-   when the package is installed or updated. &klp; replaces whole functions in
-   the kernel, even if they are being executed. An updated &klpa; module can
-   replace an existing patch if necessary.
-  </para>
-
-  <para>
-   &klp; is also lean&mdash;it contains only a small amount of code, because it
-   leverages other standard Linux technologies.
-  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     Keeping a large numbers of servers automatically up-to-date is essential
+     for organizations obtaining or maintaining certain compliance
+     certifications. &klpa; can help achieve compliance, while reducing the
+     need for costly maintenance windows.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Companies that work with service-level agreement contracts must guarantee
+     a specific level of their system accessibility and uptime. Live patching
+     makes it possible to patch systems without incurring downtime.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Since &klpa; is part of the standard system update mechanism, there is no
+     need for specialized training or introduction of complicated maintenance
+     routines.
+    </para>
+   </listitem>
+  </itemizedlist>
  </sect1>
- <sect1 xml:id="sec-klp-low-level">
-  <title>Low-level function of &klp;</title>
+ <sect1 xml:id="sec-klp-overview">
+  <title>&klp; overview</title>
 
   <para>
-   &klp; uses the ftrace infrastructure to perform patching. The following
-   describes the implementation on the &amd64;/&intel64; architecture.
+   Kernel live patches are delivered as packages with modified code that are
+   separate from the main kernel package. The live patches are cumulative, so
+   the latest patch contains all fixes from the previous ones for the kernel
+   package. Each kernel live package is tied to the exact kernel revision for
+   which it is issued. The live patch package version number increases with
+   every addition of fixes.
   </para>
 
-  <para>
-   To patch a kernel function, &klp; needs some space at the start of the
-   function to insert a jump to a new function. This space is allocated during
-   kernel compilation by GCC with function profiling turned on. In particular,
-   a 5-byte call instruction is injected to the start of kernel functions. When
-   such instrumented kernel is booting, profiling calls are replaced by 5-byte
-   NOP (no operation) instructions.
-  </para>
-
-  <para>
-   After patching starts, the first byte is replaced by the INT3 (breakpoint)
-   instruction. This ensures atomicity of the 5-byte instruction replacement.
-   The other four bytes are replaced by the address to the new function.
-   Finally, the first byte is replaced by the JMP (long jump) opcode.
-  </para>
-
-  <para>
-   Inter-processor non-maskable interrupts (IPI NMI) are used throughout the
-   process to flush speculative decoding queues of other CPUs in the system.
-   This allows switching to the new function without ever stopping the kernel,
-   not even for a very short moment. The interruptions by IPI NMIs can be
-   measured in microseconds and are not considered service interruptions as
-   they happen while the kernel is running in any case.
-  </para>
-
-  <para>
-   Callers are never patched. Instead, the callee's NOPs are replaced by a JMP
-   to the new function. JMP instructions remain forever. This takes care of
-   function pointers, including in structures, and does not require saving any
-   old data for the possibility of un-patching.
-  </para>
-
-  <para>
-   However, these steps alone would not be good enough: since the functions
-   would be replaced non-atomically, a new fixed function in one part of the
-   kernel could still be calling an old function elsewhere or vice versa. If
-   the semantics of the function interfaces changed in the patch, chaos would
-   ensue.
-  </para>
-
-  <para>
-   Thus, until all functions are replaced, &klp; uses an approach based on
-   trampolines and similar to RCU (read-copy-update), to ensure a consistent
-   view of the world to each user space thread, kernel thread and kernel
-   interrupt. A per-thread flag is set on each kernel entry and exit. This way,
-   an old function would always call another old function and a new function
-   always a new one. Once all processes have the "new universe" flag set,
-   patching is complete, trampolines can be removed and the code can operate at
-   full speed without performance impact other than an extra-long jump for each
-   patched function.
-  </para>
- </sect1>
-
-  <sect1 xml:id="sec-klp-install-patch-activate">
-   <title>Activation of SLE live patching</title>
+  <important>
+   <title>Live patches vs kernel updates</title>
    <para>
-    To activate &slea; Live Patching on your system, follow these steps:
+    Live patches contain only critical fixes, and they do not replace regular
+    kernel updates that require a reboot. Consider live patches as temporary
+    measures that protect the kernel until a proper kernel update and a reboot
+    is performed.
    </para>
-   <procedure>
-    <step>
-     <para>
-      Your &slsa; system must be registered. Register your system either during 
-      system installation, or after installation with the &yast; 
-      <guimenu>Product Registration</guimenu> module (<command>yast2
-      registration</command>). If your &slsa; system is already registered, 
-      but &slea; Live Patching is not yet activated, run the
-      <command>yast2 registration</command> command and
-      click <guimenu>Select Extensions</guimenu>.
-     </para>
-    </step>
-    <step>
-     <para>
-      Select <guimenu>SUSE Linux Enterprise Live Patching 15</guimenu> in the
-      list of available extensions and click <guimenu>Next</guimenu>.
-     </para>
-    </step>
-    <step>
-     <para>
-      Confirm the license terms and click <guimenu>Next</guimenu>.
-     </para>
-    </step>
-    <step>
-     <para>
-      Enter your &slea; Live Patching registration code and click
-      <guimenu>Next</guimenu>.
-     </para>
-    </step>
-    <step>
-     <para>
-      Check the <guimenu>Installation Summary</guimenu> and selected
-      <guimenu>Patterns</guimenu>. The patterns <systemitem>Live
-      Patching</systemitem> and 
-      <systemitem>SLE Live Patching Lifecycle Data</systemitem> should be 
-      automatically selected for installation, and there may be additional
-      packages to satisfy dependencies. 
-     </para>
-    </step>
-    <step>
-     <para>
-      Click <guimenu>Accept</guimenu> to complete the installation. This will
-      install the base &klp; components on your system, the initial live patch,
-      and any dependencies.
-     </para>
-    </step>
-   </procedure>
-  </sect1>
+  </important>
 
-  <sect1 xml:id="sec-klp-install-patch-update">
-   <title>Installing and removing patches</title>
+  <para>
+   The diagram below illustrates the overall relationship between live patches
+   and kernel updates. The list of CVEs and defect reports addressed by the
+   currently-active live patch can be viewed using the <command>klp -v
+   patches</command> command.
+  </para>
+
+  <informalfigure>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="klp.png" width="80%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="klp.png" width="100%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </informalfigure>
+
+  <para>
+   It is possible to have multiple versions of the kernel package installed
+   along with their live patches. These packages do not conflict. You can
+   install updated kernel packages along with live patches for the running
+   kernel. In this case, you may be prompted to reboot the system. Users with
+   &slea; Live Patching subscriptions are eligible for technical support as long
+   as there are live patch updates for the running kernel (see
+   <xref linkend="sec-klp-lifecycle" />).
+  </para>
+
+  <para>
+   With &klpa; activated, every kernel update comes with a live patch package.
+   This live patch does not contain any fixes and serves as a seed for future
+   live patches for the corresponding kernel. These empty seed patches are
+   called <literal>initial patches</literal>.
+  </para>
+
+  <sect2 xml:id="sec-klp-scope">
+   <title>&klp; scope</title>
    <para>
-       This section describes how to find, install, and remove &klpa; patches.
+    The scope of &slea; Live Patching includes fixes for SUSE Common
+    Vulnerability Scoring System (CVSS; SUSE CVSS is based on the CVSS v3.0
+    system) level 7+ vulnerabilities and bug fixes related to system stability
+    or data corruption. However, it may not be technically feasible to create
+    live patches for all fixes that fall under the specified categories. &suse;
+    therefore reserves the right to skip fixes in situations where creating a
+    kernel live patch is not possible for technical reasons. Currently, over
+    95% of qualifying fixes are released as live patches. For more information
+    on CVSS (the base for the SUSE CVSS rating), see
+    <link xlink:href="https://www.first.org/cvss/">Common Vulnerability Scoring
+    System SIG</link>. .
    </para>
-     <sect2 xml:id="sec-klp-install">
-  <title>Installing a &klpa; patch</title>
-     
-   <procedure>
-    <step>
-     <para>
-      Before installing new patches, run the <command>klp status</command> command to query current status,
-      which must be <literal>ready</literal> and not <literal>in_progress</literal>. 
-      You cannot apply new patches until previous patch installations are completed. Invocations of the old kernel functions are not completely eliminated until all sleeping processes wake up and get out of the way. This can take a considerable amount of time. Sleeping processes that use the old kernel functions are not considered a security issue. (See <xref linkend="sec-klp-exec-threads"/> for
-      information on managing prolonged <literal>in_progress</literal> states.)
-     </para>     
-     </step>
-    <step>
-     <para>
-         Use the normal package management system, <command>zypper</command> or 
-         &yast;, to view and install available patches. The following example
-         searches for available patches, and then installs the most recent
-         patch. It is not necessary to install all patches in order; when there
-         are multiple patches available install the most recent.
-     </para>
-     <screen>&prompt.sudo;zypper se kernel-livepatch 
-| kernel-livepatch-5_3_18-8_16-default  | Kernel live patch module  | package   
-| kernel-livepatch-5_3_18-8_19-default  | Kernel live patch module  | package   
-| kernel-livepatch-5_3_18-8_22-default  | Kernel live patch module  | package
-
-&prompt.sudo;zypper in kernel-livepatch-5_3_18-8_22-default</screen>     
-    </step>
-   </procedure>
   </sect2>
- 
-  <sect2 xml:id="sec-klp-remove">
-  <title>Removing a &klpa; patch</title>
+
+  <sect2 xml:id="sec-klp-limitations">
+   <title>&klp; limitations</title>
+   <para>
+    &klpa; involves replacing functions and gracefully handling replacement of
+    interdependent function sets. This is done by redirecting calls to
+    old code to updated code in a different memory location. Changes in data
+    structures make the situation more complicated, as the data remain in place
+    and cannot be extended or reinterpreted. While there are techniques that
+    allow indirect alteration of data structures, some fixes cannot be
+    converted to live patches. In this situation, a system restart is the only
+    way to apply the fixes.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-klp-enable-with-yast2">
+  <title>Activating &klp; using &yast;</title>
+
   <para>
-      If you need to remove a &klpa; patch, use <command>zypper</command> just
-      as you would for any other package. List your installed live patch
-      packages by using <command>zypper</command> to search for 
-      <literal>kernel-livepatch</literal>:
+   To activate &klpa; on your system, you need to have active &slsa; and
+   &slea; Live Patching subscriptions. Visit
+   <link
+   xlink:href="&sccurl;">&scc;</link> to check the status of your
+   subscriptions and obtain an registration code for the &slea; Live Patching
+   subscription.
   </para>
-     <screen>&prompt.sudo;zypper se kernel-livepatch 
-  | kernel-livepatch-5_3_18-8_16-default  | Kernel live patch module  | package   
-  | kernel-livepatch-5_3_18-8_19-default  | Kernel live patch module  | package   
-i | kernel-livepatch-5_3_18-8_22-default  | Kernel live patch module  | package
-</screen>
+
+  <para>
+   To activate &klp; on your system, follow these steps:
+  </para>
+
   <procedure>
    <step>
     <para>
-     Remove the patch using <command>zypper</command>:
+     Run the <command>yast2 registration</command> command and click
+     <guimenu>Select Extensions</guimenu>.
     </para>
-<screen>&prompt.sudo;zypper rm kernel-livepatch-5_3_18-8_22-default</screen>
    </step>
    <step>
     <para>
-     Wait for <systemitem>initrd</systemitem> to automatically rebuild, then reboot the 
-     machine.
+     Select <guimenu>SUSE Linux Enterprise Live Patching 15</guimenu> in the
+     list of available extensions and click <guimenu>Next</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Confirm the license terms and click <guimenu>Next</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Enter your &slea; Live Patching registration code and click
+     <guimenu>Next</guimenu>.
+    </para>
+   </step>
+   <step>
+    <para>
+     Check the <guimenu>Installation Summary</guimenu> and selected
+     <guimenu>Patterns</guimenu>. The patterns <systemitem>Live
+     Patching</systemitem> and <systemitem>SLE Live Patching Lifecycle
+     Data</systemitem> should be automatically selected for installation along
+     with additional packages to satisfy dependencies.
+    </para>
+   </step>
+   <step>
+    <para>
+     Click <guimenu>Accept</guimenu> to complete the installation. This will
+     install the base &klp; components on your system, the initial live patch,
+     and the required dependencies.
     </para>
    </step>
   </procedure>
-</sect2>
  </sect1>
- 
-  <sect1 xml:id="sec-klp-klp">
-  <title>The <command>klp</command> tool</title>
+ <sect1 xml:id="sec-klp-enable-cli">
+  <title>Activating &klp; from the command line</title>
 
   <para>
-   Several &klp; management tasks can be simplified with the
-   <command>klp</command> tool. The available commands are:
+   To activate &klp;, you need to have an active &slsa; and &slsa; Live
+   Patching subscriptions. Visit <link xlink:href="&sccurl;">&scc;</link> to
+   check the status of your subscriptions and obtain an registration code for
+   the &slsa; Live Patching subscription.
   </para>
 
-  <variablelist>
-   <varlistentry>
-    <term><command>klp status</command></term>
-    <listitem>
-     <para>
-      Displays the overall status of &klp; (<literal>ready</literal> or
-      <literal>in_progress</literal>).
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><command>klp patches</command></term>
-    <listitem>
-     <para>
-      Displays the list of loaded &klpa; patches.
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><command>klp blocking</command></term>
-    <listitem>
-     <para>
-      Lists processes that are preventing &klp; from finishing. By
-      default only the PIDs are listed. Specifying <option>-v</option> prints
-      command lines if available. <option>-vv</option> displays stack traces.
-     </para>
-    </listitem>
-   </varlistentry>
-  </variablelist>
-  <para>
-   For detailed information, see <command>man klp</command>.
-  </para>
- </sect1>
-
- <sect1 xml:id="sec-klp-exec-threads">
-  <title>Stuck kernel execution threads</title>
+  <procedure>
+   <step>
+    <para>
+     Run <command>sudo SUSEConnect --list-extensions</command>. Note the exact
+     activation command for &slsa; Live Patching. Example command output
+     (abbreviated):
+    </para>
+<screen>$ SUSEConnect --list-extensions
+...
+SUSE Linux Enterprise Live Patching 15 SP3 x86_64
+Activate with: SUSEConnect -p sle-module-live-patching/15.3/x86_64 -r ADDITIONAL REGCODE</screen>
+   </step>
+   <step>
+    <para>
+     Activate &slsa; Live Patching using the obtained command followed by
+     <option>-r
+     <replaceable>LIVE_PATCHING_REGISTRATION_CODE</replaceable></option>, for
+     example:
+    </para>
+<screen>SUSEConnect -p sle-module-live-patching/15.3/x86_64 -r <replaceable>LIVE_PATCHING_REGISTRATION_CODE</replaceable></screen>
+   </step>
+   <step>
+    <para>
+     Install the required packages and dependencies using the command
+     <command>zypper install -t pattern lp_sles</command>
+    </para>
+   </step>
+  </procedure>
 
   <para>
-   Kernel threads must be prepared to handle &klp;. Third-party software may
-   not support &klp;, and may spawn kernel execution threads. These threads will block the patching process indefinitely. As an emergency measure, you may 
-   force the completion of the patching process without waiting for all execution threads to cross the safety checkpoint by writing <literal>0</literal> into
-   <filename>/sys/kernel/livepatch/*/transition/</filename> (replacing the
-   asterisk wildcard with your file name). Consult &suse; support before 
-   performing this procedure.
-  </para>
-</sect1>
-
- <sect1 xml:id="sec-klp-lifecycle">
-  <title>Patch lifecycle</title>
-
-  <para>
-   Expiration dates of live patches can be accessed with <command>zypper
-   lifecycle</command>. (Make sure that the package
-   <package>lifecycle-data-sle-module-live-patching</package> is installed.)
+   At this point, the system has already been live-patched.
   </para>
 
   <para>
-   When the expiration date of a patch is reached, no further live patches for
-   this kernel version will be supplied. Plan an update of your kernel before
-   the end of the live patch lifecycle period.
-  </para>
-
-  <para>
-   For details about <command>zypper lifecycle</command>, see the
-   <emphasis>Showing Life Cycle Information</emphasis> in the <emphasis>Admin
-   Guide</emphasis>.
+   Here is how the process works behind the scenes: When the
+   package-installation system detects that there is an installed kernel that
+   can be live-patched, and that there is a live patch for it in the software channel,
+   the system selects the live patch for installation. The kernel then receives
+   the live patch fixes <emphasis>as part of the package installation</emphasis>.
+   The kernel gets live-patched even before the product installation is complete.
   </para>
  </sect1>
-
- <sect1 xml:id="sec-klp-scope">
-  <title>Scope of &klp; technology</title>
-
-  <para>
-   &klp; is based on replacing functions. Data structure alteration can be
-   accomplished only indirectly with &klp;. As a result, changes to kernel data
-   structure require special care and, if the change is too large, rebooting
-   might be required. &klp; also might not be able to handle situations where
-   one compiler is used to compile the old kernel and another compiler is used
-   for compiling the patch.
-  </para>
+ <sect1 xml:id="sec-klp-perform">
+  <title>Performing &klp;</title>
 
   <para>
-   Because of the way &klp; works, support for third-party modules that are
-   spawning kernel threads is limited.
-<!--Sending SIGSTOP and SIGCONT signals to processes in D process state
-  (uninterruptible sleep) does not make them to cross the kernel/user space
-  boundary and does not have the intended effect.-->
-  </para>
- </sect1>
- <sect1 xml:id="sec-klp-scope-patching">
-  <title>Scope of &slea; live patching</title>
-
-  <para>
-   Fixes for SUSE Common Vulnerability Scoring System (CVSS; SUSE CVSS is based
-   on the CVSS v3.0 system) level 7+ vulnerabilities and bug fixes related to
-   system stability or data corruption will be shipped in the scope of SLE Live
-   Patching. It might not be possible to produce a live patch for all kinds of
-   fixes fulfilling the above criteria. SUSE reserves the right to skip fixes
-   where production of a kernel live patch is unviable because of technical
-   reasons. For more information on CVSS, which is the base for the SUSE CVSS
-   rating, see <link xlink:href="https://www.first.org/cvss/"/>.
-  </para>
- </sect1>
- <sect1 xml:id="sec-klp-support-interaction">
-  <title>Interaction with the support processes</title>
-
-  <para>
-   While resolving a technical difficulty with &suse; support, you may receive
-   a Program Temporary Fix (PTF). PTFs may be issued for various
-   packages including those forming the base of &slea; Live Patching.
+   Kernel live-patches are installed as part of regular system updates.
+   However, there are several things you should be aware of.
   </para>
 
-  <para>
-   &klp; PTFs complying with the conditions described in the previous section
-   can be installed as usual and &suse; will ensure that the system in question
-   does not need to be rebooted and that future live updates are applied
-   cleanly.
-  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     The kernel is live-patched if a <package>kernel-livepatch-*</package>
+     package has been installed for the running kernel. You can use the command
+     <command>zypper se --details kernel-livepatch-*</command> to check what
+     kernel live-patch packages are installed on your system.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     When <package>kernel-default</package> package is installed, the update
+     manager prompts you to reboot the system. To prevent this message from
+     apparing, you can filter out kernel updates from the patching operation.
+     This can be done by adding package locks with Zypper. &susemgr; also makes
+     it possible to filter channel contents (see
+     <link xlink:href="https://documentation.suse.com/external-tree/en-us/suma/4.1/suse-manager/administration/live-patching.html">Live
+     Patching with SUSE Manager</link>).
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     You can check patching status using the <command>klp status</command>
+     command. To examine installed patches, run the <command>klp -v
+     patches</command> command.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Keep in mind that while there may be multiple kernel packages installed on
+     the system, only one of them is running at any given time. Similarly,
+     there may be multiple live patch packages installed, but only one live
+     patch is loaded into the kernel.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     The active live patch is included in the <literal>initrd</literal>. This means that in case of an
+     unexpected reboot, the system comes up with the live patch fixes applied,
+     so there is no need to perform patching again.
+    </para>
+   </listitem>
+  </itemizedlist>
 
-  <para>
-   PTFs issued for the base kernel disrupt the live patching process. First,
-   installing the PTF kernel means a reboot as the kernel cannot be replaced as
-   a whole at runtime. Second, another reboot is needed to replace the PTF with
-   any regular maintenance updates for which the live patches are issued.
-  </para>
-
-  <para>
-   PTFs for other packages in &slea; Live Patching can be treated like regular
-   PTFs with the usual guarantees.
-  </para>
+  <sect2 xml:id="sec-klp-lifecycle">
+   <title>Checking expiration date of the live patch</title>
+   <para>
+    Make sure that the
+    <package>lifecycle-data-sle-module-live-patching</package> is installed,
+    then run the <command>zypper lifecycle</command> command. You should see
+    expiration dates for live patches in the <literal>Package end of support if
+    different from product</literal> section of the output.
+   </para>
+   <para>
+    Every live patch receives updates for one year from the release of the
+    underlying kernel package. The
+    <link
+   xlink:href="https://www.suse.com/products/live-patching/current-patches/">Maintained
+    kernels, patch updates and lifecycle</link> page allows you to check
+    expiration dates based on the running kernel version without installing the
+    product extension.
+   </para>
+  </sect2>
  </sect1>
 </chapter>
