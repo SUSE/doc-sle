@@ -1,1 +1,135 @@
-../../../../xml/lxc2libvirt.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="lxc2libvirt.xml" version="5.0" xml:id="cha-lxc2libvirt">
+ <title>从 LXC 迁移到 <systemitem>libvirt-lxc</systemitem></title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+        <dm:translation>是</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  从 <phrase os="sles;sled">SUSE Linux Enterprise Server 12</phrase> 开始，LXC 已集成到 <systemitem class="library">libvirt</systemitem> 库中。相比将 LXC 作为单独的解决方案使用，此决策可带来多项优势 — 例如，与其他虚拟化解决方案保持统一，或者在使用的内核方面获得独立性。本章将会说明需要执行哪些步骤来迁移可与 <systemitem class="library">libvirt</systemitem> 库搭配使用的现有 LXC 环境。
+ </para>
+ <sect1 xml:id="lxc2libvirt-host">
+  <title>主机迁移</title>
+
+  <para>
+   迁移本身包括两个阶段。首先需要迁移主机，接着需迁移 LXC 容器。然后便可在 <systemitem class="library">libvirt</systemitem> 环境中将原始容器作为 VM Guest 运行。
+  </para>
+
+  <procedure>
+   <title>主机迁移</title>
+   <step>
+    <para>
+     使用官方 DVD 媒体将主机升级到 <phrase os="sles;sled">SUSE Linux Enterprise Server 15</phrase>。
+    </para>
+   </step>
+   <step>
+    <para>
+     升级后，安装 <systemitem>libvirt-daemon-lxc</systemitem> 和 <systemitem>libvirt-daemon-config-network</systemitem> 软件包。
+    </para>
+   </step>
+   <step>
+    <para>
+     基于现有的容器 <literal>lxc_container</literal> 创建 <systemitem class="library">libvirt</systemitem> XML 配置 <filename>lxc_container.xml</filename>：
+    </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> virt-lxc-convert /etc/lxc/lxc_container/config &gt; lxc_container.xml</screen>
+   </step>
+   <step>
+    <para>
+     检查主机上的网络配置是否与容器配置文件中的配置相同，并根据需要予以修复。
+    </para>
+   </step>
+   <step>
+    <para>
+     检查 <filename>lxc_container.xml</filename> 文件中是否存在任何异常或缺少的配置。请注意，某些 LXC 配置选项无法映射到 <systemitem class="library">libvirt</systemitem> 配置。尽管转换通常应该会正常完成，但仍请查看<xref linkend="lxc-diff"/>了解更多细节。
+    </para>
+   </step>
+   <step>
+    <para>
+     根据创建的 XML 定义在 <systemitem class="library">libvirt</systemitem> 中创建容器：
+    </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> virsh -c lxc:/// define lxc_container.xml</screen>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="lxc2libvirt-container">
+  <title>容器迁移</title>
+
+  <para>
+   迁移主机后，<systemitem class="library">libvirt</systemitem> 中的 LXC 容器将无法引导。您需要将此容器也迁移到 <phrase os="sles;sled">SUSE Linux Enterprise Server 15</phrase> 才能使一切正常运行。
+  </para>
+
+  <procedure>
+   <title>容器迁移</title>
+   <step>
+    <para>
+     缺少 <filename>baseproduct</filename> 文件（<command>zypper</command> 一直在指出此问题）。创建相关的符号链接：
+    </para>
+<screen><prompt role="root">root # </prompt>ROOTFS=/var/lib/lxc/lxc_container/rootfs
+<prompt role="root">root # </prompt>ln -s $ROOTFS/etc/products.d/SUSE_SLES.prod $ROOTFS/etc/products.d/baseproduct</screen>
+   </step>
+   <step>
+    <para>
+     添加 DVD 储存库。请注意，您需要将 DVD 设备替换为挂接到容器的相应设备：
+    </para>
+<screen os="sles;sled"><prompt role="root">root # </prompt>zypper --root $ROOTFS ar \
+cd:///?devices=/dev/dvd SLES15-0</screen>
+   </step>
+   <step>
+    <para>
+     禁用或去除以前的储存库：
+    </para>
+<screen><prompt role="root">root # </prompt>zypper --root $ROOTFS lr
+  | Alias                       | Name                         | Enabled | Refresh
+--+-----------------------------+------------------------------+---------+--------
+1 | SLES12                      | SLES12                       | Yes     | No
+2 | SUSE-[...]-Server-12-SP3 38 | SUSE-[...]-Server-12-SP3 138 | Yes     | No
+
+<prompt role="root">root # </prompt>zypper --root $ROOTFS rr 2</screen>
+
+
+   </step>
+   <step>
+    <para>
+     禁用或去除以前的储存库：
+    </para>
+<screen><prompt role="root">root # </prompt>zypper --root $ROOTFS lr
+  | Alias                       | Name                         | Enabled | Refresh
+--+-----------------------------+------------------------------+---------+--------
+1 | openSUSE 42.3 Main          | openSUSE 42.3 Main           | Yes     | No
+2 | openSUSE 42.3 Update        | openSUSE 42.3 Update         | Yes     | No
+
+<prompt role="root">root # </prompt>zypper --root $ROOTFS rr 2</screen>
+   </step>
+   <step>
+    <para>
+     升级容器：
+    </para>
+<screen><prompt role="root">root # </prompt>zypper --root $ROOTFS dup</screen>
+   </step>
+   <step>
+    <para>
+     安装<emphasis>极简</emphasis>模式，以确保安装所需的所有组件：
+    </para>
+<screen><prompt role="root">root # </prompt>zypper --root $ROOTFS in -t pattern Minimal</screen>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="lxc2libvirt-start">
+  <title>启动容器</title>
+
+  <para>
+   完成主机和容器迁移后，便能够启动容器：
+  </para>
+
+<screen><prompt role="root">root # </prompt>virsh -c lxc:/// start lxc_container</screen>
+
+  <para>
+   如果您需要通过控制台查看容器生成的日志记录消息，请运行：
+  </para>
+
+<screen><prompt role="root">root # </prompt>virsh -c lxc:/// console lxc_container</screen>
+ </sect1>
+</chapter>

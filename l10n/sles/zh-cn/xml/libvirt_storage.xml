@@ -1,1 +1,963 @@
-../../../../xml/libvirt_storage.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="libvirt_storage.xml" version="5.0" xml:id="cha-libvirt-storage">
+ <title>管理储存</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker/>
+        <dm:translation>是</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  在 VM 主机服务器本身上管理 VM Guest 时，您可以访问 VM 主机服务器的整个文件系统，以挂接或创建虚拟硬盘，或将现有映像挂接到 VM Guest。但通过远程主机管理 VM Guest 时无法做到这些。出于此原因，<systemitem class="library">libvirt</systemitem> 支持可从远程计算机访问的所谓<quote>储存池</quote>。
+ </para>
+ <tip>
+  <title>CD/DVD ISO 映像</title>
+  <para>
+   如果希望能够远程访问 VM 主机服务器上的 CD/DVD ISO 映像，需要将这些映像也放在储存池中。
+  </para>
+ </tip>
+ <para>
+  <systemitem class="library">libvirt</systemitem> 可识别两种不同类型的储存资源：卷和池。
+ </para>
+ <variablelist>
+  <varlistentry>
+   <term>储存卷</term>
+   <listitem>
+    <para>
+     储存卷是可指派到 Guest 的储存设备 — 虚拟磁盘或 CD/DVD/软盘映像。从物理上而言（在 VM 主机服务器上），它可以是块设备（分区、逻辑卷等）或文件。
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term>储存池</term>
+   <listitem>
+    <para>
+     储存池是 VM 主机服务器上可用于储存卷的储存资源，类似于台式计算机的网络储存。从物理上而言，它可分为以下类型之一：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>文件系统目录 (<guimenu>dir</guimenu>)</term>
+      <listitem>
+       <para>
+        用于存放映像文件的目录。文件可以是支持的磁盘格式之一（raw 或 qcow2），也可以是 ISO 映像。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>物理磁盘设备 (<guimenu>disk</guimenu>)</term>
+      <listitem>
+       <para>
+        使用整个物理磁盘作为储存空间。系统会为添加到池的每个卷创建一个分区。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>预格式化的块设备 (<guimenu>fs</guimenu>)</term>
+      <listitem>
+       <para>
+        指定要使用的分区，该分区与文件系统目录池（用于存放映像文件的目录）的使用方式相同。唯一的区别在于，使用文件系统目录时，<systemitem class="library">libvirt</systemitem> 会负责装入设备。
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term>iSCSI 目标 (iscsi)</term>
+      <listitem>
+       <para>
+        在 iSCSI 目标上设置池。您需要先登录卷一次，才能将卷用于 <systemitem class="library">libvirt</systemitem>。使用 YaST <guimenu>iSCSI 发起端</guimenu>来检测和登录卷<phrase os="sles">，有关细节，请参见<xref linkend="book-storage"/></phrase>。不支持在 iSCSI 池中创建卷；每个现有逻辑单元号 (LUN) 都代表一个卷。每个卷/LUN 还需要一个有效的（空）分区表或磁盘标签，这样您才能使用该卷。如果没有分区表或磁盘标签，请使用 <command>fdisk</command> 添加：
+       </para>
+<screen>~ # fdisk -cu /dev/disk/by-path/ip-192.168.2.100:3260-iscsi-iqn.2010-10.com.example:[...]-lun-2
+Device contains neither a valid DOS partition table, nor Sun, SGI
+or OSF disklabel
+Building a new DOS disklabel with disk identifier 0xc15cdc4e.
+Changes will remain in memory only, until you decide to write them.
+After that, of course, the previous content won't be recoverable.
+
+Warning: invalid flag 0x0000 of partition table 4 will be corrected by w(rite)
+
+Command (m for help): w
+The partition table has been altered!
+
+Calling ioctl() to re-read partition table.
+Syncing disks.</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>LVM 卷组 (logical)</term>
+      <listitem>
+       <para>
+        使用 LVM 卷组作为池。您可以使用预定义的卷组，或者通过指定要使用的设备来创建组。储存卷会创建为卷上的分区。
+       </para>
+       <warning>
+        <title>删除基于 LVM 的池</title>
+        <para>
+         在储存管理器中删除基于 LVM 的池时，也会删除卷组。这会导致池中储存的所有数据丢失且不可恢复！
+        </para>
+       </warning>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>多路径设备 (<guimenu>mpath</guimenu>)</term>
+      <listitem>
+       <para>
+        目前，多路径支持仅限于向 Guest 指派现有设备。不支持从 <systemitem class="library">libvirt</systemitem> 内部创建卷或配置多路径。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>网络导出的目录 (<guimenu>netfs</guimenu>)</term>
+      <listitem>
+       <para>
+        指定要使用的网络目录，该网络目录与文件系统目录池（用于存放映像文件的目录）的使用方式相同。唯一的区别在于，使用文件系统目录时，<systemitem class="library">libvirt</systemitem> 会负责装入目录。支持的协议为 NFS 和 GlusterFS。
+       </para>
+      </listitem>
+     </varlistentry>
+
+
+     <varlistentry>
+      <term>SCSI 主机适配器 (<guimenu>scsi</guimenu>)</term>
+      <listitem>
+       <para>
+        SCSI 主机适配器的使用方式与 iSCSI 目标基本相同。我们建议使用基于 <filename>/dev/disk/by-*</filename> 的设备名称而不是 <filename>/dev/sd<replaceable>X</replaceable></filename>。后者可能会发生变化（例如，添加或拆除硬盘时）。不支持在 iSCSI 池中创建卷。每个现有 LUN（逻辑单元号）都代表一个卷。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </listitem>
+  </varlistentry>
+ </variablelist>
+ <warning>
+  <title>安全考虑</title>
+  <para>
+   为了避免数据丢失或损坏，请不要尝试使用也用于在 VM 主机服务器上构建储存池的资源，例如 LVM 卷组、iSCSI 目标等。无需从 VM 主机服务器连接到这些资源，也无需在 VM 主机服务器上装入这些资源 — <systemitem class="library">libvirt</systemitem> 将负责这些事项。
+  </para>
+  <para>
+   不要在 VM 主机服务器上按标签装入分区。在某些情况下，分区可能是从 VM Guest 内部使用 VM 主机服务器上已有的名称标记的。
+  </para>
+ </warning>
+ <sect1 xml:id="sec-libvirt-storage-vmm">
+  <title>使用虚拟机管理器管理储存</title>
+
+  <para>
+   虚拟机管理器提供了一个图形界面，即储存管理器，用于管理储存卷和池。要访问储存管理器，请右键单击某个连接并选择<guimenu>细节</guimenu>，或者高亮显示某个连接并选择<menuchoice> <guimenu>编辑</guimenu> <guimenu>连接细节</guimenu> </menuchoice>。选择<guimenu>储存</guimenu>选项卡。
+  </para>
+
+  <informalfigure>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="virt_virt-manager_storage.png" width="60%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="virt_virt-manager_storage.png" width="60%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </informalfigure>
+
+  <sect2 xml:id="sec-libvirt-storage-vmm-addpool">
+   <title>添加储存池</title>
+   <para>
+    要添加储存池，请执行以下操作：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      单击左下角的<guimenu>添加</guimenu>。<guimenu>添加新储存池</guimenu>对话框即会显示。
+     </para>
+    </step>
+    <step>
+     <para>
+      提供池的<guimenu>名称</guimenu>（可包含字母数字字符和 <literal>_-.</literal>），然后选择<guimenu>类型</guimenu>。按<guimenu>继续</guimenu>可进行下一步。
+     </para>
+     <informalfigure>
+      <mediaobject>
+       <imageobject role="fo">
+        <imagedata fileref="virt_virt-manager_storage_add.png" width="60%" format="PNG"/>
+       </imageobject>
+       <imageobject role="html">
+        <imagedata fileref="virt_virt-manager_storage_add.png" width="60%" format="PNG"/>
+       </imageobject>
+      </mediaobject>
+     </informalfigure>
+    </step>
+    <step>
+     <para>
+      在随后出现的窗口中指定所需细节。需要输入的数据取决于您要创建的池类型：
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>dir</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：指定现有目录。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>disk</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：用于存放设备的目录。一般情况下可以保留默认值 <filename>/dev</filename>。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>格式</guimenu>：设备分区表的格式。一般情况下，使用 <guimenu>auto</guimenu> 应该不会有问题。如果有问题，请通过在 VM 主机服务器上运行命令 <command>parted</command>
+           <option>-l</option> 获取所需的格式。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>源路径</guimenu>：设备的路径。建议使用基于 <filename>/dev/disk/by-*</filename> 的设备名称而不是简单的 <filename>/dev/sd<replaceable>X</replaceable></filename>，因为后者可能会发生变化（例如，添加或拆除硬盘时）。您需要指定类似整个磁盘而不是磁盘上的分区（如果存在）的路径。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>构建池</guimenu>：激活此选项会格式化设备。设备上的所有数据都将丢失，请慎用！
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>fs</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：VM 主机服务器文件系统上的安装点。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>格式</guimenu>：设备的文件系统格式。使用默认值 <literal>auto</literal> 应该不会有问题。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>源路径</guimenu>：设备文件的路径。建议使用基于 <filename>/dev/disk/by-*</filename> 的设备名称而不是 <filename>/dev/sd<replaceable>X</replaceable></filename>，因为后者可能会发生变化（例如，添加或拆除硬盘时）。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>iscsi</guimenu>
+       </term>
+       <listitem>
+        <para>
+         通过在 VM 主机服务器上运行以下命令来获取所需的数据：
+        </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> iscsiadm --mode node</screen>
+        <para>
+         此命令将返回采用以下格式的 iSCSI 卷列表。以粗体文本显示的元素是必需的：
+        </para>
+<screen><emphasis role="bold">IP_ADDRESS</emphasis>:PORT,TPGT <emphasis role="bold">TARGET_NAME_(IQN)</emphasis></screen>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：包含设备文件的目录。使用 <literal>/dev/disk/by-path</literal>（默认值）或 <literal>/dev/disk/by-id</literal>。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>主机名</guimenu>：iSCSI 服务器的主机名或 IP 地址。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>源路径</guimenu>：iSCSI 目标名称 (IQN)。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>logical</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：如果您使用现有卷组，请指定现有设备路径。构建新 LVM 卷组时，请指定 <filename>/dev</filename> 目录中目前不存在的设备名称。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>源路径</guimenu>：使用现有卷组时，请留空。创建新卷组时，请在此处指定其设备。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>构建池</guimenu>：仅当创建新卷组时才激活。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>mpath</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：目前对多路径的支持仅限于通过它来使所有多路径设备可用。因此，请在此处指定任意字符串，此字符串随后将被忽略。必须指定路径，否则 XML 解析器将会失败。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>netfs</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：VM 主机服务器文件系统上的安装点。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>主机名</guimenu>：要导出网络文件系统的服务器的 IP 地址或主机名。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>源路径</guimenu>：正在导出的服务器上的目录。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry>
+       <term><emphasis role="bold">类型：</emphasis><guimenu>scsi</guimenu>
+       </term>
+       <listitem>
+        <itemizedlist mark="bullet" spacing="normal">
+         <listitem>
+          <para>
+           <guimenu>目标路径</guimenu>：包含设备文件的目录。使用 <literal>/dev/disk/by-path</literal>（默认值）或 <literal>/dev/disk/by-id</literal>。
+          </para>
+         </listitem>
+         <listitem>
+          <para>
+           <guimenu>源路径</guimenu>：SCSI 适配器的名称。
+          </para>
+         </listitem>
+        </itemizedlist>
+       </listitem>
+      </varlistentry>
+
+     </variablelist>
+     <note>
+      <title>文件浏览</title>
+      <para>
+       从远程位置操作时，无法通过单击<guimenu>浏览</guimenu>使用文件浏览器。
+      </para>
+     </note>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>完成</guimenu>以添加储存池。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-storage-vmm-manage">
+   <title>管理储存池</title>
+   <para>
+    您可以通过虚拟机管理器的储存管理器在池中创建或删除卷。您还可以暂时停用或永久删除现有的储存池。SUSE 目前不支持更改池的基本配置。
+   </para>
+   <sect3 xml:id="sec-libvirt-storage-vmm-manage-pool">
+    <title>启动、停止和删除池</title>
+    <para>
+     储存池的用途是提供 VM 主机服务器上的块设备，远程管理 VM Guest 时，可将这些设备添加到其中。要暂时禁止远程访问某个池，请单击储存管理器左下角的<guimenu>停止</guimenu>。停止的池标记为<guimenu>状态：非活动</guimenu>，并在列表窗格中灰显。默认情况下，新建的池在 VM 主机服务器<guimenu>引导</guimenu>时会自动启动。
+    </para>
+    <para>
+     要启动某个非活动的池并再次使其可从远程位置使用，请单击储存管理器左下角的<guimenu>启动</guimenu>。
+    </para>
+    <note>
+     <title>池的状态不会影响挂接的卷</title>
+     <para>
+      无论池处于什么状态（<guimenu>活动</guimenu>（已停止）或<guimenu>非活动</guimenu>（已启动）），池中挂接到 VM Guest 的卷都始终可用。池的状态只会影响到能否通过远程管理将卷挂接到 VM Guest。
+     </para>
+    </note>
+    <para>
+     要永久禁止访问某个池，请单击储存管理器左下角的<guimenu>删除</guimenu>。您只能删除非活动的池。删除某个池不会实际擦除其在 VM 主机服务器上的内容，而只会删除池配置。不过，在删除池时需要额外小心，尤其是删除基于 LVM 卷组的工具时：
+    </para>
+    <warning xml:id="deleting-storage-pools">
+     <title>删除储存池</title>
+     <para>
+      删除基于<emphasis>本地</emphasis>文件系统目录、本地分区或磁盘的储存池不会影响到这些池中当前挂接到 VM Guest 的卷的可用性。
+     </para>
+     <para>
+      如果删除 iSCSI、SCSI、LVM 组或网络导出的目录这些类型的池，将无法再从 VM Guest 访问这些池中的卷。尽管卷本身不会被删除，但 VM 主机服务器将不再可以访问这些资源。
+     </para>
+     <para>
+      创建足够大的新池或者直接从主机系统装入/访问这些资源时，iSCSI/SCSI 目标或网络导出的目录中的卷将再次可供访问。
+     </para>
+     <para>
+      删除基于 LVM 组的储存池时，将擦除 LVM 组定义，并且该 LVM 组将不再存在于主机系统上。其配置将不可恢复，并且此池中的所有卷都会丢失。
+     </para>
+    </warning>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-vmm-manage-volume-add">
+    <title>将卷添加到储存池</title>
+    <para>
+     借助虚拟机管理器，您可以在所有储存池（多路径、iSCSI 或 SCSI 类型的池除外）中创建卷。这些池中的卷相当于 LUN，无法从 <systemitem class="library">libvirt</systemitem> 内部更改。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       可以使用储存管理器创建新卷，或者在将新储存设备添加到 VM Guest 时创建新卷。在以上任一情况下，请从左侧面板中选择一个储存池，然后单击<guimenu>创建新卷</guimenu>。
+      </para>
+     </step>
+     <step>
+      <para>
+       指定映像的<guimenu>名称</guimenu>并选择映像格式。
+      </para>
+      <para>
+       SUSE 目前仅支持 <literal>raw</literal> 或 <literal>qcow2</literal> 映像。后一个选项在基于 LVM 组的池中不可用。
+      </para>
+      <para>
+       在<guimenu>最大容量</guimenu>的旁边，指定允许磁盘映像达到的最大大小。除非您使用 <literal>qcow2</literal> 映像，否则还可以设置最初应该分配的<guimenu>分配</guimenu>量。如果这两个值不同，将会创建一个按需增长的稀疏映像文件。
+      </para>
+      <para>
+       对于 <literal>qcow2</literal> 映像，可以使用一个构成基本映像的<guimenu>后备储存</guimenu>（也称为<quote>后备文件</quote>）。这样新建的 <literal>qcow2</literal> 映像便只会记录对基本映像进行的更改。
+      </para>
+     </step>
+     <step>
+      <para>
+       单击<guimenu>完成</guimenu>开始创建卷。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-vmm-manage-volume-delete">
+    <title>从储存池中删除卷</title>
+    <para>
+     只能在储存管理器中删除卷：选择相应卷并单击<guimenu>删除卷</guimenu>。单击<guimenu>是</guimenu>确认。
+    </para>
+    <warning>
+     <title>即使卷处于使用中状态，也能将其删除</title>
+     <para>
+      即使活动或非活动的 VM Guest 中当前正在使用卷，也能将卷删除。无法恢复已删除的卷。
+     </para>
+     <para>
+      储存管理器中的<guimenu>使用对象</guimenu>列会指示某个卷是否已由 VM Guest 使用。
+     </para>
+    </warning>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-storage-virsh">
+  <title>使用 <command>virsh</command> 管理储存</title>
+
+  <para>
+   您也可以使用 <command>virsh</command> 通过命令行管理储存。不过，SUSE 目前不支持创建储存池。因此，本节仅限于介绍启动、停止和删除池以及卷管理等功能。
+  </para>
+
+  <para>
+   运行 <command>virsh help pool</command> 和 <command>virsh help volume</command> 可分别获取用于管理池和卷的所有 <command>virsh</command> 子命令列表。
+  </para>
+
+  <sect2 xml:id="sec-libvirt-storage-virsh-list-pools">
+   <title>列出池和卷</title>
+   <para>
+    执行以下命令可以列出当前处于活动状态的所有池。要同时列出非活动池，请添加选项 <option>--all</option>：
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh pool-list --details</screen>
+   <para>
+    可以使用 <literal>pool-info</literal> 子命令获取有关特定池的细节：
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh pool-info <replaceable>POOL</replaceable></screen>
+   <para>
+    默认情况下，只能按池列出卷。要列出某个池中的所有卷，请输入以下命令。
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh vol-list --details <replaceable>POOL</replaceable></screen>
+   <para>
+    目前，<command>virsh</command> 不提供任何可显示某个卷是否已由 Guest 使用的工具。下面的过程说明如何列出所有池中当前已被 VM Guest 使用的卷。
+   </para>
+   <procedure xml:id="pro-libvirt-storage-virsh-list-vols">
+    <title>列出当前已在 VM 主机服务器上使用的所有储存卷</title>
+    <step>
+     <para>
+      将以下内容保存到某个文件（例如 ~/libvirt/guest_storage_list.xsl）来创建一个 XSLT 样式表：
+     </para>
+<screen>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;xsl:stylesheet version="1.0"
+  xmlns:xsl="http://www.w3.org/1999/XSL/Transform"&gt;
+  &lt;xsl:output method="text"/&gt;
+  &lt;xsl:template match="text()"/&gt;
+  &lt;xsl:strip-space elements="*"/&gt;
+  &lt;xsl:template match="disk"&gt;
+    &lt;xsl:text&gt;  &lt;/xsl:text&gt;
+    &lt;xsl:value-of select="(source/@file|source/@dev|source/@dir)[1]"/&gt;
+    &lt;xsl:text&gt;&amp;#10;&lt;/xsl:text&gt;
+  &lt;/xsl:template&gt;
+&lt;/xsl:stylesheet&gt;</screen>
+    </step>
+    <step>
+     <para>
+      在外壳中运行以下命令：假设 Guest 的 XML 定义全部储存在默认位置 (<filename>/etc/libvirt/qemu</filename>)。<command>xsltproc</command> 由软件包 <systemitem class="resource">libxslt</systemitem> 提供。
+     </para>
+<screen>SSHEET="$HOME/libvirt/guest_storage_list.xsl"
+cd /etc/libvirt/qemu
+for FILE in *.xml; do
+  basename $FILE .xml
+  xsltproc $SSHEET $FILE
+done</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-storage-virsh-start-pools">
+   <title>启动、停止和删除池</title>
+   <para>
+    使用 <command>virsh</command> pool 子命令来启动、停止或删除池。在以下示例中，请将 <replaceable>POOL</replaceable> 替换为池的名称或其 UUID：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>停止池</term>
+     <listitem>
+<screen><prompt>tux &gt; </prompt>virsh pool-destroy <replaceable>POOL</replaceable></screen>
+      <note>
+       <title>池的状态不会影响挂接的卷</title>
+       <para>
+        无论池处于什么状态（<guimenu>活动</guimenu>（已停止）或<guimenu>非活动</guimenu>（已启动）），池中挂接到 VM Guest 的卷都始终可用。池的状态只会影响到能否通过远程管理将卷挂接到 VM Guest。
+       </para>
+      </note>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>删除池</term>
+     <listitem>
+<screen><prompt>tux &gt; </prompt>virsh pool-delete <replaceable>POOL</replaceable></screen>
+      <warning>
+       <title>删除储存池</title>
+       <para>
+        参见 <xref linkend="deleting-storage-pools"/>
+       </para>
+      </warning>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>启动池</term>
+     <listitem>
+<screen><prompt>tux &gt; </prompt>virsh pool-start <replaceable>POOL</replaceable></screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>启用池自动启动功能</term>
+     <listitem>
+<screen><prompt>tux &gt; </prompt>virsh pool-autostart <replaceable>POOL</replaceable></screen>
+      <para>
+       只有标记为 autostart 的池才会自动在 VM 主机服务器重引导时启动。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>禁用池自动启动功能</term>
+     <listitem>
+<screen><prompt>tux &gt; </prompt>virsh pool-autostart <replaceable>POOL</replaceable> --disable</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-storage-virsh-add-volumes">
+   <title>将卷添加到储存池</title>
+   <para>
+    <command>virsh</command> 提供了两种将卷添加到储存池的方法：在 XML 定义中使用 <literal>vol-create</literal> 和 <literal>vol-create-from</literal> 添加，或者使用 <literal>vol-create-as</literal> 通过命令行参数添加。SUSE 目前不支持前一种方法，因此本节重点介绍 <literal>vol-create-as</literal> 子命令。
+   </para>
+   <para>
+    要将卷添加到现有池，请输入以下命令：
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh vol-create-as <replaceable>POOL</replaceable><co xml:id="co-vol-create-as-pool"/><replaceable>NAME</replaceable><co xml:id="co-vol-create-as-name"/> 12G --format<co xml:id="co-vol-create-as-capacity"/><replaceable>raw|qcow2</replaceable><co xml:id="co-vol-create-as-format"/> --allocation 4G<co xml:id="co-vol-create-as-alloc"/></screen>
+   <calloutlist>
+    <callout arearefs="co-vol-create-as-pool">
+     <para>
+      卷要添加到的池的名称
+     </para>
+    </callout>
+    <callout arearefs="co-vol-create-as-name">
+     <para>
+      卷的名称
+     </para>
+    </callout>
+    <callout arearefs="co-vol-create-as-capacity">
+     <para>
+      卷的大小，在本示例中为 12 GB。使用后缀 k、M、G、T 来分别表示千字节、兆字节、千兆字节和万亿字节。
+     </para>
+    </callout>
+    <callout arearefs="co-vol-create-as-format">
+     <para>
+      卷的格式。SUSE 目前支持 <literal>raw</literal> 和 <literal>qcow2</literal>。
+     </para>
+    </callout>
+    <callout arearefs="co-vol-create-as-alloc">
+     <para>
+      可选的参数。默认情况下，<command>virsh</command> 将创建一个按需增长的稀疏映像文件。使用此参数指定应分配的空间量（本示例中为 4 GB）。使用后缀 k、M、G、T 来分别表示千字节、兆字节、千兆字节和万亿字节。
+     </para>
+     <para>
+      如果不指定此参数，将生成不包含分配量的稀疏映像文件。要创建非稀疏卷，请使用此参数指定整个映像大小（在本示例中为 <literal>12G</literal>）。
+     </para>
+    </callout>
+   </calloutlist>
+   <sect3 xml:id="sec-libvirt-storage-virsh-add-volumes-clone">
+    <title>克隆现有卷</title>
+    <para>
+     将卷添加到池的另一种方法是克隆现有卷。请始终在原始实例所在的同一个池中创建新实例。
+    </para>
+<screen><prompt>tux &gt; </prompt>virsh vol-clone <replaceable>NAME_EXISTING_VOLUME</replaceable><co xml:id="co-vol-clone-existing"/><replaceable>NAME_NEW_VOLUME</replaceable><co xml:id="co-vol-clone-new"/> --pool <replaceable>POOL</replaceable><co xml:id="co-vol-clone-pool"/></screen>
+    <calloutlist>
+     <callout arearefs="co-vol-clone-existing">
+      <para>
+       要克隆的现有卷的名称
+      </para>
+     </callout>
+     <callout arearefs="co-vol-clone-new">
+      <para>
+       新卷的名称
+      </para>
+     </callout>
+     <callout arearefs="co-vol-clone-pool">
+      <para>
+       可选的参数。<systemitem class="library">libvirt</systemitem> 会尝试自动查找现有卷。如果找不到，请指定此参数。
+      </para>
+     </callout>
+    </calloutlist>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-storage-virsh-del-volumes">
+   <title>从储存池中删除卷</title>
+   <para>
+    要从池中永久删除某个卷，请使用 <literal>vol-delete</literal> 子命令：
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh vol-delete <replaceable>NAME</replaceable> --pool <replaceable>POOL</replaceable></screen>
+   <para>
+    <option>--pool</option> 为可选项。<systemitem class="library">libvirt</systemitem> 会尝试自动查找卷。如果找不到，请指定此参数。
+   </para>
+   <warning>
+    <title>删除卷时不会进行检查</title>
+    <para>
+     无论卷当前是否已在活动或非活动的 VM Guest 中使用，都将一律被删除。无法恢复已删除的卷。
+    </para>
+    <para>
+     只能使用<xref linkend="pro-libvirt-storage-virsh-list-vols"/>中所述的方法来检测某个卷是否已由 VM Guest 使用。
+    </para>
+   </warning>
+  </sect2>
+
+  <sect2 xml:id="libvirt-storage-virsh-attach-volumes">
+   <title>将卷挂接到 VM Guest</title>
+   <para>
+    按照<xref linkend="sec-libvirt-storage-virsh-add-volumes"/>中所述创建卷后，可将其挂接到虚拟机并作为硬盘使用：
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh attach-disk <replaceable>DOMAIN</replaceable> <replaceable>SOURCE_IMAGE_FILE</replaceable> <replaceable>TARGET_DISK_DEVICE</replaceable></screen>
+   <para>
+    例如：
+   </para>
+<screen><prompt>tux &gt; </prompt>virsh attach-disk sles12sp3 /virt/images/example_disk.qcow2 sda2</screen>
+   <para>
+    要检查是否已挂接新磁盘，请检查 <command>virsh dumpxml</command> 命令的结果：
+   </para>
+<screen><prompt role="root">root # </prompt>virsh dumpxml sles12sp3
+[...]
+&lt;disk type='file' device='disk'&gt;
+ &lt;driver name='qemu' type='raw'/&gt;
+ &lt;source file='/virt/images/example_disk.qcow2'/&gt;
+ &lt;backingStore/&gt;
+ &lt;target dev='sda2' bus='scsi'/&gt;
+ &lt;alias name='scsi0-0-0'/&gt;
+ &lt;address type='drive' controller='0' bus='0' target='0' unit='0'/&gt;
+&lt;/disk&gt;
+[...]</screen>
+   <sect3>
+    <title>热插入或持久更改</title>
+    <para>
+     可将磁盘挂接到活动和非活动的域。挂接操作由 <option>--live</option> 和 <option>--config</option> 选项控制：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><option>--live</option>
+      </term>
+      <listitem>
+       <para>
+        将磁盘热插入到活动域。挂接操作不会保存在域配置中。对非活动域使用 <option>--live</option> 会出错。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><option>--config</option>
+      </term>
+      <listitem>
+       <para>
+        持久更改域配置。下一次启动域后，挂接的磁盘将可用。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><option>--live</option><option>--config</option>
+      </term>
+      <listitem>
+       <para>
+        热插入磁盘并将其添加到持久域配置中。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <tip>
+     <title><command>virsh attach-device</command></title>
+     <para>
+      <command>virsh attach-device</command> 是 <command>virsh attach-disk</command> 的更通用的形式。可以使用此命令将其他类型的设备挂接到域。
+     </para>
+    </tip>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="libvirt-storage-virsh-detach-volumes">
+   <title>从 VM Guest 分离卷</title>
+   <para>
+    要从域分离磁盘，请使用 <command>virsh detach-disk</command>：
+   </para>
+<screen><prompt role="root">root # </prompt>virsh detach-disk <replaceable>DOMAIN</replaceable> <replaceable>TARGET_DISK_DEVICE</replaceable></screen>
+   <para>
+    例如：
+   </para>
+<screen><prompt role="root">root # </prompt>virsh detach-disk sles12sp3 sda2</screen>
+   <para>
+    可以按照<xref linkend="libvirt-storage-virsh-attach-volumes"/>中所述，使用 <option>--live</option> 和 <option>--config</option> 选项来控制挂接操作。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-storage-locking">
+  <title>使用 <systemitem class="daemon">virtlockd</systemitem> 锁定磁盘文件和块设备</title>
+
+  <para>
+   锁定块设备和磁盘文件可以防止从不同的 VM Guest 并发向这些资源写入数据。它可以防范启动同一个 VM Guest 两次，或者将同一个磁盘添加到两个不同的虚拟机。这样就会减少由于配置错误导致虚拟机磁盘映像损坏的风险。
+  </para>
+
+  <para>
+   锁定操作由名为 <systemitem class="daemon">virtlockd</systemitem> 的守护程序控制。由于此守护程序独立于 <systemitem class="daemon">libvirtd</systemitem> 守护程序运行，在 <systemitem class="daemon">libvirtd</systemitem> 崩溃或重启动后，锁将会保留。甚至在 <systemitem class="daemon">virtlockd</systemitem> 本身更新之后，锁也仍会保留，因为此守护程序能够自行重新执行。这可以确保当 <systemitem class="daemon">virtlockd</systemitem> 更新后，<emphasis>无需</emphasis>重启动 VM Guest。KVM、QEMU 和 Xen 支持 <systemitem class="daemon">virtlockd</systemitem>。
+  </para>
+
+  <sect2 xml:id="sec-libvirt-storage-locking-enable">
+   <title>启用锁定</title>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上默认未启用锁定虚拟磁盘的功能。要启用锁定并在系统重引导时自动启动锁定，请执行以下步骤：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      编辑 <filename>/etc/libvirt/qemu.conf</filename> 并设置
+     </para>
+<screen>lock_manager = "lockd"</screen>
+    </step>
+    <step>
+     <para>
+      使用以下命令启动 <systemitem class="daemon">virtlockd</systemitem> 守护程序：
+     </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> systemctl start virtlockd</screen>
+    </step>
+    <step>
+     <para>
+      使用以下命令重启动 <systemitem class="daemon">libvirtd</systemitem> 守护程序：
+     </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+    </step>
+    <step>
+     <para>
+      确保引导系统时自动启动 <systemitem class="daemon">virtlockd</systemitem>：
+     </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> systemctl enable virtlockd</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-storage-locking-configure">
+   <title>配置锁定</title>
+   <para>
+    <systemitem class="daemon">virtlockd</systemitem> 默认配置为自动锁定为 VM Guest 配置的所有磁盘。默认设置使用“直接”锁空间，在这种情况下，系统会根据与 VM Guest &lt;disk&gt; 设备关联的实际文件路径获取锁。例如，如果 VM Guest 包含下面的 &lt;disk&gt; 设备，将直接针对 <filename>/var/lib/libvirt/images/my-server/disk0.raw</filename> 调用 <literal>flock(2)</literal>：
+   </para>
+<screen>&lt;disk type='file' device='disk'&gt;
+ &lt;driver name='qemu' type='raw'/&gt;
+ &lt;source file='/var/lib/libvirt/images/my-server/disk0.raw'/&gt;
+ &lt;target dev='vda' bus='virtio'/&gt;
+&lt;/disk&gt;</screen>
+   <para>
+    可以通过编辑 <filename>/etc/libvirt/qemu-lockd.conf</filename> 文件来更改 <systemitem class="daemon">virtlockd</systemitem> 配置。此文件还包含详细注释及其他信息。确保通过重新装载 <systemitem class="daemon">virtlockd</systemitem> 来激活配置更改：
+   </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> systemctl reload virtlockd</screen>
+
+   <sect3 xml:id="sec-libvirt-storage-locking-configure-shared-fs">
+    <title>启用间接锁空间</title>
+    <para>
+     <systemitem class="daemon">virtlockd</systemitem> 的默认配置使用<quote>直接</quote>锁空间。这意味着，系统会根据与 &lt;disk&gt; 设备关联的实际文件路径来获取锁。
+    </para>
+    <para>
+     如果磁盘文件路径不可供所有主机访问，可将 <systemitem class="daemon">virtlockd</systemitem> 配置为允许<quote>间接</quote>锁空间。这意味着，系统会使用磁盘文件路径的哈希在间接锁空间目录中创建一个文件。然后，将在这些哈希文件而不是实际的磁盘文件路径中存放锁。如果包含磁盘文件的文件系统不支持 <literal>fcntl()</literal> 锁，也可以使用间接锁空间。使用 <option>file_lockspace_dir</option> 设置指定间接锁空间：
+    </para>
+<screen>file_lockspace_dir = "<replaceable>/MY_LOCKSPACE_DIRECTORY</replaceable>"</screen>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-storage-locking-configure-lvm-iscsi">
+    <title>在 LVM 或 iSCSI 卷上启用锁定</title>
+    <para>
+     如果您要锁定由多个主机共享的 LVM 或 iSCSI 卷上的虚拟磁盘，则需要按 UUID 而不是路径（默认使用路径）执行锁定。此外，需将锁空间目录放在可供共享该卷的所有主机访问的共享文件系统上。为 LVM 和/或 iSCSI 设置以下选项：
+    </para>
+<screen>lvm_lockspace_dir = "<replaceable>/MY_LOCKSPACE_DIRECTORY</replaceable>"
+iscsi_lockspace_dir = "<replaceable>/MY_LOCKSPACE_DIRECTORY</replaceable>"</screen>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-storage-resize">
+  <title>联机调整 Guest 块设备的大小</title>
+
+  <para>
+   有时，您需要更改（扩展或收缩）Guest 系统使用的块设备的大小。例如，当最初分配的磁盘空间不再足够时，便需要增大空间大小。如果 Guest 磁盘驻留在<emphasis>逻辑卷</emphasis>中，您可以在 Guest 系统正在运行时调整该磁盘的大小。与脱机调整磁盘大小相比（请参见 <xref linkend="sec-guestfs-tools"/> 软件包中的 <command>virt-resize</command> 命令），这是一项巨大的优势，因为 Guest 提供的服务在调整大小期间不会受到干扰。要调整 VM Guest 磁盘的大小，请执行以下步骤：
+  </para>
+
+  <procedure>
+   <title>联机调整 Guest 磁盘的大小</title>
+   <step>
+    <para>
+     在 Guest 系统内部，检查磁盘（例如 <filename>/dev/vda</filename>）的当前大小。
+    </para>
+<screen><prompt role="root">root # </prompt>fdisk -l /dev/vda
+Disk /dev/sda: 160.0 GB, 160041885696 bytes, 312581808 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes</screen>
+   </step>
+   <step>
+    <para>
+     在主机上，将容纳 Guest 磁盘 <filename>/dev/vda</filename> 的逻辑卷调整到所需大小，例如 200 GB。
+    </para>
+<screen><prompt role="root">root # </prompt>lvresize -L 200G /dev/mapper/vg00-home
+Extending logical volume home to 200 GiB
+Logical volume home successfully resized</screen>
+   </step>
+   <step>
+    <para>
+     在主机上，调整与 Guest 磁盘 <filename>/dev/mapper/vg00-home</filename> 相关的块设备的大小。请注意，您可以使用 <command>virsh list</command> 来查找 <replaceable>DOMAIN_ID</replaceable>。
+    </para>
+<screen><prompt role="root">root # </prompt>virsh blockresize  --path /dev/vg00/home --size 200G <replaceable>DOMAIN_ID</replaceable>
+Block device '/dev/vg00/home' is resized</screen>
+   </step>
+   <step>
+    <para>
+     检查 Guest 是否接受新磁盘大小。
+    </para>
+<screen><prompt role="root">root # </prompt>fdisk -l /dev/vda
+Disk /dev/sda: 200.0 GB, 200052357120 bytes, 390727260 sectors
+Units = sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes</screen>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-storage-share">
+  <title>在主机与 Guest 之间共享目录（文件系统直通）</title>
+
+  <para>
+   libvirt 允许使用 QEMU 的文件系统直通（也称为 VirtFS）功能在主机与 Guest 之间共享目录。此类目录还可由多个 VM Guest 同时访问，因此可用于在 VM Guest 之间交换文件。
+  </para>
+
+  <note>
+   <title>Windows Guest 和文件系统直通</title>
+   <para>
+    请注意，无法通过文件系统直通在 VM 主机服务器与 Windows Guest 之间共享目录，因为 Windows 缺少装入共享目录所需的驱动程序。
+   </para>
+  </note>
+
+  <para>
+   要使共享目录可在 VM Guest 上使用，请执行以下操作：
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     在虚拟机管理器中打开 Guest 的控制台，然后从菜单中选择<menuchoice><guimenu>视图</guimenu>
+     <guimenu>细节</guimenu></menuchoice>，或者在工具栏中单击<guimenu>显示虚拟硬件细节</guimenu>。选择<menuchoice> <guimenu>添加硬件</guimenu> <guimenu>文件系统</guimenu>
+     </menuchoice>打开<guimenu>文件系统直通</guimenu>对话框。
+    </para>
+   </step>
+   <step>
+    <para>
+     可以在<guimenu>驱动程序</guimenu>中选择<guimenu>句柄</guimenu>或<guimenu>路径</guimenu>基本驱动程序。默认设置为<guimenu>路径</guimenu>。可以在<guimenu>模式</guimenu>中选择安全模型，这会影响在主机上设置文件权限的方式。有三个选项可用：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><guimenu>直通</guimenu>（默认设置）</term>
+      <listitem>
+       <para>
+        使用客户端用户的身份凭证直接在文件系统上创建文件。这与 NFSv3 使用的设置非常相似。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><guimenu>Squash</guimenu>
+      </term>
+      <listitem>
+       <para>
+        与<guimenu>直通</guimenu>相同，但会忽略 <command>chown</command> 等特权操作的失败事件。当以 <systemitem class="username">root</systemitem> 特权之外的身份运行 KVM 时，需要选择此选项。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><guimenu>已映射</guimenu>
+      </term>
+      <listitem>
+       <para>
+        使用文件服务器的身份凭证 (<literal>qemu.qemu</literal>) 创建文件。用户身份凭证和客户端用户的身份凭证保存在扩展属性中。当主机和 Guest 域应彻底隔离时，建议使用此模型。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </step>
+   <step>
+    <para>
+     使用<guimenu>源路径</guimenu>指定 VM 主机服务器上的目录的路径。在<guimenu>目标路径</guimenu>中输入一个字符串，作为装入共享目录时使用的标记。请注意，此字段中的字符串仅作为标记，不是 VM Guest 上的路径。
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>应用</guimenu>设置。如果 VM Guest 当前正在运行，需要将其关闭才能应用新设置（重引导 Guest 是不够的）。
+    </para>
+   </step>
+   <step>
+    <para>
+     引导 VM Guest。要装入共享目录，请输入以下命令：
+    </para>
+<screen><prompt>tux &gt; </prompt><command>sudo</command> mount -t 9p -o trans=virtio,version=9p2000.L,rw <replaceable>TAG</replaceable> /<replaceable>MOUNT_POINT</replaceable></screen>
+    <para>
+     要使共享目录永久可用，请将下面一行添加到 <filename>/etc/fstab</filename> 文件中：
+    </para>
+<screen><replaceable>TAG</replaceable>   /<replaceable>MOUNT_POINT</replaceable>    9p  trans=virtio,version=9p2000.L,rw    0   0</screen>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="libvirt-storage-rbd">
+  <title>通过 <systemitem class="library">libvirt</systemitem> 使用 RADOS 块设备</title>
+  <para>
+   RADOS 块设备 (RBD) 将数据储存在 Ceph 群集中。这些设备支持快照、复制和数据一致性。您可以像使用其他块设备一样，从 <systemitem class="library">libvirt</systemitem> 管理的 VM Guest 使用 RBD。
+  </para>
+  <para os="sles;sled">
+   有关更多细节，请参见 SUSE Enterprise Storage《<citetitle><citetitle>Administration Guide</citetitle></citetitle>》（管理指南）中的“<citetitle>Using libvirt with Ceph</citetitle>”（将 libvirt 与 Ceph 配合使用）一章。<link xlink:href="https://documentation.suse.com/ses/"/> 中提供了 SUSE Enterprise Storage 文档。
+  </para>
+ </sect1>
+</chapter>
