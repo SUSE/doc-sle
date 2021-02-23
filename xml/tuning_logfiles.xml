@@ -1029,6 +1029,200 @@ test
    information.
   </para>
  </sect1>
+ <sect1 xml:id="sec-tuning-syslog-server">
+  <title>Forwarding log messages to a central log server</title>
+  <para>
+   System log data can be forwarded from individual systems to a central
+   syslog server on the network. This allows administrators to get an overview
+   of events on all hosts and prevents attackers that succeed in taking over a
+   system from manipulating system logs to cover their tracks.
+  </para>
+  <sect2 xml:id="sec-tuning-syslog-server-setup">
+   <title>Set up the central syslog server</title>
+   <!--
+   <para>
+    This section describes a basic syslog forwarding setup on &sle;.
+   </para>
+   -->
+   <procedure xml:id="pro-tuning-syslog-server">
+    <title>Configure the central <systemitem>rsyslog</systemitem> server</title>
+    <para>
+     To set up a central log server, perform the following steps:
+    </para>
+    <step>
+     <para>
+      Edit the configuration file
+      <filename>/etc/rsyslog.d/remote.conf</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Uncomment the following lines in the <literal>UDP Syslog Server</literal>
+      or <literal>TCP Syslog Server</literal> section of the configuration file.
+      Assign an IP address and port for <systemitem
+       class="daemon">rsyslogd</systemitem>.
+     </para>
+     <para>
+      TCP example:
+     </para>
+     <screen>$ModLoad imtcp.so
+$UDPServerAddress <replaceable>IP</replaceable><co xml:id="co-tuning-syslog-server-ip"/>
+$InputTCPServerRun <replaceable>PORT</replaceable><co xml:id="co-tuning-syslog-server-port"/></screen>
+     <para>
+      UDP example:
+     </para>
+     <screen>$ModLoad imudp.so
+$UDPServerAddress <replaceable>IP</replaceable><xref linkend="co-tuning-syslog-server-ip" xrefstyle="select:label nopage"/>
+$UDPServerRun <replaceable>PORT</replaceable><xref linkend="co-tuning-syslog-server-port" xrefstyle="select:label nopage"/></screen>
+     <calloutlist>
+      <callout arearefs="co-tuning-syslog-server-ip">
+       <para>
+        IP address of the interface for <systemitem
+         class="daemon">rsyslogd</systemitem> to listen on. If no address is
+        given, the daemon listens on all interfaces.
+       </para>
+      </callout>
+      <callout arearefs="co-tuning-syslog-server-port">
+       <para>
+        Port for <systemitem class="daemon">rsyslogd</systemitem> to listen on.
+        Select a privileged port below 1024. The default is 514.
+       </para>
+      </callout>
+     </calloutlist>
+     <important>
+      <title>TCP vs. UDP protocol</title>
+      <para>
+       Traditionally syslog uses the UDP protocol to transmit log messages over
+       the network. This involves less overhead but lacks reliability. Log
+       messages can get lost under high load.
+       <!-- cwickert 2021-03-02 Original text before shortening -->
+       <!-- The TCP protocol is more
+       reliable. Messages will only get lost under
+       <emphasis>constant</emphasis> high load, which should not occur under
+       normal circumstances.
+      </para>
+      <para>
+       Since the advantages of centralized logging could suffer from
+       unreliability, using TCP recommended. -->
+      </para>
+      <para>
+       The TCP protocol is more reliable and should be preferred over UDP.
+      </para>
+     </important>
+     <note>
+      <title><literal>UDPServerAddress</literal> with TCP</title>
+      <para>
+       The <literal>$UDPServerAddress</literal> configuration parameter in the
+       TCP example is no error. Despite its name it is used for both TCP and
+       UDP.
+      </para>
+     </note>
+    </step>
+    <step>
+     <para>
+      Save the file.
+     </para>
+    </step>
+    <step>
+     <para>
+      Restart the <systemitem class="daemon">rsyslog</systemitem> service:
+     </para>
+     <screen>&prompt.sudo;<command>systemctl restart rsyslog.service</command></screen>
+    </step>
+    <step>
+     <para>Open the respective port in the firewall. For <systemitem
+      class="daemon">firewalld</systemitem> with TCP on port 514 run:
+     </para>
+<screen>&prompt.sudo;<command>firewall-cmd --add-port <replaceable>514/tcp</replaceable> --permanent</command>
+&prompt.sudo; <command>firewall-cmd --reload</command>
+     </screen>
+    </step>
+   </procedure>
+   <para>
+    You have now configured the central logging server. Next, configure the
+    clients for remote logging.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec-tuning-syslog-server-client">
+   <title>Set up the client machines</title>
+   <procedure xml:id="pro-tuning-syslog-client">
+    <title>Configure a <guimenu>rsyslog</guimenu> instance for remote logging</title>
+    <para>
+     To configure a machine for remote logging on a central log server, perform
+     the following steps:
+    </para>
+    <step>
+     <para>
+      Edit the configuration file
+      <filename>/etc/rsyslog.d/remote.conf</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Uncomment the appropriate line (TCP or UDP) and replace
+      <literal>remote-host</literal> with the address of the central log server
+      set up in <xref linkend="sec-tuning-syslog-server-setup"/>.
+     </para>
+     <para>
+      TCP example:
+     </para>
+     <screen># Remote Logging using TCP for reliable delivery
+# remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+*.* <replaceable>@@remote-host</replaceable></screen>
+     <para>
+      UDP example:
+     </para>
+     <screen># Remote Logging using UDP
+# remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+*.* <replaceable>@remote-host</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      Save the file.
+     </para>
+    </step>
+    <step>
+     <para>
+      Restart the <systemitem class="daemon">rsyslog</systemitem> service:
+     </para>
+     <screen>&prompt.sudo;<command>systemctl restart rsyslog.service</command></screen>
+    </step>
+    <step>
+     <para>
+      Verify the proper function of the syslog forwarding:
+     </para>
+     <screen>&prompt.user;<command>logger "hello world"</command></screen>
+     <para>
+      The log message <literal>hello world</literal> should now appear on the
+      central syslog server.
+     </para>
+    </step>
+   </procedure>
+   <para>
+    You have now configured a machine for remote logging to your central log
+    server.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec-tuning-syslog-server-more">
+   <title>More information</title>
+   <para>
+    This basic setup does not include encryption and is only suitable for
+    trusted internal networks. TLS encryption is strongly recommended but
+    requires a certificate infrastructure to be set up first.
+   </para>
+   <para>
+    In this setup all messages from remote hosts will be treated the same on the
+    central syslog server. Consider filtering messages into separate files by
+    remote host or classify them by message category.
+   </para>
+   <para>
+    For more information about encryption, filtering, and other advanced topics,
+    consult the <phrase role="productname">RSyslog</phrase> documentation at
+    <link xlink:href="https://www.rsyslog.com/doc/master/index.html#manual"/>.
+   </para>
+  </sect2>
+ </sect1>
+
  <sect1 xml:id="sec-tuning-syslog-logger">
   <title>Using <command>logger</command> to make system log entries</title>
 
