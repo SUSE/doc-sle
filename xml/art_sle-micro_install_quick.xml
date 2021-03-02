@@ -63,8 +63,8 @@ The recommended hard disk space is 20 GB for &slema; itself and 40 GB for contai
 	<title>The manual installation procedure</title>
 
 <sect2 xml:id="sec-slem-licence-agreement">
-	<title>The language nad keyboard selection</title>
-	<para>The default language and keboard layout is English (US). If you want to choose a different language in the <guimenu>Language</guimenu> drop down menu. </para>
+	<title>The language and keyboard selection</title>
+	<para>The default language and keyboard layout is English (US). If you want to choose a different language in the <guimenu>Language</guimenu> drop down menu. </para>
 	<para>Read the licence agreement. The default languange is English, but the licence agreement is available in multiple languages. To get a particular translation, click <guimenu>Licence translations</guimenu> and in the drop-down menu select the desired language and click <guimenu>OK</guimenu>. After you read the licence agrement, check <guimenu>I Agree to the Licence Terms</guimenu> and click <guimenu>Next</guimenu> to proceed to the next installaton step.</para>
 </sect2>
 <sect2 xml:id="sec-slem-registration">
@@ -251,21 +251,104 @@ In order to receive technical support and product updates, you need to register 
 <sect1 xml:id="sec-slem-image-deployment">
 <title>Raw image deployment</title>
 <para>&productname;  provides raw images that can be directly deployed to your device storage&mdash;a memory card, USB flash drive or a hard disk.</para>
-<para>To deploy the image, download the raw image and decompress it:</para>
+<para>To deploy the image, perform the following steps:</para>
+<procedure>
+<title>Deploying rwa disk images</title>
+<step>
+ <para>download the raw image and decompress it:</para>
 <screen>xz -d &lt;downloaded_image.raw.xz&gt;</screen>
+</step>
+<step>
 <para>copy the decompressed image to the device:</para>
 <screen>dd if=&lt;downloaded_image.raw&gt; of=/dev/sdX</screen>
+</step>
+<step>
+<para>label your installation volume <literal>ignition</literal>, no matter the configuration tool used. Tou can use any type of configuration storage media that your virtualization system or your hardware supports&mdash;iso image, a USB flash drive, etc.</para>
+</step>
+<step>
 <para>Prior to booting for the first time, perform initial configuration by using Ignition or Combustion. The minimal configuration must provide a password for &rootuser;, otherwise the system will not be accessible after the first boot.</para>
-<para>No matter the configuration tool used, you need to label your installation volume <literal>ignition</literal>.</para>
+</step>
+<step>
+<para>After the first boot you need to register your &slem; instance by using SUSEConnect.</para>
+</step>
+</procedure>
+
+
 <sect2 xml:id="sec-slem-ignition">
 <title>Congiguration by using Ignition</title>
-<para>Ignition configures your system on the first boot by using the <filename>config.ign</filename> configuration file. The <filename>config.ign</filename> file must be placed in a directory <filename>ignition</filename>. The <filename>ignition</filename> directory as a subdirectory of the root directory. The root directory also contains the raw image to be deployed. The directory structure is then the following:</para>
+<para>Ignition configures your system on the first boot according to the <filename>config.ign</filename> configuration file. The <filename>config.ign</filename> file must be placed in a directory <filename>ignition</filename>. The <filename>ignition</filename> directory as a subdirectory of the root directory. The root directory also contains the raw image to be deployed. The directory structure is then the following:</para>
 <screen>
 &lt;root directory&gt;
 	- ignition
 		- config.ign
 	- raw disk image	
 </screen>
+<para>The <filename>config.ign</filename> is in the JSON format. A minimal example followws:</para>
+<screen>
+{
+  "ignition": { "version": "3.1.0" },
+  "passwd": {
+    "users": [
+      {
+        "name": "root",
+        "passwordHash": "pemFK1OejzrTI"
+      }
+    ]
+  }
+}
+</screen>
+<para>The example above sets a password for &rootuser; to <emphasis>opensuse</emphasis>. To obtain your own password hash, use the command:</para>
+<screen>
+&prompt.root; openssl passwd
+</screen>
+
+<sect3 xml:id="sec-ignition-flashdisk">
+<title>Preparing a USB flash disk</title>
+<para>Especially on bare metal systems, RaspberryPi or other ARM architectures, installing fron a USB flash disk may be the best solution. To prepare the USB flash disk, do the following:</para>
+<procedure>
+<title>Preparing a USB flash disk</title>
+<step>
+	<para>format the disk to any file system supported by &slema;: FAT, EXT4, etc.</para>
+</step>
+<step>
+	<para>set the partition label to <literal>ignition</literal>. For EXT4 file system with one partition:</para>
+<screen>e2label /dev/sdX1 ignition</screen>
+</step>
+<step>
+<para>mount the partition</para>
+</step>
+<step>
+<para>create the directory structure as mentioned in <xref linkend="sec-slem-ignition"/>.</para>
+</step>	
+</procedure>
+</sect3>
+
+<sect3 xml:id="sec-ignition-iso">
+<title>Creating an iso file</title>
+</sect3>
+</sect2>
+<sect2 xml:id="sec-slem-combustion">
+	<title>Configuration by using Combustion</title>
+<para>Combustion is a a minimal module for dracut. you can provide your script and Combution runs the script on the first boot of the system. You can use Combustion to add files, install packages, set up devices and also repartition your disk. You can provide the configuration as a shell script on external storage that is run doring the booting process as a new system snapshot. If the process is successful, the system boots into the new snapshot.</para>
+<para>To use Combustion on boot, create a directory <filename>combustion</filename> as a subdirectory of the root directory. To the <filename>combustion</filename> folder place the script. The script is then executed in a transactional update shell.</para>
+<para>An example script follows:</para>
+<screen>
+#!/bin/bash
+# combustion: network
+# Redirect output to the console
+exec > >(exec tee -a /dev/tty0) 2>&amp;1
+# Set a password for root, generate the hash with "openssl passwd -6"
+echo 'root:$5$.wn2BZHlEJ5R3B1C$TAHEchlU.h2tvfOpOki54NaHpGYKwdNhjaBuSpDotD7' | chpasswd -e
+# Add a public ssh key and enable sshd
+mkdir -pm700 /root/.ssh/
+cat id_rsa_new.pub >> /root/.ssh/authorized_keys
+systemctl enable sshd.service
+# Install vim-small
+zypper --non-interactive install vim-small
+# Leave a marker
+echo "Configured with combustion" > /etc/issue.d/combustion
+</screen>
+<para>The example script above sets a &rootuser; password, copies a ssh key (the ssh key must be located in the <filename>combustion</filename> directory) and installs the <emphasis>Vim</emphasis> editor with reduced features.</para>
 </sect2>
 </sect1>
 
