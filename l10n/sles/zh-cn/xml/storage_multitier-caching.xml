@@ -1,196 +1,153 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_multitier-caching.xml" version="5.0" xml:id="cha-multitiercache" xml:lang="zh-cn">
- <title>Multi-tier Caching for Block Device Operations</title>
+ <title>用于块设备操作的多层超速缓存</title>
  <info>
-      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
-        <dm:bugtracker/>
-        <dm:translation>no</dm:translation>
-      </dm:docmanager>
-    </info>
-    <para>
-  A multi-tier cache is a replicated/distributed cache that consists of at
-  least two tiers: one is represented by slower but cheaper rotational block
-  devices (hard disks), while the other is more expensive but performs faster
-  data operations (for example SSD flash disks).
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  多层超速缓存是一种复制的/分布式超速缓存，它至少包括两个层：一个层由速度较慢但较为廉价的旋转块设备（硬盘）表示，另一个层成本更高，但执行数据操作的速度更快（例如，SSD 闪存盘）。
  </para>
  <para>
-  SUSE Linux Enterprise Server implements two different solutions for caching between flash and
-  rotational devices: <systemitem class="resource">bcache</systemitem> and <systemitem class="resource">lvmcache</systemitem>.
+  SUSE Linux Enterprise Server 为闪存设备与旋转设备的超速缓存实施两种不同的解决方案：<systemitem class="resource">bcache</systemitem> 和 <systemitem class="resource">lvmcache</systemitem>。
  </para>
  <sect1 xml:id="sec-multitiercache-terminology">
-  <title>General Terminology</title>
+  <title>一般术语</title>
 
   <para>
-   This section explains several terms often used when describing cache related
-   features:
+   本节对在介绍超速缓存相关功能时经常用到的几个术语进行了解释：
   </para>
 
   <variablelist>
    <varlistentry>
-    <term>Migration</term>
+    <term>迁移</term>
     <listitem>
      <para>
-      Movement of the primary copy of a logical block from one device to the
-      other.
+      将逻辑块的主副本从一个设备移到另一个设备。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Promotion</term>
+    <term>升级</term>
     <listitem>
      <para>
-      Migration from the slow device to the fast device.
+      从慢速设备迁移到快速设备。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Demotion</term>
+    <term>降级</term>
     <listitem>
      <para>
-      Migration from the fast device to the slow device.
+      从快速设备迁移到慢速设备。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Origin device</term>
+    <term>源设备</term>
     <listitem>
      <para>
-      The big and slower block device. It always contains a copy of the logical
-      block, which may be out of date or kept in synchronization with the copy
-      on the cache device (depending on policy).
+      大型慢速块设备。它始终包含逻辑块的副本，该副本可能已过时或者与超速缓存设备上的副本保持同步（取决于策略）。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Cache device</term>
+    <term>超速缓存设备</term>
     <listitem>
      <para>
-      The small and faster block device.
+      小型高速块设备。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Metadata device</term>
+    <term>元数据设备</term>
     <listitem>
      <para>
-      A small device that records which blocks are in the cache, which are
-      dirty, and extra hints for use by the policy object. This information
-      could be put on the cache device as well, but having it separate allows
-      the volume manager to configure it differently, for example as a mirror
-      for extra robustness. The metadata device may only be used by a single
-      cache device.
+      一个小型设备，用于记录哪些块在超速缓存中、哪些块是脏的，以及供策略对象使用的附加提示。此信息可放在超速缓存设备上，但将它隔离可让卷管理器对它进行不同的配置，例如，配置为镜像以提高稳定性。元数据设备只能由单个超速缓存设备使用。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Dirty block</term>
+    <term>脏块</term>
     <listitem>
      <para>
-      If some process writes to a block of data which is placed in the cache,
-      the cached block is marked as <emphasis>dirty</emphasis> because it was
-      overwritten in the cache and needs to be written back to the original
-      device.
+      如果某个进程将信息写入超速缓存中的某个数据块，则该超速缓存的块将被标记为<emphasis>脏</emphasis>块，因为该块在超速缓存中已被覆盖，需要写回到原始设备。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Cache miss</term>
+    <term>超速缓存未命中</term>
     <listitem>
      <para>
-      A request for I/O operations is pointed to the cached device's cache
-      first. If it cannot find the requested values, it looks in the device
-      itself, which is slow. This is called a <emphasis>cache miss</emphasis>.
+      I/O 操作请求会先指向已超速缓存设备的超速缓存。如果找不到请求的值，则会在设备本身中查找，因此速度会变慢。这称为<emphasis>超速缓存未命中</emphasis>。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Cache hit</term>
+    <term>超速缓存命中</term>
     <listitem>
      <para>
-      When a requested value is found in the cached device's cache, it is
-      served fast. This is called a <emphasis>cache hit</emphasis>.
+      如果在已超速缓存设备的超速缓存中找到请求的值，则可以快速提供该值。这称为<emphasis>超速缓存命中</emphasis>。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Cold cache</term>
+    <term>冷超速缓存</term>
     <listitem>
      <para>
-      Cache that holds no values (is empty) and causes <emphasis>cache
-      misses</emphasis>. As the cached block device operations progress, it
-      gets filled with data and becomes <emphasis>warm</emphasis>.
+      不保存任何值（为空）且导致<emphasis>超速缓存未命中</emphasis>的超速缓存。在执行已超速缓存块设备的操作过程中，冷超速缓存中会填充数据，从而变为<emphasis>暖</emphasis>超速缓存。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>Warm cache</term>
+    <term>暖超速缓存</term>
     <listitem>
      <para>
-      Cache that already holds some values and is likely to result in
-      <emphasis>cache hits</emphasis>.
+      已保存了一些值并且可能会导致<emphasis>超速缓存命中</emphasis>的超速缓存。
      </para>
     </listitem>
    </varlistentry>
   </variablelist>
  </sect1>
  <sect1 xml:id="sec-multitiercache-caching-modes">
-  <title>Caching Modes</title>
+  <title>超速缓存模式</title>
 
   <para>
-   Following are the basic caching modes that multi-tier caches use:
-   <emphasis>write-back</emphasis>, <emphasis>write-through</emphasis>,
-   <emphasis>write-around</emphasis> and <emphasis>pass-through</emphasis>.
+   下面是多层超速缓存使用的基本超速缓存模式：<emphasis>写回</emphasis>、<emphasis>直写</emphasis>、<emphasis>绕写</emphasis>和<emphasis>直通</emphasis>。
   </para>
 
   <variablelist>
    <varlistentry>
-    <term>write-back</term>
+    <term>写回</term>
     <listitem>
      <para>
-      Data written to a block that is cached go to the cache only, and the
-      block is marked dirty. This is the default caching mode.
+      写入已超速缓存块的数据只会存入超速缓存，并且该块将标记为脏块。这是默认的超速缓存模式。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>write-through</term>
+    <term>直写</term>
     <listitem>
      <para>
-      Writing to a cached block will not complete until it has hit both the
-      origin and cache devices. Clean blocks remain clean with
-      <emphasis>write-through</emphasis> cache.
+      只有在同时命中源设备和超速缓存设备之后，向已超速缓存块的写入才会完成。在<emphasis>直写</emphasis>超速缓存中，干净块将保持干净状态。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>write-around</term>
+    <term>绕写</term>
     <listitem>
      <para>
-      A similar technique to write-through cache, but write I/O is written
-      directly to a permanent storage, bypassing the cache. This can prevent
-      the cache being flooded with write I/O that will not subsequently be
-      re-read, but the disadvantage is that a read request for recently written
-      data will create a 'cache miss' and needs to be read from slower bulk
-      storage and experience higher latency.
+      类似于直写超速缓存的一种技术，不过，写 I/O 将直接写入永久性储存，并绕过超速缓存。这可以防止超速缓存因写 I/O 而填满，导致以后不可重新读取，不过，缺点是对最近写入数据的读取请求会造成“超速缓存未命中”，因而需要从慢速大容量储存中读取这些数据，致使发生较高延迟。
      </para>
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>pass-through</term>
+    <term>直通</term>
     <listitem>
      <para>
-      To enable the <emphasis>pass-through</emphasis> mode, the cache needs to
-      be clean. Reading is served from the origin device bypassing the cache.
-      Writing is forwarded to the origin device and 'invalidates' the cache
-      block. <emphasis>Pass-through</emphasis> allows a cache device activation
-      without having to care about data coherency, which is maintained. The
-      cache will gradually become cold as writing takes place. If you can
-      verify the coherency of the cache later, or establish it by using the
-      <literal>invalidate_cblocks</literal> message, you can switch the cache
-      device to <emphasis>write-through</emphasis> or
-      <emphasis>write-back</emphasis> mode while it is still warm. Otherwise,
-      you can discard the cache contents before switching to the desired
-      caching mode.
+      要启用<emphasis>直通</emphasis>模式，超速缓存必须是干净的。将绕过超速缓存，从源设备为读取请求提供服务。写请求将转到源设备，使超速缓存块“失效”。<emphasis>直通</emphasis>允许您激活超速缓存设备时不必考虑数据一致性，而这是可以维护的。随着写操作的不断进行，超速缓存将逐渐变为冷状态。如果您以后可以校验超速缓存的一致性，或者可以使用 <literal>invalidate_cblocks</literal> 讯息来建立这种一致性，则可以在超速缓存设备仍处于暖状态时，将它切换到<emphasis>直写</emphasis>或<emphasis>写回</emphasis>模式。或者，可以在切换到所需的超速缓存模式之前，先丢弃超速缓存内容。
      </para>
     </listitem>
    </varlistentry>
@@ -202,44 +159,35 @@
 
 
   <para>
-   <systemitem class="resource">bcache</systemitem> is a Linux kernel block layer cache. It allows one or more fast
-   disk drives (such as SSDs) to act as a cache for one or more slower hard
-   disks. <systemitem class="resource">bcache</systemitem> supports write-through and write-back, and is independent of
-   the file system used. By default it caches random reads and writes only,
-   which SSDs excel at. It is suitable for desktops, servers, and high end
-   storage arrays as well.
+   <systemitem class="resource">bcache</systemitem> 是一个 Linux 内核块层超速缓存。它允许使用一个或多个高速磁盘驱动器（例如 SSD）作为一个或多个速度低得多的硬盘的超速缓存。<systemitem class="resource">bcache</systemitem> 支持直写和写回，不受所用文件系统的约束。默认情况下，它只超速缓存随机读取和写入，这也是 SSD 的强项。它还适合用于台式机、服务器和高端储存阵列。
   </para>
 
   <sect2 xml:id="sec-multitiercache-bcache-features">
-   <title>Main Features</title>
+   <title>主要功能</title>
    <itemizedlist>
     <listitem>
      <para>
-      A single cache device can be used to cache an arbitrary number of backing
-      devices. Backing devices can be attached and detached at runtime, while
-      mounted and in use.
+      可以使用单个超速缓存设备来超速缓存任意数量的后备设备。在运行时可以挂接和分离已装入及使用中的后备设备。
      </para>
     </listitem>
     <listitem>
      <para>
-      Recovers from unclean shutdowns—writes are not completed until the
-      cache is consistent with regard to the backing device.
+      在非正常关机后恢复 - 只有在超速缓存与后备设备一致后才完成写入。
      </para>
     </listitem>
     <listitem>
      <para>
-      Throttles traffic to the SSD if it becomes congested.
+      SSD 拥塞时限制传至 SSD 的流量。
      </para>
     </listitem>
     <listitem>
      <para>
-      Highly efficient write-back implementation. Dirty data is always written
-      out in sorted order.
+      高效的写回实施方案。脏数据始终按排序顺序写出。
      </para>
     </listitem>
     <listitem>
      <para>
-      Stable and reliable—in production use.
+      稳定可靠，可在生产环境中使用。
      </para>
     </listitem>
    </itemizedlist>
@@ -248,87 +196,71 @@
 
 
   <sect2 xml:id="sec-multitiercache-bcache-setting-bcache-device">
-   <title>Setting Up a <systemitem class="resource">bcache</systemitem> Device</title>
+   <title>设置 <systemitem class="resource">bcache</systemitem> 设备</title>
    <para>
-    This section describes steps to set up and manage a <systemitem class="resource">bcache</systemitem> device.
+    本节介绍设置和管理 <systemitem class="resource">bcache</systemitem> 设备的步骤。
    </para>
    <procedure>
     <step>
      <para>
-      Install the <systemitem>bcache-tools</systemitem> package:
+      安装 <systemitem>bcache-tools</systemitem> 包：
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> zypper in bcache-tools</screen>
     </step>
     <step>
      <para>
-      Create a backing device (typically a mechanical drive). The backing
-      device can be a whole device, a partition, or any other standard block
-      device.
+      创建后备设备（通常是一个机械驱动器）。后备设备可以是整个设备、一个分区或任何其他标准块设备。
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> make-bcache -B /dev/sdb</screen>
     </step>
     <step>
      <para>
-      Create a cache device (typically an SSD disk).
+      创建超速缓存设备（通常是一个 SSD 磁盘）。
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> make-bcache -C /dev/sdc</screen>
      <para>
-      In this example, the default block and bucket sizes of 512 B and 128 KB
-      are used. The block size should match the backing device's sector size
-      which will usually be either 512 or 4k. The bucket size should match the
-      erase block size of the caching device with the intention of reducing
-      write amplification. For example, using a hard disk with 4k sectors and
-      an SSD with an erase block size of 2 MB this command would look as
-      follows:
+      本示例使用了默认的块大小和储存桶大小，分别为 512 B 和 128 KB。块大小应与后备设备的扇区大小（通常为 512 或 4k）匹配。储存桶大小应与超速缓存设备的擦除块大小匹配，以便减少写入放大现象。例如，如果使用具有 4k 扇区的硬盘和具有 2 MB 擦除块大小的 SSD，则此命令将如下所示：
      </para>
 <screen>sudo make-bcache --block 4k --bucket 2M -C /dev/sdc</screen>
      <tip>
-      <title>Multi-Device Support</title>
+      <title>多设备支持</title>
       <para>
-       <command>make-bcache</command> can prepare and register multiple backing
-       devices and a cache device at the same time. In this case you do not
-       need to manually attach the cache device to the backing device
-       afterward:
+       <command>make-bcache</command> 可同时准备和注册多个后备设备与一个超速缓存设备。在这种情况下，以后您不需要将超速缓存设备手动挂接到后备设备：
       </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> make-bcache -B /dev/sda /dev/sdb -C /dev/sdc</screen>
      </tip>
     </step>
     <step>
      <para>
-      <systemitem class="resource">bcache</systemitem> devices show up as
+      <systemitem class="resource">bcache</systemitem> 设备将显示为
      </para>
 <screen>/dev/bcache<replaceable>N</replaceable></screen>
      <para>
-      and as
+      和
      </para>
 <screen>/dev/bcache/by-uuid/<replaceable>UUID</replaceable>
 /dev/bcache/by-label/<replaceable>LABEL</replaceable></screen>
      <para>
-      You can normally format and mount <systemitem class="resource">bcache</systemitem> devices as usual:
+      您可以像平时一样正常格式化和装入 <systemitem class="resource">bcache</systemitem> 设备：
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> mkfs.ext4 /dev/bcache0
 <prompt>tux &gt; </prompt><command>sudo</command> mount /dev/bcache0 /mnt</screen>
      <para>
-      You can control <systemitem class="resource">bcache</systemitem> devices through <systemitem>sysfs</systemitem>
-      at
-      <filename>/sys/block/bcache<replaceable>N</replaceable>/bcache</filename>.
+      您可以在 <filename>/sys/block/bcache<replaceable>N</replaceable>/bcache</filename> 中通过 <systemitem>sysfs</systemitem> 控制 <systemitem class="resource">bcache</systemitem> 设备。
      </para>
     </step>
     <step>
      <para>
-      After both the cache and backing devices are registered, you need to
-      attach the backing device to the related cache set to enable caching:
+      注册超速缓存设备和后备设备后，需要将后备设备挂接到相关的超速缓存集才能启用超速缓存：
      </para>
 <screen><prompt>tux &gt; </prompt>echo <replaceable>CACHE_SET_UUID</replaceable> &gt; /sys/block/bcache0/bcache/attach</screen>
      <para>
-      where <replaceable>CACHE_SET_UUID</replaceable> is found in
-      <filename>/sys/fs/bcache</filename>.
+      其中，<replaceable>CACHE_SET_UUID</replaceable> 可在 <filename>/sys/fs/bcache</filename> 中找到。
      </para>
     </step>
     <step>
      <para>
-      By default <systemitem class="resource">bcache</systemitem> uses a pass-through caching mode. To change it to for
-      example write-back, run
+      默认情况下，<systemitem class="resource">bcache</systemitem> 使用直通超速缓存模式。要更改模式，例如，更改为写回模式，请运行
      </para>
 <screen><prompt>tux &gt; </prompt>echo writeback &gt; /sys/block/bcache0/bcache/cache_mode</screen>
     </step>
@@ -336,19 +268,12 @@
   </sect2>
 
   <sect2 xml:id="sec-multitiercache-bcache-sysfs">
-   <title><systemitem class="resource">bcache</systemitem> Configuration Using <systemitem>sysfs</systemitem></title>
+   <title>使用 <systemitem>sysfs</systemitem> 的 <systemitem class="resource">bcache</systemitem> 配置</title>
    <para>
-    <systemitem class="resource">bcache</systemitem> devices use the <systemitem>sysfs</systemitem> interface to store
-    their runtime configuration values. This way you can change <systemitem class="resource">bcache</systemitem>
-    backing and cache disks' behavior or see their usage statistics.
+    <systemitem class="resource">bcache</systemitem> 设备使用 <systemitem>sysfs</systemitem> 接口来储存其运行时配置值。这样，您便可以更改 <systemitem class="resource">bcache</systemitem> 后备设备和超速缓存磁盘的行为，或查看其使用统计数字。
    </para>
    <para>
-    For the complete list of <systemitem class="resource">bcache</systemitem> <systemitem>sysfs</systemitem>
-    parameters, see the contents of the
-    <filename>/usr/src/linux/Documentation/bcache.txt</filename> file, mainly
-    the <literal>SYSFS - BACKING DEVICE</literal>, <literal>SYSFS - BACKING
-    DEVICE STATS</literal>, and <literal>SYSFS - CACHE DEVICE</literal>
-    sections.
+    有关 <systemitem class="resource">bcache</systemitem> <systemitem> sysfs</systemitem> 参数的完整列表，请查看 <filename>/usr/src/linux/Documentation/bcache.txt</filename> 文件的内容，主要查看 <literal>SYSFS - BACKING DEVICE</literal>、<literal>SYSFS - BACKING DEVICE STATS</literal> 和 <literal>SYSFS - CACHE DEVICE</literal> 部分。
    </para>
   </sect2>
  </sect1>
@@ -356,54 +281,38 @@
   <title><systemitem class="resource">lvmcache</systemitem></title>
 
   <para>
-   <systemitem class="resource">lvmcache</systemitem> is a caching mechanism consisting of logical volumes (LVs). It
-   uses the <literal>dm-cache</literal> kernel driver and supports
-   write-through (default) and write-back caching modes. <systemitem class="resource">lvmcache</systemitem> improves
-   performance of a large and slow LV by dynamically migrating some of its data
-   to a faster and smaller LV. For more information on LVM, see
-   <xref linkend="part-lvm"/>.
+   <systemitem class="resource">lvmcache</systemitem> 是由逻辑卷 (LV) 组成的超速缓存机制。它使用 <literal>dm-cache</literal> 内核驱动程序，支持直写（默认）和写回超速缓存模式。<systemitem class="resource">lvmcache</systemitem> 可将大型慢速 LV 的部分数据动态迁移到更快、更小的 LV，从而提高其性能。有关 LVM 的详细信息，请参见<xref linkend="part-lvm"/>。
   </para>
 
   <para>
-   LVM refers to the small, fast LV as a <emphasis>cache pool LV</emphasis>.
-   The large, slow LV is called the <emphasis>origin LV</emphasis>. Because of
-   requirements from dm-cache, LVM further splits the cache pool LV into two
-   devices: the <emphasis>cache data LV</emphasis> and <emphasis>cache
-   metadata LV</emphasis>. The cache data LV is where copies of data blocks
-   are kept from the origin LV to increase speed. The cache metadata LV holds
-   the accounting information that specifies where data blocks are stored.
+   LVM 将小型快速 LV 称为<emphasis>超速缓存池 LV</emphasis>。大型慢速 LV 称为<emphasis>源 LV</emphasis>。由于 dm-cache 的要求，LVM 进一步将超速缓存池 LV 分割成两个设备：<emphasis>超速缓存数据 LV</emphasis> 和<emphasis>超速缓存元数据 LV</emphasis>。来自源 LV 的数据块副本保存在超速缓存数据 LV 中，以提高速度。超速缓存元数据 LV 保存记帐信息，这些信息指定数据块的储存位置。
   </para>
 
   <sect2 xml:id="sec-multitiercache-lvmcache-configure">
-   <title>Configuring <systemitem class="resource">lvmcache</systemitem></title>
+   <title>配置 <systemitem class="resource">lvmcache</systemitem></title>
    <para>
-    This section describes steps to create and configure LVM based caching.
+    本节介绍创建和配置基于 LVM 的超速缓存的步骤。
    </para>
    <procedure>
     <step>
      <para>
-      <emphasis>Create the origin LV.</emphasis> Create a new LV or use an
-      existing LV to become the origin LV:
+      <emphasis>创建源 LV。</emphasis>创建新 LV，或使用现有 LV 作为源 LV：
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvcreate -n <replaceable>ORIGIN_LV</replaceable> -L 100G vg <replaceable>/dev/SLOW_DEV</replaceable></screen>
     </step>
     <step>
      <para>
-      <emphasis>Create the cache data LV.</emphasis> This LV will hold data
-      blocks from the origin LV. The size of this LV is the size of the cache
-      and will be reported as the size of the cache pool LV.
+      <emphasis>创建超速缓存数据 LV。</emphasis>此 LV 将保存来自源 LV 的数据块。此 LV 的大小是超速缓存的大小，将报告为超速缓存池 LV 的大小。
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvcreate -n <replaceable>CACHE_DATA_LV</replaceable> -L 10G vg <replaceable>/dev/FAST</replaceable></screen>
     </step>
     <step>
      <para>
-      <emphasis>Create the cache metadata LV.</emphasis> This LV will hold
-      cache pool metadata. The size of this LV should be approximately 1000
-      times smaller than the cache data LV, with a minimum size of 8MB.
+      <emphasis>创建超速缓存元数据 LV。</emphasis>此 LV 将保存超速缓存池元数据。此 LV 的大小应该比超速缓存数据 LV 大约小 1000 倍，其最小大小为 8MB。
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvcreate -n <replaceable>CACHE_METADATA_LV</replaceable> -L 12M vg <replaceable>/dev/FAST</replaceable></screen>
      <para>
-      List the volumes you have created so far:
+      列出您目前为止所创建的卷：
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvs -a vg
 LV                VG   Attr        LSize   Pool Origin
@@ -413,21 +322,16 @@ origin_lv         vg   -wi-a----- 100.00g</screen>
     </step>
     <step>
      <para>
-      <emphasis>Create a cache pool LV.</emphasis> Combine the data and
-      metadata LVs into a cache pool LV. You can set the cache pool LV's
-      behavior at the same time.
+      <emphasis>创建超速缓存池 LV。</emphasis>将数据 LV 和元数据 LV 组合成一个超速缓存池 LV。同时还可以设置超速缓存池 LV 的行为。
      </para>
      <para>
-      <replaceable>CACHE_POOL_LV</replaceable> takes the name of
-      <replaceable>CACHE_DATA_LV</replaceable>.
+      <replaceable>CACHE_POOL_LV</replaceable> 与 <replaceable>CACHE_DATA_LV</replaceable> 同名。
      </para>
      <para>
-      <replaceable>CACHE_DATA_LV</replaceable> is renamed to
-      <replaceable>CACHE_DATA_LV</replaceable>_cdata and becomes hidden.
+      <replaceable>CACHE_DATA_LV</replaceable> 重命名为 <replaceable>CACHE_DATA_LV</replaceable>_cdata，并且会隐藏起来。
      </para>
      <para>
-      <replaceable>CACHE_META_LV</replaceable> is renamed to
-      <replaceable>CACHE_DATA_LV</replaceable>_cmeta and becomes hidden.
+      <replaceable>CACHE_META_LV</replaceable> 重命名为 <replaceable>CACHE_DATA_LV</replaceable>_cmeta，并且会隐藏起来。
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvconvert --type cache-pool \
  --poolmetadata vg/cache_metadata_lv vg/cache_data_lv</screen>
@@ -440,20 +344,16 @@ origin_lv              vg   -wi-a----- 100.00g</screen>
     </step>
     <step>
      <para>
-      <emphasis>Create a cache LV.</emphasis> Create a cache LV by linking the
-      cache pool LV to the origin LV.
+      <emphasis>创建超速缓存 LV。</emphasis>通过将超速缓存池 LV 链接到源 LV 来创建超速缓存 LV。
      </para>
      <para>
-      The user accessible cache LV takes the name of the origin LV, while the
-      origin LV becomes a hidden LV renamed to
-      <replaceable>ORIGIN_LV</replaceable>_corig.
+      用户可访问的超速缓存 LV 与源 LV 同名，源 LV 将变成重命名为 <replaceable>ORIGIN_LV</replaceable>_corig 的隐藏 LV。
      </para>
      <para>
-      CacheLV takes the name of <replaceable>ORIGIN_LV</replaceable>.
+      CacheLV 与 <replaceable>ORIGIN_LV</replaceable> 同名。
      </para>
      <para>
-      <replaceable>ORIGIN_LV</replaceable> is renamed to
-      <replaceable>ORIGIN_LV</replaceable>_corig and becomes hidden.
+      <replaceable>ORIGIN_LV</replaceable> 重命名为 <replaceable>ORIGIN_LV</replaceable>_corig，并且会隐藏起来。
      </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvconvert --type cache --cachepool vg/cache_data_lv vg/origin_lv</screen>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvs -a vg
@@ -468,47 +368,39 @@ origin_lv              vg   Cwi-a-C--- 100.00g cache_data_lv [origin_lv_corig]
   </sect2>
 
   <sect2 xml:id="sec-multitiercache-lvmcache-remove">
-   <title>Removing a Cache Pool</title>
+   <title>去除超速缓存池</title>
    <para>
-    There are several ways to turn off the LV cache.
+    可通过多种方法关闭 LV 超速缓存。
    </para>
    <sect3 xml:id="sec-multitiercache-lvmcache-remove-detach">
-    <title>Detach a Cache Pool LV from a Cache LV</title>
+    <title>从超速缓存 LV 分离超速缓存池 LV</title>
     <para>
-     You can disconnect a cache pool LV from a cache LV, leaving an unused
-     cache pool LV and an uncached origin LV. Data are written back from the
-     cache pool to the origin LV when necessary.
+     您可以从超速缓存 LV 断开与超速缓存池 LV 的连接，留下一个未使用的超速缓存池 LV 和一个未超速缓存的源 LV。数据将根据需要从超速缓存池写回到源 LV。
     </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvconvert --splitcache vg/origin_lv</screen>
    </sect3>
    <sect3 xml:id="sec-multitiercache-lvmcache-remove-wo-origin">
-    <title>Removing a Cache Pool LV without Removing its Origin LV</title>
+    <title>去除超速缓存池 LV 但不去除其源 LV</title>
     <para>
-     This writes back data from the cache pool to the origin LV when necessary,
-     then removes the cache pool LV, leaving the uncached origin LV.
+     以下命令会根据需要将数据从超速缓存池写回到源 LV，然后去除超速缓存池 LV，留下未超速缓存的源 LV。
     </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvremove vg/cache_data_lv</screen>
     <para>
-     An alternative command that also disconnects the cache pool from the cache
-     LV, and deletes the cache pool:
+     也可以使用以下替代命令从超速缓存 LV 断开与超速缓存池的连接，并删除超速缓存池：
     </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvconvert --uncache vg/origin_lv</screen>
    </sect3>
    <sect3 xml:id="sec-multitiercache-lvmcache-remove-both">
-    <title>Removing Both the Origin LV and the Cache Pool LV</title>
+    <title>去除源 LV 和超速缓存池 LV</title>
     <para>
-     Removing a cache LV removes both the origin LV and the linked cache pool
-     LV.
+     去除超速缓存 LV 会同时去除源 LV 和链接的超速缓存池 LV。
     </para>
 <screen><prompt>tux &gt; </prompt><command>sudo</command> lvremove vg/origin_lv</screen>
    </sect3>
    <sect3 xml:id="sec-multitiercache-lvmcache-remove-info">
-    <title>For More Information</title>
+    <title>更多信息</title>
     <para>
-     You can find more <systemitem class="resource">lvmcache</systemitem> related topics, such as supported cache
-     modes, redundant sub-logical volumes, cache policy, or converting existing
-     LVs to cache types, in the <systemitem class="resource">lvmcache</systemitem> manual page (<command>man 7
-     lvmcache</command>).
+     可以在 <systemitem class="resource">lvmcache</systemitem> 手册页 (<command>man 7 lvmcache</command>) 中找到有关 <systemitem class="resource">lvmcache</systemitem> 的更多主题，例如支持的超速缓存模式、冗余的子逻辑卷、超速缓存策略，或者将现有 LV 转换为超速缓存类型。
     </para>
    </sect3>
   </sect2>
