@@ -15,7 +15,8 @@ The first column is to be filled by the requester, the second column is to be fi
 
 | Code 15     | Backport Done
 | ----------  | ----------
-| [ ] 15 SP3  | *(no backport necessary)*
+| [ ] 15 SP4  |*(no backport necessary)*
+| [ ] 15 SP3  | [ ]
 | [ ] 15 SP2  | [ ]
 | [ ] 15 SP1  | [ ]
 | [ ] 15 SP0  | [ ]
