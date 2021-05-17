@@ -2105,6 +2105,191 @@ Apr 04 16:52:26 g144 start_apache2[3088]: httpd2-prefork: Syntax error on line
    </variablelist>
   </sect2>
  </sect1>
+ <sect1 xml:id="sec-boot-systemd-timer-units">
+  <title>&systemd; timer units</title>
+  <para>
+  Similar to cron, &systemd; timer units provide a mechanism for scheduling jobs
+  on Linux. Although &systemd; timer units serve the same purpose as cron, they
+  offer several advantages.
+  </para>
+  
+  <itemizedlist>
+  <listitem>
+  <para>
+  Jobs scheduled using a timer unit can depend on other &systemd; services.
+  </para>
+  </listitem>
+  <listitem>
+  <para>
+  Timer units are treated as regular &systemd; services, so can be
+  managed with <command>systemctl</command>.
+  </para>
+  </listitem>
+  <listitem>
+  <para>
+  Timers can be realtime and monotonic.
+  </para>
+  </listitem>
+  <listitem>
+  <para>
+  Time units are logged to the &systemd; journal, which makes it easier to
+  monitor and troubleshoot them.
+  </para>
+  </listitem>
+  </itemizedlist>
+
+  <para>
+  &systemd; timer units are identified by the <literal>.timer</literal> file name extension.
+  </para>
+
+  <sect2 xml:id="sec-boot-systemd-timer-types">
+  <title>&systemd; timer types</title>
+  <para>
+  Timer units can use monotonic and realtime timers.
+  </para>
+
+<itemizedlist>
+<listitem>
+<para>
+    Similar to cronjobs, realtime timers are triggered on calendar events.
+    Realtime timers are defined using the option <option>OnCalendar</option>.
+</para>
+</listitem>
+<listitem>
+<para>
+Monotonic timers are triggered at a specified time elapsed from a certain
+starting point. The latter could be a system boot or system unit activation
+event. There are several options for defining monotonic timers including
+<option>OnBootSec</option>, <option>OnUnitActiveSec</option>, and
+<option>OnTypeSec</option>. Monotonic timers  are not persistent, and they are
+reset after each reboot.
+</para>
+</listitem>
+</itemizedlist>
+  </sect2>
+  <sect2 xml:id="sec-boot-systemd-timer-service-units">
+  <title>&systemd; timers and service units</title>
+  <para>
+  Every timer unit must have a corresponding &systemd; unit file it controls.
+  In other words, a <filename>.timer</filename> file activates and manages the
+  corresponding <filename>.service</filename> file. When used with a timer, the
+  <filename>.service</filename> file does not require an
+  <literal>[Install]</literal> section, as the service is managed by the timer.
+  </para>
+  </sect2>
+  <sect2 xml:id="sec-boot-systemd-timer-example">
+  <title>Practical example</title>
+  <para>
+  To understand the basics of &systemd; timer units, we set up a timer that
+  triggers the <filename>foo.sh</filename> shell script.
+  </para>
+  <para>
+  First step is to create a &systemd; service unit that controls the shell
+  script. To do this, open a new text file for editing and add the following
+  service unit definition:
+  </para>
+
+<screen>[Unit]
+Description="Foo shell script"
+
+[Service]
+ExecStart=/usr/local/bin/foo.sh</screen>
+
+<para>
+Save the file under the name <filename>foo.service</filename> in the directory
+<filename>/etc/systemd/system/</filename>.
+</para>
+
+<para>
+Next, open a new text file for editing and add the following timer definition:
+</para>
+
+  <screen>[Unit]
+Description="Run foo shell script"
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=24h
+Unit=foo.service
+
+[Install]
+WantedBy=multi-user.target</screen>
+<para>
+The <literal>[Timer]</literal> section in the example above specifies what
+service to trigger (<literal>foo.service</literal>) and when to trigger it. In
+this case, the option <option>OnBootSec</option> specifies a monotonic timer
+that triggers the service five minutes after the system boot, while the option
+<option>OnUnitActiveSec</option> triggers the service 24 hours after the service
+has been activated (that is, the timer will trigger the service once a day).
+Finally the option <option>WantedBy</option> specifies that the timer should
+start when the system has reached the multi-user target.
+</para>
+<para>
+Instead of a monotonic timer, you can specify a realtime one using the option
+<option>OnCalendar</option>. The following realtime timer definition triggers
+the related service unit once a week, starting on Monday at 12:00.
+</para>
+<screen>[Timer]
+OnCalendar=weekly
+Persistent=true</screen>
+<para>
+The option <option>Persistent=true</option> indicates that the service will be
+triggered immediately after the timer activation if the timer missed the last
+start time (for example, due to the system being powered off).
+</para>
+<para>
+The option <option>OnCalendar</option> can also be used to define specific dates
+times for triggering a service using the following format: <literal>DayOfWeek
+Year-Month-Day Hour:Minute:Second</literal>. The example below triggers a service
+at 5am every day:
+</para>
+<screen>OnCalendar=*-*-* 5:00:00</screen>
+<para>
+You can use an asterisk to specify any value, and commas to list possible
+values. Use two values separated by .. to indicate a contiguous range. The
+following example triggers a service at 6pm on Friday of every month: 
+</para>
+<screen>OnCalendar=Fri *-*-1..7 18:00:00</screen>
+<para>
+To trigger a service at different times, you can specify several
+<option>OnCalendar</option> entries:
+</para>
+<screen>OnCalendar=Mon..Fri 10:00
+OnCalendar=Sat,Sun 22:00</screen>
+<para>
+ In the example above, a service is triggered at 10am on week days and at
+ 10pm on weekends.
+ </para>
+<para>
+When you are done editing the timer unit file, save it under the
+name <filename>foo.timer</filename> in the
+<filename>/etc/systemd/system/</filename> directory. To check the correctness of
+the created unit files, run the following command:
+</para>
+<screen>&prompt.sudo; systemd-analyze verify /etc/systemd/system/foo.*</screen>
+<para>
+If the command returns no output, the files have passed the verification
+successfully.
+</para>
+<para>
+To start the timer, use the command <command>sudo systemctl start
+foo.timer</command>. To enable the timer on boot, run the command <command>sudo
+systemctl enable foo.timer</command>.
+</para>
+  </sect2>
+  <sect2 xml:id="sec-boot-systemd-timer-manage">
+  <title>Managing &systemd; timers</title>
+  <para>
+  Since timers are treated as regular &systemd; units, you can manage them using
+  <command>systemctl</command>. You can start a timer with <command>systemctl
+  start</command>, enable a timer with <command>systemctl enable</command>, and
+  so on. In addition to that, you can list all active timers using the command
+  <command>systemctl list-timers</command>. To list all timers,
+  including inactive ones, run the command <command>systemctl list-timers --all</command>.
+  </para>
+  </sect2>
+  </sect1>
+
  <sect1 xml:id="sec-boot-systemd-info">
   <title>More Information</title>
 
