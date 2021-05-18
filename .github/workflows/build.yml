@@ -1,0 +1,55 @@
+---
+name: "Build"
+
+on:
+  workflow_run:
+    workflows: ["Validate Doc"]
+    branches: [main]
+    types: 
+      - completed
+      - requested
+
+jobs:
+  on-success:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      file: ${{ steps.set-dc-files.outputs.file }}
+    steps:
+      - name: Create DC files
+        id: set-dc-files
+        # Give it an id to handle to get step outputs in the outputs key above
+        run: |
+          shopt -s extglob
+          DC=$(ls DC!(*-all|*-html) | jq -R -s -c 'split("\n")[:-1]')
+          echo "$DC"
+          echo "::set-output name=file::$DC"
+
+  on-failure:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    steps:
+      - name: Failure
+        run: echo "That wasn't successful"
+  
+  html:
+    runs-on: ubuntu-latest
+    needs: [on-success]  # Depends on previous job
+    strategy:
+      matrix:
+        # List matrix strategy from directories dynamically
+        dc-file: ${{ fromJson(needs.on-success.outputs.file) }}
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: tomschr/xml-doc-action@main
+        with:
+          command: |
+            daps -vv --builddir=build/${{matrix.dc-file}} \
+               -d ${{matrix.dc-file}} validate
+
+      - name: list the builddir
+        id: builddir
+        run: |
+          ls -lR build/
