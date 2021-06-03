@@ -1762,7 +1762,7 @@ domid=3: nr_frames=3, max_nr_frames=40
   </sect2>
 
   <sect2 xml:id="virsh-kvm-zseries-crypto-proc">
-   <title>Dedicate a crypto adapter to a &kvm host</title>
+   <title>Dedicate a crypto adapter to a &kvm; host</title>
    <procedure>
     <step>
      <para>
@@ -1809,6 +1809,91 @@ echo -0x0 | sudo tee /sys/bus/ap/apmask
 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
 echo -0x0 | sudo tee /sys/bus/ap/aqmask
 0xfffffdffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+</screen>
+    </step>
+    <step>
+     <para>
+      Load the <literal>vfio_ap</literal> driver and verify that mediated
+      devices (MDEV) can be registered:
+     </para>
+<screen>
+&prompt.sudo;modprobe vfio_ap
+dmesg | tail
+[...]
+[272006.492864] vfio_ap matrix: MDEV: Registered
+</screen>
+    </step>
+    <step>
+     <para>
+      Create a new MDEV device and verify that it was added:
+     </para>
+<screen>
+uuid=$(uuidgen)
+$ echo ${uuid} | sudo tee /sys/devices/vfio_ap/matrix/mdev_supported_types/vfio_ap-passthrough/create
+dmesg | tail
+[...]
+[272197.818811] iommu: Adding device 24f952b3-03d1-4df2-9967-0d5f7d63d5f2 to group 0
+[272197.818815] vfio_mdev 24f952b3-03d1-4df2-9967-0d5f7d63d5f2: MDEV: group_id = 0
+</screen>
+    </step>
+    <step>
+     <para>
+      Assign adapter 0 and domain 16 (22 decimal) to
+      <literal>vfio-ap</literal>:
+     </para>
+<screen>
+&prompt.sudo;echo +0x0 > /sys/devices/vfio_ap/matrix/${uuid}/assign_adapter
+&prompt.user;echo +0x16 | sudo tee /sys/devices/vfio_ap/matrix/${uuid}/assign_domain
+&prompt.user;echo +0x16 | sudo tee /sys/devices/vfio_ap/matrix/${uuid}/assign_control_domain
+</screen>
+    </step>
+    <step>
+     <para>
+      verify the matrix that you have configured:
+     </para>
+<screen>
+&prompt.user;cat /sys/devices/vfio_ap/matrix/${uuid}/matrix
+00.0016
+</screen>
+    </step>
+    <step>
+     <para>
+      Create a new VM (refer to <xref linkend="ha-kvm-inst"/>) and wait until
+      it is initialized. Alternatively, use an existing VM. In both cases, make
+      sure it is shut down.
+     </para>
+    </step>
+    <step>
+     <para>
+      Change its configuration to use the MDEV device:
+     </para>
+<screen>
+&prompt.sudo;virsh edit <replaceable>VM_NAME</replaceable>
+[...]
+&lt;hostdev mode='subsystem' type='mdev' model='vfio-ap'>
+ &lt;source>
+  &lt;address uuid='24f952b3-03d1-4df2-9967-0d5f7d63d5f2'/>
+ &lt;/source>
+&lt;/hostdev>
+[...]
+</screen>
+    </step>
+    <step>
+     <para>
+      Restart the VM:
+     </para>
+<screen>&prompt.sudo;virsh reboot <replaceable>VM_NAME</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      Log in to the guest and verify that the adapter is present:
+     </para>
+<screen>
+&prompt.user;lszcrypt
+CARD.DOMAIN TYPE MODE STATUS REQUEST_CNT
+-------------------------------------------------
+00 CEX5C CCA-Coproc online 1
+00.0016 CEX5C CCA-Coproc online 1
 </screen>
     </step>
    </procedure>
