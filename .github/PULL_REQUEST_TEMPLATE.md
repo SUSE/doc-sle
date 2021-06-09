@@ -1,29 +1,32 @@
-### Description
+### PR creator: Description
 
 Describe the overall goals of this pull request.
 
 
-### Are there any relevant issues/feature requests?
+### PR creator: Are there any relevant issues/feature requests?
 
 * bsc#...
 * jsc#SLE-...
 
 
-### To which product versions do the changes apply?
+### PR creator: Which product versions do the changes apply to?
 
-The first column is to be filled by the requester, the second column is to be filled by the doc team after the changes have been backported to the maintenance branches.
+When opening a PR, check all versions of the documentation that your PR applies to.
 
-| Code 15     | Backport Done
-| ----------  | ----------
-| [ ] 15 SP4  |*(no backport necessary)*
-| [ ] 15 SP3  | [ ]
-| [ ] 15 SP2  | [ ]
-| [ ] 15 SP1  | [ ]
-| [ ] 15 SP0  | [ ]
+- SLE 15/openSUSE Leap 15.x
+  - [ ] SLE 15 SP4/openSUSE Leap 15.4 *(if applicable to 15 SP4 _only_ -- do not merge yet!)*
+  - [ ] SLE 15 SP3/openSUSE Leap 15.3 *(current `main`, no backport necessary)*
+  - [ ] SLE 15 SP2/openSUSE Leap 15.2
+  - [ ] SLE 15 SP1
+  - [ ] SLE 15 GA
+- SLE 12
+  - [ ] SLE 12 SP5
+  - [ ] SLE 12 SP4
+  - [ ] SLE 12 SP3
 
-| Code 12     | Backport Done
-| ----------  | ----------
-| [ ] 12 SP5  | [ ]
-| [ ] 12 SP4  | [ ]
-| [ ] 12 SP3  | [ ]
-| [ ] 12 SP2  | [ ]
+### PR reviewer only: Have all backports been applied?
+
+The doc team member merging your PR will take care of backporting to older documents.
+When opening a PR, do *not* set the following check box.
+
+- [ ] all necessary backports are done
