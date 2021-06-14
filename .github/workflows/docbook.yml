@@ -1,0 +1,92 @@
+---
+name: Validate/build docs
+
+on:
+  push
+
+jobs:
+  select-dc-files:
+    runs-on: ubuntu-latest
+    outputs:
+      validate-list: ${{ steps.select-dc-validate.outputs.dc-list }}
+      build-list: ${{ steps.select-dc-build.outputs.dc-list }}
+      allow-build: ${{ steps.select-dc-build.outputs.allow-build }}
+      relevant-branches: ${{ steps.select-dc-build.outputs.relevant-branches }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Checking basic soundness of DC files
+        uses: openSUSE/doc-ci@gha-select-dcs
+        with:
+          mode: soundness
+
+      - name: Selecting DC files to validate
+        id: select-dc-validate
+        uses: openSUSE/doc-ci@gha-select-dcs
+        with:
+          mode: list-validate
+
+      - name: Selecting DC files to build
+        id: select-dc-build
+        uses: openSUSE/doc-ci@gha-select-dcs
+        with:
+          mode: list-build
+          original-org: SUSE
+
+  validate:
+    runs-on: ubuntu-latest
+    needs: select-dc-files
+    strategy:
+      # don't cancel all validation runners when one of them fails, we want full results
+      fail-fast: false
+      matrix:
+        dc-files: ${{ fromJson(needs.select-dc-files.outputs.validate-list) }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Validating DC file(s) ${{ matrix.dc-files }}
+        uses: openSUSE/doc-ci@gha-validate
+        with:
+          dc-files: ${{ matrix.dc-files }}
+
+
+  build-html:
+    runs-on: ubuntu-latest
+    needs: [select-dc-files, validate]
+    if: ${{ needs.select-dc-files.outputs.allow-build == 'true' }}
+    outputs:
+      artifact-name: ${{ steps.build-dc.outputs.artifact-name }}
+      artifact-dir: ${{ steps.build-dc.outputs.artifact-dir }}
+    strategy:
+      matrix:
+        dc-files: ${{ fromJson(needs.select-dc-files.outputs.build-list) }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Building DC file(s) ${{ matrix.dc-files }}
+        id: build-dc
+        uses: openSUSE/doc-ci@gha-build
+        with:
+          dc-files: ${{ matrix.dc-files }}
+      - name: Uploading builds as artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ steps.build-dc.outputs.artifact-name }}
+          path: ${{ steps.build-dc.outputs.artifact-dir }}/*
+          retention-days: 3
+
+
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ success() }}
+    needs: [select-dc-files, build-html]
+    steps:
+      - name: Downloading all build artifacts
+        uses: actions/download-artifact@v2
+        with:
+          path: artifact-dir
+      - name: Publishing builds on susedoc.github.io
+        uses: openSUSE/doc-ci@gha-publish
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY_SLE }}
+        with:
+          artifact-path: artifact-dir
+          relevant-dirs: ${{ needs.select-dc-files.outputs.relevant-branches }}
