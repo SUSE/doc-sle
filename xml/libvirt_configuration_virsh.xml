@@ -1744,4 +1744,234 @@ domid=3: nr_frames=3, max_nr_frames=40
    </step>
   </procedure>
  </sect1>
+ <sect1 xml:id="virsh-kvm-zseries-crypto">
+  <title>Crypto adapter pass-through to &kvm; guests on &zseries;</title>
+
+  <sect2 xml:id="virsh-kvm-zseries-crypto-intro">
+   <title>Introduction</title>
+   <para>
+    &zseries; machines include cryptographic hardware with useful functions
+    such as random number generation, digital signature generation, or
+    encryption. &kvm; allows dedicating these crypto adapters to guests as
+    pass-through devices. The means that the hypervisor cannot observe
+    communications between the guest and the device.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="virsh-kvm-zseries-crypto-cover">
+   <title>What is covered</title>
+   <para>
+    You will learn how to dedicate a crypto adapter and domains on a &zseries;
+    host to a &kvm; guest. The procedure includes the following basic steps:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Mask the crypto adapter and domains from the default driver on the host.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Load the <literal>vfio-ap</literal> driver.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Assign the crypto adapter and domains to the <literal>vfio-ap</literal>
+      driver.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Configure the guest to use the crypto adapter.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="virsh-kvm-zseries-crypto-reqs">
+   <title>Requirements</title>
+   <itemizedlist>
+    <listitem>
+     <para>
+      You need to have the &qemu; / &libvirt; virtualization environment
+      correctly installed and functional.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      The <literal>vfio_ap</literal> and <literal>vfio_mdev</literal> modules
+      for the running kernel need to be available on the host operating system.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="virsh-kvm-zseries-crypto-proc">
+   <title>Dedicate a crypto adapter to a &kvm; host</title>
+   <procedure>
+    <step>
+     <para>
+      Verify that the <literal>vfio_ap</literal> and
+      <literal>vfio_mdev</literal> kernel modules are loaded on the host:
+     </para>
+<screen>&prompt.user;lsmod | grep vfio_</screen>
+     <para>
+      If any of them is not listed, load it manually, for example:
+     </para>
+<screen>&prompt.sudo;modprobe vfio_mdev</screen>
+    </step>
+    <step>
+     <para>
+      Create a new MDEV device on the host and verify that it was added:
+     </para>
+<screen>
+uuid=$(uuidgen)
+$ echo ${uuid} | sudo tee /sys/devices/vfio_ap/matrix/mdev_supported_types/vfio_ap-passthrough/create
+dmesg | tail
+[...]
+[272197.818811] iommu: Adding device 24f952b3-03d1-4df2-9967-0d5f7d63d5f2 to group 0
+[272197.818815] vfio_mdev 24f952b3-03d1-4df2-9967-0d5f7d63d5f2: MDEV: group_id = 0
+</screen>
+    </step>
+    <step>
+     <para>
+      Identify the device on the host's logical partition that you intend to
+      dedicate to a &kvm; guest:
+     </para>
+<screen>&prompt.user;ls -l /sys/bus/ap/devices/
+[...]
+lrwxrwxrwx 1 root root 0 Nov 23 03:29 00.0016 -> ../../../devices/ap/card00/00.0016/
+lrwxrwxrwx 1 root root 0 Nov 23 03:29 card00 -> ../../../devices/ap/card00/
+</screen>
+     <para>
+      In this example, it is card <literal>0</literal> queue
+      <literal>16</literal>. To match the Hardware Management Console (HMC)
+      configuration, you need to convert from <literal>16</literal> hexadecimal
+      to <literal>22</literal> decimal.
+     </para>
+    </step>
+    <step>
+     <para>
+      Mask the adapter from the <literal>zcrypt</literal> use:
+     </para>
+<screen>
+&prompt.user;lszcrypt
+CARD.DOMAIN TYPE MODE STATUS REQUEST_CNT
+-------------------------------------------------
+00 CEX5C CCA-Coproc online 5
+00.0016 CEX5C CCA-Coproc online 5
+</screen>
+     <para>
+      Mask the adapter:
+     </para>
+<screen>
+&prompt.user;cat /sys/bus/ap/apmask
+0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+echo -0x0 | sudo tee /sys/bus/ap/apmask
+0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+</screen>
+     <para>
+      Mask the domain:
+     </para>
+<screen>
+&prompt.user;cat /sys/bus/ap/aqmask
+0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+echo -0x0 | sudo tee /sys/bus/ap/aqmask
+0xfffffdffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+</screen>
+    </step>
+    <step>
+     <para>
+      Assign adapter 0 and domain 16 (22 decimal) to
+      <literal>vfio-ap</literal>:
+     </para>
+<screen>
+&prompt.sudo;echo +0x0 > /sys/devices/vfio_ap/matrix/${uuid}/assign_adapter
+&prompt.user;echo +0x16 | sudo tee /sys/devices/vfio_ap/matrix/${uuid}/assign_domain
+&prompt.user;echo +0x16 | sudo tee /sys/devices/vfio_ap/matrix/${uuid}/assign_control_domain
+</screen>
+    </step>
+    <step>
+     <para>
+      Verify the matrix that you have configured:
+     </para>
+<screen>
+&prompt.user;cat /sys/devices/vfio_ap/matrix/${uuid}/matrix
+00.0016
+</screen>
+    </step>
+    <step>
+     <para>
+      Either create a new VM (refer to <xref linkend="cha-kvm-inst"/>) and wait
+      until it is initialized, or use an existing VM. In both cases, make sure
+      the VM is shut down.
+     </para>
+    </step>
+    <step>
+     <para>
+      Change its configuration to use the MDEV device:
+     </para>
+<screen>
+&prompt.sudo;virsh edit <replaceable>VM_NAME</replaceable>
+[...]
+&lt;hostdev mode='subsystem' type='mdev' model='vfio-ap'>
+ &lt;source>
+  &lt;address uuid='24f952b3-03d1-4df2-9967-0d5f7d63d5f2'/>
+ &lt;/source>
+&lt;/hostdev>
+[...]
+</screen>
+    </step>
+    <step>
+     <para>
+      Restart the VM:
+     </para>
+<screen>&prompt.sudo;virsh reboot <replaceable>VM_NAME</replaceable></screen>
+    </step>
+    <step>
+     <para>
+      Log in to the guest and verify that the adapter is present:
+     </para>
+<screen>
+&prompt.user;lszcrypt
+CARD.DOMAIN TYPE MODE STATUS REQUEST_CNT
+-------------------------------------------------
+00 CEX5C CCA-Coproc online 1
+00.0016 CEX5C CCA-Coproc online 1
+</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="virsh-kvm-zseries-crypto-moreinfo">
+   <title>Further reading</title>
+   <itemizedlist>
+    <listitem>
+     <para>
+      The installation of virtualization components is detailed in
+      <xref linkend="cha-vt-installation"/>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      The <literal>vfio_ap</literal> architecture is detailed in
+      <link xlink:href="https://www.kernel.org/doc/Documentation/s390/vfio-ap.txt"/>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      A general outline together with a detailed procedure is described in
+      <link xlink:href="https://bugs.launchpad.net/ubuntu/+source/linux/+bug/1787405"/>.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      The architecture of VFIO Mediated devices (MDEVs) is detailed in
+      <link xlink:href="https://www.kernel.org/doc/html/latest/driver-api/vfio-mediated-device.html"/>.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
 </chapter>
