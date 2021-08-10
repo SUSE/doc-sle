@@ -372,11 +372,11 @@ CPU Affinity:   yy
   </sect2>
  </sect1>
  <sect1 xml:id="libvirt-config-virsh-cpu">
-  <title>Configuring CPU model</title>
+  <title>Configuring CPU properties</title>
 
   <para>
    You can specify the CPU model and its features and topology with the
-   <tag>cpu</tag> element. For example:
+   <tag>&lt;cpu/></tag> element:
   </para>
 
 <screen>
@@ -394,9 +394,9 @@ CPU Affinity:   yy
 
   <para>
    The <literal>&lt;cpu/></literal> element describes guest CPU requirements.
-   Its match attribute specifies how strictly the virtual CPU provided to the
-   guest matches these requirements. Possible values for the
-   <literal>match</literal> attribute are:
+   Its <literal>match</literal> attribute specifies how strictly the virtual
+   CPU provided to the guest matches these requirements. Possible values for
+   the <literal>match</literal> attribute are:
   </para>
 
   <variablelist>
@@ -426,7 +426,293 @@ CPU Affinity:   yy
     <listitem>
      <para>
       The domain will not be created unless the host CPU exactly matches the
-      specification.
+      specification. Mainly useful for testing purposes, not in the production
+      environment.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Sometimes the hypervisor is not able to create a virtual CPU exactly
+   matching the specification passed by &libvirt;. You can use an optional
+   <literal>check</literal> attribute to request a specific way of checking
+   whether the virtual CPU matches the specification. Once the domain starts,
+   &libvirt; will automatically change the <literal>check</literal> attribute
+   to the best supported value to ensure the virtual CPU does not change when
+   the domain is migrated to another host. The following values can be used:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>none</term>
+    <listitem>
+     <para>
+      &libvirt; does no checking and it is up to the hypervisor to refuse to
+      start the domain if it cannot provide the requested CPU.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>partial</term>
+    <listitem>
+     <para>
+      &libvirt; will check the guest CPU specification before starting a
+      domain, but the rest is left on the hypervisor. It can still provide a
+      different virtual CPU.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>full</term>
+    <listitem>
+     <para>
+      The virtual CPU created by the hypervisor will be checked against the CPU
+      specification and the domain will not be started unless the two CPUs
+      match.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   The optional <literal>mode</literal> attribute tries to configure the guest
+   CPU to be as close the host CPU as possible. Possible values for the
+   <literal>mode</literal> attribute are:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>custom</term>
+    <listitem>
+     <para>
+      In this mode, the <tag>&lt;cpu/></tag> element describes the CPU that is
+      presented to the guest. The guest will see the same CPU no matter what
+      host the guest is booted on. This is the default behavior.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>host-model</term>
+    <listitem>
+     <para>
+      The <literal>host-model</literal> mode copies the host CPU XML definition
+      of capabilities into the domain XML. Since the CPU definition is copied
+      just before starting a domain, exactly the same XML can be used on
+      different hosts while still providing the best guest CPU each host
+      supports. The <literal>match</literal> and <literal>model</literal>
+      attributes cannot be used in this mode.
+     </para>
+<screen>
+&lt;cpu mode='host-model'>
+  &lt;model fallback='forbid'/>
+  &lt;topology sockets='1' dies='1' cores='2' threads='1'/>
+&lt;/cpu>
+</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>host-passthrough</term>
+    <listitem>
+     <para>
+      In this mode, the CPU visible to the guest will be exactly the same as
+      the host CPU. The downside of this mode is that the guest environment
+      cannot be reproduced on different hardware. Therefore, migration of a
+      guest using <literal>host-passthrough</literal> is dangerous if the
+      source and destination hosts are not identical in both hardware. You can
+      adjust further details of the CPU using <literal>feature</literal>
+      elements. The virtual CPU may or may not contain features which may block
+      migration even to an identical host. The optional
+      <literal>migratable</literal> attribute may be used to explicitly request
+      such features to be removed from (<literal>on</literal>) or kept in
+      (<literal>off</literal>) the virtual CPU.
+     </para>
+<screen>
+&lt;cpu mode='host-passthrough' migratable='off'>
+  &lt;cache mode='passthrough'/>
+  &lt;feature policy='disable' name='lahf_lm'/>
+&lt;/cpu>
+</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>maximum</term>
+    <listitem>
+     <para>
+      When running a guest with hardware virtualization this CPU model is
+      functionally identical to <literal>host-passthrough</literal>. When
+      running a guest with CPU emulation, this CPU model will enable the
+      maximum set of features that the emulation engine is able to support.
+      Note that even with <literal>migratable='on'</literal>, the migration
+      will be dangerous unless both hosts are running identical versions of the
+      emulation code.
+     </para>
+     <tip>
+      <para>
+       If an application does not care about a specific CPU and just wants the
+       best featureset without a need for migration compatibility, the
+       <literal>maximum</literal> model is a good choice.
+      </para>
+     </tip>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   The <tag>&lt;model/></tag> element specifies CPU model requested by the
+   guest. You can find the list of available CPU models in the
+   <filename>/usr/share/libvirt/cpu_map/</filename> directory. If a hypervisor
+   is not able to use the exact CPU model, &libvirt; automatically falls back
+   to a closest supported model while maintaining the list of CPU features. You
+   can use an optional <literal>fallback</literal> attribute to forbid this
+   behavior. In such case an attempt to start a domain requesting an
+   unsupported CPU model will fail. Supported values for fallback attribute
+   are: <literal>allow</literal> (this is the default), and
+   <literal>forbid</literal>. The optional <literal>vendor_id</literal>
+   attribute sets the vendor ID as seen by the guest. It needs to be exactly 12
+   characters long. If not set, the vendor ID of the host is used. Typical
+   values are <literal>AuthenticAMD</literal> and
+   <literal>GenuineIntel</literal>.
+  </para>
+
+  <para>
+   The <tag>&lt;vendor/></tag> element specifies the CPU vendor requested by
+   the guest. If this element is not set, the guest can be run on a CPU
+   matching given features regardless on its vendor. You can find the list of
+   supported vendors in
+   <filename>/usr/share/libvirt/cpu_map/cpu_map/*_vendors.xml</filename>.
+  </para>
+
+  <para>
+   The <tag>&lt;topology/></tag> element specifies requested topology of
+   virtual CPU provided to the guest. Its
+   attributes&mdash;<literal>sockets</literal>, <literal>dies</literal>,
+   <literal>cores</literal> and <literal>threads</literal>&mdash;accept
+   non-zero positive integer values. They refer to the number of CPU sockets
+   per NUMA node, number of dies per socket, number of cores per die, and
+   number of threads per core. The <literal>dies</literal> attribute is
+   optional and will default to 1 if not set. The other attributes are all
+   mandatory.
+  </para>
+
+  <para>
+   The <tag>&lt;cpu/></tag> element can contain multiple
+   <tag>&lt;feature/></tag> elements. They fine-tune features provided by the
+   selected CPU model. You can find the list of known feature names in the same
+   file as CPU models, for example:
+  </para>
+
+<screen>
+&prompt.user;cat /usr/share/libvirt/cpu_map/x86_qemu64.xml
+&lt;cpus>
+ &lt;model name='qemu64'>
+  &lt;feature name='apic'/>
+  &lt;feature name='clflush'/>
+  &lt;feature name='cmov'/>
+  &lt;feature name='cx16'/>
+  &lt;feature name='cx8'/>
+  &lt;feature name='de'/>
+[...]
+</screen>
+
+  <para>
+   The meaning of each <tag>&lt;feature/></tag> element depends on its
+   <literal>policy</literal> attribute. It needs to be set to one of the
+   following values:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>force</term>
+    <listitem>
+     <para>
+      The virtual CPU will claim that the feature is supported regardless of
+      whether it is supported by host CPU.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>require</term>
+    <listitem>
+     <para>
+      Guest creation will fail unless the feature is supported by the host CPU
+      or the hypervisor is able to emulate it. This is the default.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>optional</term>
+    <listitem>
+     <para>
+      The feature will be supported by virtual CPU if and only if it is
+      supported by host CPU.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable</term>
+    <listitem>
+     <para>
+      The feature will not be supported by virtual CPU.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>forbid</term>
+    <listitem>
+     <para>
+      Guest creation will fail if the feature is supported by host CPU.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   Individual CPU feature names are specified as part of the
+   <literal>name</literal> attribute. For example, to explicitly specify the
+   <literal>pcid</literal> feature with <literal>Intel IvyBridge</literal> CPU
+   model:
+  </para>
+
+<screen>
+[...]
+&lt;cpu match='exact'>
+ &lt;model fallback='forbid'>IvyBridge&lt;/model>
+ &lt;vendor>Intel&lt;/vendor>
+ &lt;feature policy='require' name='pcid'/>
+&lt;/cpu>
+[...]
+</screen>
+
+  <para>
+   The <tag>&lt;cache/></tag> element describes the virtual CPU cache. If the
+   element is missing, the hypervisor will use a sensible default. The
+   <tag>&lt;cache/></tag> element supports the following attributes:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>level</term>
+    <listitem>
+     <para>
+      This optional attribute specifies which cache level is described by the
+      element. Missing attribute means that the element describes all CPU cache
+      levels at once. Mixing <tag>&lt;cache/></tag> elements with the
+      <literal>level</literal> attribute set and those without the attribute is
+      forbidden.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>mode</term>
+    <listitem>
+     <para>
+      The <literal>emulate</literal> mode means that the hypervisor will
+      provide a fake CPU cache data. <literal>passthrough</literal> means that
+      the real CPU cache data reported by the host CPU will be passed through
+      to the virtual CPU. With <literal>disable</literal>, The virtual CPU will
+      report no CPU cache of the specified level (or no cache at all if the
+      <literal>level</literal> attribute is missing).
      </para>
     </listitem>
    </varlistentry>
