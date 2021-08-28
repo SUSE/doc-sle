@@ -33,7 +33,7 @@
  <sect1 xml:id="sec-ignition-configuration">
  <title><literal>config.ign</literal></title>
  <para>
- When installing on a bare metal, the configuration file <filename>config.ign</filename> must reside in the <filename>ignition</filename> subdirectory on the configuration media. The directory structure should look as follows:
+ When installing on a bare metal, the configuration file <filename>config.ign</filename> must reside in the <filename>ignition</filename> subdirectory on the configuration media. The directory structure must look as follows:
  </para>
  <screen>
  &lt;root directory&gt;
@@ -47,7 +47,7 @@
  -fw_cfg name=opt/com.coreos/config,file=<replaceable>path to config.ign</replaceable>
  </screen>
  <para>
- The <filename>confign.ign</filename> contains various data types&mdash;objects, strings, integers, booleans and lists of objects. For a complete specification refer to <link xlink:href="https://coreos.github.io/ignition/configuration-v3_1/">Ignition specifiaction v3.1.0</link>.
+ The <filename>config.ign</filename> contains various data types&mdash;objects, strings, integers, booleans and lists of objects. For a complete specification refer to <link xlink:href="https://coreos.github.io/ignition/configuration-v3_1/">Ignition specifiaction v3.1.0</link>.
  </para>
  <para>
  The <literal>version</literal> attribute is mandatory and in case of &slema; its value must be set to <literal>3.1.0</literal>. Otherwise Ignition will fail.
@@ -55,10 +55,10 @@
  <sect2 xml:id="sec-converting-config">
  <title>Converting YAML <literal>fcc</literal> file to JSON <literal>ign</literal></title>
  <para>
- To make the Ignition configuration more human-readable, you can use a two phase configuration. At first you prepare your configuration in YAML as a <literal>fcc</literal> file and then you convert these configuration to JSON. The conversion can be done by the <literal>butane</literal> tool.
+ To make the Ignition configuration more human-readable, you can use a two phase configuration. At first you prepare your configuration in YAML as a <literal>fcc</literal> file and then you transpile these configuration to JSON. The transpilation can be done by the <literal>butane</literal> tool.
  </para>
  <para>
-During the conversion <literal>fcct</literal> verifies syntax of the YAML file to catch potential errors in the structure. For the latest version of <literal>butane</literal> tool add a repository:
+During the transpilation <literal>fcct</literal> verifies syntax of the YAML file to catch potential errors in the structure. For the latest version of <literal>butane</literal> tool add a repository:
  </para>
  <screen>
  &prompt.sudo; zypper ar -f https://download.opensuse.org/repositories/devel:/kubic:/ignition/<replaceable>distribution</replaceable>/ devel_kubic_ignition
@@ -84,7 +84,7 @@ During the conversion <literal>fcct</literal> verifies syntax of the YAML file t
  </listitem>
  </itemizedlist>
  <para>
- Now you can install the <literal>fcct</literal> tool:
+ Now you can install the <literal>butane</literal> tool:
  </para>
  <screen>
  &prompt.sudo; zypper in ignition-config-transpiler
@@ -130,10 +130,60 @@ During the conversion <literal>fcct</literal> verifies syntax of the YAML file t
  <sect3 xml:id="sec-ignition-storage">
  <title>Storage configuration</title>
  <para>
- The <literal>storage</literal> attribute is used to configure partitions, RAID, define file systems, create files, etc. In the followin example the <filename>/opt</filename> directory will be formated to btrfs and mounted to the <literal>/dev/sda1</literal> partition. The partition table will not be erased.
+ The <literal>storage</literal> attribute is used to configure partitions, RAID, define file systems, create files, etc. To define artitions, use the <literal>disks</literal> attiribute. The <literal>filesystem</literal> is used to format partitions and define mount points of particular partitions. The <literal>files</literal> attribute can be used to create files in the file system. Each of the mentioned attributes is described in following sections.
+ </para>
+ <sect4 xml:id="sec-storage-disks">
+ <title>The <literal>disks</literal> attribute</title>
+ <para>
+ The <literal>disks</literal> attributes is a list of devices that enables you to define partitions on these devices. The <literal>disks</literal> attribute must contain at least one <literal>device</literal>, other attributes are optional. The following example will use a single virtual device and divide the disk into four partiotions.
  </para>
  <screen>
  variant: fcos
+version: 1.0.0
+storage:
+  disks:
+    - device:	"/dev/vda"
+      wipeTable: true
+      partitions: 
+      	- label: root
+      	  number: 1
+      	- label: var
+      	  number: 2
+ </screen>
+ </sect4>
+ <sect4 xml:id="sec-storage-filesystem">
+ <title>The <literal>filesystem</literal> attribute</title>
+ <para>
+ <literal>filesystem</literal> must contain the following attributes:
+ </para>
+ <variablelist>
+ <varlistentry>
+ <term>device</term>
+ <listitem>
+ <para>
+ is the absolute path to the device, typically <literal>/dev/sda</literal> in case of physical disk.
+ </para>
+ </listitem>
+  </varlistentry>
+  <varlistentry>
+  <term>format</term>
+ <listitem>
+ <para>
+ <literal>the file system format (btrfs, ext4, xfs, vfat or swap</literal>
+ </para>
+ <note>
+ <para>
+ In case of &slema;, the <literal>root</literal> file system must be formatted to btrfs. 
+ </para>
+ </note>
+ </listitem>
+ </varlistentry>
+ </variablelist>
+ <para>
+ The following example demonstrates using the <literal>filesystem</literal> attribute. The <filename>/opt</filename> directory will be formated to btrfs and mounted to the <literal>/dev/sda1</literal> partition. The partition table will not be erased.
+ </para>
+ <screen>
+variant: fcos
 version: 1.0.0
 storage:
   filesystems:
@@ -141,6 +191,28 @@ storage:
       device: "/dev/sda1"
       format: btrfs
       wipe_filesystem: false
+ </screen>
+ </sect4>
+ <sect4 xml:id="sec-storage-files">
+ <title>The <literal>files</literal></title>
+ <para>
+ You can use the <literal>files</literal> to create any files on your machine. Bear in mind that if you want to create files outside the default initrd mounted directories, you need to define the directories by using the <litera>filesystem</literal> attibute, e.g.:
+ </para>
+ <screen>
+ variant: fcos
+version: 1.0.0
+storage:
+  filesystems:
+    - path: /home
+      device: "/dev/sda2"
+      format: ext4
+      wipe_filesystem: false
+   files:
+    - path: /home/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: "slemicro-1"
  </screen>
  <para>
  In the following example a host name is created by using the <literal>files</literal> attribute. The <filename>/etc/hostname</filename> will be created with the <emphasis>slemicro-1</emphasis> host name:
@@ -157,6 +229,7 @@ storage:
       contents:
         inline: "slemicro-1"
  </screen>
+ </sect4>
  </sect3>
  </sect2>
  </sect1>
