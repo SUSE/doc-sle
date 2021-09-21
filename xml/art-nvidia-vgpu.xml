@@ -205,5 +205,194 @@
    </sect3>
   </sect2>
  </sect1>
+ <sect1 xml:id="configure-nvidia-vgpu-configuring host">
+  <title>Configuring vGPU manager in &vmhost;</title>
+
+  <sect2 xml:id="configure-nvidia-vgpu-verify-host">
+   <title>Prepare &vmhost; environment</title>
+   <procedure>
+    <step>
+     <para>
+      Verify that you have a compatible server and GPU cards. Check
+      specification (FIXME) for details.
+     </para>
+    </step>
+    <step>
+     <para>
+      Verify that &vmhost; is &sls; 15 SP2 or newer:
+     </para>
+<screen>
+&prompt.user;cat /etc/issue
+Welcome to SUSE Linux Enterprise Server 15 SP3  (x86_64) - Kernel \r (\l).
+</screen>
+    </step>
+    <step>
+     <para>
+      If Ampere architecture GPU cards are used, verify that &vmhost; supports
+      VT-/IOMMU and SR-IOV technologies, and that they are enabled in BIOS.
+     </para>
+    </step>
+    <step>
+     <para>
+      Enable IOMMU. Verify that it is included in the boot command line:
+     </para>
+<screen>
+cat /proc/cmdline
+BOOT_IMAGE=/boot/vmlinuz-default [...] intel_iommu=on [...]
+</screen>
+     <para>
+      If not, add the following line to <filename>/etc/default/grub</filename>.
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+        For Intel CPUs:
+       </para>
+<screen>GRUB_CMDLINE_LINUX="intel_iommu=on"</screen>
+       <para>
+        For AMD CPUs:
+       </para>
+<screen>GRUB_CMDLINE_LINUX="amd_iommu=on"</screen>
+      </listitem>
+     </itemizedlist>
+     <para>
+      Then generate new &grub; configuration file and reboot:
+     </para>
+<screen>
+&prompt.sudo;grub2-mkconfig -o /boot/grub2/grub.cfg
+&prompt.sudo;systemctl reboot
+</screen>
+     <tip>
+      <para>
+       You can verify that IOMMU is loaded by running the following command:
+<screen>sudo dmesg | grep -e IOMMU</screen>
+      </para>
+     </tip>
+    </step>
+    <step>
+     <!-- 2021-09-21 tbazant: this seems out of place here:
+      "After finishing the driver installation, run
+      /usr/lib/nvidia/sriov-manage -e slot:bus:domain.function"
+      -->
+     <para>
+      Enable SR-IOV. Refer to
+      <link
+      xlink:href="https://documentation.suse.com/sles/15-SP3/single-html/SLES-virtualization/#sec-libvirt-config-io"/>
+      for useful information.
+     </para>
+    </step>
+    <step>
+     <para>
+      Disable the nouveau kernel module by adding the following line it to the
+      top of the <filename>/etc/modprobe.d/50-blacklist.conf</filename> file:
+     </para>
+<screen>blacklist nouveau</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="configure-nvidia-vgpu-kvm-driver">
+   <title>Install the &nvidia; &kvm; driver</title>
+   <procedure>
+    <step>
+     <para>
+      Exit from the graphical mode:
+     </para>
+<screen>&prompt.sudo;init 3</screen>
+    </step>
+    <step>
+     <para>
+      Install the <package>kernel-default-devel</package> package and its
+      dependencies:
+     </para>
+<screen>&prompt.sudo;zypper in kernel-default-devel</screen>
+    </step>
+    <step>
+     <para>
+      Download the vGPU software from the &nvidia; portal, make it executable,
+      and run it:
+     </para>
+<screen>
+&prompt.user;chmod +x NVIDIA-Linux-x86_64-450.55-vgpu-kvm.run
+&prompt.sudo;./NVIDIA-Linux-x86_64-450.55-vgpu-kvm.run
+</screen>
+     <tip>
+      <para>
+       To enable dynamic kernel module support in order to get the module
+       rebuilt automatically when new a new kernel is installed, add the
+       <option>--dkms</option> option:
+      </para>
+<screen>&prompt.sudo;./NVIDIA-Linux-x86_64-450.55-vgpu-kvm.run --dkms</screen>
+     </tip>
+    </step>
+    <step>
+     <para>
+      When the driver installation is finished, reboot the system:
+     </para>
+<screen>&prompt.sudo;systemctl reboot</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="configure-nvidia-vgpu-verify-driver-installation">
+   <title>Verify the driver installation</title>
+   <procedure>
+    <step>
+     <para>
+      Verify loaded kernel modules:
+     </para>
+<screen>
+&prompt.user;lsmod | grep nvidia
+nvidia_vgpu_vfio       49152  9
+nvidia              14393344  229 nvidia_vgpu_vfio
+mdev                   20480  2 vfio_mdev,nvidia_vgpu_vfio
+vfio                   32768  6 vfio_mdev,nvidia_vgpu_vfio,vfio_iommu_type1
+</screen>
+     <para>
+      The modules containing the <literal>vfio</literal> string are required
+      dependencies.
+     </para>
+    </step>
+    <step>
+     <para>
+      Print the GPU device status with the <command>nvidia-smi</command>
+      command. The output should be similar to the following one:
+     </para>
+<screen>
+&prompt.user;nvidia-smi
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 470.63       Driver Version: 470.63       CUDA Version: N/A      |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|                               |                      |               MIG M. |
+|===============================+======================+======================|
+|   0  NVIDIA A40          Off  | 00000000:31:00.0 Off |                    0 |
+|  0%   46C    P0    39W / 300W |      0MiB / 45634MiB |      0%      Default |
+|                               |                      |                  N/A |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                                  |
+|  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
+|        ID   ID                                                   Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+</screen>
+    </step>
+    <step>
+     <para>
+      Check the sysfs file system. For Volta and earlier GPU cards, new directory <filename>mdev_supported_types</filename> is added, for example:
+     </para>
+     <screen>cd /sys/bus/pci/devices/0000\:84\:00.0/mdev_supported_types</screen>
+     <para>
+      For Ampere GPU cards, you need to enable SR-IOV first.
+      <!-- 2021-09-21 tbazant, this referes to 'out-of-place' comment below -->
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
  <xi:include href="common_gfdl1.2_i.xml"/>
 </article>
