@@ -383,15 +383,478 @@ vfio                   32768  6 vfio_mdev,nvidia_vgpu_vfio,vfio_iommu_type1
     </step>
     <step>
      <para>
-      Check the sysfs file system. For Volta and earlier GPU cards, new directory <filename>mdev_supported_types</filename> is added, for example:
+      Check the sysfs file system. For Volta and earlier GPU cards, new
+      directory <filename>mdev_supported_types</filename> is added, for
+      example:
      </para>
-     <screen>cd /sys/bus/pci/devices/0000\:84\:00.0/mdev_supported_types</screen>
+<screen>cd /sys/bus/pci/devices/0000\:84\:00.0/mdev_supported_types</screen>
      <para>
       For Ampere GPU cards, you need to enable SR-IOV first.
       <!-- 2021-09-21 tbazant, this referes to 'out-of-place' comment below -->
      </para>
     </step>
    </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="configure-nvidia-vgpu-passthrough">
+  <title>Creating a vGPU device and passing it through to a &vmguest;</title>
+
+  <sect2 xml:id="configure-nvidia-vgpu-passthrough-without-sriov">
+   <title>Create a legacy vGPU device without support for SR-IOV</title>
+   <para>
+    All the &nvidia; Volta and earlier architecture GPUs work in this mode.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Obtain the Bus/Device/Function (BDF) numbers of the host GPU device:
+     </para>
+<screen>
+&prompt.user;lspci | grep NVIDIA
+84:00.0 3D controller: NVIDIA Corporation GV100GL [Tesla V100 PCIe 16GB] (rev a1)
+</screen>
+    </step>
+    <step>
+     <para>
+      Check for the mdev supported devices and detailed information:
+     </para>
+<screen>
+&prompt.user;ls /sys/bus/pci/devices/0000:84:00.0/mdev_supported_types/
+nvidia-105  nvidia-106  nvidia-107  nvidia-108  nvidia-109  nvidia-110 [...] 
+</screen>
+     <para>
+      The map of vGPU mdev devices and their type is as follows:
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+        nvidia-105 to nvidia-109: 1Q 2Q 4Q 8Q 16Q
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        nvidia-110 to nvidia-114: 1A 2A 4A 8A 16A
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        nvidia-115, nvidia-163, nvidia-217, nvidia-247: 1B 2B 2B4 1B4
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        nvidia-299 to nvidia-301: 4C 8C 16C
+       </para>
+      </listitem>
+     </itemizedlist>
+     <para>
+      Refer to
+      <link xlink:href="https://docs.nvidia.com/grid/11.0/grid-vgpu-user-guide/index.html#vgpu-types-tesla-v100-pcie"/>
+      for more details.
+     </para>
+    </step>
+    <step>
+     <para>
+      Inspect a vGPU device:
+     </para>
+<screen>
+&prompt.user;cd /sys/bus/pci/devices/0000:03:00.0/mdev_supported_types/
+&prompt.user;ls nvidia-105
+&prompt.user;cat nvidia-105/description 
+num_heads=2, frl_config=60, framebuffer=1024M, max_resolution=4096x2160, max_instance=16
+&prompt.user;cat nvidia-105/name 
+GRID V100-1Q
+</screen>
+    </step>
+    <step>
+     <para>
+      Generate a unique ID and create an mdev device based on it:
+     </para>
+<screen>
+      &prompt.user;uuidgen
+      4f3b6e47-0baa-4900-b0b1-284c1ecc192f
+      &prompt.sudo;echo "4f3b6e47-0baa-4900-b0b1-284c1ecc192f" > nvidia-105/create
+     </screen>
+    </step>
+    <step>
+     <para>
+      Verify the new mdev device. You can inspect the content of the
+      <filename>/sys/bus/mdev/devices</filename> directory:
+     </para>
+<screen>
+&prompt.user;cd /sys/bus/mdev/devices
+&prompt.user;ls -l
+lrwxrwxrwx 1 root root 0 Aug 30 23:03 86380ffb-8f13-4685-9c48-0e0f4e65fb87 \
+ -> ../../../devices/pci0000:80/0000:80:02.0/0000:84:00.0/86380ffb-8f13-4685-9c48-0e0f4e65fb87
+lrwxrwxrwx 1 root root 0 Aug 30 23:03 86380ffb-8f13-4685-9c48-0e0f4e65fb88 \
+ -> ../../../devices/pci0000:80/0000:80:02.0/0000:84:00.0/86380ffb-8f13-4685-9c48-0e0f4e65fb88
+lrwxrwxrwx 1 root root 0 Aug 30 23:03 86380ffb-8f13-4685-9c48-0e0f4e65fb89 \
+ -> ../../../devices/pci0000:80/0000:80:02.0/0000:84:00.0/86380ffb-8f13-4685-9c48-0e0f4e65fb89
+lrwxrwxrwx 1 root root 0 Aug 30 23:03 86380ffb-8f13-4685-9c48-0e0f4e65fb90 \
+ -> ../../../devices/pci0000:80/0000:80:02.0/0000:84:00.0/86380ffb-8f13-4685-9c48-0e0f4e65fb90
+</screen>
+     <para>
+      Or you can use the <command>mdevctl</command> command:
+     </para>
+<screen>
+&prompt.sudo;mdevctl list
+86380ffb-8f13-4685-9c48-0e0f4e65fb90 0000:84:00.0 nvidia-299
+86380ffb-8f13-4685-9c48-0e0f4e65fb89 0000:84:00.0 nvidia-299
+86380ffb-8f13-4685-9c48-0e0f4e65fb87 0000:84:00.0 nvidia-299
+86380ffb-8f13-4685-9c48-0e0f4e65fb88 0000:84:00.0 nvidia-299
+</screen>
+    </step>
+    <step>
+     <para>
+      Query the new vGPU device capability:
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi vgpu -q
+GPU 00000000:84:00.0
+Active vGPUs                      : 1
+vGPU ID                           : 3251634323
+   VM UUID                       : ee7b7a4b-388a-4357-a425-5318b2c65b3f
+   VM Name                       : sle15sp3
+   vGPU Name                     : GRID V100-4C
+   vGPU Type                     : 299
+   vGPU UUID                     : d471c7f2-0a53-11ec-afd3-38b06df18e37
+   MDEV UUID                     : 86380ffb-8f13-4685-9c48-0e0f4e65fb87
+   Guest Driver Version          : 460.91.03
+   License Status                : Licensed
+   GPU Instance ID               : N/A
+   Accounting Mode               : Disabled
+   ECC Mode                      : N/A
+   Accounting Buffer Size        : 4000
+   Frame Rate Limit              : N/A
+   FB Memory Usage
+       Total                     : 4096 MiB
+       Used                      : 161 MiB
+       Free                      : 3935 MiB
+   Utilization
+       Gpu                       : 0 %
+       Memory                    : 0 %
+       Encoder                   : 0 %
+       Decoder                   : 0 %
+   Encoder Stats
+       Active Sessions           : 0
+       Average FPS               : 0
+       Average Latency           : 0
+   FBC Stats
+       Active Sessions           : 0
+       Average FPS               : 0
+       Average Latency           : 0
+</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="configure-nvidia-vgpu-passthrough-with-sriov">
+   <title>Create a vGPU device with support for SR-IOV</title>
+   <para>
+    All &nvidia; Ampere and newer architecture GPUs work in this mode.
+   </para>
+   <procedure>
+    <step>
+     <para>
+      Obtain the Bus/Device/Function (BDF) numbers of the host GPU device:
+     </para>
+<screen>
+&prompt.user;lspci | grep NVIDIA
+b1:00.0 3D controller: NVIDIA Corporation GA100 [A100 PCIe 40GB] (rev a1)
+</screen>
+    </step>
+    <step>
+     <para>
+      Enable virtual functions:
+     </para>
+<screen>&prompt.sudo;/usr/lib/nvidia/sriov-manage -e 00:b1:0000.0</screen>
+     <note>
+      <para>
+       This configuration is not persistent and must be re-enabled after the
+       host reboot.
+      </para>
+     </note>
+    </step>
+    <step>
+     <para>
+      Obtain the Bus/Domain/Function (BDF) of virtual functions on the GPU:
+     </para>
+<screen>
+&prompt.user;ls -l /sys/bus/pci/devices/0000:b1:00.0/ | grep virtfn
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn0 -> ../0000:b1:00.4
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn1 -> ../0000:b1:00.5
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn10 -> ../0000:b1:01.6
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn11 -> ../0000:b1:01.7
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn12 -> ../0000:b1:02.0
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn13 -> ../0000:b1:02.1
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn14 -> ../0000:b1:02.2
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn15 -> ../0000:b1:02.3
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn2 -> ../0000:b1:00.6
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn3 -> ../0000:b1:00.7
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn4 -> ../0000:b1:01.0
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn5 -> ../0000:b1:01.1
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn6 -> ../0000:b1:01.2
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn7 -> ../0000:b1:01.3
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn8 -> ../0000:b1:01.4
+lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn9 -> ../0000:b1:01.5
+</screen>
+    </step>
+    <step>
+     <para>
+      <emphasis>Create a vGPU device.</emphasis> Select the virtual function
+      (VF) that you want to use to create the vGPU device and assign it a
+      unique ID.
+     </para>
+     <important>
+      <para>
+       Each VF can only create one vGPU instance. Of you want to create more
+       vGPU instances, you need to use a different VFs.
+      </para>
+     </important>
+<screen>
+&prompt.user;cd /sys/bus/pci/devices/0000:b1:00.0/virtfn1/mdev_supported_types
+&prompt.user;for i in *; do echo "" $(cat $i/name) available: $(cat $i/avail*); done
+GRID A100-4C available: 0
+GRID A100-5C available: 0
+GRID A100-8C available: 0
+GRID A100-10C available: 1
+GRID A100-20C available: 0
+GRID A100-40C available: 0
+GRID A100-1-5C available: 0
+GRID A100-2-10C available: 0
+GRID A100-3-20C available: 0
+GRID A100-4-20C available: 0
+GRID A100-7-40C available: 0
+GRID A100-1-5CME available: 0
+&prompt.user;uuidgen
+f715f63c-0d00-4007-9c5a-b07b0c6c05de
+&prompt.sudo;echo "f715f63c-0d00-4007-9c5a-b07b0c6c05de" > nvidia-471/create
+&prompt.sudo;dmesg | tail
+[...]
+[ 3218.491843] vfio_mdev f715f63c-0d00-4007-9c5a-b07b0c6c05de: Adding to iommu group 322
+[ 3218.499700] vfio_mdev f715f63c-0d00-4007-9c5a-b07b0c6c05de: MDEV: group_id = 322
+[ 3599.608540] vfio_mdev f715f63c-0d00-4007-9c5a-b07b0c6c05de: Removing from iommu group 322
+[ 3599.616753] vfio_mdev f715f63c-0d00-4007-9c5a-b07b0c6c05de: MDEV: detaching iommu
+[ 3626.345530] vfio_mdev f715f63c-0d00-4007-9c5a-b07b0c6c05de: Adding to iommu group 322
+[ 3626.353383] vfio_mdev f715f63c-0d00-4007-9c5a-b07b0c6c05de: MDEV: group_id = 322
+</screen>
+    </step>
+    <step>
+     <para>
+      Verify the new vGPU device:
+     </para>
+<screen>
+&prompt.user;cd /sys/bus/mdev/devices/
+&prompt.user;ls
+f715f63c-0d00-4007-9c5a-b07b0c6c05de
+</screen>
+    </step>
+    <step>
+     <para>
+      Query the new vGPU device capability:
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi vgpu -q
+GPU 00000000:B1:00.0
+Active vGPUs                      : 1
+vGPU ID                           : 3251634265
+  VM UUID                       : b0d9f0c6-a6c2-463e-967b-06cb206415b6
+  VM Name                       : sles15sp2-gehc-vm1
+  vGPU Name                     : GRID A100-10C
+  vGPU Type                     : 471
+  vGPU UUID                     : 444f610c-1b08-11ec-9554-ebd10788ee14
+  MDEV UUID                     : f715f63c-0d00-4007-9c5a-b07b0c6c05de
+  Guest Driver Version          : N/A
+  License Status                : N/A
+  GPU Instance ID               : N/A
+  Accounting Mode               : N/A
+  ECC Mode                      : Disabled
+  Accounting Buffer Size        : 4000
+  Frame Rate Limit              : N/A
+  FB Memory Usage
+      Total                     : 10240 MiB
+      Used                      : 0 MiB
+      Free                      : 10240 MiB
+  Utilization
+      Gpu                       : 0 %
+      Memory                    : 0 %
+      Encoder                   : 0 %
+      Decoder                   : 0 %
+  Encoder Stats
+      Active Sessions           : 0
+      Average FPS               : 0
+      Average Latency           : 0
+  FBC Stats
+      Active Sessions           : 0
+      Average FPS               : 0
+      Average Latency           : 0
+</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="configure-nvidia-vgpu-passthrough-mig-backed">
+   <title>Creating a MIG-backed vGPU</title>
+   <procedure>
+    <step>
+     <para>
+      Enable MIG mode for a GPU:
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi -i 0 -mig 1
+Enabled MIG Mode for GPU 00000000:B1:00.0
+All done.
+</screen>
+    </step>
+    <step>
+     <para>
+      Query the GPU instance profile:
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi mig -lgip
++-----------------------------------------------------------------------------+
+| GPU instance profiles:                                                      |
+| GPU   Name             ID    Instances   Memory     P2P    SM    DEC   ENC  |
+|                              Free/Total   GiB              CE    JPEG  OFA  |
+|=============================================================================|
+|   0  MIG 1g.5gb        19     7/7        4.75       No     14     0     0   |
+|                                                             1     0     0   |
++-----------------------------------------------------------------------------+
+|   0  MIG 1g.5gb+me     20     1/1        4.75       No     14     1     0   |
+|                                                             1     1     1   |
++-----------------------------------------------------------------------------+
+|   0  MIG 2g.10gb       14     3/3        9.75       No     28     1     0   |
+|                                                             2     0     0   |
++-----------------------------------------------------------------------------+
+|   0  MIG 3g.20gb        9     2/2        19.62      No     42     2     0   |
+|                                                             3     0     0   |
++-----------------------------------------------------------------------------+
+|   0  MIG 4g.20gb        5     1/1        19.62      No     56     2     0   |
+|                                                             4     0     0   |
++-----------------------------------------------------------------------------+
+|   0  MIG 7g.40gb        0     1/1        39.50      No     98     5     0   |
+|                                                             7     1     1   |
++-----------------------------------------------------------------------------+
+</screen>
+    </step>
+    <step>
+     <para>
+      Create a GPU instance specifying '5' as a GPU profile instance ID:
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi mig -cgi 5
+Successfully created GPU instance ID  1 on GPU  0 using profile MIG 4g.20gb (ID  5)
+&prompt.sudo;nvidia-smi mig -cci -gi 1
+Successfully created compute instance ID  0 on GPU  0 GPU instance ID  1 using profile MIG 4g.20gb (ID  3)
+</screen>
+    </step>
+    <step>
+     <para>
+      Verify the GPU instance:
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi
+Tue Sep 21 11:19:36 2021
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 470.63       Driver Version: 470.63       CUDA Version: N/A      |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|                               |                      |               MIG M. |
+|===============================+======================+======================|
+|   0  NVIDIA A100-PCI...  On   | 00000000:B1:00.0 Off |                   On |
+| N/A   38C    P0    38W / 250W |      0MiB / 40536MiB |     N/A      Default |
+|                               |                      |              Enabled |
++-------------------------------+----------------------+----------------------+
+
++-----------------------------------------------------------------------------+
+| MIG devices:                                                                |
++------------------+----------------------+-----------+-----------------------+
+| GPU  GI  CI  MIG |         Memory-Usage |        Vol|         Shared        |
+|      ID  ID  Dev |           BAR1-Usage | SM     Unc| CE  ENC  DEC  OFA  JPG|
+|                  |                      |        ECC|                       |
+|==================+======================+===========+=======================|
+|  0    1   0   0  |      0MiB / 20096MiB | 56      0 |  4   0    2    0    0 |
+|                  |      0MiB / 32767MiB |           |                       |
++------------------+----------------------+-----------+-----------------------+
+
++-----------------------------------------------------------------------------+
+| Processes:                                                                  |
+|  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
+|        ID   ID                                                   Usage      |
+|=============================================================================|
+|  No running processes found                                                 |
++-----------------------------------------------------------------------------+
+</screen>
+    </step>
+    <step>
+     <para>
+      Use the MIG instance. You can use the instance directly with the
+      UUID&mdash;for example, pass it through to a &vmguest; or assign it to a
+      container/CUDA process.
+     </para>
+     <para>
+      You can also create a vGPU on top of it. The procedure is the same as for
+      the vGPU with SR-IOV support. Refer to
+      <xref linkend="configure-nvidia-vgpu-passthrough-with-sriov"/>.
+     </para>
+<screen>
+&prompt.sudo;nvidia-smi -L
+GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-ee14e29d-dd5b-2e8e-eeaf-9d3debd10788)
+ MIG 4g.20gb     Device  0: (UUID: MIG-fed03f85-fd95-581b-837f-d582496d0260)
+</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="configure-nvidia-vgpu-passthrough-to-vm">
+   <title>Passthrough the vGPU device to a &vmguest;</title>
+   <sect3 xml:id="configure-nvidia-vgpu-passthrough-to-vm-libvirt">
+    <title>Passthrough by &libvirt;</title>
+    <procedure>
+     <step>
+      <para>
+       Create a &libvirt;-based virtual machine (VM) with UEFI support and a
+       normal VGA display.
+      </para>
+     </step>
+     <step>
+      <para>
+       Edit the VM's configuration by running <command>virsh edit
+       <replaceable>VM-NAME</replaceable></command>.
+      </para>
+     </step>
+     <step>
+      <para>
+       Add the new mdev device with the unique ID you used when creating the
+       vGPU device to the &lt;devices/> section.
+      </para>
+      <note>
+       <para>
+        If you are using Q-series, use <literal>display='on'</literal> instead.
+       </para>
+      </note>
+<screen>
+##Change display='on' if you are using Q-series.
+
+&lt;hostdev mode='subsystem' type='mdev' managed='no' model='vfio-pci' display='off'>
+  &lt;source>
+    &lt;address uuid='4f3b6e47-0baa-4900-b0b1-284c1ecc192f'/>
+  &lt;/source>
+  &lt;address type='pci' domain='0x0000' bus='0x00' slot='0x0a' function='0x0'/>
+&lt;/hostdev>
+</screen>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="configure-nvidia-vgpu-passthrough-to-vm-qemu">
+    <title>Passthrough by &qemu;</title>
+    <para>
+     Add the following device to the &qemu; command line. Use the unique ID
+     that you used when creating the vGPU device:
+    </para>
+<screen>-device vfio-pci,sysfsdev=/sys/bus/mdev/devices/4f3b6e47-0baa-4900-b0b1-284c1ecc192f</screen>
+   </sect3>
   </sect2>
  </sect1>
  <xi:include href="common_gfdl1.2_i.xml"/>
