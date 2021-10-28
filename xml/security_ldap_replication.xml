@@ -1,0 +1,469 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE sect1
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+<sect1 xmlns="http://docbook.org/ns/docbook" 
+       xmlns:xi="http://www.w3.org/2001/XInclude" 
+       xmlns:xlink="http://www.w3.org/1999/xlink" 
+       version="5.0" 
+       xml:id="sec-security-ldap-replication">
+ <title>Setting up replication</title>
+
+ <para>
+  &ds389; supports replicating its database content between multiple servers.
+  According to the type of replication, this provides:
+ </para>
+
+ <itemizedlist>
+  <listitem>
+   <para>
+    Faster performance and response times
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    Fault tolerance and failover
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    Load balancing
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    High availability
+   </para>
+  </listitem>
+ </itemizedlist>
+
+ <sect2 xml:id="sec-security-ldap-replication-async">
+  <title>Asynchronous writes</title>
+  <para>
+   &ds389a; manages replication differently than other databases. Replication
+   is asynchronous, and eventually consistent. This means:
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     Any write or change to a single server is immediately accepted.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     There is a delay between a write and replication to other servers.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     If that write conflicts with writes on other servers, it may be rolled
+     back at some point in the future.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Not all servers may show identical content at the same time due to
+     replication delay.
+    </para>
+   </listitem>
+  </itemizedlist>
+  <para>
+   In general, as LDAP is "low-write", these factors mean that all servers are
+   at least up to a common baseline of a known consistent state. Small changes
+   occur on top of this baseline, so many of these aspects of delayed
+   replication are not perceived in day to day usage.
+  </para>
+ </sect2>
+
+ <sect2 xml:id="sec-security-ldap-replication-topology">
+  <title>Designing your topology</title>
+  <para>
+   Consider the following factors when you are designing your replication
+   topology.
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     The need for replication: high availability, geo-location, read scaling,
+     or a combination of all.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     How many replicas (nodes, servers) you plan to have in your topology.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Direction of data flows, both inside of the topology, and data flowing
+     into the topology.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     How clients will balance across nodes of the topology for their requests
+     (multiple ldap URIs, SRV records, load balancers).
+    </para>
+   </listitem>
+  </itemizedlist>
+  <para>
+   These factors all affect how you may create your topology. (See
+   <xref linkend="sec-security-ldap-replication-two-replicas"/> for some
+   topology examples.)
+  </para>
+ </sect2>
+
+ <sect2 xml:id="sec-security-ldap-replication-topologies">
+  <title>Example replication topologies</title>
+  <para>
+   The following sections provide examples of replication topologies, using two
+   to six &ds389; nodes. The maximum number of supported read-write replicas in
+   a topology is twenty. Operational experience shows the optimal number for
+   replication efficiency is a maximum of eight.
+  </para>
+  <para>
+   A node of the topology can only be offline for a maximum of days up to the
+   limit of the changelog (see FOO).
+  </para>
+  <sect3 xml:id="sec-security-ldap-replication-two-replicas">
+   <title>Two replicas</title>
+   <example xml:id="ex-ldap-replication-two-replicas">
+    <title>Two replicas</title>
+<screen>
+┌────┐       ┌────┐
+│ S1 │◀─────▶│ S2 │
+└────┘       └────┘
+</screen>
+   </example>
+   <para>
+    In <xref linkend="ex-ldap-replication-two-replicas"/> there are two nodes,
+    S1 and S2, which replicate bi-directionally between each other. S1 and S2
+    could be in separate data centers, or in the same data center. Clients can
+    balance across the servers using LDAP URIs, a load balancer, or DNS SRV
+    records. This is the simplest topology for high availability. Note that
+    each server needs to be able to provide 100% of client load, in case the
+    other server is offline for any reason. A two-node replication is generally
+    not adequate for horizontal read scaling.
+   </para>
+  </sect3>
+  <sect3 xml:id="sec-security-ldap-replication-four-replicas">
+   <title>Four replicas</title>
+   <example xml:id="ex-ldap-replication-four-replicas">
+    <title>Four replicas</title>
+<screen>
+┌────┐       ┌────┐
+│ S1 │◀─────▶│ S2 │
+└────┘       └────┘
+   ▲            ▲  
+   │            │  
+   ▼            ▼  
+┌────┐       ┌────┐
+│ S3 │◀─────▶│ S4 │
+└────┘       └────┘
+</screen>
+   </example>
+   <para>
+    <xref linkend="ex-ldap-replication-four-replicas"/> has four servers. These
+    could be in four datacenters, or two servers per datacenter. In the case of
+    one node per data center, each node should be able to support 100% of
+    client load. When there are two per datacenter, each one only needs to
+    scale to 50% of the client load.
+   </para>
+  </sect3>
+  <sect3 xml:id="sec-security-ldap-replication-six-replicas">
+   <title>Six replicas</title>
+   <example xml:id="ex-ldap-replication-six-replicas">
+    <title>Six replicas</title>
+<screen>
+                  ┌────┐       ┌────┐                   
+                  │ S1 │◀─────▶│ S2 │                   
+                  └────┘       └────┘                   
+                     ▲            ▲                     
+                     │            │                     
+   ┌────────────┬────┴────────────┴─────┬────────────┐  
+   │            │                       │            │  
+   ▼            ▼                       ▼            ▼  
+┌────┐       ┌────┐                  ┌────┐       ┌────┐
+│ S3 │◀─────▶│ S4 │                  │ S5 │◀─────▶│ S6 │
+└────┘       └────┘                  └────┘       └────┘  
+</screen>
+   </example>
+   <para>
+    In <xref linkend="ex-ldap-replication-six-replicas"/>, each pair is in a
+    separate location. S1 and S2 are the primary servers, and S3, S4, S5, and
+    S6 are secondary servers. Each pair of servers replicate to each other. S3,
+    S4, S5, and S6 can accept writes, though most of the replication is done
+    through S1 and S2. This setup provides geographic separation for high
+    availability and scaling.
+   </para>
+  </sect3>
+  <sect3 xml:id="sec-security-ldap-replication-six-replicas-read-only">
+   <title>Six replicas with read-only secondaries</title>
+   <example xml:id="ex-ldap-replication-six-replicas-read-only">
+    <title>Six replicas with read-only secondaries</title>
+<screen>
+             ┌────┐       ┌────┐             
+             │ S1 │◀─────▶│ S2 │             
+             └────┘       └────┘             
+                │            │               
+                │            │               
+   ┌────────────┼────────────┼────────────┐  
+   │            │            │            │  
+   ▼            ▼            ▼            ▼  
+┌────┐       ┌────┐       ┌────┐       ┌────┐
+│ S3 │       │ S4 │       │ S5 │       │ S6 │
+└────┘       └────┘       └────┘       └────┘
+</screen>
+   </example>
+   <para>
+    In the above diagram, S1 and S2 are the primary servers, and the other four
+    servers are read-only replicas. All changes occur on S1 and S2, and are
+    propagated to the four replicas. Read-only servers can be configured to
+    store only a subset of the database, or partial entries. This limits data
+    exposure. You could have a fractional read-only server in a DMZ, for
+    example, so that if data is exposed, changes can not propagate back to the
+    primary instances
+   </para>
+  </sect3>
+ </sect2>
+
+ <sect2 xml:id="sec-security-ldap-replication-terminology">
+  <title>Terminology</title>
+  <para>
+   In the example configurations we have seen that &ds389a; can take on a
+   number of roles in a topology. The following list clarifies the terminology.
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>Replica</term>
+    <listitem>
+     <para>
+      An instance of &ds389a; with an attached database.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Read-write replica</term>
+    <listitem>
+     <para>
+      A replica with a full copy of a database, that accepts read and write
+      operations.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Read-only replica</term>
+    <listitem>
+     <para>
+      A replica with a full copy of a database, that only accepts read
+      operations.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Fractional read-only replica</term>
+    <listitem>
+     <para>
+      A replica with a partial copy of a database, that only accepts read-only
+      operations.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Supplier</term>
+    <listitem>
+     <para>
+      A replica that supplies data from its database to another replica.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Consumer</term>
+    <listitem>
+     <para>
+      A replica that receives data from another replica to write into its
+      database.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Replication agreement</term>
+    <listitem>
+     <para>
+      The configuration of a server defining its supplier and consumer relation
+      to another replica.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Topology</term>
+    <listitem>
+     <para>
+      A set of replicas connected via replication agreements.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Replica ID</term>
+    <listitem>
+     <para>
+      A unique identifier of the &ds389; instance within the replication
+      topology.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Replication manager</term>
+    <listitem>
+     <para>
+      An account with replication rights in the directory.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+
+ <sect2 xml:id="sec-security-ldap-replication-configuration">
+  <title>Configuring replication</title>
+  <para>
+   The first example sets up a two node bi-directional replication with a
+   single read-only server, as a minimal starting example. In the following
+   examples, the host names of the two read-write nodes are RW1 and RW2, and
+   the read-only server is RO1. (Of course you must use your own host names.)
+  
+   </para>
+  <para>
+   All servers should have a backend with an identical suffix. Only one server,
+   RW1, needs an initial copy of the database.
+  </para>
+  <para>
+   The following commands configure the read-write replicas, RW1 and RW2.
+   First, configure RW1:
+  </para>
+<screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> replication create-manager</command>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> replication enable</command> \ 
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable></command> \
+<command>--role supplier --replica-id 1 --bind-dn "cn=replication manager,cn=config"</command>
+</screen>
+  <para>
+   Configure RW2:
+  </para>
+<screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> replication create-manager</command>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> replication enable</command> \
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable></command> \ 
+<command>--role supplier --replica-id 2 --bind-dn "cn=replication manager,cn=config"</command>
+</screen>
+  <para>
+   This will create the replication metadata required on RW1 and RW2. Note the
+   difference in the <option>replica-id</option> between the two servers. This
+   also creates the replication manager account, which is an account with
+   replication rights for authenticating between the two nodes.
+  </para>
+  <para>
+   RW1 and RW2 are now both configured to have replication metadata. The next
+   step is to create the first agreement for data from RW1 to RW2.
+  </para>
+<screen>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-agmt create</command> \
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable></command> \
+<command>--host &exampleserverip; --port 3389 --conn-protocol LDAP --bind-dn "cn=replication manager,cn=config"</command> \
+<command>--bind-passwd <replaceable>PASSWORD</replaceable> --bind-method SIMPLE <replaceable>RW1_to_RW2</replaceable></command>
+</screen>
+  <para>
+   Data will not flow from RW1 to RW2 until performing a full synchronization
+   of the database, which is called an initialization or reinit. This will
+   reset all database content on RW2 to match the content of RW1. Run the
+   following command to trigger a reinit of the data:
+  </para>
+<screen>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-agmt init</command> \
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable> <replaceable>RW1_to_RW2</replaceable></command>
+</screen>
+  <para>
+   Check the status by running this command on RW1:
+  </para>
+<screen>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-agmt init-status</command> \
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable> <replaceable>RW1_to_RW2</replaceable></command>
+</screen>
+  <para>
+   When it is finished, you should see a "Agreement successfully initialized"
+   message. If you get an error message, check the errors log. Otherwise, you
+   should see the identical content from RW1 on RW2.
+  </para>
+  <para>
+   Finally, to make this bi-directional, configure a replication agreement from
+   RW2 back to RW1:
+  </para>
+<screen>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-agmt create</command> \
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable></command> \
+<command>--host &exampleserver2ip; --port 3389 --conn-protocol LDAP --bind-dn "cn=replication manager,cn=config"</command> \
+<command>--bind-passwd <replaceable>PASSWORD</replaceable> --bind-method SIMPLE <replaceable>RW2_to_RW1</replaceable></command>
+</screen>
+  <para>
+   Changes made on either RW1 or RW2 will now be replicated to the other. Check
+   replication status on either server with the following command:
+  </para>
+<screen>
+&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-agmt status</command> \
+<command>--suffix dc=<replaceable>example</replaceable>,dc=<replaceable>com</replaceable></command> \
+<command>--bind-dn "cn=replication manager,cn=config"</command> \
+<command>--bind-passwd <replaceable>PASSWORD</replaceable> <replaceable>RW2_to_RW1</replaceable></command> 
+</screen>
+  <para>
+   -- read-only We need to create the replication accounts and metadata first.
+   RO3# dsconf localhost replication create-manager RO3# dsconf localhost
+   replication enable --suffix dc=example,dc=com --role consumer --bind-dn
+   "cn=replication manager,cn=config" Note that for a read-only we do not
+   provide a replica-id, and we set the role to "consumer". This allocates a
+   special read-only replica-id for all read-onlies. Once created, we can now
+   add the agreements from RW1 and RW2 to the read-only instance. RW1# dsconf
+   localhost repl-agmt create --suffix dc=example,dc=com --host 172.17.0.5
+   --port 3389 --conn-protocol LDAP --bind-dn "cn=replication
+   manager,cn=config" --bind-passwd password --bind-method SIMPLE RW1_to_RO3
+   RW2# dsconf localhost repl-agmt create --suffix dc=example,dc=com --host
+   172.17.0.5 --port 3389 --conn-protocol LDAP --bind-dn "cn=replication
+   manager,cn=config" --bind-passwd password --bind-method SIMPLE RW2_to_RO3
+   Once in place, you can use either RW1 or RW2 to perform the initialisation
+   of the database of RO3. RW1# dsconf localhost repl-agmt init --suffix
+   dc=example,dc=com RW1_to_RO3 You can monitor the topology with: dsconf
+   localhost replication monitor -c "172.17.0.3:3389:cn=replication
+   manager,cn=config:password" "172.17.0.4:3389:cn=replication
+   manager,cn=config:password" "172.17.0.5:3389:cn=replication
+   manager,cn=config:password" You need to supply connection strings for each
+   node you wish to monitor. You can also check the replication health with:
+   dsctl localhost healthcheck --check replication # This is a good command
+   anyway. dsctl localhost healthcheck Backups ======= When replication is
+   enabled you need to adjust your 389-ds backup strategy. If you are using
+   db2ldif you MUST add the --replication flag to ensure that replication
+   metadata is backed up. You should backup ALL servers in the topology. When
+   restoring from backup, you restore a single node of the topology, and then
+   configure all other nodes as new instances with reinit's. Pausing
+   Replication =================== You can pause replication by using
+   disable/enable on the agreement. You may chose to do this during maintenance
+   windows or similar. Once enabled, replication will resume and catch up. RW2#
+   dsconf localhost repl-agmt disable --suffix dc=example,dc=com RW2_to_RW1
+   RW2# dsconf localhost repl-agmt enable --suffix dc=example,dc=com RW2_to_RW1
+   Changelog Max Age ================= A replica can be offline for up to
+   changelog max-age, and when it comes on line will replay and catch up from
+   other replicas. If it is offline for longer than this time, the replica will
+   need to be reinitialised and will refuse to accept or provide changes to
+   other nodes as they may be inconsistent. You can set the max age with:
+   dsconf localhost replication set-changelog --max-age 7d --suffix
+   dc=example,dc=com Removing a Replica ================== To remove a replica
+   you should fence the node and prevent any other incoming changes or reads.
+   Then find all servers that have incoming replication agreements and remove
+   them. In this example we will remove RW2. RW1# dsconf localhost repl-agmt
+   delete --suffix dc=example,dc=com RW1_to_RW2 On the replica you are removing
+   remove all outbound agreements. RW2# dsconf localhost repl-agmt delete
+   --suffix dc=example,dc=com RW2_to_RW1 RW2# dsconf localhost repl-agmt delete
+   --suffix dc=example,dc=com RW2_to_RO3 Stop the instance on RW2. On RW1 run
+   the cleanallruv task to remove the replica id from the topology. RW1# dsconf
+   localhost repl-tasks cleanallruv --suffix dc=example,dc=com --replica-id 2
+   RW1# dsconf localhost repl-tasks list-cleanruv-tasks
+  </para>
+ </sect2>
+</sect1>
