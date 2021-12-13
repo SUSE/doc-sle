@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_images_combustion.xml" version="5.0" xml:id="cha-images-combustion">
+ <title>使用 Combustion 进行配置</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    本章将介绍 Combustion，它是用于在首次引导时根据您的配置来配置系统的工具。
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec-about-combustion">
+  <title>关于 Combustion</title>
+
+  <para>
+   Combustion 是一种 dracut 模块，可用于在首次引导时配置系统。Combustion 会读取提供的文件（名为 <filename>script</filename>），并执行其中的命令，以对文件系统进行更改。您可以使用 Combustion 来更改默认分区、设置用户口令、创建文件、安装软件包等。
+  </para>
+
+  <para>
+   系统将在 <literal>ignition.firstboot</literal> 参数传递给内核命令行后调用 Combustion dracut 模块。然后，Combustion 便会从 <filename>script</filename> 中读取配置。如果在 <filename>script</filename> 中发现网络标志，Combustion 会尝试配置网络。挂载 <literal>/sysroot</literal> 后，Combustion 会尝试激活 <filename>/etc/fstab</filename> 中的所有挂载点，然后调用 <command>transactional-update</command> 来应用其他更改（如设置 <systemitem class="username">root</systemitem> 口令或安装软件包）。
+  </para>
+
+  <para>
+   使用 Combustion 时，您需要以名称 <literal>combustion</literal> 来标记配置设备、在该配置媒体中创建特定目录结构，以及添加名为 <filename>script</filename> 的配置文件。在配置媒体的根目录中，创建名为 <filename>combustion</filename> 的目录，并将 <filename>script</filename> 以及其他文件（如 SSH 密钥、配置文件等）放在此目录下。这样目录结构将如下所示：
+  </para>
+
+<screen>
+&lt;root directory&gt;
+└── combustion
+    └── script
+    └── other files
+
+	</screen>
+
+  <para>
+   您可以使用 Combustion 来配置 QEMU/KVM 虚拟机。在此情况下，可使用 <command>qemu</command> 命令的 <literal>fw_cfg</literal> 参数来传递 <filename>script</filename> 文件的位置：
+  </para>
+
+<screen>
+	-fw_cfg name=opt/org.opensuse.combustion/script,file=/var/combustion-script
+	</screen>
+
+  <para>
+   Combustion 可与 Ignition 搭配使用。如果您要将它们搭配使用，请用 <literal>ignition</literal> 标记配置媒体，并在目录结构中添加包含 <filename>config.ign</filename> 的 <filename>ignition</filename> 目录，如下所示：
+  </para>
+
+<screen>
+&lt;root directory&gt;
+└── combustion
+    └── script
+    └── other files
+└── ignition 
+    └── config.ign
+	</screen>
+
+  <para>
+   在此情况下，Ignition 会先于 Combustion 运行。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-combustion-script">
+  <title><filename>script</filename> 配置文件</title>
+
+  <para>
+   <filename>script</filename> 配置文件是在系统上的事物更新外壳中执行的一组命令。本节提供了使用 Combustion 执行各种配置任务的示例。
+  </para>
+
+  <important>
+   <title>包含解释器声明</title>
+   <para>
+    因为 <filename>script</filename> 文件由 bash 解释，所以请务必在文件的第一行以解释器声明开头：
+   </para>
+<screen>
+ #!/bin/bash
+ </screen>
+  </important>
+
+  <para>
+   如果您要登录系统，请至少包含 <systemitem class="username">root</systemitem> 口令，但建议使用 SSH 密钥建立身份验证。如果您需要使用 <systemitem class="username">root</systemitem> 口令，请务必配置安全口令。如果您使用随机生成的口令，请至少包含 10 个字符。如果手动创建口令，请包含 10 个以上字符并结合使用大小写字母和数字。
+  </para>
+
+  <sect2 xml:id="sec-script-network">
+   <title>网络配置</title>
+   <para>
+    要在首次引导期间配置并使用网络连接，请在 <filename>script</filename> 中添加以下语句：
+   </para>
+<screen>
+ # combustion: network
+ </screen>
+   <para>
+    使用此语句会将 <literal>rd.neednet=1</literal> 参数传递给 dracut。如果不使用该语句，将不会为系统配置任何网络连接。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-script-partitioning">
+   <title>分区</title>
+   <para>
+    SLE Micro raw 映像使用的是默认分区方案（如<xref linkend="sec-default-partitioning"/>中所述）。您可能希望使用不同的分区方式。下面一组示例代码段会将 <filename>/home</filename> 移至另一个分区。
+   </para>
+   <note>
+    <title>在快照中包含的目录外部进行更改</title>
+    <para>
+     以下脚本会执行快照中未包含的更改。如果脚本失败且快照被丢弃，某些更改将仍可见且无法还原（例如对 <literal>/dev/vdb</literal> 设备的更改）。
+    </para>
+   </note>
+   <para>
+    以下代码段会在 <literal>/dev/vdb</literal> 设备上创建含单个分区的 GPT：
+   </para>
+<screen>
+sfdisk /dev/vdb &lt;&lt;EOF
+label: gpt
+type=linux
+EOF 
+
+partition=/dev/vdb1
+   </screen>
+   <para>
+    该分区为 BTRFS 格式：
+   </para>
+<screen>
+wipefs --all ${partition}
+mkfs.btrfs ${partition} 
+   </screen>
+   <para>
+    以下代码段会将 <filename>/home</filename> 中可能包含的内容移到新的 <filename>/home</filename> 文件夹位置：
+   </para>
+<screen>
+mount /home
+mount ${partition} /mnt 
+rsync -aAXP /home/ /mnt/
+umount /home /mnt
+   </screen>
+   <para>
+    下面的代码段会去除 <filename>/etc/fstab</filename> 中的旧项并创建新项：
+   </para>
+<screen>
+awk -i inplace '$2 != "/home"' /etc/fstab
+echo "$(blkid -o export ${partition} | grep ^UUID=) /home btrfs defaults 0 0" &gt;&gt;/etc/fstab
+   </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-cript-security">
+   <title>设置 <systemitem class="username">root</systemitem> 的口令</title>
+   <para>
+    在设置 <systemitem class="username">root</systemitem> 口令前，请先生成口令的哈希，例如，使用 <command>openssl passwd -6</command> 来生成。要设置口令，请在 <filename>script</filename> 中添加以下内容：
+   </para>
+<screen>
+ echo 'root:$5$.wn2BZHlEJ5R3B1C$TAHEchlU.h2tvfOpOki54NaHpGYKwdNhjaBuSpDotD7' | chpasswd -e
+ </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-script-sshkeys">
+   <title>添加 SSH 密钥</title>
+   <para>
+    以下代码段会创建用于储存 <systemitem class="username">root</systemitem> 的 SSH 密钥的目录，然后将位于配置设备上的 SSH 公共密钥复制到 <filename>authorized_keys</filename> 文件中。
+   </para>
+<screen>
+ mkdir -pm700 /root/.ssh/
+cat id_rsa_new.pub &gt;&gt; /root/.ssh/authorized_keys
+ </screen>
+   <note>
+    <para>
+     如果您需要通过 SSH 进行远程登录，则必须启用 SSH 服务。有关细节，请参见<xref linkend="sec-script-services"/>。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-script-services">
+   <title>启用服务</title>
+   <para>
+    您可能需要启用某些服务，例如 SSH 服务。要启用 SSH 服务，请将下面一行添加到 <filename>script</filename> 中：
+   </para>
+<screen>
+ systemctl enable sshd.service
+ </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-script-install">
+   <title>安装软件包</title>
+   <important>
+    <title>可能需要网络连接并注册您的系统</title>
+    <para>
+     由于您可能需要额外订阅某些软件包，因此可能需事先注册系统。此外，安装额外的软件包可能还需要有网络连接。
+    </para>
+   </important>
+   <para>
+    在首次引导配置期间，可以在系统上安装额外的软件包。例如，可以通过添加以下命令安装 <literal>vim</literal> 编辑器：
+   </para>
+<screen>
+zypper --non-interactive install vim-small
+ </screen>
+   <note>
+    <para>
+     请注意，在配置完毕并引导到配置的系统前，您将无法使用 <command>zypper</command>。如果想要在稍后进行更改，则必须使用 <command>transactional-update</command> 命令创建已更改快照。有关细节，请参见<xref linkend="sec-transactional-udate"/>。
+    </para>
+   </note>
+  </sect2>
+ </sect1>
+</chapter>
