@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_images_combustion.xml" version="5.0" xml:id="cha-images-combustion">
+ <title>Combustionによる設定</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    この章では、Combustionについて説明します。Combustionとは、設定に従って最初のブート時にシステムを設定するために使用するツールです。
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec-about-combustion">
+  <title>Combustionについて</title>
+
+  <para>
+   Combustionは、最初のブート時にシステムを設定できるdracutモジュールです。Combustionは<filename>script</filename>と呼ばれる提供されるファイルを読み込み、その中でコマンドを実行して、ファイルシステムへの変更を行います。Combustionを使用して、デフォルトパーティションの変更、ユーザのパスワードの設定、ファイルの作成、パッケージのインストールなどを実行できます。
+  </para>
+
+  <para>
+   Combustion dracutモジュールは、<literal>ignition.firstboot</literal>引数がカーネルコマンドラインに渡された後に呼び出されます。その後、Combustionは<filename>script</filename>から設定を読み込みます。ネットワークフラグが<filename>script</filename>で見つかった場合、Combustionはネットワークを設定しようとします。<literal>/sysroot</literal>がマウントされると、Combustionは<filename>/etc/fstab</filename>にあるすべてのマウントポイントを有効にしようとし、<command>transactional-update</command>を呼び出して、他の変更(<systemitem class="username">root</systemitem>パスワードの設定やパッケージのインストールなど)を適用します。
+  </para>
+
+  <para>
+   Combustionを使用する場合は、設定デバイスに<literal>combustion</literal>という名前のラベルを付け、その設定メディアで固有のディレクトリ構造を作成して、<filename>script</filename>という名前の設定ファイルを含める必要があります。設定メディアのルートディレクトリに、<filename>combustion</filename>というディレクトリを作成し、<filename>script</filename>を他のファイル(SSHキー、設定ファイルなど)とともにこのディレクトリに配置します。ディレクトリ構造は次のようになるはずです。
+  </para>
+
+<screen>
+&lt;root directory&gt;
+└── combustion
+    └── script
+    └── other files
+
+	</screen>
+
+  <para>
+   Combustionを使用して、QEMU/KVM仮想マシンを設定できます。この場合、<command>qemu</command>コマンドの<literal>fw_cfg</literal>パラメータを使用して<filename>script</filename>ファイルの場所を渡します。
+  </para>
+
+<screen>
+	-fw_cfg name=opt/org.opensuse.combustion/script,file=/var/combustion-script
+	</screen>
+
+  <para>
+   Combustionは、Ignitionとともに使用することができます。Ignitionとともに使用する場合は、設定メディアの<literal>ignition</literal>にラベルを付け、以下に示すように、ディレクトリ構造に<filename>config.ign</filename>を含む<filename>ignition</filename>ディレクトリを含めます。
+  </para>
+
+<screen>
+&lt;root directory&gt;
+└── combustion
+    └── script
+    └── other files
+└── ignition 
+    └── config.ign
+	</screen>
+
+  <para>
+   このシナリオでは、IgnitionはCombustionの前に実行されます。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-combustion-script">
+  <title><filename>script</filename>設定ファイル</title>
+
+  <para>
+   <filename>script</filename>設定ファイルは、transactional-updateシェルでシステム上で実行される一連のコマンドです。このセクションでは、Combustionを使用して、さまざまな設定タスクを実行する例を示します。
+  </para>
+
+  <important>
+   <title>インタープリタ宣言を含める</title>
+   <para>
+    <filename>script</filename>ファイルはbashによって解釈されるため、必ず最初の行で、インタープリタ宣言を使用してファイルを開始してください。
+   </para>
+<screen>
+ #!/bin/bash
+ </screen>
+  </important>
+
+  <para>
+   システムにログインする場合は、少なくとも<systemitem class="username">root</systemitem>パスワードを含めてください。ただし、SSHキーを使用した認証を確立することをお勧めします。<systemitem class="username">root</systemitem>パスワードを使用する必要がある場合は、セキュアなパスワードを設定してください。ランダムに生成されたパスワードを使用する場合は、少なくとも10文字を使用してください。パスワードを手動で作成する場合は、10文字以上を使用し、大文字と小文字、および数字を組み合わせます。
+  </para>
+
+  <sect2 xml:id="sec-script-network">
+   <title>ネットワーク設定</title>
+   <para>
+    最初のブート時にネットワーク接続を設定して使用するには、<filename>script</filename>に次のステートメントを追加します。
+   </para>
+<screen>
+ # combustion: network
+ </screen>
+   <para>
+    このステートメントを使用すると、<literal>rd.neednet=1</literal>引数がdracutに渡されます。このステートメントを使用しない場合、システムはネットワーク接続なしで設定されます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-script-partitioning">
+   <title>パーティショニング</title>
+   <para>
+    SLE Micro生イメージは、<xref linkend="sec-default-partitioning"/>で説明されるように、デフォルトのパーティショニングスキームで提供されます。異なるパーティショニングを使用することもできます。次の一連のスニペット例では、<filename>/home</filename>を別のパーティションに移動します。
+   </para>
+   <note>
+    <title>スナップショットに含まれるディレクトリの外部で変更を実行する</title>
+    <para>
+     次のスクリプトは、スナップショットに含まれていない変更を実行します。スクリプトが失敗し、スナップショットが破棄された場合、一部の変更は表示されたままとなり元に戻すことができません(<literal>/dev/vdb</literal>デバイスへの変更と同様)。
+    </para>
+   </note>
+   <para>
+    次のスニペットは、<literal>/dev/vdb</literal>デバイス上で単一パーティションを持つGPTを作成します。
+   </para>
+<screen>
+sfdisk /dev/vdb &lt;&lt;EOF
+label: gpt
+type=linux
+EOF 
+
+partition=/dev/vdb1
+   </screen>
+   <para>
+    パーティションはBTRFSにフォーマットされます。
+   </para>
+<screen>
+wipefs --all ${partition}
+mkfs.btrfs ${partition} 
+   </screen>
+   <para>
+    次のスニペットによって、<filename>/home</filename>の可能なコンテンツが新しい<filename>/home</filename>フォルダの場所に移動されます。
+   </para>
+<screen>
+mount /home
+mount ${partition} /mnt 
+rsync -aAXP /home/ /mnt/
+umount /home /mnt
+   </screen>
+   <para>
+    次のスニペットは、<filename>/etc/fstab</filename>の古いエントリを削除して、新しいエントリを作成します。
+   </para>
+<screen>
+awk -i inplace '$2 != "/home"' /etc/fstab
+echo "$(blkid -o export ${partition} | grep ^UUID=) /home btrfs defaults 0 0" &gt;&gt;/etc/fstab
+   </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-cript-security">
+   <title><systemitem class="username">root</systemitem>のパスワードの設定</title>
+   <para>
+    <systemitem class="username">root</systemitem>パスワードを設定する前に、<command>openssl passwd -6</command>などを使用して、パスワードのハッシュを生成します。パスワードを設定するには、<filename>script</filename>に以下を追加します:
+   </para>
+<screen>
+ echo 'root:$5$.wn2BZHlEJ5R3B1C$TAHEchlU.h2tvfOpOki54NaHpGYKwdNhjaBuSpDotD7' | chpasswd -e
+ </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-script-sshkeys">
+   <title>SSHキーの追加</title>
+   <para>
+    次のスニペットは、<systemitem class="username">root</systemitem>のSSHキーを格納するディレクトリを作成し、設定デバイスにあるSSH公開鍵を<filename>authorized_keys</filename>ファイルにコピーします。
+   </para>
+<screen>
+ mkdir -pm700 /root/.ssh/
+cat id_rsa_new.pub &gt;&gt; /root/.ssh/authorized_keys
+ </screen>
+   <note>
+    <para>
+     SSHを介したリモートログインを使用する必要がある場合は、SSHサービスを有効にする必要があります。詳細については、<xref linkend="sec-script-services"/>を参照してください。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-script-services">
+   <title>サービスの有効化</title>
+   <para>
+    SSHサービスなど、一部のサービスを有効化する必要がある場合があります。SSHサービスを有効化するには、次の行を<filename>script</filename>に追加します。
+   </para>
+<screen>
+ systemctl enable sshd.service
+ </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-script-install">
+   <title>パッケージのインストール</title>
+   <important>
+    <title>ネットワーク接続およびシステムの登録が必要になる場合があります。</title>
+    <para>
+     一部のパッケージには追加のサブスクリプションが必要になる場合があるため、あらかじめシステムを登録する必要がある場合があります。また、追加のパッケージをインストールするには、利用可能なネットワーク接続が必要になる場合もあります。
+    </para>
+   </important>
+   <para>
+    最初のブート設定時に、システムに追加パッケージをインストールできます。たとえば、以下を追加して、<literal>vim</literal>エディタをインストールできます。
+   </para>
+<screen>
+zypper --non-interactive install vim-small
+ </screen>
+   <note>
+    <para>
+     設定が完了して、設定されたシステムでブートした後では、<command>zypper</command>を使用できないことに注意してください。後で変更を実行するには、<command>transactional-update</command>コマンドを使用して、変更されたスナップショットを作成する必要があります。詳細については、<xref linkend="sec-transactional-udate"/>を参照してください。
+    </para>
+   </note>
+  </sect2>
+ </sect1>
+</chapter>

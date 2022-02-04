@@ -1,0 +1,613 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="urn:x-suse:xslt:profiling:docbook50-profile.xsl"
+                 type="text/xml"
+                 title="Profiling step"?>
+<!DOCTYPE article
+[
+  <!ENTITY % entities SYSTEM "entity-decl.ent">
+    %entities;
+]>
+<article xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="article-podman" xml:lang="en">
+ <title>Podman Guide</title>
+ <info>
+  <productnumber>&productnumber;</productnumber><productname>&productname;</productname><date>
+<?dbtimestamp format="B d, Y"?></date>
+  <abstract>
+   <para>
+    This guide describes Podman and containers.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <section xml:id="sec-introduction-containers">
+  <title>Introduction to containers</title>
+  <para>
+   Containers offer a lightweight virtualization method to run multiple virtual
+   environments (containers) simultaneously on a single host. Unlike
+   technologies such as &xen; or &kvm;, where the processor simulates a
+   complete hardware environment and a hypervisor controls virtual machines,
+   containers provide virtualization on the operating system level, where the
+   kernel controls the isolated containers.
+  </para>
+  <itemizedlist mark="bullet" spacing="normal">
+   <title>Advantages of using containers</title>
+   <listitem>
+    <para>
+     Containers make it possible to isolate applications in self-contained
+     units.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Containers provide near-native performance. Depending on the runtime, a
+     container can use the host kernel directly, thus minimizing overhead.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     It is possible to control network interfaces and apply resources inside
+     containers through kernel control groups.
+    </para>
+   </listitem>
+  </itemizedlist>
+  <itemizedlist mark="bullet" spacing="normal">
+   <title>Limitations of containers</title>
+   <listitem>
+    <para>
+     Containers run on the host system's kernel, so they cannot use different
+     kernels or different kernel versions.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Containers are not secure, and the overall security depends on the host
+     system. Containerized applications can be secured through &aa; or &selnx;
+     profiles. Securing containers is harder than securing virtual machines,
+     due to the larger attack surface.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </section>
+ <section xml:id="sec-introduction-podman">
+  <title>Podman overview</title>
+  <para>
+   Podman is a short name for Pod Manager Tool. It is a daemonless container
+   engine that enables you to run and deploy applications using containers and
+   container images. Podman provides a command line interface to manage
+   containers.
+  </para>
+  <para>
+   As Podman does not have a daemon, it provides integration with systemd. This
+   makes it possible to control containers via systemd units. You can create
+   these units for existing containers as well as generate units that can start
+   containers if they do not exist in the system. Moreover, Podman can run
+   systemd inside containers.
+  </para>
+  <para>
+   Podman enables you to organize your containers into pods. Pods share the
+   same network interface and resources. A typical use case for organizing a
+   group of containers into a pod is a container that runs a database and a
+   container with a client that accesses the database. For further information
+   about pods, refer to <xref linkend="pod-architecture"/>.
+  </para>
+  <section xml:id="pod-architecture">
+   <title>Pods architecture</title>
+   <para>
+    A pod is a group of containers that share the same name space, ports, and
+    network connection. Usually, containers within one pod can communicate
+    directly with each other. Each pod contains an infrastructure container
+    (<literal>INFRA</literal>), whose purpose is to hold the name space.
+    <literal>INFRA</literal> also enables Podman to add other containers to the
+    pod. Port bindings, cgroup-parent values, and kernel name spaces are all
+    assigned to the infrastructure container. Therefore, later changes of these
+    values are not possible.
+   </para>
+   <figure xml:id="fig-pod-architecture">
+    <title>Pods architecture</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="pods_architecture.svg" width="100%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="pods_architecture.svg" width="100%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    Each container in a pod has its own instance of a monitoring program. The
+    monitoring program watches the container's process and if the container
+    dies, the monitoring program saves its exit code. The program also holds
+    open the tty interface for the particular container. The monitoring program
+    enables you to run containers in the detached mode when Podman exits, because
+    this program continues to run and enables you to attach tty later.
+   </para>
+  </section>
+ </section>
+ <section xml:id="sec-podman-delivery">
+  <title>Getting Podman</title>
+  <para>
+   In case of &slema;, Podman is delivered in all raw images or is installed by
+   default if you installed your system manually from ISO. To verify that
+   Podman is installed in your system, run the following command:
+  </para>
+<screen>&prompt.root;zypper se -i podman</screen>
+  <para>
+   If Podman is not listed in the output, install it by running:
+  </para>
+<screen>&prompt.root;transactional-update pkg install podman*</screen>
+  <para>
+   In the Cockpit web interface, you need to start Podman as a service by
+   clicking <guimenu>Start podman</guimenu> to access container
+   management.
+  </para>
+  <para>
+   By default, Podman requires root privileges. To enable rootless mode for the
+   current user, run the following command:
+  </para>
+<screen>
+&prompt.user;sudo usermod --add-subuids 200000-201000 \
+  --add-subgids 200000-201000 $USER
+</screen>
+  <para>
+   Reboot the machine to enable the change. The command above defines a range
+   of local UIDs to which the UIDs allocated to users inside the container are
+   mapped on the host. Note that the ranges defined for different users must
+   not overlap. It is also important that the ranges do not reuse the UID of an
+   existing local user or group. By default, adding a user with the
+   <command>useradd</command> command automatically allocates subUID and subGID
+   ranges.
+  </para>
+  <para>
+   Running a container with Podman in rootless mode on &slema; may fail,
+   because the container needs read access to the SUSE Customer Center
+   credentials. Therefore, running containers as &rootuser; is recommended.
+  </para>
+ </section>
+ <section xml:id="sec-getting-images">
+  <title>Getting container images</title>
+  <para>
+   To run a container, you need an image. An image includes all the
+   dependencies needed to run an application. You can obtain images from an
+   image registry. Available registries are defined in the
+   <filename>/etc/containers/registries.conf</filename> configuration file. If
+   you have a local image registry or want to use other registries, add the
+   registries into the configuration file.
+  </para>
+  <important>
+   <title>No tools for building images in &slema;</title>
+   <para>
+    &slema; does not provide tools for building custom images. Therefore, the
+    only way to get an image is to pull it from an image registry.
+   </para>
+  </important>
+  <para>
+   The <command>podman pull</command> command pulls an image from an image registry.
+   The syntax is as follows:
+  </para>
+<screen>&prompt.root;podman pull <replaceable>[OPTIONS]</replaceable> <replaceable>SOURCE</replaceable></screen>
+  <para>
+   The <replaceable>source</replaceable> can be an image without the registry
+   name. In that case, Podman tries to pull the image from all registries
+   configured in the <filename>/etc/containers/registries.conf</filename> file.
+   The default image tag is <literal>latest</literal>. The default location of
+   pulled images is
+   <filename>/var/lib/containers/storage/overlay-images/</filename>.
+  </para>
+  <para>
+   To view all possible options of the <command>podman pull</command> command,
+   run:
+  </para>
+<screen>&prompt.root;podman pull --help</screen>
+  <note>
+   <title>Getting images using Cockpit</title>
+   <para>
+    If you are using Cockpit, you can also pull images from an image registry in
+    the <guimenu>Podman containers</guimenu> menu by clicking <guimenu>+ Get
+    new image</guimenu>.
+   </para>
+  </note>
+  <para>
+   Podman enables you to search for images in an image registry or a list of
+   registries using the command:
+  </para>
+<screen>&prompt.root;podman search <replaceable>IMAGE_NAME</replaceable></screen>
+ </section>
+ <section xml:id="sec-working-containers">
+  <title>Working with containers</title>
+  <para>
+   The following section covers common container management tasks. This
+   includes creating, starting, and modifying containers.
+  </para>
+  <section xml:id="sec-podman-run">
+   <title>Running containers</title>
+   <para>
+    After you have pulled your container image, you can create containers based
+    on it. You can run an instance of the image using the <command>podman
+    run</command> command. The command syntax is as follows:
+   </para>
+<screen>&prompt.root;podman run [<replaceable>OPTIONS</replaceable>] <replaceable>IMAGE</replaceable> [<replaceable>CONTAINER_NAME</replaceable>]</screen>
+   <para>
+    <replaceable>IMAGE</replaceable> is specified in format
+    <emphasis>transport:path</emphasis>. If <emphasis>transport</emphasis> is
+    omitted, the default <literal>docker</literal> is used. The
+    <emphasis>path</emphasis> can reference to a specific image registry. If
+    omitted, Podman searches for the image in registries defined in the
+    <filename>/etc/containers/registries.conf</filename> file. An example that
+    runs a container called <literal>sles15</literal> based on the
+    <literal>sle15</literal> image follows:
+   </para>
+<screen>&prompt.root;podman run registry.opensuse.org/suse/templates/images/sle-15-sp3/base/images/suse/sle15 sles15</screen>
+   <para>
+    Below is a list of frequently used options. For a complete list of
+    available options, run the command: <command>podman run --help</command>.
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>--detach, -d</literal></term>
+     <listitem>
+      <para>
+       The container will run in the background.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--env, -e=env</literal></term>
+     <listitem>
+      <para>
+       This option allows arbitrary environment variables that are available
+       for the process to be launched inside of the container. If an
+       environment variable is specified without a value, Podman will check the
+       host environment for a value and set the variable only if it is set on
+       the host.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--help</literal></term>
+     <listitem>
+      <para>
+       Prints help for the <command>podman run</command> command.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--hostname=</literal><emphasis>name</emphasis>,<literal> -h</literal></term>
+     <listitem>
+      <para>
+       Sets the container host name that is available inside the container.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--pod=</literal><emphasis>name</emphasis></term>
+     <listitem>
+      <para>
+       Runs container in an existing pod. To create a pod, prefix the pod name
+       with <literal>new:</literal>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--read-only</literal></term>
+     <listitem>
+      <para>
+       Mounts the container’s root file system as read only.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--systemd=true|false|always</literal></term>
+     <listitem>
+      <para>
+       Runs container in systemd mode. The default is true.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </section>
+  <section xml:id="sec-podman-stop">
+   <title>Stopping containers</title>
+   <para>
+    If the <command>podman run</command> command finished successfully, a new
+    container has been started. You can stop the container by running:
+   </para>
+<screen>&prompt.root;podman stop <replaceable>[OPTIONS]</replaceable> <replaceable>CONTAINER</replaceable></screen>
+   <para>
+    You can specify a single container name or ID or a space-separated list of
+    containers. The command takes the following options:
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><literal>--all, -a</literal></term>
+     <listitem>
+      <para>
+       Stops all running containers.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--latest, -l</literal></term>
+     <listitem>
+      <para>
+       Instead of providing a container name, the last created container will
+       be stopped.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>--time, -t=</literal><emphasis>seconds</emphasis></term>
+     <listitem>
+      <para>
+       Seconds to wait before forcibly stopping the container.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    To view all possible options of the <command>podman stop</command> command,
+    run the following:
+   </para>
+<screen>&prompt.root;podman stop --help</screen>
+  </section>
+  <section xml:id="sec-podman-start">
+   <title>Starting containers</title>
+   <para>
+    To start already created but stopped containers, use the <command>podman
+    start</command> command. The command syntax is as follows:
+   </para>
+<screen>&prompt.root;podman start <replaceable>[OPTIONS]</replaceable> <replaceable>CONTAINER</replaceable></screen>
+   <para>
+    <replaceable>CONTAINER</replaceable> can be a container name or a container
+    ID.
+   </para>
+   <para>
+    For a complete list of possible options of <command>podman start</command>,
+    run the command:
+   </para>
+<screen>&prompt.root;podman start --help</screen>
+  </section>
+  <section xml:id="sec-podman-commit">
+   <title>Committing modified containers</title>
+   <para>
+    You can run a new container with specific attributes that are not part of
+    the original image. To save the container with these attributes as a new
+    image, you can use the <command>podman commit</command> command:
+   </para>
+<screen>&prompt.root;podman commit <replaceable>[OPTIONS]</replaceable> <replaceable>CONTAINER</replaceable> <replaceable>IMAGE</replaceable></screen>
+   <para>
+    <replaceable>CONTAINER</replaceable> is a container name or a container ID.
+    <replaceable>IMAGE</replaceable> is the new image name. If the image name
+    does not start with a registry name, the value <literal>localhost</literal>
+    is used.
+   </para>
+   <para>
+    When using Cockpit, you can perform the <command>commit</command> operation
+    directly from a container's <guimenu>Details</guimenu>, by clicking
+    <guimenu>Commit</guimenu>. A dialog box opens. Specify all required details
+    as shown below and click <guimenu>Commit</guimenu>:
+   </para>
+   <figure>
+    <title>Committing a container in Cockpit</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="cockpit_commit_container.png" width="100%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="cockpit_commit_container.png" width="100%"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+  </section>
+  <section xml:id="sec-podman-ps">
+   <title>Listing containers</title>
+   <para>
+    Podman enables you to list all running containers using the <command>podman
+    ps</command> command. The generic syntax of the command is as follows:
+   </para>
+<screen>&prompt.root;podman  ps <replaceable>[OPTIONS]</replaceable></screen>
+   <para>
+    Command options can change the displayed information. For example, using
+    the <literal>--all</literal> option will output all containers created by
+    Podman (not only the running containers).
+   </para>
+   <para>
+    For a complete list of <command>podman ps</command> options, run:
+   </para>
+<screen>&prompt.root;podman ps --help</screen>
+  </section>
+  <section xml:id="sec-podman-rm">
+   <title>Removing containers</title>
+   <para>
+    To remove one or more unused container from the host, use the
+    <command>podman rm</command> command as follows:
+   </para>
+<screen>&prompt.root;podman rm <replaceable>[OPTIONS]</replaceable> <replaceable>CONTAINER</replaceable></screen>
+   <para>
+    <replaceable>CONTAINER</replaceable> can be a container name or a container
+    ID.
+   </para>
+   <para>
+    The command does not remove the specified container if the container is
+    running. To remove a running container, use the <literal>-f</literal>
+    option.
+   </para>
+   <para>
+    For a complete list of <command>podman rm</command> options, run:
+   </para>
+<screen>&prompt.root;podman rm --help</screen>
+   <note>
+    <title>Deleting all stopped containers</title>
+    <para>
+     You can delete all stopped containers from your host with a single
+     command:
+    </para>
+<screen>&prompt.root;podman container prune</screen>
+    <para>
+     Make sure that each stopped container is intended to be removed before you
+     run the command, otherwise you might remove containers that are still in
+     use and were stopped only temporarily.
+    </para>
+   </note>
+  </section>
+ </section>
+ <section xml:id="sec-working-pods">
+  <title>Working with pods</title>
+  <para>
+   Containers can be grouped into a pod. The containers in the pod then share
+   network, pid, and IPC namespace. Pods can be managed by <command>podman
+   pod</command> commands. This section provides an overview of the commands
+   for managing pods.
+  </para>
+  <section xml:id="sec-creating-pods">
+   <title>Creating pods</title>
+   <para>
+    The command <command>podman pod create</command> is used to create a pod.
+    The syntax of the command is as follows:
+   </para>
+<screen>&prompt.root;podman pod create <replaceable>[OPTIONS]</replaceable></screen>
+   <para>
+    The command outputs the pod ID. By default, the pods are created without being
+    started. You can start a pod by running a container in the pod, or by
+    starting the pod as described in <xref linkend="sec-starting-pods"/>.
+   </para>
+   <note>
+    <title>Default pod names</title>
+    <para>
+     If you do not specify a pod name with the <literal>--name</literal>
+     option, Podman will assign a default name for the pod.
+    </para>
+   </note>
+   <para>
+    For a complete list of possible options, run the following command:
+   </para>
+<screen>&prompt.root;podman pod create --help</screen>
+  </section>
+  <section xml:id="sec-listing-pods">
+   <title>Listing pods</title>
+   <para>
+    You can list all pods by running the command:
+   </para>
+<screen>&prompt.root;podman pod list</screen>
+   <para>
+    The output looks as follows:
+   </para>
+<screen>
+POD ID        NAME               STATUS   CREATED       # OF CONTAINERS  INFRA ID
+30fba506fecb  upbeat_mcclintock  Created  19 hours ago  1                4324f40c9651
+976a83b4d88b  nervous_feynman    Running  19 hours ago  2                daa5732ecd02
+</screen>
+   <para>
+    As each pod includes the <literal>INFRA</literal> container, the number of
+    containers in a pod is always larger than zero.
+   </para>
+  </section>
+  <section xml:id="sec-starting-pods">
+   <title>Starting/stopping/restarting pods</title>
+   <para>
+    After a pod is created, you must start it, as it is not in the state
+    <literal>running</literal> by default. In the commands below,
+    <replaceable>POD</replaceable> can be a pod name or a pod ID.
+   </para>
+   <para>
+    To start a pod, run the command:
+   </para>
+<screen>&prompt.root;podman pod start <replaceable>[OPTIONS]</replaceable> <replaceable>POD</replaceable></screen>
+   <para>
+    For a complete list of possible options, run:
+   </para>
+<screen>&prompt.root;podman pod start --help</screen>
+   <para>
+    To stop a pod, use the <command>podman pod stop</command> as follows:
+   </para>
+<screen>&prompt.root;podman pod stop <replaceable>POD</replaceable></screen>
+   <para>
+    To restart a pod, use the <command>podman pod restart</command> command as
+    follows:
+   </para>
+<screen>&prompt.root;podman pod restart <replaceable>POD</replaceable></screen>
+  </section>
+  <section xml:id="sec-adding-pods">
+   <title>Managing containers in a pod</title>
+   <para>
+    To add a new container to a pod, use the <command>podman run</command>
+    command with the option <literal>--pod</literal>. A general syntax of the
+    command follows:
+   </para>
+<screen>&prompt.root;podman run <replaceable>[OPTIONS]</replaceable> --pod <replaceable>POD_NAME</replaceable> <replaceable>IMAGE</replaceable></screen>
+   <para>
+    For details about the <command>podman run</command> command, refer to
+    <xref linkend="sec-podman-run"/>.
+   </para>
+   <note>
+    <title>Only new containers can be added to a pod</title>
+    <para>
+     The <command>podman start</command> command does not allow for starting a
+     container in a pod if the container was not added to the pod during
+     the container's initial running.
+    </para>
+   </note>
+   <para>
+    You cannot remove a container from a pod and keep the container running,
+    because the container itself is removed from the host.
+   </para>
+   <para>
+    Other actions like start, restart, and stop can be performed on specific
+    containers without affecting the status of the pod.
+   </para>
+  </section>
+  <section xml:id="sec-removing-pods">
+   <title>Removing pods</title>
+   <para>
+    There are two ways to remove pods. You can use the <command>podman pod
+    rm</command> command to remove one or more pods. Alternatively, you can
+    remove all stopped pods using the <command>podman pod prune</command>
+    command.
+   </para>
+   <para>
+    To remove a pod or several pods, run the <command>podman pod rm</command>
+    command as follows:
+   </para>
+<screen>&prompt.root;podman pod rm <replaceable>POD</replaceable></screen>
+   <para>
+    <replaceable>POD</replaceable> can be a pod name or a pod ID.
+   </para>
+   <para>
+    To remove all currently stopped pods, use the <command>podman pod
+    prune</command> command. Make sure that all stopped pods are intended to be
+    removed before you run the <command>podman pod prune</command> command,
+    otherwise you might remove pods that are still in use.
+   </para>
+  </section>
+  <section xml:id="sec-monitoring-pods">
+   <title>Monitoring processes in pods</title>
+   <para>
+    To view all containers in all pods, use the following command:
+   </para>
+<screen>&prompt.root;podman ps -a --pod</screen>
+   <para>
+    The output of the command will be similar to the following one:
+   </para>
+   <!-- Decreased text size and removed a few columns to make this fit on the PDF. -->
+<screen>
+<?dbsuse-fo font-size="0.70em"?>
+CONTAINER ID  IMAGE                       COMMAND    CREATED       STATUS                 [...]
+4324f40c9651  k8s.gcr.io/pause:3.2                   21 hours ago  Created
+daa5732ecd02  k8s.gcr.io/pause:3.2                   22 hours ago  Up 3 hours ago
+e5c8e360c54b  localhost/test:latest       /bin/bash  3 days ago    Exited (137) 3 days ago
+82dad15828f7  localhost/opensuse/toolbox  /bin/bash  3 days ago    Exited (137) 3 days ago
+1a23da456b6f  docker.io/i386/ubuntu       /bin/bash  4 days ago    Exited (0) 6 hours ago
+df890193f651  localhost/opensuse/toolbox  /bin/bash  4 days ago    Created
+  </screen>
+   <para>
+    The first two records are the <literal>INFRA</literal> containers of each
+    pod, based on the <literal>k8s.gcr.io/pause:3.2</literal> image. Other
+    containers in the output are stand-alone containers that do not belong to
+    any pod.
+   </para>
+  </section>
+ </section>
+ <xi:include href="podman_terminology.xml"/>
+</article>
