@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" version="5.0"
+ xmlns:xi="http://www.w3.org/2001/XInclude"
+ xmlns:xlink="http://www.w3.org/1999/xlink"
+ xml:id="cha-ulp" xml:lang="en">
+ <title>Userspace live patching</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    This document describes the basic principles and usage of userspace live
+    patching. service.
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec-ulp">
+  <title>About user live patching</title>
+
+  <para>
+   Userspace live patching (ULP) refers to the process of applying patches to
+   the libraries used by a running process, without interrupting them. Live
+   patching operations are performed using the <systemitem>ulp</systemitem>
+   tool that is part of the <systemitem>libpulp</systemitem>.
+  </para>
+
+  <para>
+   <systemitem>libpulp</systemitem> is a framework that enables userspace live
+   patching. It consists of the <systemitem>libpulp.so</systemitem> library and
+   tools for making libraries live-patchable and applying live patches to
+   running processes (the <systemitem>ulp</systemitem> binary).
+  </para>
+
+  <sect2 xml:id="sec-ulp-prereqs">
+   <title>Prerequisites</title>
+   <para>
+    For ULP to work, two requirements must be met.
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      For a library to be live-patchable, it must be compiled with the
+      <option>-fpatchable-function-entry</option> GCC flag. No changes to the
+      library source code are required.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Processes must preload <systemitem>libpulp.so</systemitem>.
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="sec-ulp-libpulp">
+   <title>Using libpulp</title>
+   <para>
+    To use <systemitem>libpulp</systemitem> with an application, you must
+    perform the following steps:
+   </para>
+   <orderedlist>
+    <listitem>
+     <para>
+      Make a library live-patchable.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      When launching the application, preload <systemitem>libpulp</systemitem>
+      with <command>LD_PRELOAD=/usr/lib64/libpulp.so
+      ./<replaceable>APPLICATION</replaceable></command> command.
+     </para>
+    </listitem>
+   </orderedlist>
+   <sect3 xml:id="sec-ulp-prep-lib">
+    <title>Preparing a library to be live-patchable</title>
+    <para>
+     For a library to be live-patchable, it must contain a
+     <literal>NOP</literal> preamble in all function calls. GCC version 8 and
+     higher, as well as the GCC version that ships with &sls;, provides the
+     <option>-fpatchable-function-entry=</option> specifically for that
+     purpose. Thus on the &x86-64; architecture, compiling a library written in
+     C with <option>-fpatchable-function-entry=16,14</option> flag is
+     sufficient for making it live-patchable.
+    </para>
+    <para>
+     The glibc, libssl.so.1.1, and libcrypto.so.1.1 libraries are already
+     live-patchable on &sle; &product-ga ; SP&product-sp;.
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-ulp-livepatch-check">
+    <title>Checking if a library is live-patchable</title>
+    <para>
+     To check whether a library is live-patchable, use the following script:
+    </para>
+<screen>#!/bin/sh
+
+is_lib_livepatcheable() {
+  ULP_NOPS_LEN=16
+  ULP_PRE_NOPS_LEN=14
+  ULP_NOP_OPCODE=90
+
+  local lib_path=$1
+  local address_of_a_symbol=`objdump -T $lib_path | grep '\.text' | head -n 1 | awk '{ print $1 }'`
+
+  if [ $? -ne 0 ]; then
+    echo "Unable to find a symbol in $lib_path"
+    exit 1
+  fi
+
+  # Convert hexadecimal address in decimal so we can do mathematical operations
+  local addr_decimal=`printf "%llu" "0x$address_of_a_symbol"`
+  if [ $addr_decimal -eq 0 ]; then
+    echo "Symbol at address found is invalid: $address_of_a_symbol"
+    exit 1
+  fi
+
+  local ulp_prologue_dec=`expr $addr_decimal - $ULP_PRE_NOPS_LEN`
+  local ulp_prologue_addr=`printf "0x%lx" $ulp_prologue_dec`
+
+  # Get bytes at target library. It should have $ULP_NOPS_LEN nops (0x90 on x86)
+  local insns=`xxd -s $ulp_prologue_addr -l $ULP_PRE_NOPS_LEN -c $ULP_PRE_NOPS_LEN \
+    -g $ULP_PRE_NOPS_LEN $lib_path | grep -oEi "($ULP_NOP_OPCODE){$ULP_PRE_NOPS_LEN}"`
+
+  # If library is not livepatcheable, insns is empty.
+  if [ -z "$insns" ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+if [ -z $1 ]; then
+  echo "usage: $0 &lt;.so_to_check&gt;"
+  exit 1
+fi
+
+is_lib_livepatcheable $1
+if [ $? -ne 0 ]; then
+  echo "library $1 is not livepatchable: missing NOP prologue"
+else
+  echo "library $1 is livepatchable"
+fi</screen>
+   </sect3>
+   <sect3 xml:id="sec-ulp-apply-livepatch">
+    <title>Applying livepatches</title>
+    <para>
+     Livepatches are applied using the <systemitem>ulp trigger</systemitem>
+     command, for example:
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.ulp</screen>
+    <para>
+     In the example above, <literal>PID</literal> is the PID of the running
+     process that uses the library to be patched.
+     <literal>LIVEPATCH.ulp</literal> is the actual livepatch file.
+    </para>
+    <para>
+     The <literal>live patching succeeded</literal> indicates that the
+     live-patching operation was successful.
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-ulp-revert-livepatch">
+    <title>Reverting livepatches</title>
+    <para>
+     <command>ulp trigger</command> can be used to revert livepatches. There
+     are two ways to revert livepatches. You can revert a livepatch by applying
+     the appropriate <filename>.rev</filename> patch:
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.rev</screen>
+    <para>
+     Alternatively, it is possible to remove all patches associated with a
+     particular library. For example:
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable> --revert-all=<replaceable>LIBRARY</replaceable></screen>
+    <para>
+     In the example above, <replaceable>LIBRARY</replaceable> refers to the
+     actual library, for example, <systemitem>libcrypto.so.1.1</systemitem>.
+    </para>
+    <para>
+     The latter approach can be useful when you do not have the source code of
+     the original livepatch or you want to remove a specific old patch and
+     apply a new one, without the target application running potentially
+     unsecure code. For example:
+    </para>
+<screen>ulp trigger -p $(pidof test) --revert-all=libcrypto.so.1.1 new_livepatch2.ulp</screen>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>
