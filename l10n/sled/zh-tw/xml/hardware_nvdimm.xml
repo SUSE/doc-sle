@@ -1,0 +1,643 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="hardware_nvdimm.xml" version="5.0" xml:id="cha-nvdimm">
+ <title>永續性記憶體</title>
+ <info>
+  <abstract>
+   <para>
+    本章包含關於使用裝備非揮發性主記憶體的 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 的額外資訊。此類記憶體稱做<emphasis>永續性記憶體</emphasis>，由一或多個 NVDIMM 構成。
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>是</dm:translation>
+  </dm:docmanager>
+ </info>
+ <sect1 xml:id="sec-nvdimm-intro">
+  <title>簡介</title>
+
+  <para>
+   永續性記憶體是一種新型電腦儲存，其速度接近動態 RAM (DRAM)，但同時具備 RAM 的逐位元組定址能力，以及固態硬碟 (SSD) 的效能。
+  </para>
+
+  <para>
+   與傳統 RAM 類似，永續性記憶體是直接安裝在主機板上的記憶體插槽。因此，它的實體板型規格與 RAM 相同，以 DIMM 的形式提供。這些記憶體稱做 NVDIMM：非揮發性雙列直插式記憶體模組。
+  </para>
+
+  <para>
+   不過，與 RAM 不同，永續性記憶體在多個方面類似於快閃記憶體式 SSD。後兩者都採用固態記憶體電路形式，但除此之外，兩者都提供非揮發性儲存：系統斷電或者重新啟動後，記憶體中的內容會得到保留。使用這兩種媒體時，寫入資料的速度比讀取資料要慢；兩者都支援有限的重新寫入週期數。最後，與 SSD 一樣，如果在特定的應用方案中，更適合對永續性記憶體進行磁區層級的存取，則也可以這樣做。
+  </para>
+
+  <para>
+   不同的型號使用不同形式的電子儲存媒體 (例如 Intel 3D XPoint)，或者將 NAND 快閃記憶體與 DRAM 結合使用。另外，業界正在開發新式的非揮發性 RAM。這意味著，不同的廠商和 NVDIMM 型號會提供不同的效能與持久性特徵。
+  </para>
+
+  <para>
+   由於涉及的儲存技術處於早期開發階段，不同廠商的硬體可能存在不同的限制。因此，以下陳述適用於一般性場景。
+  </para>
+  
+  <para>
+   永續性記憶體的速度最多比 DRAM 要慢 10 倍，但比快閃記憶體要快大約 1000 倍。可在其中逐位元組重新寫入資料，而不像在快閃記憶體中一樣，需要抹除整個磁區，然後重新寫入資料。最後，儘管重新寫入週期數有限，但大部分形式的永續性記憶體可以處理數百萬次重新寫入，相比之下，快閃記憶體只能處理數千個週期。
+  </para>
+  
+  <para>
+   這會產生兩種重要結果：
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     使用最新技術無法執行僅包含永續性記憶體的系統，因此無法實現完全非揮發性的主記憶體。必須混合使用傳統的 RAM 和 NVDIMM。作業系統和應用程式將在傳統 RAM 中執行，而 NVDIMM 則可當成速度極快的輔助儲存。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     由於不同廠商的永續性記憶體效能特徵不同，程式設計師可能需要考慮到特定伺服器中 NVDIMM 的硬體規格，包括 NVDIMM 的數目，以及它們可以裝入哪些記憶體插槽。顯然，這會對監管程式的使用、不同主機之間的軟體移轉等造成影響。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   ACPI 標準版本 6 中定義了此新式儲存子系統。但是，<filename>libnvdimm</filename> 支援該標準頒佈之前的 NVDIMM，這些記憶體的使用方式相同。
+  </para>
+  
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-terms">
+  <title>詞彙</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>區域</term>
+    <listitem>
+     <para>
+      <emphasis>區域</emphasis>是永續性記憶體中可劃分為一或多個<emphasis>名稱空間</emphasis>的區塊。如果不事先將某個區域配置到名稱空間，則您無法存取該區域的永續性記憶體。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>名稱空間</term>
+    <listitem>
+     <para>
+      非揮發性儲存的單個連續定址範圍，相當於 NVM Express SSD 的名稱空間，或 SCSI 邏輯單位 (LUN)。名稱空間做為獨立區塊裝置顯示在伺服器的 <filename>/dev</filename> 目錄中。根據所需的存取方法，名稱空間可將多個 NVDIMM 中的儲存合併成較大磁碟區，或者允許將這些儲存分割成較小的磁碟區。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>模式</term>
+    <listitem>
+     <para>
+      每個名稱空間還具有一種<emphasis>模式</emphasis>，該模式定義要為該名稱空間啟用哪些 NVDIMM 功能。同一父區域的旁支名稱空間一律具有相同的類型，但可將其設定為使用不同的模式。名稱空間模式包括：
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>devdax</term>
+       <listitem>
+        <para>
+         裝置 DAX 模式。建立單字元裝置檔案 (<filename>/dev/dax<replaceable>X</replaceable>.<replaceable>Y</replaceable>
+         </filename>). <emphasis>不</emphasis>需要建立檔案系統。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>fsdax</term>
+       <listitem>
+        <para>
+         檔案系統 DAX 模式。如果未指定其他模式，則使用預設值。建立區塊裝置 (<filename>/dev/pmem<replaceable>X</replaceable> [.<replaceable>Y</replaceable>]</filename>)，支援將 DAX 用於 <literal>ext4</literal> 或 <literal>XFS</literal>。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>磁區(指磁碟內部分區時)</term>
+       <listitem>
+        <para>
+         適用於不執行中繼資料檢查總數計算的傳統檔案系統。適用於小型開機磁碟區。與其他作業系統相容。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>raw</term>
+       <listitem>
+        <para>
+         不包含標籤或中繼資料的記憶體磁碟。不支援 DAX。與其他作業系統相容。
+        </para>
+        <note>
+         <para>
+          SUSE 不支援 <literal>raw</literal> 模式。無法在 <literal>raw</literal> 名稱空間中掛接檔案系統。
+         </para>
+        </note>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>類型</term>
+    <listitem>
+     <para>
+      每個名稱空間和區域都有一種<emphasis>類型</emphasis>，該類型定義如何存取與該名稱空間或區域關聯的永續性記憶體。名稱空間的類型永遠與其父區域的類型相同。有兩種不同的類型：「永續性記憶體」(可使用兩種不同的方式進行設定)，以及已廢棄的「區塊模式」。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>永續性記憶體 (PMEM)</term>
+       <listitem>
+        <para>
+         與 RAM 一樣，PMEM 儲存提供位元組層級的存取。使用 PMEM 時，單個名稱空間可以包含多個交錯式 NVDIMM，使這些 NVDIMM 均可用做單個裝置。
+        </para>
+        <para>
+         可使用兩種方式來設定 PMEM 名稱空間。
+        </para>
+        <variablelist>
+         <varlistentry>
+          <term>將 PMEM 與 DAX 搭配使用</term>
+          <listitem>
+           <para>
+            為 Direct Access (DAX) 設定 PMEM 名稱空間後，存取記憶體時會繞過核心的頁面快取，直接進入媒體。軟體可以分別直接讀取或寫入該名稱空間的每個位元組。
+           </para>
+          </listitem>
+         </varlistentry>
+         <varlistentry>
+          <term>將 PMEM 與 BTT 搭配使用</term>
+          <listitem>
+           <para>
+            與在傳統磁碟機中一樣，將依磁區存取設定為以 BTT 模式執行的 PMEM 名稱空間，而不是像在 RAM 中一樣，採用位元組定址模式。某個轉譯表機制會將存取活動批次處理成磁區大小的單元。
+           </para>
+           <para>
+            BTT 的優點在於，儲存子系統會確定將每個磁區完全寫入基礎媒體，如果某項寫入操作出於某種原因而失敗，則會取消註冊該操作。因此，無法在給定的磁區中進行部分寫入。
+           </para>
+           <para>
+            此外，核心會快取對 BTT 名稱空間的存取。
+           </para>
+           <para>
+            缺點在於，BTT 名稱空間不支援 DAX。
+           </para>
+          </listitem>
+         </varlistentry>
+        </variablelist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>區塊模式 (BLK)</term>
+       <listitem>
+        <para>
+         區塊模式儲存將每個 NVDIMM 做為獨立的裝置進行定址。此模式已遭廢棄，且不再受支援。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <para>
+      除 <literal>devdax</literal> 名稱空間以外，其他所有類型也必須使用檔案系統格式化，如同使用傳統驅動器一樣。<phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 支援將 <literal>ext2</literal>、<literal>ext4</literal> 與 <literal>XFS</literal> 檔案系統用於此目的。
+     </para>
+   </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Direct Access (DAX)</term>
+    <listitem>
+     <para>
+      DAX 允許將永續性記憶體直接對應成程序的位址空間 (例如，使用 <literal>mmap</literal> 系統呼叫進行對應)。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>DIMM 實體位址 (DPA)</term>
+    <listitem>
+     <para>
+      在單個 DIMM 的記憶體中用做偏移量的記憶體位址；也就是說，在該 DIMM 中用做最低可定址位元組的從零開始的位址。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>標籤</term>
+    <listitem>
+     <para>
+      儲存在 NVDIMM 中的中繼資料，例如名稱空間定義。可以使用 DSM 存取這些資料。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>裝置特定的方法 (DSM)</term>
+    <listitem>
+     <para>
+      用於存取 NVDIMM 中韌體的 ACPI 方法。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-uses">
+  <title>使用案例</title>
+
+  <sect2 xml:id="sec-nvdimm-uses-pmem">
+   <title>將 PMEM 與 DAX 搭配使用</title>
+   <para>
+    必須注意，這種記憶體存取方式<emphasis>不是</emphasis>交易性的。如果發生斷電或其他系統故障，資料可能不會完全寫入儲存。僅當應用程式可以處理部分寫入資料的情況時，PMEM 儲存才適用。
+   </para>
+   <sect3>
+    <title>
+     可受益於較大位元組可定址儲存容量的應用程式。
+    </title>
+    <para>
+     如果伺服器代管的某個應用程式可逐位元組直接使用較大的快速儲存容量，則程式設計師可以使用 <literal>mmap</literal> 系統呼叫，將永續性記憶體區塊直接放入該應用程式的位址空間，而無需使用任何額外的系統 RAM。
+    </para>
+   </sect3>
+   <sect3>
+    <title>避免使用核心頁面快取</title>
+    <para>
+     您可以節省用於頁面快取的 RAM，而不要將 RAM 配置給應用程式。例如，可以專門使用非揮發性記憶體來儲存虛擬機器 (VM) 影像。由於這些影像不會快取，因此可以減少主機上的快取使用量，從而可在每部主機上設定更多的 VM。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2>
+   <title>將 PMEM 與 BTT 搭配使用</title>
+   <para>
+    當您想要使用一組 NVDIMM 中的永續性記憶體做為類似磁碟的極速儲存池時，此方法非常有用。
+   </para>
+   <para>
+    對於應用程式而言，此類裝置僅顯示為極速 SSD，並可像其他任何儲存裝置一樣供您使用。例如，LVM 可以排佈在永續性記憶體的頂層，如往常一樣正常運作。
+   </para>
+   <para>
+    BTT 的優點在於可以保證磁區寫入的不可部分完成性，因此，即使是依存於資料完整性的複雜應用程式也能保持正常運作。可透過標準的錯誤報告通道來執行媒體錯誤報告。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-tools">
+  <title>用於管理永續性記憶體的工具</title>
+
+  <para>
+   若要管理永續性記憶體，必須安裝 <literal>ndctl</literal> 套件。安裝此套件也會安裝 <filename>libndctl</filename> 套件，後者提供一組使用者空間庫來設定 NVDIMM。
+  </para>
+  
+  <para>
+   這些工具透過 <filename>libnvdimm</filename> 庫運行。該庫支援三種類型的 NVDIMM：
+  </para>
+  
+  <itemizedlist>
+   <listitem>
+    <para>
+     PMEM
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     BLK
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     同步 PMEM 和 BLK。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   <command>ndctl</command> 公用程式提供一系列有用的 <command>man</command> 頁面。可使用以下指令存取這些頁面：
+  </para>
+
+<screen><command>ndctl help <replaceable>subcommand</replaceable></command></screen>
+
+  <para>
+   若要查看可用子指令的清單，請使用：
+  </para>
+
+<screen><command>ndctl --list-cmds</command></screen>
+
+  <para>
+   可用的子指令包括：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>version</term>
+    <listitem>
+     <para>
+      顯示 NVDIMM 支援工具的目前版本。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-namespace</term>
+    <listitem>
+     <para>
+      使指定的名稱空間可供使用。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-namespace</term>
+    <listitem>
+     <para>
+      防止使用指定的名稱空間。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>create-namespace</term>
+    <listitem>
+     <para>
+      從指定的儲存裝置建立新名稱空間。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>destroy-namespace</term>
+    <listitem>
+     <para>
+      移除指定的名稱空間。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-region</term>
+    <listitem>
+     <para>
+      使指定的區域可供使用。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-region</term>
+    <listitem>
+     <para>
+      防止使用指定的區域。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>zero-labels</term>
+    <listitem>
+     <para>
+      抹除裝置中的中繼資料。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>read-labels</term>
+    <listitem>
+     <para>
+      取回指定裝置的中繼資料。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>list</term>
+    <listitem>
+     <para>
+      顯示可用的裝置。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>help</term>
+    <listitem>
+     <para>
+      顯示關於工具用法的資訊。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-setup">
+  <title>設定永續性記憶體</title>
+
+  <sect2 xml:id="sec-nvdimm-setup-view">
+   <title>檢視可用的 NVDIMM 儲存</title>
+   <para>
+    可以使用 <command>ndctl</command> <literal>list</literal> 指令列出系統中所有可用的 NVDIMM。
+   </para>
+   <para>
+    在以下範例中，系統包含三個 NVDIMM，它們位於單個三通道交錯集內。
+   </para>
+<screen><prompt role="root">root # </prompt><command>ndctl list --dimms</command>
+
+[
+ {
+  "dev":"nmem2",
+  "id":"8089-00-0000-12325476"
+ },
+ {
+  "dev":"nmem1",
+  "id":"8089-00-0000-11325476"
+ },
+ {
+  "dev":"nmem0",
+  "id":"8089-00-0000-10325476"
+ }
+]</screen>
+   <para>
+    結合不同的參數執行 <command>ndctl</command>
+    <literal>list</literal> 還可以列出可用的區域。
+   </para>
+   <note>
+    <para>
+     區域可能不按數字順序顯示。
+    </para>
+   </note>
+   <para>
+    請注意，儘管只有三個 NVDIMM，但它們卻顯示為四個區域。
+   </para>
+<screen><prompt role="root">root # </prompt><command>ndctl list --regions</command>
+
+[
+ {
+  "dev":"region1",
+  "size":68182605824,
+  "available_size":68182605824,
+  "type":"blk"
+ },
+ {
+  "dev":"region3",
+  "size":202937204736,
+  "available_size":202937204736,
+  "type":"pmem",
+  "iset_id":5903239628671731251
+  },
+  {
+   "dev":"region0",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  },
+  {
+   "dev":"region2",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  }
+]</screen>
+   <para>
+    空間以兩種不同的形式顯示：三個 BLK 類型的獨立 64 GB 區域，或者一個 PMEM 類型的合併 189 GB 區域，後者將三個交錯式 NVDIMM 中的所有空間表示為單個磁碟區。
+   </para>
+   <para>
+    請注意，<literal>available_size</literal> 的顯示值與 <literal>size</literal> 的顯示值相同。這意味著尚未配置任何空間。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-dax">
+   <title>將儲存設定為使用 DAX 的單個 PMEM 名稱空間</title>
+   <para>
+    第一個範例將三個 NVDIMM 設定為使用 Direct Access (DAX) 的單個 PMEM 名稱空間。
+   </para>
+   <para>
+    第一個步驟是建立新的名稱空間。
+   </para>
+<screen><prompt role="root">root # </prompt><command>ndctl create-namespace --type=<replaceable>pmem</replaceable> --mode=<replaceable>fsdax</replaceable> --map=<replaceable>memory</replaceable></command>
+{
+ "dev":"namespace3.0",
+ "mode":"memory",
+ "size":199764213760,
+ "uuid":"dc8ebb84-c564-4248-9e8d-e18543c39b69",
+ "blockdev":"pmem3"
+}</screen>
+   <para>
+    如此會建立支援 DAX 的區塊裝置 <filename>/dev/pmem3</filename>。裝置名稱中的 <literal>3</literal> 承襲自父區域號碼 (在本例中為 <filename>region3</filename>)。
+   </para>
+   <para>
+    <option>--map=memory</option> 選項從 NVDIMM 中設定出一部分 PMEM 儲存空間，以便可以使用這些空間來配置內部核心資料結構 (稱做<literal>結構頁面</literal>)。如此即可將新的 PMEM 名稱空間與 <literal>O_DIRECT I/O</literal> 和 <literal>RDMA</literal> 等功能搭配使用。
+   </para>
+   <para>
+    最終 PMEM 名稱空間的容量之所以小於父 PMEM 區域，是因為有一部分永續性記憶體保留給了核心資料結構。
+   </para>
+   <para>
+    接下來，我們驗證新的區塊裝置是否可用於作業系統：
+   </para>
+<screen><prompt role="root">root # </prompt><command>fdisk -l /dev/<replaceable>pmem3</replaceable></command>
+Disk /dev/pmem3: 186 GiB, 199764213760 bytes, 390164480 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    與其他任何磁碟機一樣，在使用該裝置之前，必須先將其格式化。在此範例中，我們使用 XFS 將其格式化：
+   </para>
+<screen><prompt role="root">root # </prompt><command>mkfs.xfs /dev/<replaceable>pmem3</replaceable></command>
+meta-data=/dev/pmem3      isize=256    agcount=4, agsize=12192640 blks
+         =                sectsz=4096  attr=2, projid32bit=1
+         =                crc=0        finobt=0, sparse=0
+data     =                bsize=4096   blocks=48770560, imaxpct=25
+         =                sunit=0      swidth=0 blks
+naming   =version 2       bsize=4096   ascii-ci=0 ftype=1
+log      =internal log    bsize=4096   blocks=23813, version=2
+         =                sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none            extsz=4096   blocks=0, rtextents=0</screen>
+   <para>
+    接下來，可將新的磁碟機掛接到某個目錄：
+   </para>
+<screen><prompt role="root">root # </prompt><command>mount -o dax /dev/<replaceable>pmem3</replaceable> /mnt/<replaceable>pmem3</replaceable></command></screen>
+   <para>
+    然後，可以驗證是否得到了一個支援 DAX 的裝置：
+   </para>
+<screen><prompt role="root">root # </prompt><command>mount | grep dax</command>
+/dev/pmem3 on /mnt/pmem3 type xfs (rw,relatime,attr2,dax,inode64,noquota)</screen>
+   <para>
+    結果是，我們已得到一個使用 XFS 檔案系統格式化的，且掛接有 DAX 的 PMEM 名稱空間。
+   </para>
+   <para>
+    對該檔案系統中的檔案進行任何 <literal>mmap()</literal> 呼叫，都會傳回直接對應至 NVDIMM 上的永續性記憶體的虛擬位址，並且會完全繞過頁面快取。
+   </para>
+   <para>
+    對該檔案系統中的檔案進行任何 <literal>fsync</literal> 或 <literal>msync</literal> 呼叫仍可確定將修改後的資料完全寫入 NVDIMM。這些呼叫會衝洗透過 <literal>mmap</literal> 對應在使用者空間中修改之任何頁面的關聯處理器快取行。
+   </para>
+   <sect3 xml:id="sec-nvdimm-setup-deldax">
+    <title>移除名稱空間</title>
+    <para>
+     在建立使用相同儲存的其他任何磁碟區類型之前，我們必須卸載此 PMEM 磁碟區，然後將其移除。
+    </para>
+    <para>
+     首先卸載該磁碟區：
+    </para>
+<screen><prompt role="root">root # </prompt><command>umount /mnt/<replaceable>pmem3</replaceable></command></screen>
+    <para>
+     然後停用名稱空間。
+    </para>
+<screen><prompt role="root">root # </prompt><command>ndctl disable-namespace <replaceable>namespace3.0</replaceable></command>
+disabled 1 namespace</screen>
+    <para>
+     然後刪除該磁碟區：
+    </para>
+<screen><prompt role="root">root # </prompt><command>ndctl destroy-namespace <replaceable>namespace3.0</replaceable></command>
+destroyed 1 namespace</screen>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-btt">
+   <title>建立使用 BTT 的 PMEM 名稱空間</title>
+   <para>
+    在下一個範例中，我們將建立使用 BTT 的 PMEM 名稱空間。
+   </para>
+<screen><prompt role="root">root # </prompt><command>ndctl create-namespace --type=<replaceable>pmem</replaceable> --mode=<replaceable>sector</replaceable></command>
+{
+ "dev":"namespace3.0",
+ "mode":"sector",
+ "uuid":"51ab652d-7f20-44ea-b51d-5670454f8b9b",
+ "sector_size":4096,
+ "blockdev":"pmem3s"
+}</screen>
+   <para>
+    接下來，驗證新裝置是否存在：
+   </para>
+<screen><prompt role="root">root # </prompt><command>fdisk -l /dev/<replaceable>pmem3s</replaceable></command>
+Disk /dev/pmem3s: 188.8 GiB, 202738135040 bytes, 49496615 sectors
+Units: sectors of 1 * 4096 = 4096 bytes
+Sector size (logical/physical): 4096 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    與前面設定的支援 DAX 的 PMEM 名稱空間一樣，這個支援 BTT 的 PMEM 名稱空間也會佔用 NVDIMM 中的所有可用儲存。
+   </para>
+   <note>
+    <para>
+     裝置名稱 (<filename>/dev/<replaceable>pmem3s</replaceable></filename>) 中的後置 <literal>s</literal> 表示<literal>磁區</literal> (sector)，可用於輕鬆辨別設定為使用 BTT 的名稱空間。
+    </para>
+   </note>
+   <para>
+    可依前一範例中所述格式化和掛接磁碟區。
+   </para>
+   <para>
+    這裡顯示的 PMEM 名稱空間不能使用 DAX。它會使用 BTT 來提供<emphasis>磁區寫入不可部分完成性</emphasis>。每次透過 PMEM 區塊驅動程式進行磁區寫入時，BTT 都會配置一個新的磁區來接收新資料。完全寫入新資料後，BTT 將以不可部分完成性的方式更新其內部對應結構，使新寫入的資料可供應用程式使用。如果在此過程中的任意時點發生電源故障，則寫入內容將會完全遺失，在這種情況下，應用程式可以存取其舊資料，而這些資料仍舊保持不變。如此可以防止出現所謂「磁區撕裂」的情況。
+   </para>
+   <para>
+    與其他任何標準區塊裝置一樣，可以使用某種檔案系統格式化這個支援 BTT 的 PMEM 名稱空間，並在該檔案系統中使用它。無法將該名稱空間與 DAX 搭配使用。但是，此區塊裝置中檔案的 <literal>mmap</literal> 對應會使用頁面快取。
+   </para>
+
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-moreinfo">
+  <title>更多資訊</title>
+
+  <para>
+   以下清單中提供了更多關於此主題的資訊︰
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="https://nvdimm.wiki.kernel.org/">永續性記憶體 Wiki</link>
+    </para>
+    <para>
+     包含關於設定 NVDIMM 系統的指示、關於測試的資訊，以及關於啟用 NVDIMM 的規格連結。隨著 Linux 中 NVDIMM 支援功能的不斷發展，此網站的內容也會不斷擴充。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://pmem.io/">永續性記憶體程式設計</link>
+    </para>
+    <para>
+     關於在 Linux 和其他作業系統中設定、使用非揮發性記憶體，以及對使用此類記憶體的系統進行程式設計的資訊。其中介紹了 NVM 庫 (NVML)。該庫提供有用的 API 用於在使用者空間中進行永續性記憶體程式設計。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://www.kernel.org/doc/Documentation/nvdimm/nvdimm.txt">LIBNVDIMM：非揮發性裝置</link>
+    </para>
+    <para>
+     此文件面向核心開發人員，包含在目前 Linux 核心樹狀結構的「文件」資料夾中。其中探討了涉及啟用 NVDIMM 的不同核心模組，列出了關於核心實作的一些技術詳細資料，並介紹了 <command>ndctl</command> 工具使用的 <filename>sysfs</filename> 核心介面。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://github.com/pmem/ndctl">GitHub：pmem/ndctl</link>
+    </para>
+    <para>
+     用於管理 Linux 核心中 <command>libnvdimm</command> 子系統的公用程式庫。此外還包含使用者空間庫，以及單元測試和文件。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>
