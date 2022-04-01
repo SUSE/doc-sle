@@ -287,245 +287,170 @@ TasksMax=16284
   </sect2>
  </sect1>
  <sect1>
-  <title>Controlling I/O with proportional weight policy</title>
+<!-- BEGIN NEW VERSION -->
+<title>I/O control with cgroups</title>
 
-  <para>
-   This section introduces using the Linux kernel's block I/O controller to
-   prioritize I/O operations. The cgroup blkio subsystem controls and monitors
-   access to I/O on block devices. State objects that contain the subsystem
-   parameters for a cgroup are represented as pseudo-files within the cgroup
-   virtual file system, also called a pseudo-file system.
-  </para>
+<sect2>
+<title>Prerequisites</title>
 
-  <para>
-   The examples in this section show how writing values to some of these
-   pseudo-files limits access or bandwidth, and reading values from some of
-   these pseudo-files provides information on I/O operations. Examples are
-   provided for both cgroup-v1 and cgroup-v2.
-  </para>
-
-  <para>
-   You need a test directory containing two files for testing performance and
-   changed settings. A quick way to create test files fully populated with text
-   is using the <command>yes</command> command. The following example commands
-   create a test directory, and then populate it with two 537 MB text files:
-  </para>
-
-<screen>&prompt.plain-root;mkdir /io-cgroup
-&prompt.plain-root;cd /io-cgroup
-&prompt.plain-root;yes this is a test file | head -c 537MB > file1.txt
-&prompt.plain-root;yes this is a test file | head -c 537MB > file2.txt
-</screen>
-
-  <para>
-   To run the examples open three command shells. Two shells are for reader
-   processes, and one shell is for running the steps that control I/O. In the
-   examples, each command prompt is labeled to indicate if it represents one of
-   the reader processes, or I/O.
-  </para>
-
-  <sect2>
-   <title>Using cgroup-v1</title>
-   <para>
-    The following proportional weight policy files can be used to grant a
-    reader process a higher priority for I/O operations than other reader
-    processes accessing the same disk.
-   </para>
+<sect3>
+<title>Filesystem</title>
+<para>
+Despite the IO control is configured in terms of block devices, it is the
+filesystem and its inode abstraction that is important to exercise the policies
+(when it come to controlling also the writeback IO).
+Therefore a cgroup aware filesystem must be chosen, the recommended SLES
+filesystems [2] added support in following upstream releases:
+<!-- [2] is https://www.susecon.com/doc/2015/sessions/TUT20066.pdf, slide 7, maybe there's better SLES docs -->
+</para>
    <itemizedlist mark="bullet" spacing="normal">
-    <listitem>
-     <para>
-      <filename>blkio.bfq.weight</filename> (available in kernels starting with
-      version 5.0 with blk-mq and when using the BFQ I/O scheduler)
-     </para>
-    </listitem>
+	   <listitem>btrfs (v4.3),</listitem>
+	   <listitem>ext4 (v4.3),</listitem>
+	   <listitem>xfs (v5.3).</listitem>
    </itemizedlist>
-   <para>
-    To test this, run a single reader process (in the examples, reading from an
-    SSD) without controlling its I/O, using <filename>file2.txt</filename>:
-   </para>
-<screen> 
-&prompt.io-controller;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.io-controller;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 1.33049 s, 404 MB/s
-</screen>
-   <para>
-    Now run a background process reading from the same disk:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5220
-...
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 2.61592 s, 205 MB/s
-</screen>
-   <para>
-    Each process gets half of the throughput for I/O operations. Next, set up
-    two control groups&mdash;one for each process&mdash;verify that BFQ is
-    used, and set a different weight for reader2:
-   </para>
-<screen>
-&prompt.io-controller;cd /sys/fs/cgroup/blkio/
-&prompt.blkio;mkdir reader1
-&prompt.blkio;mkdir reader2
-&prompt.blkio;echo 5220 > reader1/cgroup.procs
-&prompt.blkio;echo 5251 > reader2/cgroup.procs
-&prompt.blkio;cat /sys/block/sda/queue/scheduler
-mq-deadline kyber [bfq] none
-&prompt.blkio;cat reader1/blkio.bfq.weight
-100
-&prompt.blkio;echo 200 > reader2/blkio.bfq.weight
-&prompt.blkio;cat reader2/blkio.bfq.weight
-200
-</screen>
-   <para>
-    With these settings and reader1 in the background, reader2 should have
-    higher throughput than previously:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5220
-...
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 2.06604 s, 260 MB/s
-</screen>
-   <para>
-    The higher proportional weight resulted in higher throughput for reader2.
-    Now double its weight again:
-   </para>
-<screen>
-&prompt.blkio;cat reader1/blkio.bfq.weight
-100
-&prompt.blkio;echo 400 > reader2/blkio.bfq.weight
-&prompt.blkio;cat reader2/blkio.bfq.weight
-400
-</screen>
-   <para>
-    This results in another increase in throughput for reader2:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5220
-...
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 1.69026 s, 318 MB/s
-</screen>
-  </sect2>
+<para>
+as of today (SLES15 SP3), any of the named filesystems can be used.
+</para>
+</sect3>
 
-  <sect2>
-   <title>Using cgroup-v2</title>
-   <para>
-    First set up your test environment as shown at the beginning of this
-    chapter.
-   </para>
-   <para>
-    Then make sure that the Block IO controller is not active, as that is for
-    cgroup-v1. To do this, boot with kernel parameter
-    <option>cgroup_no_v1=blkio</option>. Verify that this parameter was used,
-    and that the IO controller (cgroup-v2) is available:
-   </para>
+<sect3>
+<title>Unified cgroup hiearchy</title>
+<para>
+To properly account also writeback IO, it is necessary to have equal IO and memory
+controller cgroup hierarchies and use cgroup v2 IO controller.
+Together, this means that one has to use so called <emphasis>unified</emphasis>
+cgroup hierarchy.
+This has to be requested explicitly in SLES by passing a kernel command line
+option <option>systemd.unified_cgroup_hierarchy=1</option>.
+</para>
+</sect3>
+
+<sect3>
+<title>Block IO scheduler</title>
+<para>
+The throttling policy is implemented higher in the stack therefore it doesn’t
+require on additional adjustments.
+The proportional IO control policies have two different implementations nowadays:
+BFQ controller and cost-based model.
+We describe the BFQ controller here and in order to exert its proportional
+implementation for a particular device, we must make sure that BFQ is the
+chosen scheduler.
+Check the current scheduler
+</para>
 <screen>
-&prompt.io-controller;cat /proc/cmdline
-BOOT_IMAGE=... cgroup_no_v1=blkio ...
-&prompt.io-controller;cat /sys/fs/cgroup/unified/cgroup.controllers
-io
-</screen>
-   <para>
-    Next, enable the IO controller:
-   </para>
-<screen>
-&prompt.io-controller;cd /sys/fs/cgroup/unified/
-&prompt.unified;echo '+io' > cgroup.subtree_control
-&prompt.unified;cat cgroup.subtree_control
-io
-</screen>
-   <para>
-    Now run all the test steps, similarly to the steps for cgroup-v1. Note that
-    some of the directories are different. Run a single reader process (in the
-    examples, reading from an SSD) without controlling its I/O, using
-    file2.txt:
-   </para>
-<screen>
-&prompt.unified;cd -
-&prompt.io-controller;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.io-controller;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5633
-[...]
-</screen>
-   <para>
-    Run a background process reading from the same disk and note your
-    throughput values:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5633
-[...]
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5703
-[...]
-</screen>
-   <para>
-    Each process gets half of the throughput for I/O operations. Set up two
-    control groups&mdash;one for each process&mdash;verify that BFQ is the
-    active scheduler, and set a different weight for reader2:
-   </para>
-<screen>
-&prompt.io-controller;cd -
-&prompt.unified;mkdir reader1
-&prompt.unified;mkdir reader2
-&prompt.unified;echo 5633 > reader1/cgroup.procs
-&prompt.unified;echo 5703 > reader2/cgroup.procs
-&prompt.unified;cat /sys/block/sda/queue/scheduler
+$ cat /sys/class/block/$DEV/queue/scheduler
 mq-deadline kyber [bfq] none
-&prompt.unified;cat reader1/io.bfq.weight
-default 100
-&prompt.unified;echo 200 > reader2/io.bfq.weight
-&prompt.unified;cat reader2/io.bfq.weight
-default 200
 </screen>
-   <para>
-    Test your throughput with the new settings. reader2 should show an increase
-    in throughput.
-   </para>
+<para>
+Switch the scheduler
+</para>
 <screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1 of=/dev/null bs=4k
-5633
-[...]
-&prompt.reader2;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
-5703
-[...]
+$ echo bfq >/sys/class/block/$DEV/queue/scheduler
 </screen>
-   <para>
-    Try doubling the weight again for reader2, and testing the new setting:
-   </para>
+<para>
+</para>
+<para>
+<command>$DEV</command> is the disk device, not a partition and the optimal way
+to set this attribute is a udev rule specific to the device (note that SLES
+ships udev rules that already enable BFQ for rotational disk drives).
+</para>
+</sect3>
+
+<sect3>
+<title>Cgroup hieararchy layout</title>
+<para>
+Normally, all tasks reside in the root cgroup and they compete against each other.
+When the tasks are distributed into the cgroup tree the competition occurs
+between siblings cgroups only. 
+This applies to the proportional IO control, the throttling hierarchically
+aggregates throughput of all descendants.
+</para>
+<!-- this is not code but a picture -->
 <screen>
-&prompt.reader2;echo 400 > reader1/blkio.bfq.weight
-&prompt.reader2;cat reader2/blkio.bfq.weight
-400
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-[...]
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-[...]
+r
+`-  a      io.bfq.weight=100
+    `- [c] io.bfq.weight=300
+    `-  d  io.bfq.weight=100
+`- [b]     io.bfq.weight=200
 </screen>
-  </sect2>
- </sect1>
+<para>
+IO is originating only from cgroups c and b. Despite c has higher weight, it
+will be treated with lower priority based on the weight of a that is
+level-competing with b.
+</para>
+
+</sect2>
+<sect2>
+<title>Configuring control quantities</title>
+<para>
+You can apply the values to (long running) services permantently
+</para>
+<screen>
+systemctl set-property fast.service IOWeight=400
+systemctl set-property slow.service IOWeight=50
+systemctl set-property throttled.service IOReadBandwidthMax="/dev/sda 1M"
+</screen>
+
+<para>
+Alternatively, you can apply IO control to individually run commands, for instance:
+</para>
+<screen>
+systemd-run --scope -p IOWeight=400 prioritized_command
+systemd-run --scope -p IOWeight=50  low_prioritized_command
+systemd-run --scope -p IOReadBandwidthMax="/dev/sda 1M" dd if=/dev/sda of=/dev/null bs=1M count=10
+</screen>
+
+</sect2>
+<sect2>
+<title>IO control behavior and setting expectations</title>
+</para>
+<para>
+IO control works best for direct IO operations (bypassing page cache), the
+situations where the actual IO is decoupled from the caller (typically
+writeback via page cache) may manifest variously – delayed IO control or even
+no observed IO control (consider little bursts or competing workloads that
+happen to never ‘‘meet’’ submitting IO at the same time (and hence saturating
+the bandwidth)).
+For these reasons, the resulting ratio of IO throughtputs does not strictly
+follow the ratio of configured weights.
+</para>
+<para>
+The writeback activity depends on the amount of dirty pages, besides the global
+sysctl knobs memory limits of individual cgroups come into play when the dirty
+limits are distributed among cgroups and this in turn may affect IO intensity
+of affected cgroups.
+</para>
+<para>
+Not all storages are equal.
+The IO control happens at IO scheduler layer, this has ramifications for setups
+with devices stacked on these that do no actual scheduling.
+Consider device mapper logical volumes spanning multiple physical devices, MD
+RAID or even btrfs RAID.
+IO control over such setups may be challenging.
+</para>
+<para>
+There is no separate setting for proportional IO control of reads and writes.
+</para>
+<para>
+Proportional IO control is only one of the policies that can interact with
+each other (but responsible resource design perhaps avoids that).
+</para>
+<para>
+The IO device bandwidth is not the only shared resource on the IO path,
+namely, global filesystem structures are involved too, which is relevant when
+IO control is meant to guarantee certain bandwidth – it won’t and it may
+even lead to priority inversion (prioritized cgroup waiting for a transaction
+of slower cgroup).
+</para>
+<para>
+So far, we have been discussing only explicit IO of filesystem data but swap-
+in and swap-out can be controlled too.
+Although if such a need arises, it usually points out to improperly provisioned
+memory (or memory limits).
+</para>
+</sect2>
+</sect1>
+<!-- END NEW VERSION -->
  <sect1>
   <title>More information</title>
 
