@@ -1,0 +1,398 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="bootconcept.xml" version="5.0" xml:id="cha-boot">
+ <title>Introdução ao processo de inicialização</title>
+ <info>
+  <abstract>
+   <para>
+    A inicialização de um sistema Linux envolve componentes e tarefas diferentes. Após um processo de inicialização de firmware e de hardware, que depende da arquitetura da máquina, o kernel será iniciado pelo carregador de boot GRUB 2. A partir deste ponto, o processo de boot é completamente controlado pelo sistema operacional e administrado pelo <systemitem class="daemon">systemd</systemitem>. O <systemitem class="daemon">systemd</systemitem> oferece um conjunto de <quote>destinos</quote> que inicializam configurações para uso diário, manutenção ou emergências.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes (sim)</dm:translation>
+  </dm:docmanager>
+ </info>
+
+
+ <sect1 xml:id="sec-boot-terminology">
+  <title>Terminologia</title>
+  <para>
+   Este capítulo usa termos que podem ter interpretação ambígua. Para entender como eles são usados neste documento, leia as definições a seguir:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term><systemitem>init</systemitem></term>
+    <listitem>
+     <para>
+      Dois processos diferentes são normalmente chamados <quote>init</quote>:
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+        O processo <systemitem>initramfs</systemitem>, que monta o sistema de arquivos raiz
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        O processo do sistema operacional, que inicia todos os outros processos executados do sistema de arquivos raiz real
+       </para>
+      </listitem>
+     </itemizedlist>
+     <para>
+      Nos dois casos, o programa <systemitem class="daemon">systemd</systemitem> é responsável por essa tarefa. Ele é executado do <systemitem>initramfs</systemitem> para montar o sistema de arquivos raiz. Depois de bem-sucedido, ele será novamente executado do sistema de arquivos raiz como o processo inicial. Para evitar confusão entre esses dois processos do <systemitem class="daemon">systemd</systemitem>, chamamos o primeiro processo de <emphasis>init no initramfs</emphasis> e o segundo de <emphasis>systemd</emphasis>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>
+     <systemitem>initrd</systemitem>/<systemitem>initramfs</systemitem>
+    </term>
+    <listitem>
+     <para>
+      Um <systemitem>initrd</systemitem> (disco RAM inicial) é um arquivo de imagem que inclui a imagem do sistema de arquivos raiz, que é carregada pelo kernel e montada do <filename>/dev/ram</filename> como o sistema de arquivos raiz temporário. A montagem desse sistema de arquivos exige um driver.
+     </para>
+     <para>
+      Desde o kernel 2.6.13, o initrd foi substituído pelo <systemitem>initramfs</systemitem> (sistema de arquivos RAM inicial), que não exige a montagem de um driver do sistema de arquivos. O <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> usa exclusivamente um <systemitem>initramfs</systemitem>. No entanto, como o <systemitem>initramfs</systemitem> é armazenado como <filename>/boot/initrd</filename>, ele costuma ser chamado de <quote>initrd</quote>. Neste capítulo, usamos exclusivamente o nome <systemitem>initramfs</systemitem>.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+
+
+ <sect1 xml:id="sec-boot-proc">
+  <title>Processo de boot do Linux</title>
+
+  <para>
+   O processo de boot do Linux consiste em vários estágios, cada um deles representado por um componente diferente:
+  </para>
+  <orderedlist>
+   <listitem>
+    <para>
+     <xref linkend="sec-boot-proc-initialization" xrefstyle="HeadingOnPage"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="sec-boot-proc-kernel" xrefstyle="HeadingOnPage"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="sec-boot-initramfs" xrefstyle="HeadingOnPage"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="sec-boot-systemd" xrefstyle="HeadingOnPage"/>
+    </para>
+   </listitem>
+  </orderedlist>
+
+  <sect2 xml:id="sec-boot-proc-initialization">
+   <title>
+    Fase de inicialização e do carregador de boot
+   </title>
+   <para>
+    Durante a fase de inicialização, o hardware da máquina é configurado e os dispositivos são preparados. Esse processo varia bastante entre as arquiteturas de hardware.
+   </para>
+   <para>
+    O <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> usa o carregador de boot GRUB 2 em todas as arquiteturas. Dependendo da arquitetura e do firmware, o processo para iniciar o carregador de boot GRUB 2 pode ter várias etapas. A finalidade do carregador de boot é carregar o kernel e o sistema de arquivos inicial baseado em RAM (initramfs). Para obter mais informações sobre o GRUB 2, consulte o <xref linkend="cha-grub2"/>.
+   </para>
+   <sect3 xml:id="sec-boot-proc-initialization-x86-aarch" arch="x86_64;aarch64">
+    <title>
+     Fase de inicialização e do carregador de boot no AArch64 e no AMD64/Intel 64
+    </title>
+    <para>
+     Após ligar o computador, o BIOS ou a UEFI inicializa a tela e o teclado e testa a memória principal. Até esse estágio, a máquina não acessa nenhuma mídia de armazenamento em massa. Em seguida, as informações sobre a data e o horário atuais e sobre os periféricos mais importantes são carregadas dos valores do CMOS. Quando a mídia de boot e sua geometria são reconhecidas, o controle do sistema passa do BIOS/UEFI para o carregador de boot.
+    </para>
+    <para>
+     Em uma máquina equipada com BIOS tradicional, apenas o código do primeiro setor de dados físico de 512 bytes, MBR (Master Boot Record), do disco de boot pode ser carregado. Apenas o GRUB 2 mínimo é adequado ao MBR. Sua única finalidade é carregar uma imagem do núcleo do GRUB 2 com os drivers do sistema de arquivos do espaço entre o MBR e a primeira partição (tabela de partição MBR) ou da partição de boot BIOS (tabela de partição GPT). Essa imagem inclui os drivers do sistema de arquivos, portanto, ela pode acessar o <filename>/boot</filename> localizado no sistema de arquivos raiz. O <filename>/boot</filename> contém módulos adicionais para o núcleo do GRUB 2, além do kernel e da imagem initramfs. Como ele tem acesso a essa partição, o GRUB 2 carrega o kernel e a imagem initramfs na memória e transfere o controle ao kernel.
+    </para>
+    <para>
+     Ao inicializar um sistema BIOS de um sistema de arquivos criptografado que inclui uma partição <filename>/boot</filename> criptografada, você precisa inserir a senha de decodificação duas vezes. O GRUB 2 precisa dela primeiro para decodificar o <filename>/boot</filename> e depois o <systemitem class="daemon">systemd</systemitem> para montar os volumes criptografados.
+    </para>
+    <para>
+     Nas máquinas com UEFI, o processo de boot é muito mais simples do que nas máquinas com BIOS tradicional. O firmware pode ler a partição de discos do sistema formatado em FAT com uma tabela de partição GPT. Esta partição de sistema EFI (no sistema em execução montado como <filename>/boot/efi</filename>) contém espaço suficiente para hospedar um GRUB 2 de pleno direito, que é carregado diretamente e executado pelo firmware.
+    </para>
+    <para>
+     Se o BIOS/UEFI suportar inicialização por rede, também será possível configurar um servidor de boot que ofereça o carregador de boot. Em seguida, o sistema será inicializado por PXE. o BIOS/UEFI funciona como o carregador de boot. Ele obtém a imagem do servidor de boot e inicia o sistema. Isso é totalmente independente dos discos rígidos locais.
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-boot-proc-initialization-zsystems" arch="zseries">
+    <title>
+     Fase de inicialização e do carregador de boot no IBM z Systems
+    </title>
+    <para>
+     No IBM z Systems, o processo de boot deve ser inicializado por um carregador de boot denominado <command>zipl</command> (carga inicial de programa z). Embora o <command>zipl</command> suporte a leitura de vários sistemas de arquivos, ele não suporta o sistema de arquivos padrão SLE (Btrfs) ou a inicialização de instantâneos. Portanto, o <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> usa um processo de boot de duas fases que garante suporte total ao Btrfs no momento da inicialização:
+    </para>
+    <procedure>
+     <step>
+      <para>
+       O <command>zipl</command> é inicializado da partição <filename>/boot/zipl</filename> formatada em ext2. Essa partição inclui um kernel mínimo e um initramfs, que são carregados na memória. O initramfs contém um driver Btrfs (entre outros) e o carregador de boot GRUB 2. O kernel é iniciado com um parâmetro <literal>initgrub</literal>, que o instrui a iniciar o GRUB 2.
+      </para>
+     </step>
+     <step>
+      <para>
+       O kernel monta o sistema de arquivos raiz para que <filename>/boot</filename> se torne acessível. Agora, o GRUB 2 é iniciado do initramfs. Ele lê a configuração em <filename>/boot/grub2/grub.cfg</filename> e carrega o kernel final e o initramfs do <filename>/boot</filename>. Agora, o novo kernel é carregado pelo Kexec.
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-boot-proc-kernel">
+   <title>Fase do kernel</title>
+   <para>
+    Depois que o carregador de boot passar no controle do sistema, o processo de boot será o mesmo em todas as arquiteturas. O carregador de boot carrega tanto o kernel quanto um sistema de arquivos inicial baseado em RAM (<systemitem>initramfs</systemitem>) na memória, e o kernel assume o controle.
+   </para>
+   <para>
+    Depois que o kernel configurar o gerenciamento de memória e detectar o tipo de CPU e seus recursos, ele inicializará o hardware e montará o sistema de arquivos raiz temporário que foi carregado com o <systemitem>initramfs</systemitem> da memória.
+   </para>
+
+   <sect3 xml:id="sec-boot-initrd">
+    <title>Arquivo <systemitem>initramfs</systemitem></title>
+    <para>
+     O <systemitem>initramfs</systemitem> (sistema de arquivos RAM inicial) é um pequeno arquivo cpio que pode ser carregado pelo kernel em um disco RAM. Ele está localizado em <filename>/boot/initrd</filename>. É possível criá-lo com uma ferramenta chamada <command>dracut</command>. Consulte <command>man 8 dracut</command> para obter detalhes.
+    </para>
+    <para>
+     O <systemitem>initramfs</systemitem> fornece um ambiente Linux mínimo que permite a execução de programas antes da montagem do sistema de arquivos raiz real. Este ambiente mínimo do Linux é carregado na memória pelas rotinas do BIOS ou da UEFI e não tem outros requisitos de hardware específicos além de memória suficiente. O arquivo <systemitem>initramfs</systemitem> sempre deve incluir um executável denominado <systemitem>init</systemitem>, que executa o daemon <systemitem class="daemon">systemd</systemitem> no sistema de arquivos raiz para realização do processo de boot.
+    </para>
+    <para>
+     Antes da montagem do sistema de arquivos raiz e da inicialização do sistema operacional, o kernel precisa dos drivers correspondentes para acessar o dispositivo em que o sistema de arquivos raiz está localizado. Esses drivers podem incluir drivers especiais para determinados tipos de unidades de discos rígidos ou até drivers de rede para acesso a um sistema de arquivos de rede. Os módulos necessários ao sistema de arquivos raiz são carregados pelo <systemitem>init</systemitem> no <systemitem>initramfs</systemitem>. Depois de carregados os módulos, o <systemitem class="service">udev</systemitem> fornecerá os dispositivos necessários ao <systemitem>initramfs</systemitem>. Posteriormente no processo de boot, depois de mudar o sistema de arquivos raiz, será necessário gerar novamente os dispositivos. Esse procedimento é feito pela unidade <filename>systemd-udev-trigger.service</filename> do <systemitem class="daemon">systemd</systemitem>.
+    </para>
+
+    <sect4 xml:id="sec-boot-initrd-regenerate">
+     <title>Gerando o initramfs novamente</title>
+     <para>
+      Como o <systemitem>initramfs</systemitem> contém drivers, é necessário atualizá-lo sempre que uma nova versão de um dos drivers é disponibilizada. Isso é feito automaticamente ao instalar o pacote que contém a atualização de driver. O YaST ou o zypper informará você sobre isso mostrando a saída do comando que gera o <systemitem>initramfs</systemitem>. Em algumas ocasiões, entretanto, você precisa gerar outra vez o <systemitem>initramfs</systemitem> manualmente:
+     </para>
+     <itemizedlist>
+      <listitem>
+       <para>
+        
+        <xref xrefstyle="select:title" linkend="var-initrd-regenerate-drivers"/>
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        
+        <xref xrefstyle="select:title" linkend="var-initrd-regenerate-raidroot"/>
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        
+        <xref xrefstyle="select:title" linkend="var-initrd-regenerate-lvmadd"/>
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        
+        <xref xrefstyle="select:title" linkend="var-initrd-regenerate-kernelvars"/>
+       </para>
+      </listitem>
+     </itemizedlist>
+
+     <variablelist>
+      <varlistentry xml:id="var-initrd-regenerate-drivers">
+       <term>Adicionando drivers por causa de mudanças no hardware</term>
+       <listitem>
+        <para>
+         Se você precisar mudar o hardware (por exemplo, discos rígidos), e esse hardware exigir drivers diferentes no kernel durante a inicialização, será necessário atualizar o arquivo <systemitem>initramfs.</systemitem>
+        </para>
+        <para>
+         Edite <filename>/etc/dracut.conf.d/01-dist.conf</filename> (ou crie-o, se ainda não existir) e adicione a linha a seguir.
+        </para>
+        <screen>force_drivers+="<replaceable>DRIVER1</replaceable>"</screen>
+        <para>
+         Substitua <replaceable>DRIVER1</replaceable> pelo nome do driver do módulo. Se for necessário adicionar mais do que um driver, liste-os separados com espaço:
+        </para>
+        <screen>force_drivers+="<replaceable>DRIVER1</replaceable> <replaceable>DRIVER2</replaceable>"</screen>
+        <para>
+         Avance para o <xref linkend="pro-generate-initramfs"/>.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry xml:id="var-initrd-regenerate-raidroot">
+       <term>Movendo diretórios de sistema para um RAID ou LVM</term>
+       <listitem>
+        <para>
+         Sempre que você mover arquivos de troca (swap) ou diretórios de sistema, como <filename>/usr</filename>, em um sistema em execução para um RAID ou volume lógico, será necessário criar um <systemitem>initramfs</systemitem> que ofereça suporte a drivers RAID ou LVM de software.
+        </para>
+        <para>
+         Para isso, crie as respectivas entradas em <filename>/etc/fstab</filename> e monte as novas entradas. Por exemplo, com <command>mount -a</command> e/ou <command>swapon -a</command>.
+        </para>
+        <para>
+         Avance para o <xref linkend="pro-generate-initramfs"/>.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry xml:id="var-initrd-regenerate-lvmadd">
+       <term>
+        Adicionando discos a um grupo de LVM/RAID Btrfs com o sistema de arquivos raiz
+       </term>
+       <listitem>
+        <para>
+         Sempre que você adicionar (ou remover) um disco de um grupo de volumes lógicos ou de um RAID Btrfs com o sistema de arquivos raiz, será necessário criar um <systemitem>initramfs</systemitem> que ofereça suporte ao volume ampliado. Siga as instruções no <xref linkend="pro-generate-initramfs"/>.
+        </para>
+        <para>
+         Avance para o <xref linkend="pro-generate-initramfs"/>.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry xml:id="var-initrd-regenerate-kernelvars">
+       <term>Mudando as variáveis do kernel</term>
+       <listitem>
+        <para>
+         Se você mudar os valores das variáveis do kernel pela interface do <command>sysctl</command>, editando os arquivos relacionados (<filename>/etc/sysctl.conf</filename> ou <filename>/etc/sysctl.d/*.conf</filename>), a mudança será perdida na próxima reinicialização do sistema. Mesmo que você carregue os valores com <command>sysctl --system</command> em tempo de execução, as mudanças não são gravadas no arquivo <systemitem>initramfs</systemitem>. Você precisa atualizá-lo de acordo com a instrução no <xref linkend="pro-generate-initramfs"/>.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+
+     <procedure xml:id="pro-generate-initramfs">
+      <title>Gerar um initramfs</title>
+      <para>
+       Observe que todos os comandos no procedimento a seguir precisam ser executados como usuário <systemitem class="username">root</systemitem>.
+      </para>
+      <step>
+       <para>
+        Gere um novo arquivo <systemitem>initramfs</systemitem> executando
+       </para>
+       <screen>dracut <replaceable>MY_INITRAMFS</replaceable></screen>
+       <para>
+        Substitua <replaceable>MY_INITRAMFS</replaceable> pelo nome de arquivo de sua escolha. O novo <systemitem>initramfs</systemitem> será criado como <filename>/boot/<replaceable>MY_INITRAMFS</replaceable></filename>.
+       </para>
+       <para>
+        Se preferir, execute <command>dracut -f</command>. Esse comando sobregravará o arquivo existente usado atualmente.
+       </para>
+      </step>
+      <step>
+       <para>
+        (Ignore esta etapa se você executou <command>dracut -f</command> na etapa anterior). Crie um link para o arquivo <systemitem>initramfs</systemitem> criado na etapa anterior:
+       </para>
+       <screen>(cd /boot &amp;&amp; ln -sf <replaceable>MY_INITRAMFS</replaceable> initrd)</screen>
+      </step>
+      <step arch="zseries">
+       <para>
+        Na arquitetura do IBM z Systems, execute também o <command>grub2-install</command>.
+       </para>
+      </step>
+     </procedure>
+    </sect4>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-boot-initramfs">
+   <title>Fase do init no initramfs</title>
+   <para>
+    O sistema de arquivos raiz temporário montado pelo kernel do <systemitem>initramfs</systemitem> contém o executável <systemitem class="daemon">systemd</systemitem> (que é denominado <systemitem>init</systemitem> no <systemitem>initramfs</systemitem>). Consulte também a <xref linkend="sec-boot-terminology"/>. Este programa executa todas as ações necessárias para montar o sistema de arquivos raiz apropriado. Ele oferece a funcionalidade do kernel para os drivers necessários de sistema de arquivos e de dispositivo para controladoras de armazenamento em massa com o <systemitem class="service">udev</systemitem>.
+   </para>
+
+   <para>
+    O principal objetivo do <systemitem>init</systemitem> no <systemitem>initramfs</systemitem> é preparar a montagem e o acesso ao sistema de arquivos raiz real. Dependendo da configuração do sistema, o <systemitem>init</systemitem> no <systemitem>initramfs</systemitem> será responsável pelas tarefas a seguir.
+   </para>
+
+   <variablelist>
+    <varlistentry>
+     <term>Carregamento de Módulos do Kernel</term>
+     <listitem>
+      <para>
+       Dependendo da configuração do hardware, drivers especiais poderão ser necessários para acessar os componentes de hardware do computador (sendo que o componente mais importante é o disco rígido). Para acessar o sistema de arquivos raiz final, o kernel precisa carregar os drivers adequados do sistema de arquivos.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Fornecendo arquivos especiais de bloco</term>
+     <listitem>
+      <para>
+       O kernel gera eventos de dispositivo de acordo com os módulos carregados. O <systemitem class="service">udev</systemitem> gerencia esses eventos e gera os arquivos de bloco especiais necessários em um sistema de arquivos RAM em <filename>/dev</filename>. Sem esses arquivos especiais, o sistema de arquivos e outros dispositivos não estariam acessíveis.
+      </para>
+    </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Gerenciamento de configurações RAID e LVM</term>
+     <listitem>
+      <para>
+       Se você configurar o sistema para armazenar o sistema de arquivos raiz no RAID ou no LVM, o <systemitem>init</systemitem> no <systemitem>initramfs</systemitem> configurará o LVM ou o RAID para permitir acesso ao sistema de arquivos raiz posteriormente.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Gerenciando a configuração de rede</term>
+     <listitem>
+      <para>
+       Se você tiver configurado o sistema para usar um sistema de arquivos raiz montado em rede (via NFS), o <systemitem>init</systemitem> deverá verificar se os drivers de rede corretos foram carregados e estão configurados para permitir acesso ao sistema de arquivos raiz.
+      </para>
+      <para>
+       Se o sistema de arquivos residir em um dispositivo de blocos de rede, como iSCSI ou SAN, a conexão com o servidor de armazenamento também será configurada pelo <systemitem>init</systemitem> no <systemitem>initramfs</systemitem>. O <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> permitirá a inicialização de um destino iSCSI secundário se o destino primário não estiver disponível. 
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+
+   <note>
+    <title>Resolvendo falhas de montagem</title>
+    <para>
+     Se o sistema de arquivos raiz não puder ser montado no ambiente de boot, ele deverá ser verificado e consertado antes de prosseguir com a inicialização. O verificador de sistema de arquivos será iniciado automaticamente nos sistemas de arquivos Ext3 e Ext4. O processo de conserto não é automatizado nos sistemas de arquivos XFS e Btrfs, e o usuário vê as informações que descrevem as opções disponíveis para consertar o sistema de arquivos. Quando o sistema de arquivos é consertado com êxito, sair do ambiente de boot faz com que o sistema repita a montagem do sistema de arquivos raiz. Em caso de êxito, o boot continuará normalmente.
+    </para>
+   </note>
+
+   <sect3 xml:id="sec-boot-linuxrc-initramfs">
+    <title>Fase do init no initramfs no processo de instalação</title>
+    <para>
+     Quando o <systemitem>init</systemitem> no <systemitem>initramfs</systemitem> é chamado durante o boot inicial como parte do processo de instalação, suas tarefas são diferentes das que foram mencionadas acima. Observe que o sistema de instalação não inicia também o <systemitem class="daemon">systemd</systemitem> do <systemitem>initramfs</systemitem>. Esse tipo de tarefa é executado pelo <command>linuxrc</command>.
+    </para>
+
+    <variablelist>
+     <varlistentry>
+      <term>Localização da mídia de instalação</term>
+      <listitem>
+       <para>
+        Ao iniciar o processo de instalação, a máquina carrega um kernel de instalação e um <systemitem>init</systemitem> especial que inclui o instalador do YaST. O instalador do YaST é executado em um sistema de arquivos RAM e precisa ter informações sobre a localização do meio de instalação para acessá-lo e instalar o sistema operacional.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>
+       Inicialização do reconhecimento de hardware e carregamento dos módulos kernel adequados
+      </term>
+      <listitem>
+       <para>
+        Conforme mencionado na <xref linkend="sec-boot-initrd"/>, o processo de boot começa com um conjunto mínimo de drivers que pode ser usado com a maioria das configurações de hardware. Em máquinas com AArch64, POWER e AMD64/Intel 64, o <command>linuxrc</command> inicializa um processo de varredura de hardware inicial que determina o conjunto de drivers adequados à sua configuração de hardware. No IBM z Systems, uma lista de drivers e seus parâmetros precisam ser fornecidos, por exemplo, por meio do linuxrc ou de um parmfile.
+       </para>
+       <para>
+        Esses drivers são usados para gerar um <systemitem>initramfs</systemitem> personalizado necessário para inicializar o sistema. Se os módulos não forem necessários para inicialização, mas forem para coldplug, eles poderão ser carregados com <systemitem class="daemon">systemd</systemitem>. Para obter mais informações, consulte a <xref linkend="sec-boot-systemd-advanced-kernel-modules"/>.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Carregando o sistema de instalação</term>
+      <listitem>
+       <para>
+        Quando o hardware é adequadamente reconhecido, os drivers apropriados são carregados. O programa <systemitem class="service">udev</systemitem> cria os arquivos de dispositivo especiais, e o <command>linuxrc</command> inicia o sistema de instalação com o instalador do YaST.
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>Inicialização do YaST</term>
+      <listitem>
+       <para>
+        Por fim, o <command>linuxrc</command> inicia o YaST, que inicia a instalação do pacote e a configuração do sistema.
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+  </sect2>
+
+
+  <sect2 xml:id="sec-boot-systemd">
+   <title>Fase do systemd</title>
+   <para>
+    Após encontrar o sistema de arquivos raiz <quote>real</quote>, será verificado se há erros nele e se ele foi montado. Se esse procedimento for bem-sucedido, o <systemitem>initramfs</systemitem> será limpo e o daemon <systemitem class="daemon">systemd</systemitem> no sistema de arquivos raiz será executado. O <systemitem class="daemon">systemd</systemitem> é um gerenciador de serviços e sistemas do Linux. Trata-se do processo pai que é iniciado como PID 1 e age como um sistema init que ativa e mantém os serviços no espaço do usuário. Consulte o <xref linkend="cha-systemd"/> para obter os detalhes. 
+   </para>
+  </sect2>
+ </sect1>
+</chapter>
