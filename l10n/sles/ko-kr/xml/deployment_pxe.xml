@@ -1,0 +1,504 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_pxe.xml" version="5.0" role="General" xml:id="cha-deployment-prep-pxe">
+ <title>네트워크 부팅 환경 준비</title>
+ <info>
+  <abstract>
+   <para>
+    이 장에서는 PXE로 부팅하는 데 필요한 인프라를 제공하는 DHCP 및 TFTP 서버를 구성하는 방법에 대해 설명합니다.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>예</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  <phrase role="productname"><phrase os="sles">SUSE® Linux Enterprise Server</phrase></phrase>는 PXE(프리부팅 실행 환경)를 통해 설치할 수 있습니다. 클라이언트 하드웨어는 PXE를 통한 부팅을 지원해야 합니다. 네트워크는 필요한 데이터를 클라이언트에 제공하는 DHCP 서버 및 TFTP 서버를 제공해야 합니다. 이 장에서는 필요한 서버 설정에 대해 안내합니다.
+ </para>
+ <para>
+  PXE는 커널 및 initrd만 부팅합니다. 설치 환경 또는 라이브 시스템으로 부팅하는 데 사용할 수 있습니다. 설치 소스를 설정하려면 <xref linkend="cha-deployment-instserver"/> 항목을 참조하십시오.
+ </para>
+ <para>
+  이 절에서는 복잡한 부팅 시나리오에 필요한 구성 작업에 대해 다룹니다. 여기에는 DHCP, PXE 부팅, TFTP 및 WOL(Wake On Lan)에 즉시 적용 가능한 구성 예가 포함됩니다.
+ </para>
+ <para>
+  이 예제에서는 DHCP, TFTP 및 NFS 서버가 IP가 <literal>192.168.1.1</literal>인 같은 시스템에 있다고 가정합니다. 모든 서비스가 다른 시스템에 있어도 문제는 없습니다. 필요한 경우 IP 주소를 변경하십시오.
+ </para>
+ <sect1 xml:id="sec-deployment-dhcp-server">
+  <title>DHCP 서버 설정</title>
+  <para>
+   자동 주소 할당을 네트워크 클라이언트에 제공하는 것 이외에도 DHCP 서버는 TFTP 서버의 IP 주소와 커널 및 Initrd 파일 경로를 알려줍니다. 로드해야 할 파일은 대상 시스템의 아키텍처 및 레거시 BIOS 또는 UEFI 부팅 중 무엇을 사용할지에 따라 다릅니다. 클라이언트는 DHCP 요청에서 아키텍처 유형을 전송합니다. 이 정보를 기반으로 DHCP 서버는 클라이언트가 부팅에 다운로드해야 할 파일을 결정할 수 있습니다.
+  </para>
+  <procedure xml:id="pro-deployment-dhcp-server">
+   <step>
+    <para>
+     DHCP 서버를 호스팅하는 시스템에 <systemitem class="username">root</systemitem>로 로그인합니다.
+    </para>
+   </step>
+   <step>
+    <para>
+     <command>systemctl enable dhcpd</command>를 실행하여 DHCP 서버를 활성화합니다.
+    </para>
+   </step>
+   <step>
+    <para>
+     <filename>/etc/dhcpd.conf</filename>에 있는 DHCP 서버 구성 파일의 서브넷 구성에 다음 행을 추가합니다.
+    </para>
+<screen># The following lines are optional
+option domain-name "my.lab";
+option domain-name-servers 192.168.1.1;
+option routers 192.168.1.1;
+option ntp-servers 192.168.1.1;
+ddns-update-style none;
+default-lease-time 3600;
+
+# The following lines are required
+option arch code 93 = unsigned integer 16; # RFC4578
+subnet 192.168.1.0 netmask 255.255.255.0 {
+ next-server 192.168.1.1;
+ range 192.168.1.100 192.168.1.199;
+ default-lease-time 3600;
+ max-lease-time 3600;
+ if option arch = 00:07 or option arch = 00:09 {
+   filename "/EFI/x86/grub.efi";
+ }
+ else if option arch = 00:0b {
+   filename "/EFI/aarch64/bootaa64.efi";
+ }
+ else  {
+   filename "/BIOS/x86/pxelinux.0";
+ }
+}</screen>
+    <para>
+     이 구성 예에서는 IP가 <literal>192.168.1.1</literal>인 서버에서 DHCP, DNS 및 게이트웨이가 있는 서브넷 <literal>192.168.1.0/24</literal>를 사용합니다. 사용한 모든 IP 주소는 네트워크 레이아웃에 따라 변경됩니다. <filename>dhcpd.conf</filename>에서 사용할 수 있는 옵션에 대한 자세한 내용은 <systemitem>dhcpd.conf</systemitem> 매뉴얼 페이지를 참조하십시오.
+    </para>
+   </step>
+   <step>
+    <para>
+     <command>systemctl restart dhcpd</command>를 실행하여 DHCP 서버를 다시 시작합니다.
+    </para>
+   </step>
+  </procedure>
+  <para>
+   PXE 및 WOL(Wake On Lan) 설치의 원격 제어에 SSH를 사용하려는 경우 DHCP에서 설치 대상에 제공해야 하는 IP 주소를 지정합니다.. 이렇게 하려면 다음 예에 따라 위에서 언급한 DHCP 구성을 수정합니다.
+  </para>
+<screen>group {
+ host test {
+   hardware ethernet <replaceable>MAC_ADDRESS</replaceable>;
+   fixed-address <replaceable>IP_ADDRESS</replaceable>;
+   }
+}
+</screen>
+  <para>
+   Host 문은 설치 대상의 호스트 이름을 소개합니다. 특정 호스트에 호스트 이름과 IP 주소를 바인딩하려면 시스템의 하드웨어(MAC) 주소를 알고 이를 지정해야 합니다. 이 예에서 사용된 모든 변수를 사용자 환경과 일치하는 실제 값으로 바꿉니다.
+  </para>
+  <para>
+   DHCP 서버를 다시 시작한 후에는 정적 IP가 지정된 호스트에 제공되어 SSH를 통해 시스템에 연결할 수 있습니다.
+  </para>
+ </sect1>
+
+ <sect1 xml:id="sec-deployment-tftp-server">
+  <title>TFTP 서버 설정</title>
+  <para>
+   다음 절차에서는 32비트 및 64비트의 x86 아키텍처에서 UEFI 및 BIOS를 사용하여 대상 시스템용 서버를 준비하는 방법을 설명합니다. 준비된 구조에서는 이미 AArch64 시스템을 제공합니다.
+  </para>
+  <sect2 xml:id="sec-deployment-tftp-server-install">
+   <title>TFTP 서버 설치</title>
+   <para>
+    TFTP 서버를 설치하려면 다음 절차를 사용하십시오.
+   </para>
+
+   <procedure>
+    <step>
+     <para>
+      <systemitem>tftp</systemitem> 패키지를 설치합니다.
+     </para>
+     <screen><prompt>tux &gt; </prompt><command>sudo</command> <command>zypper in tftp</command></screen>
+    </step>
+    <step>
+     <para>
+      <filename>/etc/sysconfig/tftp</filename>에서 <systemitem class="daemon">tftpd</systemitem> 구성을 검토하고 필요에 따라 옵션을 추가하거나 변경합니다. 자세한 내용은 <command>man 8 tftpd</command>를 참조하십시오. TFTP 데몬은 구성을 변경하지 않고 작동합니다. 파일의 기본 루트 디렉토리는 <filename>/srv/tftpboot</filename>입니다.
+     </para>
+    </step>
+    <step>
+     <para>
+      <systemitem class="daemon">tftpd</systemitem>가 부팅 시간에 시작되는지 확인하고 다시 시작하여 새 구성을 읽습니다.
+     </para>
+     <screen><prompt>tux &gt; </prompt><command>sudo</command> <command>systemctl enable tftp.socket</command>
+<prompt>tux &gt; </prompt><command>sudo</command> <command>systemctl restart tftp.socket</command></screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec-deployment-tftp-server-grub-package">
+   <title>패키지에서 PXE 파일 설치</title>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>는 BIOS의 PXE 또는 RPM의 UEFI 시스템을 통해 부팅에 필요한 파일을 제공합니다. TFTP 서버를 실행하는 시스템에 파일을 설치합니다.
+   </para>
+   <screen><prompt>tux &gt; </prompt><command>sudo</command> <command>zypper in tftpboot-installation-SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></command></screen>
+   <para>
+    <replaceable>OS_VERSION</replaceable>을 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 설치 버전으로 바꿉니다. 예를 들면 <literal>15</literal> 및 <replaceable>ARCHITECTURE</replaceable>는 시스템의 아키텍처(예: <literal>x86_64</literal>)로 바꿉니다. <command>zypper se tftpboot</command>를 사용하여 사용 가능한 모든 버전과 아키텍처를 검색할 수 있습니다.
+   </para>
+   <para>
+    파일은 <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></filename>에 설치됩니다. <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>의 다른 버전 및 아키텍처에 대한 파일을 <filename>/srv/tftpboot</filename> 디렉토리에 복사할 수도 있습니다.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec-deployment-tftp-server-pxelinux">
+   <title>PXELINUX 구성</title>
+   <para>
+    편집기에서 <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/net/pxelinux.cfg/default</filename> 파일을 엽니다. <xref linkend="cha-deployment-instserver"/>에 설명된 대로 설정에 따라 <literal>install</literal> 파라미터의 경로를 바꿉니다 . 또한 <replaceable>TFTP_SERVER</replaceable>도 TFTP 서버의 IP 주소로 바꿉니다. PXELINUX 구성 옵션의 개요는 <xref linkend="sec-deployment-prep-boot-pxeopts"/> 항목을 참조하십시오.
+   </para>
+<screen>default linux
+
+# install
+label linux
+  ipappend 2
+  kernel boot/<replaceable>ARCHITECTURE</replaceable>/loader/linux
+  append initrd=boot/x86_64/<replaceable>ARCHITECTURE</replaceable>/initrd instsys=tftp://<replaceable>TFTP_SERVER</replaceable>/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/boot/<replaceable>ARCHITECTURE</replaceable>/root install=<replaceable>PROTOCOL</replaceable>://<replaceable>SERVER_IP</replaceable>:/<replaceable>PATH</replaceable>
+
+display  message
+implicit 1
+prompt  1
+timeout  50</screen>
+   <para>
+    <literal>append</literal> 줄에서 사용되는 부팅 파라미터에 대한 자세한 내용은 <xref linkend="sec-boot-parameters-list"/> 항목을 참조하십시오.
+   </para>
+   <para>
+    필요한 경우 <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/net/pxelinux.cfg/message</filename>를 편집하여 [부팅] 메뉴에 메시지를 표시합니다.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec-deployment-tftp-server-efilinux-x86">
+   <title>GRUB2를 사용하여 EFI의 PXE 부팅 준비</title>
+   <para>
+    GRUB2 구성 파일을 변경할 필요는 없습니다. 그러나 기본 설정에서 설치 시스템의 네트워크 소스가 제공되지 않습니다. 네트워크를 통해 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>를 완전히 설치하려면 <option>install</option> 파라미터를 <filename>/srv/tftpboot/SLES-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/EFI/BOOT/grub.cfg</filename> 파일에 있는 <option>linuxefi</option> 줄에 추가합니다. <xref linkend="cha-deployment-instserver"/>에 설명된 대로 설정에 따라 <literal>install</literal> 파라미터를 설정합니다. <literal>efilinux</literal> 줄에서 사용되는 기타 부팅 파라미터에 대한 자세한 내용은 <xref linkend="sec-boot-parameters-list"/> 항목을 참조하십시오.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-pxeopts">
+  <title>PXELINUX 구성 옵션</title>
+
+  <para>
+   여기에 나열된 옵션은 PXELINUX 구성 파일에 사용할 수 있는 모든 옵션의 하위 집합입니다.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><option>APPEND <replaceable>OPTIONS</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      하나 이상의 옵션을 커널 명령 줄에 추가합니다. 이 옵션은 자동 부팅과 수동 부팅 모두에 추가됩니다. 옵션은 커널 명령의 맨 처음에 추가되고, 명시적으로 입력된 커널 옵션을 무효화하도록 일반적으로 허용됩니다.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>APPEND -</option>
+    </term>
+    <listitem>
+     <para>
+      아무 것도 추가하지 않습니다. <option>LABEL</option> 섹션에서 인수로 단일 하이픈이 있는 <option>APPEND</option>는 전역 <option>APPEND</option>를 무효화하는 데 사용할 수 있습니다.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>DEFAULT <replaceable>KERNEL_OPTIONS</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      기본 커널 명령줄을 설정합니다. PXELINUX가 자동으로 부팅되면 자동 옵션이 자동으로 추가되어 자동 부팅을 나타내는 것을 제외하고, DEFAULT 이후의 항목이 부팅 프롬프트 시 입력된 것처럼 작동합니다.
+     </para>
+     <para>
+      구성 파일이 없거나 DEFAULT 항목이 구성 파일에 정의되지 않은 경우 기본값은 옵션이 없는 커널 이름 <quote>linux</quote>입니다.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+
+    <term><option>IFAPPEND <replaceable>FLAG</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      <replaceable>FLAG</replaceable> 값에 따라 특정 옵션을 커널 명령줄에 추가합니다. <option>IFAPPEND</option> 옵션은 PXELINUX에서만 사용 가능합니다. <replaceable>FLAG</replaceable>에는 다음과 같은 값이 필요합니다(<xref linkend="tab-deployment-boot-pxeopts-ifappend"/> 참조).
+     </para>
+     <table xml:id="tab-deployment-boot-pxeopts-ifappend">
+      <title>생성 및 추가된 <option>IFAPPEND</option>에서 커널 명령줄 옵션</title>
+      <tgroup cols="2">
+       <colspec colwidth="1*"/>
+       <colspec colwidth="4*"/>
+       <thead>
+        <row>
+         <entry valign="middle">
+          <para>
+           인수
+          </para>
+         </entry>
+         <entry>
+          <para>
+           생성된 커널 명령줄/설명
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <option>1</option>
+          </para>
+         </entry>
+         <entry>
+<screen>ip=<replaceable>CLIENT_IP</replaceable>:<replaceable>BOOT_SERVER_IP</replaceable>:<replaceable>GW_IP</replaceable>:<replaceable>NETMASK</replaceable></screen>
+          <para>
+           DHCP/BOOTP 또는 PXE 부팅 서버의 입력을 기반으로 자리 표시자가 바뀝니다.
+          </para>
+          <para>
+           이 옵션은 부팅된 시스템에서 DHCP 클라이언트를 실행하기 위한 대체 옵션이 아닙니다. 정기적으로 갱신하지 않으면 PXE BIOS가 얻은 임대가 만료되므로 IP 주소를 DHCP 서버가 다시 사용할 수 있습니다.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>2</option>
+          </para>
+         </entry>
+         <entry>
+<screen>BOOTIF=<replaceable>MAC_ADDRESS_OF_BOOT_INTERFACE</replaceable></screen>
+          <para>
+           DHCP 서버에서 응답을 받을 때까지 설치 서버가 LAN 인터페이스를 차례로 조사할 때 시간 제한을 피하려면 이 옵션이 유용합니다. 이 옵션을 사용하면 initrd 프로그램에서 시스템이 부팅되는 인터페이스를 결정할 수 있습니다. linuxrc에서 이 옵션을 읽고 이 네트워크 인터페이스를 사용합니다.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>4</option>
+          </para>
+         </entry>
+         <entry>
+<screen>SYSUUID=<replaceable>SYSTEM_UUID</replaceable></screen>
+          <para>
+           소문자로 된 16진수의 UUID를 추가합니다. <filename>/usr/share/doc/packages/syslinux/pxelinux.txt</filename> 참조
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LABEL <replaceable>LABEL</replaceable> KERNEL <replaceable>IMAGE</replaceable> APPEND <replaceable>OPTIONS</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      <replaceable>LABEL</replaceable>을 부팅할 커널로 입력하는 경우를 나타내며 PXELINUX는 대신 <replaceable>IMAGE</replaceable>를 부팅해야 하고 지정된 <option>APPEND</option> 옵션을 사용해야 합니다. 첫 번째 <option>LABEL</option> 명령 전에 파일의 전역 섹션에 지정된 항목을 바꿉니다. <replaceable>IMAGE</replaceable>의 기본값은 <replaceable>LABEL</replaceable>과 동일하고, <option>APPEND</option>가 지정되지 않은 경우 기본값은 전역 항목(있는 경우)입니다. 최대 128개의 <option>LABEL</option> 항목이 허용됩니다.
+     </para>
+
+     <para>
+      PXELINUX는 다음 구문을 사용합니다.
+     </para>
+<screen>label <replaceable>MYLABEL</replaceable>
+  kernel <replaceable>MYKERNEL</replaceable>
+  append <replaceable>MYOPTIONS</replaceable></screen>
+     <para>
+      레이블은 파일 이름이었던 것처럼 바뀌고, 바뀐 후에는 고유해야 합니다. 예를 들어 <quote>v2.6.30</quote>과 <quote>v2.6.31</quote>의 두 레이블은 두 항목 모두 동일한 DOS 파일 이름으로 바뀌기 때문에 PXELINUX에서 구분할 수 없게 됩니다.
+     </para>
+     <para>
+      커널이 Linux 커널일 필요는 없으며 부팅 섹터나 COMBOOT 파일일 수도 있습니다.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LOCALBOOT <replaceable>TYPE</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      PXELINUX에서 <option>KERNEL</option> 옵션 대신 <option>LOCALBOOT 0</option>을 지정하는 것은 이 특수 레이블을 호출하는 것을 의미하며, 이로 인해 커널 부팅 대신 로컬 디스크 부팅이 실행될 수 있습니다.
+     </para>
+     <informaltable frame="topbot" rowsep="0">
+      <tgroup cols="2">
+
+       <thead>
+        <row>
+         <entry>
+          <para>
+           인수
+          </para>
+         </entry>
+         <entry>
+          <para>
+           설명
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>0</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           일반 부팅을 수행합니다.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>4</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           메모리에 있는 UNDI(Universal Network Driver Interface) 드라이버를 사용하여 로컬 부팅을 수행합니다.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>5</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           메모리에 있는 UNDI 드라이버를 포함하여 전체 PXE 스택이 있는 로컬 부팅을 수행합니다.
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+     <para>
+      모든 다른 값은 정의되지 않았습니다. UNDI 또는 PXE 스택의 정의를 모르는 경우 <literal>0</literal>을 지정하십시오.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>TIMEOUT <replaceable>TIME-OUT</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      부팅 프롬프트에서 자동으로 부팅될 때까지 기다려야 하는 시간을 1/10초 단위로 나타냅니다. 키보드의 아무 키나 누르면 시간 초과가 취소되고, 시작된 명령을 사용자가 완료할 것이라고 가정합니다. 제로(0) 시간 초과는 시간 초과를 완전히 비활성화합니다(이 항목도 기본값임). 허용 가능한 최대 시간 초과 값은 35996입니다(1시간 미만).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>PROMPT<replaceable> flag_val</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      <option>flag_val</option>이 0인 경우 <keycap function="shift"/> 또는 <keycap function="alt"/> 키를 눌렀거나 <keycap>Caps Lock</keycap> 또는 <keycap>Scroll Lock</keycap> 키를 설정(기본값)한 경우에만 부팅 프롬프트를 표시합니다. <option>flag_val</option>이 1인 경우 항상 부팅 프롬프트를 표시합니다.
+     </para>
+<screen>F2  <replaceable>FILENAME</replaceable>
+F1  <replaceable>FILENAME</replaceable>
+..etc...
+F9  <replaceable>FILENAME</replaceable>
+F10 <replaceable>FILENAME</replaceable></screen>
+     <para>
+      부팅 프롬프트에서 기능 키를 눌렀을 때 화면에 나타난 파일을 표시합니다. 이 파일은 프리부팅 온라인 도움말(커널 명령줄 옵션에 해당)을 구현하는 데 사용할 수 있습니다. 이전 릴리스에서의 이전 버전과의 호환성의 경우 <keycap>F10</keycap>을 <literal>F0</literal>으로도 입력할 수 있습니다. 현재는 파일 이름을 <keycap>F11</keycap> 및 <keycap>F12</keycap>로 바인딩할 방법이 없습니다.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-pxeprep">
+  <title>PXE 부팅을 위한 대상 시스템 준비</title>
+
+  <para>
+   BIOS 부팅 순서에 PXE 옵션을 포함시켜 PXE 부팅을 위한 시스템의 BIOS를 준비합니다.
+  </para>
+
+  <warning>
+   <title>BIOS 부팅 순서</title>
+   <para>
+    PXE 옵션을 BIOS의 하드 디스크 부팅 파라미터 앞에 배치하지 마십시오. 그렇지 않으면 이 시스템은 부팅할 때마다 재설치를 시도합니다.
+   </para>
+  </warning>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-wolprep">
+  <title>WOL(Wake On Lan)을 위한 대상 시스템 준비</title>
+
+  <para>
+   WOL(Wake On Lan)에는 설치 전에 활성화할 적합한 BIOS 옵션이 필요합니다. 대상 시스템의 MAC 주소도 기록해 두십시오. 이 데이터는 WOL(Wake On Lan)을 시작하는 데 필요합니다.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-wol">
+  <title>WOL(Wake On Lan)</title>
+
+  <para>
+   WOL(Wake On Lan)을 사용하면 시스템의 MAC 주소가 포함된 특수 네트워크 패킷에서 시스템을 켤 수 있습니다. 전 세계 모든 시스템에는 고유 MAC ID가 있기 때문에 잘못된 시스템을 실수로 켜는 것에 대해 걱정할 필요가 없습니다.
+  </para>
+
+  <important>
+   <title>여러 네트워크 세그먼트에 대한 WOL(Wake On Lan)</title>
+   <para>
+    제어 시스템이 WOL 명령의 대상과 동일한 네트워크 세그먼트에 없는 경우 두 가지 옵션이 있습니다. 멀티캐스트로 보낼 WOL 요청을 구성하거나 이러한 요청의 송신자 역할을 하는 네트워크 세그먼트에서 원격으로 시스템을 제어합니다.
+   </para>
+  </important>
+
+  <para>
+   SUSE Linux Enterprise Server의 사용자는 WOL이라는 YaST 모듈을 사용하여 WOL(Wake On Lan)을 쉽게 구성할 수 있습니다. 다른 버전의 SUSE Linux 기반 운영 체제 사용자는 명령줄 도구를 사용할 수 있습니다.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-wolyast">
+  <title>YaST를 사용하여 WOL(Wake On Lan)</title>
+  <para>
+   이 절차를 사용하여 YaST로 WOL(Wake On LAN)을 구성합니다.
+  </para>
+  <procedure xml:id="pro-deployment-prep-boot-wolyast">
+   <step>
+    <para>
+     <systemitem class="username">root</systemitem>로 로그인합니다. 
+    </para>
+   </step>
+   <step>
+    <para>
+     <menuchoice> <guimenu> YaST</guimenu> <guimenu> 네트워크 서비스</guimenu> <guimenu> WOL</guimenu></menuchoice>을 시작합니다.
+    </para>
+   </step>
+   <step>
+    <para>
+     <guimenu>추가</guimenu>를 클릭하고 대상 시스템의 호스트 이름과 MAC 주소를 입력합니다.
+    </para>
+   </step>
+   <step>
+    <para>
+     이 시스템을 켜려면 해당 항목을 선택하고 <guimenu>부팅하기</guimenu>를 클릭합니다.
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-mksusecd">
+  <title>PXE 대신 CD 또는 USB 드라이브에서 부팅</title>
+  <para>
+   PXE를 통해 부팅하는 대신 작은 시스템 이미지가 포함된 CD, DVD 또는 USB 드라이브를 사용할 수도 있습니다. 커널 및 initrd가 로드되면 필요한 파일이 NFS를 통해 가져오기됩니다. 부팅 가능 이미지는 <command>mksusecd</command>로 생성할 수 있습니다. 이 방법은 대상 시스템에서 PXE 부팅을 지원하지 않는 경우 유용합니다.
+  </para>
+  <para>
+   <command>sudo zypper in mksusecd</command>를 사용하여 설치합니다. 다음 명령을 사용하여 부팅 가능 ISO 이미지를 만듭니다.
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=nfs://192.168.1.1:/srv/install/<replaceable>ARCH</replaceable>/<replaceable>OS_VERSION</replaceable>/<replaceable>SP_VERSION</replaceable>/cd1  \
+/srv/tftpboot/EFI/<replaceable>ARCH</replaceable>/boot</screen>
+  <para>
+   <replaceable>ARCH</replaceable>를 대상 시스템 아키텍처에 해당하는 디렉토리로 바꿉니다. 또한 <replaceable>OS_version</replaceable>과 <replaceable>SP_version</replaceable>을 <xref linkend="sec-deployment-tftp-server"/>의 경로에 따라 바꿉니다.
+  </para>
+  <para>
+   <option>--net</option> 옵션에 NFS 서버를 사용하는 대신 HTTP 리포지토리(예: openSUSE 리포지토리)를 사용할 수도 있습니다.
+  </para>
+  <screen><prompt>tux &gt; </prompt><command>mksusecd</command> --create image.iso \
+--net=http://download.opensuse.org/tumbleweed/repo/oss/suse \
+/srv/tftpboot/EFI/<replaceable>ARCH</replaceable>/boot</screen>
+  <para>
+   <filename>image.iso</filename>를 DVD 또는 CD에 쓰거나 <command>dd</command>를 사용하여 USB 스틱에 쓸 수 있습니다.
+  </para>
+  <screen><prompt role="root">root # </prompt><command>dd</command> if=image.iso of=/dev/<replaceable>USB_DEVICE</replaceable></screen>
+  <para>
+   <replaceable>USB_DEVICE</replaceable>를 사용하는 USB 스틱의 장치 이름으로 바꿉니다. 실수로 다른 드라이브의 데이터를 손상하지 않도록 장치 이름을 철저히 확인하십시오.
+  </para>
+ </sect1>
+</chapter>
