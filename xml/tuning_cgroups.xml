@@ -292,9 +292,9 @@ TasksMax=16284
 <title>I/O control with cgroups</title>
 <para>
 This section introduces using the Linux kernel's block I/O controller to
-prioritize or throttle I/O operations,
-it leverages the means provided by systemd to configure cgroups.
-Finally, it discusses probable pitfalls when dealing with proportional I/O control.
+prioritize or throttle I/O operations. This leverages the means provided by
+systemd to configure cgroups, and discusses probable pitfalls when dealing
+with proportional I/O control.
 </para>
 
 <sect2 xml:id="sec-cgroups-prerequisites">
@@ -308,7 +308,7 @@ during runtime.
 <sect3 xml:id="sec-cgroups-filesystems">
 <title>Filesystem</title>
 <para>
-You must use a cgroup-aware filesystem. The recommended SLES
+You must use a cgroup-writeback-aware filesystem. The recommended SLES
 filesystems added support in the following upstream releases:
 <!-- [2] is https://www.susecon.com/doc/2015/sessions/TUT20066.pdf, slide 7, maybe there's better SLES docs
 cjs: that slide is old! We must find something newer.
@@ -332,45 +332,45 @@ cjs: that slide is old! We must find something newer.
       </listitem>
    </itemizedlist>
 <para>
-As of &productname;&nbsp;3, any of the named filesystems can be used.
+As of &productname;&nbsp;SP3, any of the named filesystems can be used.
 </para>
 </sect3>
 
 <sect3 xml:id="sec-cgroups-unified-hierarchy">
 <title>Unified cgroup hiearchy</title>
 <para>
-To properly account also writeback I/O, it is necessary to have equal I/O
-and memory controller cgroup hierarchies and use cgroup v2 I/O controller.
-Together, this means that one has to use the <emphasis>unified</emphasis>
-cgroup hierarchy. This has to be requested explicitly in SLES by passing a
-kernel command line option <option>systemd.unified_cgroup_hierarchy=1</option>.
+To properly account writeback I/O, it is necessary to have equal I/O
+and memory controller cgroup hierarchies, and to use the cgroup v2 I/O
+controller. Together, this means that one has to use the
+<emphasis>unified</emphasis> cgroup hierarchy. This has to be requested
+explicitly in SLES by passing a kernel command line option,
+<option>systemd.unified_cgroup_hierarchy=1</option>.
 </para>
 </sect3>
 
 <sect3 xml:id="sec-cgroups-block-io-scheduler">
 <title>Block I/O scheduler</title>
 <para>
-The throttling policy is implemented higher in the stack therefore it
-doesn’t require any additional adjustments.
+The throttling policy is implemented higher in the stack, therefore it
+does not require any additional adjustments.
 The proportional I/O control policies have two different implementations:
-BFQ controller and cost-based model.
-We describe the BFQ controller here and in order to exert its proportional
+the BFQ controller, and the cost-based model.
+We describe the BFQ controller here. In order to exert its proportional
 implementation for a particular device, we must make sure that BFQ is the
-chosen scheduler.
-Check the current scheduler:
+chosen scheduler. Check the current scheduler:
 </para>
 <screen>
-&prompt.user;<command>cat /sys/class/block/$DEV/queue/scheduler</command>
+&prompt.user;<command>cat /sys/class/block/<replaceable>sda</replaceable>/queue/scheduler</command>
 mq-deadline kyber bfq [none]
 </screen>
 <para>
-Switch the scheduler:
+Switch the scheduler to BFQ:
 </para>
 <screen>
- &prompt.root;<command>echo bfq >/sys/class/block/<replaceable>sda1</replaceable>/queue/scheduler</command>
+ &prompt.root;<command>echo bfq > /sys/class/block/<replaceable>sda</replaceable>/queue/scheduler</command>
 </screen>
 <para>
-<literal>$DEV</literal> is the disk device, not a partition and the
+You must specify the disk device (not a partition). The
 optimal way to set this attribute is a udev rule specific to the device
 (note that &slsa; ships udev rules that already enable BFQ for rotational
 disk drives).
@@ -378,13 +378,14 @@ disk drives).
 </sect3>
 
 <sect3 xml:id="sec-cgroups-hierarchy">
-<title>Cgroup hieararchy layout</title>
+<title>Cgroup hierarchy layout</title>
 <para>
 Normally, all tasks reside in the root cgroup and they compete against
 each other. When the tasks are distributed into the cgroup tree the
-competition occurs between siblings cgroups only.
-This applies to the proportional I/O control, the throttling
-hierarchically aggregates throughput of all descendants.
+competition occurs between sibling cgroups only.
+This applies to the proportional I/O control; the throttling
+hierarchically aggregates throughput of all descendants (see the following
+diagram).
 </para>
 <!-- this is not code but a picture -->
 <screen>
@@ -395,9 +396,9 @@ r
 `- [b]     IOWeight=200
 </screen>
 <para>
-I/O is originating only from cgroups c and b. Despite c has higher weight,
-it will be treated with lower priority based on the weight of a that is
-level-competing with b.
+I/O is originating only from cgroups c and b. Even though c has a higher
+weight, it will be treated with lower priority because it is level-competing
+with b.
 </para>
 </sect3>
 </sect2>
@@ -408,18 +409,19 @@ level-competing with b.
 You can apply the values to (long running) services permanently.
 </para>
 <screen>
-&prompt.sudo;<command>systemctl set-property fast.service IOWeight=400</command>
-&prompt.sudo;<command>systemctl set-property slow.service IOWeight=50</command>
-&prompt.sudo;<command>systemctl set-property throttled.service IOReadBandwidthMax="/dev/sda 1M"</command>
+&prompt.sudo;<command>systemctl set-property <replaceable>fast.service IOWeight=400</replaceable></command>
+&prompt.sudo;<command>systemctl set-property <replaceable>slow.service IOWeight=50</replaceable></command>
+&prompt.sudo;<command>systemctl set-property <replaceable>throttled.service IOReadBandwidthMax="/dev/sda 1M"</replaceable></command>
 </screen>
 
 <para>
-Alternatively, you can apply I/O control to individually run commands, for instance:
+Alternatively, you can apply I/O control to individual commands, for
+example:
 </para>
 <screen>
-&prompt.sudo;<command>systemd-run --scope -p IOWeight=400 prioritized_command</command>
-&prompt.sudo;<command>systemd-run --scope -p IOWeight=50  low_prioritized_command</command>
-&prompt.sudo;<command>systemd-run --scope -p IOReadBandwidthMax="/dev/sda 1M" dd if=/dev/sda of=/dev/null bs=1M count=10</command>
+&prompt.sudo;<command>systemd-run --scope -p IOWeight=400 <replaceable>high_prioritized_command</replaceable></command>
+&prompt.sudo;<command>systemd-run --scope -p IOWeight=50  <replaceable>low_prioritized_command</replaceable></command>
+&prompt.sudo;<command>systemd-run --scope -p <replaceable>IOReadBandwidthMax="/dev/sda 1M" dd if=/dev/sda of=/dev/null bs=1M count=10</replaceable></command>
 </screen>
 </sect2>
 
@@ -433,11 +435,11 @@ Alternatively, you can apply I/O control to individually run commands, for insta
 <listitem>
 <para>
 I/O control works best for direct I/O operations (bypassing page cache),
-the situations where the actual IO is decoupled from the caller (typically
-writeback via page cache) may manifest variously – delayed I/O control or
-even no observed I/O control (consider little bursts or competing
-workloads that happen to never "meet" submitting I/O at the same time (and
-hence saturating the bandwidth). For these reasons, the resulting ratio of
+the situations where the actual I/O is decoupled from the caller (typically
+writeback via page cache) may manifest variously. For example, delayed I/O
+control or even no observed I/O control (consider little bursts or competing
+workloads that happen to never "meet", submitting I/O at the same time, and
+saturating the bandwidth). For these reasons, the resulting ratio of
 I/O throughputs does not strictly follow the ratio of configured weights.
 </para>
 </listitem>
@@ -451,16 +453,9 @@ weight range), hence the resulting throughput ratios also differ.
 <para>
 The writeback activity depends on the amount of dirty pages, besides the
 global sysctl knobs (<filename>vm.dirty_background_ratio</filename> and
-<filename>vm.dirty_ratio</filename>) memory limits of individual cgroups
-come into play when the dirty limits are distributed among cgroups and
+<filename>vm.dirty_ratio</filename>)). Memory limits of individual cgroups
+come into play when the dirty limits are distributed among cgroups, and
 this in turn may affect I/O intensity of affected cgroups.
-</para>
-</listitem>
-<listitem>
-<para>
-As explained in the introduction, inodes are the unit of writeback charging,
-therefore cgroups whose write I/O consists mainly of writes into a single file
-won't be fully differentiated with proportional control.
 </para>
 </listitem>
 <listitem>
@@ -468,7 +463,7 @@ won't be fully differentiated with proportional control.
 Not all storages are equal. The I/O control happens at the I/O scheduler
 layer, which has ramifications for setups with devices stacked on these
 that do no actual scheduling. Consider device mapper logical volumes
-spanning multiple physical devices, MD RAID or even Btrfs RAID.
+spanning multiple physical devices, MD RAID, or even Btrfs RAID.
 I/O control over such setups may be challenging.
 </para>
 </listitem>
@@ -486,18 +481,18 @@ each other (but responsible resource design perhaps avoids that).
 </listitem>
 <listitem>
 <para>
-The I/O device bandwidth is not the only shared resource on the I/O path,
-namely, global filesystem structures are involved too, which is relevant
-when I/O control is meant to guarantee certain bandwidth – it won’t and it
+The I/O device bandwidth is not the only shared resource on the I/O path.
+Global filesystem structures are involved, which is relevant
+when I/O control is meant to guarantee certain bandwidth; it won’t and it
 may even lead to priority inversion (prioritized cgroup waiting for a
 transaction of slower cgroup).
 </para>
 </listitem>
 <listitem>
 <para>
-So far, we have been discussing only explicit I/O of filesystem data but
-swap- in and swap-out can be controlled too. Although if such a need arises,
-it usually points out to improperly provisioned memory (or memory limits).
+So far, we have been discussing only explicit I/O of filesystem data, but
+swap-in and swap-out can also be controlled. Although if such a need
+arises, it usually points out to improperly provisioned memory (or memory limits).
 </para>
 </listitem>
 </itemizedlist>
