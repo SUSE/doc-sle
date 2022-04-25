@@ -5,7 +5,7 @@
 
 <!DOCTYPE article
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
   %entities;
 ]>
 
@@ -13,7 +13,7 @@
   xmlns="http://docbook.org/ns/docbook"
   xmlns:xi="http://www.w3.org/2001/XInclude"
   xmlns:xlink="http://www.w3.org/1999/xlink">
- <title>AMD Secure Encrypted Virtualization (AMD-SEV) Guide</title>
+ <title>&sle_amd_sev_guide;</title>
  <info>
   <productname>&productname;</productname>
   <productnumber>&productnumber;</productnumber>
@@ -21,14 +21,19 @@
   <abstract>
    <para>
     AMD's Secure Encrypted Virtualization (SEV) allows the memory of virtual
-    machines to be encrypted. This is a new feature for Linux's built-in
-    Kernel-based Virtual Machine (&kvm;) hypervisor. The intention is to
-    increase system security, especially when using persistent memory.
+    machines to be encrypted. SEV with Encrypted State (SEV-ES) goes one step
+    further by encrypting the virtual machine's CPU register content. These
+    technologies increase system security and are ideal for multi-tenant
+    environments such as cloud computing. They enable protection from a variety
+    of cross-VM and hypervisor-based attacks. The growing use of persistent
+    memory provides another compelling reason to use SEV and SEV-ES to protect
+    sensitive data.
    </para>
    <para>
-    This document aims to provide a basic understanding of how SEV works and how to
-    enable and configure it. It also mentions some limitations and restrictions that
-    the use of SEV causes as compared to non-encrypted virtualization.
+    This document aims to provide a basic understanding of how SEV and SEV-ES
+    work, and how to enable and configure these features. It also mentions some
+    limitations and restrictions that the use of SEV and SEV-ES causes as
+    compared to non-encrypted virtualization.
    </para>
   </abstract>
  </info>
@@ -52,13 +57,18 @@
   can be sent to the VM's owner as an attestation that the memory was encrypted
   correctly by the firmware. SEV is especially relevant to cloud computing
   environments, where VMs are hosted on remote servers which are not under the
-  control of the VMs' owners. It can reduce the amount of trust VMs need
+  control of the VMs' owners. SEV can reduce the amount of trust VMs need
   to place in the hypervisor and administrator of their host system.
  </para>
  <para>
-  In &sle; 12 SP4 and above, and a forthcoming maintenance release of &sle; 15,
-  the kernel, QEMU, and <package>libvirt</package> support the creation and
-  management of VMs using SEV.
+  When a virtual machine is processing sensitive data, it can be present in
+  CPU registers as well as memory. If the processing is halted, e.g. to service an
+  interrupt or share time with other processes, the virtual machine's CPU
+  register contents are saved to hypervisor memory. This memory is readable by
+  the hypervisor even if SEV is enabled. SEV-ES protects against this scenario by
+  encrypting all CPU register contents when the processing of a virtual machine is
+  halted. SEV-ES builds upon SEV to provide an even smaller attack surface for
+  virtual machines running in a multi-tenant environment.
  </para>
  </sect1>
 
@@ -340,6 +350,78 @@
   </para>
  </sect1>
 
+ <sect1 xml:id="sec-amd-sev-vminst">
+  <title>VM installation</title>
+  <para>
+   <command>virt-install</command> supports the installation of SEV and SEV-ES
+   virtual machines. In addition to your standard installation parameters,
+   provide <command>virt-install</command> with options to satisfy the VM
+   requirements and the <literal>--launchSecurity</literal> option.
+  </para>
+  <para>
+   The following example starts a network installation of a SLES15 SP4 virtual
+   machine protected with SEV-ES.
+  </para>
+  <screen>
+   virt-install --name sles15sp4-sev-es --location http://192.168.0.1/install/sles15sp4/x86_64 --disk size=20,target.bus.scsi --controller type=scsi,model=virtio-scsi,driver.iommu=on --network=bridge=br0,model=virtio,driver.iommu=on --vcpus 4 --memory 4096 --noautoconsole --events on_reboot=destroy --machine q35 --memtune hard_limit=4563402 --launchSecurity sev,policy=0x07 <co xml:id="sec-amd-sev-ex-launchsec"/> --boot firmware=efi <co xml:id="sec-amd-sev-ex-fw"/> --vnc --serial pty
+  </screen>
+  <calloutlist>
+   <callout arearefs="sec-amd-sev-ex-launchsec">
+    <para>
+     The <literal>launchSecurity</literal> option specifies the type and policy to be
+     enforced by the SEV firmware. The policy setting is described in
+     <xref linkend="table-guestpolicy"/>.
+    </para>
+   </callout>
+   <callout arearefs="sec-amd-sev-ex-fw">
+    <para>
+     The <literal>boot</literal> option allows specifying many boot-related settings,
+     including the firmware used by the virtual machine. Specifying a firmware type
+     <literal>efi</literal> allows libvirt's firmware auto-selection feature to
+     select an appropriate SEV capable firmware for the virtual machine.
+    </para>
+   </callout>
+  </calloutlist>
+ </sect1>
+
+ <sect1 xml:id="sec-amd-sev-kubevirt">
+  <title>SEV with &kubevirt;</title>
+  <para>
+   &kubevirt; supports running SEV guests starting from the version <literal>0.49.0</literal>. The
+   functionality can be activated by enabling the <literal>WorkloadEncryptionSEV</literal> feature
+   gate:
+  </para>
+  <screen>
+&prompt.user;kubectl edit kubevirt kubevirt -n kubevirt
+[...]
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+      - WorkloadEncryptionSEV
+[...]
+  </screen>
+  <para>
+   To run an SEV-encrypted guest, the virtual machine specification must include the entry
+   <literal>sev: {}</literal> under the <literal>launchSecurity</literal> domain element.
+   Additionally, you need to configure the <literal>firmware/bootloader</literal> parameters to use
+   the <literal>efi</literal> option with the <literal>secureBoot</literal> flag set to
+   <literal>disabled</literal>. The corresponding YAML snippet will look similar to the following:
+  </para>
+  <screen>
+[...]
+spec:
+  domain:
+    firmware:
+      bootloader:
+        efi:
+          secureBoot: false
+    launchSecurity:
+      sev: {}
+[...]
+  </screen>
+ </sect1>
+
  <sect1 xml:id="sec-amd-sev-limits">
   <title>Current limitations</title>
   <itemizedlist>
@@ -381,7 +463,7 @@
    </listitem>
    <listitem>
     <para>
-     <link xlink:href="https://developer.amd.com/wp-content/resources/55766.PDF"/>
+     <link xlink:href="https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf"/>
      &mdash; AMD SEV-KM API Specification (PDF)
     </para>
    </listitem>
