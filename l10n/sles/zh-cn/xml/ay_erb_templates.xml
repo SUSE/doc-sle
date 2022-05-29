@@ -1,0 +1,631 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="ay_erb_templates.xml" version="5.0" xml:id="erb-templates">
+
+ <title>ERB 模板</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  ERB 模板用于在 AutoYaST 配置文件内嵌入 Ruby 代码，以在安装期间修改配置文件。利用此方法，您可以通过设置值、添加或跳过某些部分等方式，来检查系统并调整配置文件。
+ </para>
+ <para>
+  要激活 ERB 处理，配置文件的扩展名必须为 <filename>.erb</filename>（例如，<filename>autoyast.xml.erb</filename>）。之后，它将无法合并规则/类和 ERB 模板。
+ </para>
+ <sect1 xml:id="erb">
+  <title>什么是 ERB？</title>
+
+  <para>
+   ERB 即<emphasis>嵌入式 Ruby</emphasis> (Embedded Ruby)。ERB 使用 Ruby 编程语言的功能来生成不同种类的内容。利用 ERB，您可以在配置文件中包含一些 Ruby 代码，以在运行时根据安装系统调整配置文件。
+  </para>
+
+  <para>
+   使用 ERB 时，Ruby 代码包含在 <literal>&lt;%</literal> 和 <literal>%&gt;</literal> 符号之间。使用等号 <literal>=</literal> 可在最终的配置文件中包含命令输出。
+  </para>
+
+  <example xml:id="simple-erb">
+   <title>使用 ERB 包含文件</title>
+<screen>&lt;bootloader&gt;
+  &lt;% require "open-uri" %&gt;
+  &lt;%= URI.open("http://192.168.1.1/profiles/bootloader-common.xml").read %&gt;
+&lt;/bootloader&gt; &lt;!-- this line gets replaced with the content of bootloader-common.xml --&gt;
+</screen>
+  </example>
+
+ <para>
+   可以利用 Ruby 便利性来运行任意命令。如果想获得命令的输出，请将其包含在两个反引号之中。如果想知道命令成功与否，请使用 <literal>system</literal> 函数运行该命令。
+  </para>
+  <example os="sles;osuse">
+   <title>使用 Ruby 运行命令</title>
+<screen>
+&lt;% files = `ls` %&gt; &lt;!-- files contains the output of the command (for instance "file1\nfile2\nfile3") --&gt;
+&lt;% success = system("dmidecode | grep some-model") %&gt; &lt;!-- success contains true or false --&gt;
+</screen>
+  </example>
+
+  <para>
+   此外，您还可使用更高级的 Ruby 代码结构（例如条件和循环）。
+  </para>
+  <example os="sles;osuse">
+   <title>使用 Ruby 结构</title>
+<screen>
+&lt;% ip_forward = File.read("/proc/sys/net/ipv4/ip_forward").strip %&gt;
+&lt;% if ip_forward == "1" %&gt;
+  &lt;!-- something --&gt;
+&lt;% end %&gt;
+
+&lt;% files = `ls /tmp/config/*.xml` %&gt;
+&lt;% files.split.each do |file| %&gt;
+  &lt;%= file.read %&gt;
+&lt;% end %&gt;
+</screen>
+   </example>
+
+  <para>
+   AutoYaST 提供了一小组<emphasis>帮助程序函数</emphasis>，以从底层系统中检索信息（例如 <literal>disks</literal> 或 <literal>network_cards</literal>）。您可以在<xref linkend="erb-helpers"/>中查看帮助程序及值列表。
+  </para>
+ </sect1>
+
+ <sect1 xml:id="erb-helpers">
+  <title>模板帮助程序</title>
+
+  <para>
+   模板帮助程序是 Ruby 方法的集合，可用于配置文件中以检索安装系统的相关信息。
+  </para>
+
+  <sect2 xml:id="erb-boot-efi-helper">
+   <title><literal>boot_efi?</literal></title>
+   <para>
+    <literal>boot_efi? </literal> 是布尔帮助程序，将返回系统是否使用 EFI 引导的信息。在下面的示例中，配置文件会根据当前引导模式配置引导加载器。
+   </para>
+
+  <example os="sles;osuse">
+   <title>配置引导加载器</title>
+<screen>
+&lt;% if env.boot_efi? %&gt;
+  &lt;loader_type&gt;grub2-efi&lt;/loader_type&gt;
+&lt;% else %&gt;
+  &lt;loader_type&gt;grub2&lt;/loader_type&gt;
+&lt;% end %&gt;
+</screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="erb-disks-helper">
+   <title><literal>disks</literal></title>
+   <para>
+    <literal>disks</literal> 帮助程序可返回检测到的磁盘列表。列表的每个元素包含一些基本信息，例如设备名称或大小。
+   </para>
+   <informaltable>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         键
+        </para>
+       </entry>
+       <entry>
+        <para>
+         类型
+        </para>
+       </entry>
+       <entry>
+        <para>
+         值
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>:device</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         设备内核名称（例如 <literal>sda</literal>）。
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:model</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         磁盘型号
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:serial</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         序列号
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:size</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         整数
+        </para>
+       </entry>
+       <entry>
+        <para>
+         磁盘大小（以字节为单位）
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:udev_names</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串数组
+        </para>
+       </entry>
+       <entry>
+        <para>
+         磁盘 udev 名称列表。您可以使用其中的任何名称来表示设备。
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:vendor</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         磁盘供应商名称
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+   <para>
+    以下示例中的配置文件会在最大的磁盘上安装系统。它会按大小对现有磁盘列表排序，然后使用最后一个磁盘。之后，它会使用 <literal>:device</literal> 键作为 <literal>device</literal> 元素的值。
+   </para>
+   <example>
+    <title>使用最大的磁盘</title>
+<screen>&lt;partitioning t="list"&gt;
+  &lt;drive&gt;
+    &lt;% disk = disks.sort_by { |d| d[:size] }.last %&gt; &lt;!-- find the largest disk --&gt;
+    &lt;device&gt;&lt;%= disk[:device] %&gt;&lt;/device&gt; &lt;!-- print the disk device name --&gt;
+    &lt;initialize t="boolean"&gt;true&lt;/initialize&gt;
+    &lt;use&gt;all&lt;/use&gt;
+  &lt;/drive&gt;
+&lt;/partitioning&gt;
+     </screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="erb-network-cards-helper">
+   <title><literal>network_cards</literal></title>
+   <para>
+    <literal>network_cards</literal> 帮助程序可返回网卡列表，包括网卡名称，状态信息（例如，它们是否已连接）。
+   </para>
+   <informaltable>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         键
+        </para>
+       </entry>
+       <entry>
+        <para>
+         类型
+        </para>
+       </entry>
+       <entry>
+        <para>
+         值
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>:device</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         设备名称（例如 <literal>eth0</literal> 或 <literal>enp3s0</literal>）
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:mac</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         MAC 地址
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:active</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         布尔
+        </para>
+       </entry>
+       <entry>
+        <para>
+         设备是否处于活动状态
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:link</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         布尔
+        </para>
+       </entry>
+       <entry>
+        <para>
+         设备是否已连接
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:vendor</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         磁盘供应商名称
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+   <para>
+    下面的示例会找到最先连接网络的网卡，并将其配置为使用 DHCP。
+   </para>
+   <example>
+    <title>配置连接的网卡</title>
+<screen>&lt;interfaces t="list"&gt;
+  &lt;% with_link = netword_cards.sort_by { |n| n[:name] }.find { |n| n[:link] } %&gt;
+  &lt;% if with_link %&gt;
+    &lt;interface&gt;
+      &lt;device&gt;&lt;%= with_link[:device] %&gt;&lt;/device&gt;
+      &lt;startmode&gt;auto&lt;/startmode&gt;
+      &lt;bootproto&gt;dhcp&lt;/bootproto&gt;
+      &lt;/interface&gt;
+  &lt;% end &gt;
+&lt;/interfaces&gt;
+    </screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="erb-os-release-helper">
+   <title><literal>os_release</literal></title>
+   <para>
+    <literal>os_release</literal> 帮助程序可返回操作系统信息，这些信息包含在 <filename>/etc/os-release</filename> 文件中。
+   </para>
+   <informaltable>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         键
+        </para>
+       </entry>
+       <entry>
+        <para>
+         类型
+        </para>
+       </entry>
+       <entry>
+        <para>
+         值
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>:id</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         发行套件 ID（<phrase os="sles;osuse">例如 <literal>sles</literal>、<literal>opensuse-tumbleweed</literal></phrase>）
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:name</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         发行套件名称（<phrase os="sles;osuse">例如 <literal>SLES</literal> 或 <literal>openSUSE Tumbleweed</literal></phrase>）
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:version</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         字符串
+        </para>
+       </entry>
+       <entry>
+        <para>
+         发行套件版本（<phrase os="sles;osuse">例如 <literal>15.2</literal></phrase>）
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+   <para os="sles;osuse">
+    您可以使用这些信息决定要安装的产品，对所有发行套件（SLE 或 openSUSE 发行套件）使用几乎相同的配置文件。
+   </para>
+   <example os="sles;osuse">
+    <title>对不同的发行套件重复使用相同的配置文件</title>
+<screen>&lt;products t="list"&gt;
+  &lt;% if os_release[:id] == 'sle' %&gt;
+  &lt;product&gt;SLES&lt;/product&gt;
+  &lt;% else %&gt;
+  &lt;product&gt;openSUSE&lt;/product&gt;
+  &lt;% end %&gt;
+&lt;/products&gt;</screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="erb-hardware-helper">
+   <title><literal>hardware</literal></title>
+   <para>
+    <literal>hardware</literal> 帮助程序提供其他硬件信息。它会返回 <literal>hwinfo</literal> 命令返回的所有信息。当通过所述帮助程序获取的信息不足时，您可以使用此帮助程序作为后备手段。下一个示例中使用 <literal>hardware</literal> 帮助程序来过滤 USB 设备。请查看 <xref linkend="erb-running-helpers"/> 了解如何检查 <literal>hardware</literal> 帮助程序提供的所有信息。
+   </para>
+
+  <example os="sles;osuse">
+   <title>过滤 USB 设备</title>
+<screen>
+&lt;% usb_disks = hardware["disk"].select { |d| d["driver"] != "usb-storage" } %&gt;
+</screen>
+   </example>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="erb-running-helpers">
+  <title>运行 ERB 帮助程序</title>
+
+  <para>
+   您可以使用 Ruby 控制台运行 AutoYaST ERB 帮助程序，并了解它们可提供哪些功能。所有 ERB 帮助程序都可通过 <literal>Y2Autoinstallation::Y2ERB::TemplateEnvironment</literal> 类实例来访问。以 root 身份运行 <literal>irb -ryast -rautoinstall/y2erb</literal> 可启动 Ruby 交互式解释器。
+  </para>
+
+  <example os="sles;osuse">
+   <title>运行帮助程序</title>
+<screen>
+irb &gt; env = Y2Autoinstallation::Y2ERB::TemplateEnvironment.new  # the env variable gives access to the helpers
+
+irb &gt; env.disks
+=&gt;
+[{:vendor=&gt;"WDC", :device=&gt;"sda", ...},
+ {:vendor=&gt;"TOSHIBA", :device=&gt;"sdb", ...},
+...]
+
+irb &gt; env.hardware.keys
+=&gt;
+["architecture",
+ "bios",
+ "bios_video",
+ ...]
+
+irb &gt; env.hardware["architecture"]
+=&gt;
+"x86_64"
+</screen>
+   </example>
+ </sect1>
+
+ <sect1 xml:id="erb-rendering-profile">
+  <title>呈现 ERB 配置文件</title>
+
+  <para>
+   AutoYaST 命令行提供了 <literal>check-profile</literal> 命令，可用于基于 ERB 文件生成配置文件。此命令会要求 AutoYaST 分析、运行 ERB 代码，并生成最终的配置文件。您可以检查呈现的配置文件，确定所有功能均按预期工作。请查看命令帮助了解该命令支持的所有选项：<literal>autoyast check-profile --help</literal>。在下面的示例中，<literal>check-profile</literal> 要求 AutoYaST 下载并分析配置文件，解释 ERB 并运行前脚本。结果将转储到 <literal>result.xml</literal> 文件中。
+  </para>
+
+  <example os="sles;osuse">
+   <title>呈现配置文件</title>
+<screen>
+ <prompt>&gt; </prompt><command>sudo</command> yast2 autoyast check-profile filename=<replaceable>http://192.168.1.100</replaceable>/autoinst.erb output=result.xml run-scripts=true run-erb=true
+</screen>
+  </example>
+  <warning>
+   <title><literal>check-profile</literal> 权限</title>
+   <para>
+    大多数情况下，<literal>check-profile</literal> 都需要 root 权限，因此在以 root 身份运行安装前脚本和 ERB 配置文件时请务必保持谨慎。请仅使用您信任的配置文件。
+   </para>
+  </warning>
+ </sect1>
+
+ <sect1 xml:id="erb-debugging-erb">
+  <title>调试 ERB 配置文件</title>
+
+  <para>
+   在有些情况下，您需要停止 ERB 评估并检查发生了什么情况，为此 YaST 提供了与 <literal>byebug</literal> 调试器的集成。安装 <literal>rubygem(byebug)</literal> 软件包并将 <literal>Y2DEBUGGER</literal> 环境变量设为 1。
+  </para>
+
+  <example os="sles;osuse">
+   <title>准备调试环境</title>
+<screen>
+<prompt>&gt; </prompt><command>sudo</command> zypper --non-interactive in "rubygem(byebug)"
+<prompt>&gt; </prompt><command>sudo</command> Y2DEBUGGER=1 yast2 autoyast check-profile ...
+</screen>
+  </example>
+
+  <para>
+   在想要停止的位置添加断点就像添加 &lt;% byebug %&gt; 一样容易。有关 <literal>byebug</literal> 的详细信息，请参见 <link xlink:href="https://github.com/deivid-rodriguez/byebug"/>。
+  </para>
+
+  <example os="sles;osuse">
+   <title>添加断点</title>
+<screen>
+&lt;% byebug %&gt;
+&lt;% if system("dmidecode | grep some-model") %&gt;
+  &lt;!-- do something --&gt;
+%&lt;% end %&gt;
+</screen>
+  </example>
+ </sect1>
+
+ <sect1 xml:id="erb-comparison">
+  <title>ERB 与规则和类的对比</title>
+
+  <para>
+   尽管 ERB 和规则/类都能实现动态生成配置文件的功能，但一般而言，ERB 配置文件更容易阅读和理解。一个重要的不同之处是规则和类可以合并配置文件，而 ERB 则不能。请参见<xref linkend="rulesandclass"/>了解有关合并配置文件的更多信息。另一方面，ERB 具有高级别语言 Ruby 的所有优势。我们来看一个使用了两种方式的示例。在下面的示例中，我们想将 <literal>/home</literal> 目录放在 <literal>/dev/sdb</literal> 中（如果该目录存在）。
+  </para>
+
+  <example os="sles;osuse">
+   <title>规则和类</title>
+<screen>
+&lt;rule&gt;
+  &lt;custom1&gt;
+    &lt;script&gt;
+if blkid | grep /dev/sdb &gt; /dev/null; then
+echo -n "yes"
+else
+echo -n "no"
+fi;
+    &lt;/script&gt;
+    &lt;match&gt;yes&lt;/match&gt;
+    &lt;match_type&gt;exact&lt;/match_type&gt;
+  &lt;/custom1&gt;
+  &lt;result&gt;
+    &lt;profile&gt;classes/sdb_home.xml&lt;/profile&gt;
+    &lt;dont_merge config:type="list"&gt;
+      &lt;element&gt;partition&lt;/element&gt;
+    &lt;/dont_merge&gt;
+  &lt;/result&gt;
+&lt;/rule&gt;
+</screen>
+  </example>
+
+  <example os="sles;osuse">
+   <title>ERB</title>
+<screen>
+&lt;% home_in_sdb = disks.map { |d| d[:device] }.include?("sdb") %&gt;
+
+&lt;partitioning config:type="list"&gt;
+  &lt;drive&gt;
+    ...
+  &lt;/drive&gt;
+  &lt;% if home_in_sdb %&gt;
+  &lt;drive&gt;
+    &lt;device&gt;/dev/sdb&lt;/device&gt;
+    &lt;disklabel&gt;none&lt;/disklabel&gt;
+    &lt;partitions t="list"&gt;
+      &lt;partition&gt;
+        &lt;format t="boolean"&gt;true&lt;/format&gt;
+        &lt;filesystem t="symbol"&gt;xfs&lt;/filesystem&gt;
+        &lt;mount&gt;/home&lt;/mount&gt;
+      &lt;/partition&gt;
+    &lt;/partitions&gt;
+  &lt;/drive&gt;
+  &lt;% end %&gt;
+&lt;/partitioning&gt;
+</screen>
+  </example>
+ </sect1>
+</chapter>

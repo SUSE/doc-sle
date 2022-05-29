@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="ay_kernel_dumps.xml" version="5.0" xml:id="CreateProfile-kdump">
+ <title>内核转储</title>
+
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ 
+
+ <note os="sles;sled;slemicro">
+  <title>可用性</title>
+  <para>
+   此功能在 AArch64 上或 RAM 小于 1 GB 的系统上不可用。
+  </para>
+ </note>
+
+ 
+
+ <para>
+  利用 Kdump，如果整个内核崩溃，系统可以创建崩溃转储文件。崩溃转储文件包含系统崩溃时的内存内容。日后，支持人员或（内核）开发人员可以分析此类核心文件，以找出系统崩溃的原因。Kdump 最适合用于您无法在其中轻松再现这种崩溃情况，但必须解决相应问题的服务器。
+ </para>
+
+ <para>
+  但是，Kdump 也有一个弊端。启用 Kdump 时需要为 Kdump 额外预留 64 MB 到 128 MB 的系统 RAM，以备在发生系统崩溃以及需要生成转储时使用。
+ </para>
+
+ <para>
+  本节仅介绍如何使用 AutoYaST 设置 Kdump，而涉及 Kdump 的工作原理。有关细节，请参见 kdump(7) 手册页。
+ </para>
+
+ <para>
+  以下示例演示了 Kdump 一般配置。
+ </para>
+
+ <example>
+  <title>Kdump 配置</title>
+<screen>&lt;kdump&gt;
+  &lt;!-- memory reservation --&gt;
+  &lt;add_crash_kernel config:type="boolean"&gt;true&lt;/add_crash_kernel&gt;
+  &lt;crash_kernel&gt;256M-:64M&lt;/crash_kernel&gt;
+  &lt;general&gt;
+
+    &lt;!-- dump target settings --&gt;
+    &lt;KDUMP_SAVEDIR&gt;ftp://stravinsky.suse.de/incoming/dumps&lt;/KDUMP_SAVEDIR&gt;
+    &lt;KDUMP_COPY_KERNEL&gt;true&lt;/KDUMP_COPY_KERNEL&gt;
+    &lt;KDUMP_FREE_DISK_SIZE&gt;64&lt;/KDUMP_FREE_DISK_SIZE&gt;
+    &lt;KDUMP_KEEP_OLD_DUMPS&gt;5&lt;/KDUMP_KEEP_OLD_DUMPS&gt;
+
+    &lt;!-- filtering and compression --&gt;
+    &lt;KDUMP_DUMPFORMAT&gt;compressed&lt;/KDUMP_DUMPFORMAT&gt;
+    &lt;KDUMP_DUMPLEVEL&gt;1&lt;/KDUMP_DUMPLEVEL&gt;
+
+    &lt;!-- notification --&gt;
+    &lt;KDUMP_NOTIFICATION_TO&gt;tux@example.com&lt;/KDUMP_NOTIFICATION_TO&gt;
+    &lt;KDUMP_NOTIFICATION_CC&gt;spam@example.com devnull@example.com&lt;/KDUMP_NOTIFICATION_CC&gt;
+    &lt;KDUMP_SMTP_SERVER&gt;mail.example.com&lt;/KDUMP_SMTP_SERVER&gt;
+    &lt;KDUMP_SMTP_USER&gt;&lt;/KDUMP_SMTP_USER&gt;
+    &lt;KDUMP_SMTP_PASSWORD&gt;&lt;/KDUMP_SMTP_PASSWORD&gt;
+
+    &lt;!-- kdump kernel --&gt;
+    &lt;KDUMP_KERNELVER&gt;&lt;/KDUMP_KERNELVER&gt;
+    &lt;KDUMP_COMMANDLINE&gt;&lt;/KDUMP_COMMANDLINE&gt;
+    &lt;KDUMP_COMMANDLINE_APPEND&gt;&lt;/KDUMP_COMMANDLINE_APPEND&gt;
+
+    &lt;!-- expert settings --&gt;
+    &lt;KDUMP_IMMEDIATE_REBOOT&gt;yes&lt;/KDUMP_IMMEDIATE_REBOOT&gt;
+    &lt;KDUMP_VERBOSE&gt;15&lt;/KDUMP_VERBOSE&gt;
+    &lt;KEXEC_OPTIONS&gt;&lt;/KEXEC_OPTIONS&gt;
+  &lt;/general&gt;
+&lt;/kdump&gt; </screen>
+ </example>
+
+ <para>
+  Kdump 默认处于启用状态。下面的配置展示了如何禁用该功能。
+ </para>
+
+ <example>
+  <title>禁用的 Kdump 配置</title>
+<screen>&lt;kdump&gt;
+  &lt;add_crash_kernel config:type="boolean"&gt;false&lt;/add_crash_kernel&gt;
+&lt;/kdump&gt; </screen>
+ </example>
+
+ 
+
+ <sect2 xml:id="CreateProfile-kdump-reservation">
+  <title>内存预留</title>
+  <para>
+   第一步是在引导时为 Kdump 预留内存。由于必须在引导过程的早期预留内存，因此，配置是通过名为 <literal>crashkernel</literal> 的内核命令行参数完成的。预留的内存将用于装载第二个内核，如此当第一个内核崩溃时，不需要重引导便可执行第二个内核。这第二个内核具有特殊的 initrd，其中包含通过网络保存转储或将转储保存到磁盘、发送通知电子邮件以及最终重引导所需的全部程序。
+  </para>
+  <para>
+   要为 Kdump 预留内存，请指定 <literal>amount</literal>（例如 <literal>64M</literal> 表示预留 RAM 中的 64 MB 内存）和 <literal>offset</literal>。语法为 <literal>crashkernel=AMOUNT@OFFSET</literal>。内核可以自动检测正确的偏移量（Xen 超级管理程序除外，在其中需要指定 <literal>16M</literal> 作为偏移量）。需要预留的内存量取决于体系结构和主内存。<phrase os="sles">有关为 Kdump 预留的内存量的建议，请参见<xref linkend="cha-tuning-kdump-basic-manual"/>。</phrase>
+  </para>
+  <para>
+   您还可以使用扩展的命令行语法来根据系统 RAM 指定预留的内存量。如果您为多个安装共享一个 AutoYaST 控制文件，或者您经常在一台计算机上去除或安装内存，则这种做法很有用。语法是：
+  </para>
+<screen>BEGIN_RANGE_1-END_RANGE_1:AMOUNT_1,BEGIN_RANGE_2-END_RANGE_2:AMOUNT_2@OFFSET</screen>
+  <para>
+   <literal>BEGIN_RANGE_1</literal> 是第一个内存范围的起始（例如：<literal>0M</literal>），<literal>END_RANGE_1</literal> 是第一个内存范围的结束（应假定为 <literal>infinity</literal> 时可为空），依此类推。例如，<literal>256M-2G:64M,2G-:128M</literal> 会在系统的 RAM 介于 256 MB 到 2 GB 之间时预留 64 MB 崩溃内核内存，并在系统的 RAM 为 2 GB 以上时预留 128 MB 崩溃内核内存。
+  </para>
+  <para>
+   另一方面，可为 <literal>crashkernel</literal> 参数指定多个值。例如，如果您需要预留不同的低内存段和高内存段，可使用诸如 <literal>72M,low</literal> 和 <literal>256M,high</literal> 的值：
+  </para>
+  <example>
+   <title>使用多个值预留 Kdump 内存</title>
+<screen>
+&lt;kdump&gt;
+  &lt;!-- memory reservation (high and low) --&gt;
+  &lt;add_crash_kernel config:type="boolean"&gt;true&lt;/add_crash_kernel&gt;
+  &lt;crash_kernel config:type="list"&gt;
+    &lt;listentry&gt;72M,low&lt;/listentry&gt;
+    &lt;listentry&gt;256M,high&lt;/listentry&gt;
+  &lt;/crash_kernel&gt;
+&lt;/kdump&gt; </screen>
+  </example>
+  <para>
+   下面的列表显示了预留内存所需的设置：
+  </para>
+  <variablelist>
+   <title>Kdump 内存预留设置：XML 表示</title>
+   <varlistentry>
+    <term><literal>add_crash_kernel</literal></term>
+    <listitem>
+     <para>
+      如果应预留内存并已启用 Kdump，请设置为 <literal>true</literal>。
+     </para>
+<screen>&lt;add_crash_kernel config:type="boolean"&gt;true&lt;/add_crash_kernel&gt;</screen>
+     <para>
+      必要
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>crash_kernel</literal></term>
+    <listitem>
+     <para>
+      使用上述 crashkernel 命令行语法。
+     </para>
+<screen>&lt;crash_kernel&gt;256M:64M&lt;/crash_kernel&gt;</screen>
+     <para>
+      还支持值列表。
+     </para>
+<screen>&lt;crash_kernel config:type="list"&gt;
+  &lt;listentry&gt;72M,low&lt;/listentry&gt;
+  &lt;listentry&gt;256M,high&lt;/listentry&gt;
+&lt;/crash_kernel&gt;</screen>
+     <para>
+      必要
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+
+ <sect2 xml:id="CreateProfile-kdump-saving">
+  <title>转储保存</title>
+  <para>
+   本节介绍崩溃转储的储存位置及储存方式。
+  </para>
+  <sect3 xml:id="CreateProfile-kdump-saving-target">
+   <title>目标</title>
+   <para>
+    元素 <literal>KDUMP_SAVEDIR</literal> 指定要将转储保存到的 URL。可能的方法如下：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      使用 <literal>file</literal> 可保存到本地磁盘；
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用 <literal>ftp</literal> 可保存到 FTP 服务器（不加密）；
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用 <literal>sftp</literal> 可保存到 SSH2 SFTP 服务器；
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用 <literal>nfs</literal> 可保存到 NFS 位置；
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用 <literal>cifs</literal> 可将转储保存到 Samba 或 Microsoft Windows 中的 CIFS/SMP 导出。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    有关细节，请参见 kdump(5) 手册页。两个示例：<literal>file:///var/crash</literal>（符合 FHS 的默认位置）和 <literal>ftp://user:password@host:port/incoming/dumps</literal>。将创建一个名称中包含时戳的子目录，并将转储保存到该子目录。
+   </para>
+   <para>
+    将转储保存到本地磁盘时，可以使用 <literal>KDUMP_KEEP_OLD_DUMPS</literal> 自动删除旧转储。请将此参数设置为应保留的旧转储数。如果目标分区最终的可用磁盘空间少于 <literal>KDUMP_FREE_DISK_SIZE</literal> 中指定的值，则不会保存转储。
+   </para>
+   <para>
+    要将整个内核和调试信息（如果已安装）保存到同一个目录，请将 <literal>KDUMP_COPY_KERNEL</literal> 设置为 <literal>true</literal>。您将在一个目录中获得分析转储所需的全部信息（内核模块及其调试信息除外）。
+   </para>
+  </sect3>
+  <sect3 xml:id="CreateProfile-kdump-saving-compression">
+   <title>过滤和压缩</title>
+   <para>
+    内核转储未压缩且未过滤。其大小可能与您的系统 RAM 相当。要缩小文件，请在事后压缩转储文件。在打开转储之前需将其解压缩。
+   </para>
+   <para>
+    要使用页压缩（压缩每个页并允许使用 crash(8) 调试工具进行动态解压缩），请将 <literal>KDUMP_DUMPFORMAT</literal> 设置为 <literal>compressed</literal>（默认值）。
+   </para>
+   <para>
+    您可能不想要保存所有内存页，例如，那些以零填充的页。要过滤转储，请设置 <literal>KDUMP_DUMPLEVEL</literal>。0 会生成完整转储，31 为最小转储。手册页 kdump(5) 和 makedumpfile(8) 列出了每个值会保存哪些页。
+   </para>
+  </sect3>
+  <sect3 xml:id="CreateProfile-kdump-saving-summary">
+   <title>摘要</title>
+   <variablelist>
+    <title>转储目标设置：XML 表示</title>
+    <varlistentry>
+     <term><literal>KDUMP_SAVEDIR</literal></term>
+     <listitem>
+      <para>
+       一个 URL，指定要将转储和相关文件保存到的目标。
+      </para>
+<screen>&lt;KDUMP_SAVEDIR&gt;file:///var/crash/&lt;/KDUMP_SAVEDIR&gt;</screen>
+      <para>
+       必要
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KDUMP_COPY_KERNEL</literal></term>
+     <listitem>
+      <para>
+       如果不仅要将转储保存到 <literal>KDUMP_SAVEDIR</literal>，还要将内核及其调试信息（如果已安装）保存到该目标，请设置为 <literal>true</literal>。
+      </para>
+<screen>&lt;KDUMP_COPY_KERNEL&gt;false&lt;/KDUMP_COPY_KERNEL&gt;</screen>
+      <para>
+       可选
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KDUMP_FREE_DISK_SIZE</literal></term>
+     <listitem>
+      <para>
+       保存转储后必须保留的可用磁盘空间，以 MB 为单位。如果可用空间不足，将不保存转储。
+      </para>
+<screen>&lt;KDUMP_FREE_DISK_SIZE&gt;64&lt;/KDUMP_FREE_DISK_SIZE&gt;</screen>
+      <para>
+       可选
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><literal>KDUMP_KEEP_OLD_DUMPS</literal></term>
+     <listitem>
+      <para>
+       当 <literal>KDUMP_SAVEDIR</literal> 指向本地目录时要保留（不删除）的转储数。如果您不希望自动删除任何转储，请指定 0；如果要删除除当前转储外的其他所有转储，请指定 -1。
+      </para>
+<screen>&lt;KDUMP_KEEP_OLD_DUMPS&gt;4&lt;/KDUMP_KEEP_OLD_DUMPS&gt;</screen>
+      <para>
+       可选
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect3>
+ </sect2>
+
+ <sect2 xml:id="CreateProfile-kdump-notification">
+  <title>电子邮件通知</title>
+  <para>
+   配置发生计算机崩溃以及保存转储时要发出的电子邮件通知。
+  </para>
+  <para>
+   由于 Kdump 在 initrd 中运行，本地邮件服务器无法发送通知电子邮件。需要指定一台 SMTP 服务器（参见下文）。
+  </para>
+  <para>
+   您需要在 <literal>KDUMP_NOTIFICATION_TO</literal> 中提供一个确切地址。可以在 <literal>KDUMP_NOTIFICATION_CC</literal> 中指定更多地址。在这两种情况下只能使用电子邮件地址，而不能使用实名。
+  </para>
+  <para>
+   指定 <literal>KDUMP_SMTP_SERVER</literal> 以及（如果服务器需要身份验证）<literal>KDUMP_SMTP_USER</literal> 和 <literal>KDUMP_SMTP_PASSWORD</literal>。我们不提供对 TLS/SSL 的支持，但将来可能会添加此项支持。
+  </para>
+  <variablelist>
+   <title>电子邮件通知设置：XML 表示</title>
+   <varlistentry>
+    <term><literal>KDUMP_NOTIFICATION_TO</literal></term>
+    <listitem>
+     <para>
+      应将电子邮件发送到的一个确切电子邮件地址。可以在 <literal>KDUMP_NOTIFICATION_CC</literal> 中指定其他收件人。
+     </para>
+<screen>&lt;KDUMP_NOTIFICATION_TO
+&gt;tux@example.com&lt;/KDUMP_NOTIFICATION_TO&gt;</screen>
+     <para>
+      可选（如果为空，则禁用通知）
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_NOTIFICATION_CC</literal></term>
+    <listitem>
+     <para>
+      在通知电子邮件的抄送行中指定的零个、一个或多个收件人。
+     </para>
+<screen>&lt;KDUMP_NOTIFICATION_CC
+&gt;wilber@example.com geeko@example.com&lt;/KDUMP_NOTIFICATION_CC&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_SMTP_SERVER</literal></term>
+    <listitem>
+     <para>
+      用于递送邮件的 SMTP 服务器的主机名。支持 SMTP 身份验证（请参见 <literal>KDUMP_SMTP_USER</literal> 和 <literal>KDUMP_SMTP_PASSWORD</literal>），但不支持 TLS/SSL。
+     </para>
+<screen>&lt;KDUMP_SMTP_SERVER&gt;email.suse.de&lt;/KDUMP_SMTP_SERVER&gt;</screen>
+     <para>
+      可选（如果为空，则禁用通知）
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_SMTP_USER</literal></term>
+    <listitem>
+     <para>
+      与 <literal>KDUMP_SMTP_PASSWORD</literal> 一起使用的、用于 SMTP 身份验证的用户名。
+     </para>
+<screen>&lt;KDUMP_SMTP_USER&gt;bwalle&lt;/KDUMP_SMTP_USER&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_SMTP_PASSWORD</literal></term>
+    <listitem>
+     <para>
+      与 <literal>KDUMP_SMTP_USER</literal> 一起使用的、用于 SMTP 身份验证的口令。
+     </para>
+<screen>&lt;KDUMP_SMTP_PASSWORD&gt;geheim&lt;/KDUMP_SMTP_PASSWORD&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+
+ <sect2 xml:id="CreateProfile-kdump-kernel">
+  <title>Kdump 内核设置</title>
+  <para>
+   如前所述，会引导一个特殊内核来保存转储。如果您不想使用自动检测机制来找出使用的内核（请参见 kdump(5) 手册页，其中介绍了用于查找内核的算法），可以在 <literal>KDUMP_KERNELVER</literal> 中指定自定义内核的版本。如果您将它设置为 <literal>foo</literal>，则会使用 <filename>/boot/vmlinuz-foo</filename> 或 <filename>/boot/vmlinux-foo</filename>（在包含 <filename>vmlinuz</filename> 文件的平台上会遵循此顺序）中的内核。
+  </para>
+  <para>
+   您可以指定用于引导 Kdump 内核的命令行。通常会使用引导命令行，减少与 Kdump 不相关的设置（例如 <literal>crashkernel</literal> 参数），添加 Kdump 所需的一些设置（请参见手册页 kdump(5)）。要指定其他参数，请使用 <literal>KDUMP_COMMANDLINE_APPEND</literal>。如果您完全清除自己所执行的操作并想要指定整个命令行，请设置 <literal>KDUMP_COMMANDLINE</literal>。
+  </para>
+  <variablelist>
+   <title>内核设置：XML 表示</title>
+   <varlistentry>
+    <term><literal>KDUMP_KERNELVER</literal></term>
+    <listitem>
+     <para>
+      用于 Kdump 的内核的版本字符串。将其留空会使用自动检测机制（强烈建议）。
+     </para>
+<screen>&lt;KDUMP_KERNELVER
+&gt;2.6.27-default&lt;/KDUMP_KERNELVER&gt;</screen>
+     <para>
+      可选（如果为空则使用自动检测）
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_COMMANDLINE_APPEND</literal></term>
+    <listitem>
+     <para>
+      Kdump 内核的其他命令行参数。
+     </para>
+<screen>&lt;KDUMP_COMMANDLINE_APPEND
+&gt;console=ttyS0,57600&lt;/KDUMP_COMMANDLINE_APPEND&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_Command Line</literal></term>
+    <listitem>
+     <para>
+      重写自动生成的 Kdump 命令行。须谨慎使用该功能。通常 <literal>KDUMP_COMMANDLINE_APPEND</literal> 应已足够。
+     </para>
+<screen>&lt;KDUMP_COMMANDLINE_APPEND
+&gt;root=/dev/sda5 maxcpus=1 irqpoll&lt;/KDUMP_COMMANDLINE&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+
+ <sect2 xml:id="CreateProfile-kdump-expert">
+  <title>专家设置</title>
+  <variablelist>
+   <title>专家设置：XML 表示</title>
+   <varlistentry>
+    <term><literal>KDUMP_IMMEDIATE_REBOOT</literal></term>
+    <listitem>
+     <para>
+      如果在保存转储后应自动重引导系统，则为 <literal>true</literal>，否则为 <literal>false</literal>。默认设置为自动重引导系统。
+     </para>
+<screen>&lt;KDUMP_IMMEDIATE_REBOOT
+&gt;true&lt;/KDUMP_IMMEDIATE_REBOOT&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KDUMP_VERBOSE</literal></term>
+    <listitem>
+     <para>
+      用于指定 Kdump 过程详细程度的位掩码。有关细节，请阅读 kdump(5)。
+     </para>
+<screen>&lt;KDUMP_VERBOSE&gt;3&lt;/KDUMP_VERBOSE&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>KEXEC_OPTIONS</literal></term>
+    <listitem>
+     <para>
+      装载 Kdump 内核时要传递给 kexec 的其他选项。通常为空。
+     </para>
+<screen>&lt;KEXEC_OPTIONS&gt;--noio&lt;/KEXEC_OPTIONS&gt;</screen>
+     <para>
+      可选
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect2>
+</sect1>
