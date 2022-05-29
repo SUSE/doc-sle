@@ -1,0 +1,355 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="uefi-httpboot-server.xml" version="5.0" xml:id="cha-deployment-prep-uefi-httpboot">
+ <title>Configurando um servidor de boot HTTP UEFI</title>
+ <info>
+  <abstract>
+   <para>
+    Este capítulo descreve como instalar e configurar um servidor de boot HTTP UEFI.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <sect1 xml:id="httpboot-intro">
+  <title>Introdução</title>
+
+  <para>
+   O Boot HTTP combina DHCP, DNS e HTTP para possibilitar a inicialização e a implantação de sistemas na rede. O Boot HTTP pode ser usado como um substituto de alto desempenho do PXE. O Boot HTTP permite inicializar um servidor de um URI por HTTP, transferindo rapidamente arquivos grandes, como o kernel do Linux e o sistema de arquivos raiz de servidores fora da rede local.
+  </para>
+
+  <sect2 xml:id="httpboot-client">
+   <title>Configurando a máquina cliente</title>
+   <para>
+    A habilitação do Boot HTTP em uma máquina cliente física depende do seu hardware específico. Consulte a documentação para obter mais informações sobre como habilitar o Boot HTTP em sua máquina específica.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="httpboot-preparation">
+   <title>Preparação</title>
+   <para>
+    A configuração descrita aqui usa sub-redes com IP 192.168.111.0/24 (IPv4) e 2001:db8:f00f:cafe::/64 (IPv6), e os endereços IP de servidor são 192.168.111.1 (IPv4) e 2001:db8:f00f:cafe::1/64 (IPv6), como exemplos. Ajuste esses valores para corresponder à sua configuração específica.
+   </para>
+   <para>
+    Instale os seguintes pacotes na máquina que planeja usar como servidor de Boot HTTP: <package>dhcp-server</package>, <package>apache2</package> (ou <package>lighttpd</package>) e <package>dnsmasq</package>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="httpboot-configure-server">
+  <title>Configurando o servidor</title>
+
+  <sect2 xml:id="httpboot-dns-server">
+   <title>Servidor DNS</title>
+   <para>
+    Embora a configuração do servidor DNS seja opcional, ela permite que você atribua um nome amigável ao servidor de Boot HTTP. Para configurar o servidor DNS, adicione o seguinte ao arquivo <filename>/etc/dnsmasq.conf</filename>:
+   </para>
+<screen>interface=eth0
+addn-hosts=/etc/dnsmasq.d/hosts.conf</screen>
+   <para>
+    Atribua um nome de domínio aos endereços IP no arquivo <filename>/etc/dnsmasq.d/hosts.conf</filename>:
+   </para>
+<screen>192.168.111.1 www.httpboot.local
+2001:db8:f00f:cafe::1 www.httpboot.local</screen>
+   <para>
+    Inicie o servidor DNS.
+   </para>
+<screen>systemctl start dnsmasq</screen>
+   <note>
+    <title>Usar o carregador de boot <phrase role="productname">shim</phrase></title>
+    <para>
+     Devido a uma mudança no UEFI 2.7, recomendamos o uso de um carregador de boot shim do SLE 15 ou versão mais recente para evitar possíveis erros causados pelo nó DNS adicional.
+    </para>
+   </note>
+   <sect3 xml:id="httpboot-dhcpv4-server">
+    <title>Configurando o servidor DHCPv4</title>
+    <para>
+     Antes de configurar os servidores DHCP, especifique a interface de rede para eles em <filename>/etc/sysconfig/dhcpd</filename>:
+    </para>
+<screen>DHCPD_INTERFACE="eth0"
+DHCPD6_INTERFACE="eth0"</screen>
+    <para>
+     Dessa forma, os servidores DHCP fornecem o serviço apenas na interface <literal>eth0</literal>.
+    </para>
+    <para>
+     Para configurar um servidor DHCPv4 para Boot PXE e Boot HTTP, adicione a seguinte configuração ao arquivo <filename>/etc/dhcpd.conf</filename>:
+    </para>
+<screen>option domain-name-servers 192.168.111.1;
+option routers 192.168.111.1;
+default-lease-time 14400;
+ddns-update-style none;
+  subnet 192.168.111.0 netmask 255.255.255.0 {
+    range dynamic-bootp 192.168.111.100 192.168.111.120;
+    default-lease-time 14400;
+    max-lease-time 172800;
+    class "pxeclients"{
+      match if substring (option vendor-class-identifier, 0, 9) = "PXEClient";
+      next-server 192.168.111.1;
+      filename "/bootx64.efi";
+    }
+    class "httpclients" {
+      match if substring (option vendor-class-identifier, 0, 10) = "HTTPClient";
+      option vendor-class-identifier "HTTPClient";
+      filename "http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi";
+    }
+}</screen>
+    <para>
+     Observe que o servidor DHCPv4 deve usar o parâmetro <literal>HTTPClient</literal> para o ID da classe do fornecedor, pois o cliente o utiliza para identificar uma oferta de Boot HTTP.
+    </para>
+    <para>
+     Inicie o daemon DHCP:
+    </para>
+    <para>
+     <literal>systemctl start dhcpd</literal>
+    </para>
+   </sect3>
+   <sect3 xml:id="httpboot-dhcpv6-server">
+    <title>Configurando o servidor DHCPv6</title>
+    <para>
+     Para configurar o servidor DHCPv6, adicione a seguinte configuração a <filename>/etc/dhcpd6.conf</filename>:
+    </para>
+<screen>option dhcp6.bootfile-url code 59 = string;
+option dhcp6.vendor-class code 16 = {integer 32, integer 16, string};
+subnet6 2001:db8:f00f:cafe::/64 {
+        range6 2001:db8:f00f:cafe::42:10 2001:db8:f00f:cafe::42:99;
+        option dhcp6.bootfile-url "http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi";
+        option dhcp6.name-servers 2001:db8:f00f:cafe::1;
+        option dhcp6.vendor-class 0 10 "HTTPClient";
+}</screen>
+    <para>
+     Essa configuração define o tipo de URL de boot, a classe do fornecedor e outras opções necessárias. Semelhante às configurações do DHCPv4, é necessário informar o URL de boot, que deve ter um endereço IPv6. Também é necessário especificar a opção de classe do fornecedor. No DHCPv6, ela consiste no número da empresa e nos dados da classe do fornecedor (tamanho e conteúdo). Como o driver de Boot HTTP ignora o número da empresa, você pode defini-lo como <literal>0</literal>. O conteúdo dos dados da classe do fornecedor precisa ser <literal>HTTPClient</literal>; do contrário, o cliente ignorará a oferta.
+    </para>
+    <para>
+     A implementação do Boot HTTP mais antiga, que não segue o <link xlink:href="https://datatracker.ietf.org/doc/html/rfc3315">RFC 3315</link>, requer uma configuração diferente:
+    </para>
+<screen>option dhcp6.bootfile-url code 59 = string;
+option dhcp6.vendor-class code 16 = string;
+        subnet6 2001:db8:f00f:cafe::/64 {
+        range6 2001:db8:f00f:cafe::42:10 2001:db8:f00f:cafe::42:99;
+        option dhcp6.bootfile-url "http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi;
+	option dhcp6.name-servers 2001:db8:f00f:cafe::1;
+	option dhcp6.vendor-class "HTTPClient";
+}</screen>
+    <para>
+     Inicie o daemon <literal>dhcpv6</literal>.
+    </para>
+<screen>systemctl start dhcpd6</screen>
+    <sect4 xml:id="httpboot-dhcpv6-pxe-server">
+     <title>Configurando o servidor DHCPv6 para boot PXE e HTTP</title>
+     <para>
+      Usando a seguinte configuração, é possível definir o servidor DHCPv6 para Boot PXE e Boot HTTP:
+     </para>
+<screen>option dhcp6.bootfile-url code 59 = string;
+option dhcp6.vendor-class code 16 = {integer 32, integer 16, string};
+
+subnet6 2001:db8:f00f:cafe::/64 {
+        range6 2001:db8:f00f:cafe::42:10 2001:db8:f00f:cafe::42:99;
+
+        class "PXEClient" {
+	        match substring (option dhcp6.vendor-class, 6, 9);
+	}
+
+        subclass "PXEClient" "PXEClient" {
+	        option dhcp6.bootfile-url "tftp://[2001:db8:f00f:cafe::1]/bootloader.efi";
+	}
+
+	class "HTTPClient"; {
+	        match substring (option dhcp6.vendor-class, 6, 10);
+	}
+
+	subclass "HTTPClient" "HTTPClient" {
+	        option dhcp6.bootfile-url "http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi";
+		option dhcp6.name-servers 2001:db8:f00f:cafe::1;
+		option dhcp6.vendor-class 0 10 "HTTPClient";
+	}
+}</screen>
+     <para>
+      Também é possível corresponder a classe do fornecedor a uma arquitetura específica, conforme mostrado a seguir:
+     </para>
+<screen>class "HTTPClient" {
+        match substring (option dhcp6.vendor-class, 6, 21);
+	}
+
+subclass "HTTPClient" "HTTPClient":Arch:00016 {
+        option dhcp6.bootfile-url "http://www.httpboot.local/sle/EFI/BOOT/bootx64.efi";
+	option dhcp6.name-servers 2001:db8:f00f:cafe::1;
+	option dhcp6.vendor-class 0 10 "HTTPClient";
+}</screen>
+     <para>
+      Nesse exemplo, <literal>HTTPClient:Arch:00016</literal> refere-se a um cliente de Boot HTTP AMD64/Intel 64. Essa configuração permite que o servidor atenda a diferentes arquiteturas simultaneamente.
+     </para>
+    </sect4>
+    <sect4 xml:id="httpboot-firewall">
+     <title>Configurando o firewall</title>
+     <para>
+      Se os pacotes DHCPv6 forem descartados pelo filtro RP no firewall, verifique o registro dele. Se ele incluir a entrada <literal>rpfilter_DROP</literal>, desabilite o filtro usando a seguinte configuração em <filename>/etc/firewalld/firewalld.conf</filename>:
+     </para>
+     <para>
+      <literal>IPv6_rpfilter=no</literal>
+     </para>
+    </sect4>
+   </sect3>
+   <sect3 xml:id="httpboot-tftp-server">
+    <title>Implantando um servidor TFTP (opcional)</title>
+    <para>
+     Para oferecer suporte a Boot PXE e Boot HTTP, implante um servidor TFTP. Instale o <package>tftp</package> e inicie o serviço:
+    </para>
+<screen> systemctl start tftp.socket
+systemctl start tftp.service</screen>
+    <para>
+     Também é necessário instalar um pacote <package>tftpboot-installation</package> específico para uso com Boot PXE. Execute o comando <command>zypper se tftpboot</command> para listar os pacotes <package>tftp-installation</package> disponíveis e, em seguida, instale o pacote para a versão e a arquitetura desejadas do sistema, por exemplo <package>tftpboot-installation-SLE-15-SP3-x86_64</package> Por exemplo, <package os="sles;sled">tftpboot-installation-SLE-<replaceable>VERSION</replaceable>-x86_64</package> (substitua <replaceable>VERSÃO</replaceable> pela versão real). Copie o conteúdo do diretório <filename os="sles;sled">SLE-<replaceable>VERSION</replaceable>-x86_64</filename> para o diretório raiz do servidor TFTP:
+    </para>
+
+
+    <para>
+     Para obter mais informações, consulte <filename os="sles;sled">/usr/share/tftpboot-installation/SLE-<replaceable>VERSÃO</replaceable>-x86_64/README</filename>
+    </para>
+   </sect3>
+   <sect3 xml:id="httpboot-http-server">
+    <title>Configurando o servidor HTTP</title>
+    <para>
+     Copie todo o conteúdo da imagem ISO do primeiro sistema para o diretório <filename os="sles;sled">/srv/www/htdocs/sle/</filename>. Edite o arquivo <filename os="sles;sled">/srv/www/htdocs/sle/grub.cfg</filename>. Use o exemplo a seguir como referência:
+    </para>
+<screen>timeout=60
+default=1
+
+menuentry 'Installation IPv4' --class opensuse --class gnu-linux --class gnu --class os {
+    set gfxpayload=keep
+    echo 'Loading kernel ...'
+    linuxefi /sle/boot/x86_64/loader/linux install=http://www.httpboot.local/sle
+    echo 'Loading initial ramdisk ...'
+    initrdefi /sle/boot/x86_64/loader/initrd
+}
+
+menuentry 'Installation IPv6' --class opensuse --class gnu-linux --class gnu --class os {
+    set gfxpayload=keep
+    echo 'Loading kernel ...'
+    linuxefi /sle/boot/x86_64/loader/linux install=install=http://www.httpboot.local/sle ipv6only=1 ifcfg=*=dhcp6,DHCLIENT6_MODE=managed
+    echo 'Loading initial ramdisk ...'
+    initrdefi /sle/boot/x86_64/loader/initrd
+}</screen>
+    <sect4 xml:id="httpboot-lighttpd">
+     <title>Configurando o lighttpd</title>
+     <para>
+      Para habilitar o suporte a IPv4 e IPv6 no lighttpd, modifique <filename>/etc/lighttpd/lighttpd.conf</filename> da seguinte maneira:
+     </para>
+<screen>##
+## Use IPv6?
+##
+#server.use-ipv6 = "enable"
+$SERVER["socket"] == "[::]:80" {  }</screen>
+     <para>
+      Inicie o daemon <literal>lighttpd</literal>:
+     </para>
+<screen>systemctl start lighttpd</screen>
+    </sect4>
+    <sect4 xml:id="httpboot-apache2">
+     <title>Configurando o apache2</title>
+     <para>
+      O Apache não requer configuração adicional. Inicie o daemon <literal>apache2</literal>:
+     </para>
+<screen>systemctl start apache2</screen>
+    </sect4>
+   </sect3>
+   <sect3 xml:id="httpboot-http-server-ssl-support">
+    <title>Habilitando o suporte SSL para o servidor HTTP (opcional)</title>
+    <para>
+     Para usar o Boot HTTPS, você precisa converter uma certificação do servidor existente no formato <literal>DER</literal> e registrá-la no firmware do cliente.
+    </para>
+    <para>
+     Supondo que você já tenha um certificado instalado no servidor, converta-o no formato <literal>DER</literal> para usá-lo com o cliente executando o seguinte comando:
+    </para>
+<screen>openssl x509 -in <replaceable>CERTIFICATE</replaceable>.crt -outform der -out <replaceable>CERTIFICATE</replaceable>.der</screen>
+    <sect4 xml:id="httpboot-enroll-certificate-physical-machine">
+     <title>Registrar a certificação do servidor no firmware do cliente</title>
+     <para>
+      O procedimento exato de registro do certificado convertido depende da implementação específica do firmware do cliente. Para determinados hardwares, você precisa registrar o certificado manualmente pela IU do firmware usando um dispositivo de armazenamento externo que tenha o certificado. As máquinas com suporte ao Redfish podem registrar o certificado remotamente. Consulte a documentação do seu hardware específico para obter mais informações sobre o registro de certificados.
+     </para>
+    </sect4>
+    <sect4 xml:id="httpboot-ssl-lighttpd">
+     <title>Habilitando o suporte a SSL no lighttpd</title>
+     <para>
+      Como o lighttpd precisa da chave privada e do certificado no mesmo arquivo, unifique-os usando o seguinte comando:
+     </para>
+<screen>cat <replaceable>CERTIFICATE</replaceable>.crt server.key &gt; <replaceable>CERTIFICATE</replaceable>.pem</screen>
+     <para>
+      Copie <filename><replaceable>CERTIFICATE</replaceable>.pem</filename> para o diretório <filename>/etc/ssl/private/</filename>.
+     </para>
+<screen>cp server-almighty.pem /etc/ssl/private/
+chown -R root:lighttpd /etc/ssl/private/server-almighty.pem
+chmod 640 /etc/ssl/private/server-almighty.pem</screen>
+     <para>
+      Verifique se <literal>mod_openssl</literal> está listado na seção <literal>server.modules</literal> do arquivo <filename>/etc/lighttpd/modules.conf</filename>, por exemplo:
+     </para>
+<screen>server.modules = (
+  "mod_access",
+  "mod_openssl",
+)</screen>
+     <para>
+      Adicione as seguintes linhas à seção <literal>SSL Support</literal> em <filename>/etc/lighttpd/lighttpd.conf</filename>:
+     </para>
+<screen># IPv4
+$SERVER["socket"] == ":443" {
+    ssl.engine                 = "enable"
+    ssl.pemfile                = "/etc/ssl/private/server-almighty.pem"
+}
+# IPv6
+$SERVER["socket"] == "[::]:443" {
+    ssl.engine                 = "enable"
+    ssl.pemfile                = "/etc/ssl/private/server-almighty.pem"
+}</screen>
+     <para>
+      Reinicie o lighttpd para ativar o suporte a SSL:
+     </para>
+<screen>systemctl restart lighttpd</screen>
+    </sect4>
+    <sect4 xml:id="http-ssl-apache">
+     <title>Habilitando o suporte a SSL no Apache</title>
+     <para>
+      Abra o arquivo <filename>/etc/sysconfig/apache2</filename> e adicione o flag SSL da seguinte maneira:
+     </para>
+<screen>APACHE_SERVER_FLAGS="SSL"</screen>
+     <para>
+      Verifique se o módulo <literal>ssl</literal> está listado em <literal>APACHE_MODULES</literal>, por exemplo:
+     </para>
+     <para>
+      Em seguida, copie a chave privada e o certificado para o diretório <filename>/etc/apache2/</filename>.
+     </para>
+<screen>cp server.key /etc/apache2/ssl.key/
+chown wwwrun /etc/apache2/ssl.key/server.key
+chmod 600 /etc/apache2/ssl.key/server.key
+cp server.crt /etc/apache2/ssl.crt/</screen>
+     <para>
+      Crie a configuração ssl vhost.
+     </para>
+<screen>cd /etc/apache2/vhosts.d
+cp vhost-ssl.template vhost-ssl.conf</screen>
+     <para>
+      Edite <filename>/etc/apache2/vhosts.d/vhost-ssl.conf</filename> para mudar a chave privada e o certificado:
+     </para>
+<screen>SSLCertificateFile /etc/apache2/ssl.crt/server.crt
+ SSLCertificateKeyFile /etc/apache2/ssl.key/server.key</screen>
+     <para>
+      Reinicie o apache para ativar o suporte a SSL:
+     </para>
+<screen>systemctl restart apache2</screen>
+    </sect4>
+    <sect4 xml:id="httpboot-modify-dhcp-configuration">
+     <title>Modificar a configuração do DHCP</title>
+     <para>
+      Substitua o prefixo <literal>http://</literal> por <literal>https://</literal> no <filename>dhcpd.conf/dhcpd6.conf</filename> e reinicie o servidor DHCP.
+     </para>
+<screen>systemctl restart dhcpd
+systemctl restart dhcpd6</screen>
+    </sect4>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="httpboot-client-boot">
+  <title>Inicializando o cliente por boot HTTP</title>
+
+  <para>
+   Se o firmware já suporta o boot HTTP, conecte o cabo e escolha a opção de boot correta.
+  </para>
+ </sect1>
+</chapter>

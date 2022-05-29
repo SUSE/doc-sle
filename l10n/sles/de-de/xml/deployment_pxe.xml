@@ -1,0 +1,636 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="deployment_pxe.xml" version="5.0" role="General" xml:id="cha-deployment-prep-pxe">
+ <title>Vorbereiten der Netzwerk-Boot-Umgebung</title>
+ <info>
+  <abstract>
+   <para>
+    In diesem Kapitel wird beschrieben, wie Sie einen DHCP- und einen TFTP-Server konfigurieren, die die erforderliche Infrastruktur für das Booten über PXE bilden.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <para>
+  <phrase role="productname"><phrase os="sles">SUSE® Linux Enterprise Server</phrase></phrase> kann über PXE (Preboot Execution Environment) installiert werden. Die Client-Hardware muss das Booten über PXE unterstützen. Das Netzwerk muss einen DHCP-Server und einen TFTP-Server umfassen, die den Clients die erforderlichen Daten bereitstellen. Dieses Kapitel führt Sie durch die Einrichtung der erforderlichen Server.
+ </para>
+ <para>
+  Mit PXE werden lediglich ein Kernel und initrd gebootet. Hiermit können Sie in eine Installationsumgebung oder in Live-Systeme booten. Weitere Informationen zum Einrichten der Installationsquellen finden Sie in <xref linkend="cha-deployment-instserver"/>.
+ </para>
+ <para>
+  In diesem Abschnitt werden die für komplexe Boot-Szenarien erforderlichen Konfigurationsschritte beschrieben. Er enthält zudem Konfigurationsbeispiele für DHCP, PXE-Boot, TFTP und Wake-on-LAN.
+ </para>
+ <para>
+  Bei den Beispielen wird davon ausgegangen, dass sich der DHCP-, TFTP- und NFS-Server auf demselben Rechner mit IP <literal>192.168.1.1</literal> befinden. Alle Dienste können sich problemlos auf verschiedenen Rechnern befinden. Ändern Sie die IP-Adressen in jedem Fall entsprechend.
+ </para>
+
+ <sect1 xml:id="sec-deployment-dhcp-server">
+  <title>Einrichten eines DHCP-Servers</title>
+  <para>
+   Ein DHCP-Server weist Ihren Netzwerk-Clients sowohl dynamische (<xref linkend="sec-deployment-dhcp-dynamic"/>) als auch statische (<xref linkend="sec-deployment-dhcp-static"/>) IP-Adressen zu. Er gibt Server, Routen und Domänen bekannt. Für TFTP-Server gibt DHCP auch den Kernel und die initrd-Dateien an. Welche Dateien geladen werden hängt von der Architektur des Zielrechners ab und davon, ob Legacy-BIOS oder UEFI-Boot verwendet wird. Die Clients übermitteln ihren Architekturtyp in den DHCP-Anforderungen. Auf der Grundlage dieser Information entscheidet der DHCP-Server, welche Dateien der Client zum Booten herunterladen muss.
+  </para>
+  <warning>
+   <title>Fehler bei der PXE- und AutoYaST-Installation</title>
+   <para>
+    Ab SUSE Linux Enterprise 15.0 treten unter bestimmten Umständen Fehler beim PXE-Boot und den AutoYaST-Installationen auf. Weitere Informationen und die Lösung finden Sie in <xref linkend="sec-deployment-dhcp-rfc4361"/>.
+   </para>
+  </warning>
+
+  <sect2 xml:id="sec-deployment-dhcp-dynamic">
+   <title>Dynamische Adressenzuweisung</title>
+   <para>
+    Im folgenden Beispiel wird gezeigt, wie ein DHCP-Server eingerichtet wird, der dynamisch IP-Adressen zu Clients zuweist und Server, Router, Domänen und Boot-Dateien bekannt gibt.
+   </para>
+   <procedure xml:id="pro-deployment-dhcp-server">
+    <step>
+     <para>
+      Melden Sie sich als <systemitem class="username">root</systemitem> auf dem Computer an, der den DHCP-Server bereitstellt.
+     </para>
+    </step>
+    <step>
+     <para>
+      Aktivieren Sie den DHCP-Server mit <command>systemctl enable dhcpd</command>.
+     </para>
+    </step>
+    <step>
+     <para>
+      Fügen Sie einer Subnetzkonfiguration in der Konfigurationsdatei des DHCP-Servers, die sich unter <filename>/etc/dhcpd.conf</filename> befindet, folgende Zeilen hinzu:
+     </para>
+<screen># The following lines are optional
+option domain-name "my.lab";
+option domain-name-servers 192.168.1.1;
+option routers 192.168.1.1;
+option ntp-servers 192.168.1.1;
+ddns-update-style none;
+default-lease-time 3600;
+
+# The following lines are required
+option arch code 93 = unsigned integer 16; # RFC4578
+subnet 192.168.1.0 netmask 255.255.255.0 {
+ next-server 192.168.1.1;
+ range 192.168.1.100 192.168.1.199;
+ default-lease-time 3600;
+ max-lease-time 3600;
+ if option arch = 00:07 or option arch = 00:09 {
+   filename "/EFI/x86/grub.efi";
+ }
+ else if option arch = 00:0b {
+   filename "/EFI/aarch64/bootaa64.efi";
+ }
+ else  {
+   filename "/BIOS/x86/pxelinux.0";
+ }
+}</screen>
+     <para>
+      Diese Konfiguration verwendet das Teilnetz <literal>192.168.1.0/24</literal> mit DHCP, DNS und dem Gateway am Server mit der IP <literal>192.168.1.1</literal>. Vergewissern Sie sich, dass alle IP-Adressen gemäß Ihres Netzwerk-Layouts geändert wurden. Weitere Informationen zu den in <filename></filename> verfügbaren Optionen finden Sie auf der man-Seite <systemitem>dhcpd.conf</systemitem>dhcpd.conf.
+     </para>
+    </step>
+    <step>
+     <para>
+      Starten Sie den DHCP-Server mit <command>systemctl restart dhcpd</command> neu.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-deployment-dhcp-static">
+   <title>Zuweisen von statischen IP-Adressen</title>
+   <para>
+    Ein DHCP-Server kann auch statische IP-Adressen und Hostnamen zu Netzwerk-Clients zuweisen. Ein Anwendungsfall ist die Zuweisung von statischen Adressen zu Servern. Bei einem weiteren Anwendungsfall wird die Möglichkeit des Beitritts zum Netzwerk auf die Clients mit zugewiesenen statischen IP-Adressen beschränkt und es werden keine dynamischen Adressenpools zur Verfügung gestellt.
+  </para>
+  <para>
+    Bearbeiten Sie die obige DHCP-Konfiguration entsprechend des folgenden Beispiels:
+   </para>
+<screen>group {
+ host test {
+   hardware ethernet <replaceable>MAC_ADDRESS</replaceable>;
+   fixed-address <replaceable>IP_ADDRESS</replaceable>;
+   }
+}
+</screen>
+   <para>
+    Die Hostbestimmung weist einen Hostnamen zum Installationsziel zu. Um den Hostnamen und die IP-Adresse an einen bestimmten Host zu binden, müssen Sie die Hardware-Adresse (MAC) des Client angeben. Ersetzen Sie alle Variablen in diesem Beispiel durch die aktuellen Werte, die zu Ihrer Umgebung passen. Speichern Sie dann die Änderungen und starten Sie den DHCP-Server neu.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-deployment-dhcp-rfc4361">
+   <title>Fehler bei der PXE- und AutoYaST-Installation</title>
+   <para>
+    Ab SUSE Linux Enterprise 15.0 und ISC DHCP 4.3.x treten unter bestimmten Umständen Fehler beim PXE-Boot und den AutoYaST-Installationen auf. Die PXE/AutoYaST-Installationen funktionieren nicht, wenn Ihr DHCP-Server keinen Pool von verfügbaren dynamischen IP-Adressen enthält und nur vordefinierte statische Adressen pro Client zulässt, und die Clients RFC 4361-Client-Kennungen senden. (Zufällig ausgewählte Rechner können dem Netzwerk nicht beitreten, wenn nur Adressen zugelassen werden, die bestimmten Netzwerk-Clients zugewiesen sind, und wenn keine dynamischen Adressenpools zur Verfügung gestellt werden.)
+   </para>
+   <para>
+    Wenn ein neues System in PXE startet, sendet es eine Anforderung an den DHCP-Server und erkennt sich selbst anhand einer Client-Kennung, die aus dem Hardwaretyp plus der MAC-Adresse der Netzwerkschnittstelle erstellt wurde. Dies ist eine RFC 2132 <literal>client-id</literal>. Der DHCP-Server bietet dann die zugewiesene IP-Adresse an. Als nächstes wird der Installations-Kernel geladen und er sendet eine weitere DHCP-Anforderung. Doch diese <literal>client-id</literal> ist anders und wird im RFC 4361-Format gesendet. Der DHCP-Server erkennt sie nicht als denselben Client und sucht nach einer freien dynamischen IP-Adresse. Da diese nicht verfügbar ist, wird der Installationsvorgang angehalten.
+   </para>
+   <para>
+    Die Lösung besteht darin, Clients so zu konfigurieren, dass sie RFC 2132-Client-IDs senden. Verwenden Sie zum Senden einer RFC 2132 <literal>client-id</literal> während der Installation <literal>linuxrc</literal>, um das folgende <literal>ifcfg</literal>-Kommando weiterzugeben:
+   </para>
+<screen>ifcfg=eth0=dhcp,DHCLIENT_CLIENT_ID=<replaceable>01:03:52:54:00:02:c2:67</replaceable>,
+DHCLIENT6_CLIENT_ID=<replaceable>00:03:52:54:00:02:c2:67</replaceable></screen>
+   <para>
+    Die üblicherweise verwendete RFC 2132 DHCPv4 <literal>client-id</literal> im Ethernet setzt sich aus dem Hardwaretyp (<literal>01</literal> für Ethernet) gefolgt von der Hardwareadresse (der MAC-Adresse) zusammen, wie zum Beispiel:
+   </para>
+<screen>01:52:54:00:02:c2:67</screen>
+   <para>
+    Die RFC 4361 DHCPv4 <literal>client-id</literal> versucht das Problem, einen Rechner mit mehr als einer Netzwerkschnittstelle zu erkennen, zu korrigieren. Die neue DHCPv4 <literal>client-id</literal> hat dasselbe Format wie die DHCPv6 <literal>client-id</literal>. Sie beginnt mit dem Präfix <literal>0xff</literal> anstelle des Hardwaretyps, gefolgt von der DHCPv6 IAID (der ID der Schnittstellenadressverknüpfung, die die Schnittstelle am Rechner beschreibt), gefolgt von der eindeutigen DHCPv6-Kennung (DUID), mit der der Rechner eindeutig gekennzeichnet ist.
+   </para>
+   <para>
+    Mit der oben genannten DUID auf Basis des Hardwaretyps und der Hardwareadresse wäre die neue RFC 4361 DHCPv4 <literal>client-id</literal>:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Unter Verwendung der letzten Bytes der MAC-Adresse der IAID: <literal>ff:00:02:c2:67:00:01:xx:xx:xx:xx:52:54:00:02:c2:67</literal>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      Wenn die IAID eine einfache inkrementierte Zahl ist: <literal>ff:00:00:00:01:00:01:xx:xx:xx:xx:52:54:00:02:c2:67</literal>
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Das Feld <replaceable>xx:xx:xx:xx</replaceable> im DUID-Link-Layer-Zeitstempel (DUID-LLT) ist ein Erstellungszeitstempel. Ein DUID-Link-Layer (DUID-LL) (<literal>00:03:00:01:$MAC</literal>) hat keinen Zeitstempel.
+   </para>
+   <para>
+    Weitere Informationen zur Verwendung von<literal>linuxrc</literal> finden Sie im <citetitle>AutoYaST-Handbuch</citetitle>. Sehen Sie sich dazu auch <literal>man 4 initrd</literal> und die Dokumentation für die Optionen <literal>dhcp4 &quot;create-cid&quot;</literal>, <literal>dhcp6 &quot;default-duid&quot;</literal> in <literal>man 5 wicked-config</literal>, <literal>wicked duid --help</literal> und <literal>wicked iaid --help</literal> an.
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-deployment-tftp-server">
+  <title>Einrichten eines TFTP-Servers</title>
+  <para>
+   Im folgenden Verfahren wird beschrieben, wie der Server so vorbereitet wird, dass die Client-Rechner mit UEFI und BIOS dezentral mit den durch TFTP exportierten Dateien gebootet werden können.
+  </para>
+  <sect2 xml:id="sec-deployment-tftp-server-install">
+   <title>Installieren eines TFTP-Servers</title>
+   <para>
+    So installieren Sie einen TFTP-Server:
+   </para>
+
+   <procedure>
+    <step>
+     <para>
+      Installieren Sie das Paket <systemitem>tftp</systemitem>.
+     </para>
+     <screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in tftp</command></screen>
+    </step>
+    <step>
+     <para>
+      Überprüfen Sie die <systemitem class="daemon">tftpd</systemitem>-Konfiguration unter <filename>/etc/sysconfig/tftp</filename> und ergänzen oder ändern Sie die Optionen je nach Bedarf. Weitere Informationen finden Sie unter <command>man 8 tftpd</command>. Beim TFTP-Daemon muss die Konfiguration nicht geändert werden. Das Standard-Stammverzeichnis für die Dateien lautet <filename>/srv/tftpboot</filename>.
+     </para>
+    </step>
+    <step>
+     <para>
+      <systemitem class="daemon">tftpd</systemitem> muss beim Booten gestartet werden; starten Sie es zum Einlesen der neuen Konfiguration erneut.
+     </para>
+     <screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl enable tftp.socket</command>
+<prompt>&gt; </prompt><command>sudo</command> <command>systemctl restart tftp.socket</command></screen>
+    </step>
+   </procedure>
+  </sect2>
+  <sect2 xml:id="sec-deployment-tftp-server-grub-package">
+   <title>Installieren der Dateien zum Booten</title>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> stellt die erforderlichen Dateien zum Booten über PXE auf BIOS- oder UEFI-Rechnern bereit. Die folgenden Hardwarearchitekturen werden unterstützt:
+   </para>
+
+   <itemizedlist>
+    <listitem>
+     <para>
+      AMD64/Intel 64
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      AArch64
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      POWER
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      IBM Z
+     </para>
+    </listitem>
+   </itemizedlist>
+
+   <para>
+    Dateien, die von einer bestimmten Hardwarearchitektur gebootet werden müssen, sind in einem RPM-Paket enthalten. Installieren Sie die Dateien auf dem Rechner, auf dem der TFTP-Server ausgeführt wird:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in tftpboot-installation-SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></command></screen>
+   <para>
+    Ersetzen Sie <replaceable>OS_VERSION</replaceable> durch die Versionsnummer Ihrer <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>-Installation (z. B. <replaceable>SLE-15-SP3-x86_64</replaceable>) und <replaceable>ARCHITECTURE</replaceable> durch die Architektur Ihres Systems (z. B. <literal>x86_64</literal>). Der resultierende Text würde folgendermaßen aussehen: <package>tftpboot-installation-SLE-15-SP3-x86_64</package>. Führen Sie <command>zypper se tftpboot</command> zum Suchen nach allen verfügbaren Versionen und Architekturen aus.
+   </para>
+   <para>
+    Die Dateien werden unter <filename>/srv/tftpboot/SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></filename> installiert. Sie können auch die Dateien für andere Versionen und Architekturen von <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> in das Verzeichnis <filename>/srv/tftpboot</filename> kopieren.
+   </para>
+   <tip>
+    <title>Bedienen verschiedener Architekturen</title>
+    <para>
+     Die Hardwarearchitektur von Client und Server kann variieren. Sie können beispielsweise einen AMD64/Intel 64 TFTP-Server ausführen und eine bootfähige Umgebung für AArch64-Clientrechner bereitstellen, indem Sie das Paket <package>tftpboot-installation-SLE-15-SP3-aarch64</package> installieren.
+    </para>
+   </tip>
+   <note>
+    <title>Bestehendes <filename>/srv/tftpboot/</filename>-Verzeichnis</title>
+    <para>
+     Wenn das Verzeichnis <filename>/srv/tftpboot/</filename> bereits auf Ihrem Rechner vorhanden ist, werden alle Dateien im Pfad <filename>/usr/share/tftpboot-installation/</filename> installiert. Dies ist der Fall, wenn Sie Ihren PXE-Server von einer früheren SLES-Version upgraden.
+    </para>
+    <para>
+     Kopieren Sie die Dateien manuell von <filename>/usr/share/tftpboot-installation/</filename> zu <filename>/srv/tftpboot/</filename>, um dieses Problem zu beheben. Entfernen Sie alternativ <filename>/srv/tftpboot/</filename> und installieren Sie das Paket <package>tftpboot-installation-SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable></package>.
+    </para>
+   </note>
+  </sect2>
+  <sect2 xml:id="sec-deployment-tftp-server-pxelinux">
+   <title>Konfigurieren von PXELINUX</title>
+   <para>
+    Öffnen Sie die Datei <filename>/srv/tftpboot/SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/net/pxelinux.cfg/default</filename> in einem Editor. Ersetzen Sie den Pfad für den Parameter <literal>install</literal> gemäß Ihrer Einrichtung (siehe <xref linkend="cha-deployment-instserver"/>). Ersetzen Sie außerdem <replaceable>TFTP_SERVER</replaceable> durch die IP-Adresse des TFTP-Servers. Einen Überblick über die PXELINUX-Konfigurationsoptionen finden Sie in <xref linkend="sec-deployment-prep-boot-pxeopts"/>.
+   </para>
+<screen>default linux
+
+# install
+label linux
+  ipappend 2
+  kernel boot/<replaceable>ARCHITECTURE</replaceable>/loader/linux
+  append initrd=boot/<replaceable>ARCHITECTURE</replaceable>/loader/initrd instsys=tftp://<replaceable>TFTP_SERVER</replaceable>/SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/boot/<replaceable>ARCHITECTURE</replaceable>/root install=<replaceable>PROTOCOL</replaceable>://<replaceable>SERVER_IP</replaceable>:/<replaceable>PATH</replaceable>
+
+display  message
+implicit 1
+prompt  1
+timeout  50</screen>
+   <para>
+    Weitere Informationen zu den Boot-Parametern in der Zeile <literal>append</literal> finden Sie in <xref linkend="sec-boot-parameters-list"/>.
+   </para>
+   <para>
+    Wenn eine Meldung im Boot-Menü angezeigt werden soll, bearbeiten Sie gegebenenfalls <filename>/srv/tftpboot/SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/net/pxelinux.cfg/message</filename>.
+   </para>
+  </sect2>
+  <sect2 xml:id="sec-deployment-tftp-server-efilinux-x86">
+   <title>Vorbereiten des PXE-Boot-Vorgangs für EFI mit GRUB2</title>
+   <para>
+     Normalerweise müssen die GRUB2-Konfigurationsdateien nicht geändert werden. Die Standardeinstellungen enthalten jedoch keine Netzwerkressource für das Installationssystem. Für eine vollständige Installation von <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> über das Netzwerk müssen Sie den Parameter <option>install</option> in der Anweisung <option>linuxefi</option> der Datei <filename>/srv/tftpboot/SLE-<replaceable>OS_VERSION</replaceable>-<replaceable>ARCHITECTURE</replaceable>/EFI/BOOT/grub.cfg</filename> angeben. In <xref linkend="sec-boot-parameters-list-install-source"/> finden Sie weitere Informationen über den Parameter <option>install</option>.
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-pxeopts">
+  <title>PXELINUX-Konfigurationsoptionen</title>
+
+  <para>
+   Die hier aufgeführten Optionen sind eine Teilmenge der für die PXELINUX-Konfigurationsdatei verfügbaren Optionen.
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><option>APPEND <replaceable>OPTIONEN</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Fügt der Kernel-Kommandozeile eine oder mehrere Optionen hinzu. Diese werden sowohl bei automatischen als auch bei manuellen Bootvorgängen hinzugefügt. Die Optionen werden an den Beginn der Kernel-Kommandozeile gesetzt und ermöglichen, dass explizit eingegebene Kernel-Optionen sie überschreiben können.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>APPEND -</option>
+    </term>
+    <listitem>
+     <para>
+      Hiermit wird nichts angehängt. <option>APPEND</option> mit einem Bindestrich als Argument in einem <option>LABEL</option>-Abschnitt kann zum Überschreiben einer globalen <option>APPEND</option>-Option verwendet werden.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>DEFAULT <replaceable>KERNEL_OPTIONEN</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      Legt die standardmäßige Kernel-Kommandozeile fest. Wenn PXELINUX automatisch gebootet wird, agiert es, als wären die Einträge nach DEFAULT in der Booteingabeaufforderung eingegeben worden, außer, dass die Option für das automatische Booten (boot) automatisch hinzugefügt wird.
+     </para>
+     <para>
+      Wenn keine Konfigurationsdatei vorhanden oder der DEFAULT-Eintrag in der Konfigurationsdatei nicht definiert ist, wird standardmäßig der Kernel-Name <quote>linux</quote> ohne Optionen verwendet.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+
+    <term><option>IFAPPEND <replaceable>FLAG</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Fügt eine bestimmte Option in die Kernel-Kommandozeile ein, abhängig vom Wert für <replaceable>FLAG</replaceable>. Die Option <option>IFAPPEND</option> ist nur unter PXELINUX verfügbar. Für <replaceable>FLAG</replaceable> ist ein Wert erforderlich, siehe <xref linkend="tab-deployment-boot-pxeopts-ifappend"/>:
+     </para>
+     <table xml:id="tab-deployment-boot-pxeopts-ifappend">
+      <title>Generierte und hinzugefügte Optionen für Kernel-Kommandozeilen von <option>IFAPPEND</option></title>
+      <tgroup cols="2">
+       <colspec colwidth="1*"/>
+       <colspec colwidth="4*"/>
+       <thead>
+        <row>
+         <entry valign="middle">
+          <para>
+           Argument
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Generierte Kernel-Kommandozeile/Beschreibung
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <option>1</option>
+          </para>
+         </entry>
+         <entry>
+<screen>ip=<replaceable>CLIENT_IP</replaceable>:<replaceable>BOOT_SERVER_IP</replaceable>:<replaceable>GW_IP</replaceable>:<replaceable>NETMASK</replaceable></screen>
+          <para>
+           Die Platzhalter werden auf der Grundlage der Eingaben vom DHCP/BOOTP- oder PXE-Boot-Server ersetzt.
+          </para>
+          <para>
+           Diese Option ist kein Ersatz für das Ausführen eines DHCP-Clients im gebooteten System. Ohne regelmäßige Verlängerung läuft die vom PXE BIOS erworbene Lease ab, sodass die IP-Adresse zur erneuten Verwendung durch den DHCP-Server verfügbar wird.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>2</option>
+          </para>
+         </entry>
+         <entry>
+<screen>BOOTIF=<replaceable>MAC_ADDRESS_OF_BOOT_INTERFACE</replaceable></screen>
+          <para>
+           Mit dieser Option lässt sich eine Zeitüberschreitung vermeiden, wenn der Installationsserver die LAN-Schnittstellen einzeln nacheinander abfragt, bis er eine Antwort von einem DHCP-Server erhält. Ein initrd-Programm kann dabei ermitteln, von welcher Schnittstelle das System gebootet wurde. linuxrc liest diese Option aus und verwendet die erkannte Netzwerkschnittstelle.
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <option>4</option>
+          </para>
+         </entry>
+         <entry>
+<screen>SYSUUID=<replaceable>SYSTEM_UUID</replaceable></screen>
+          <para>
+           Fügt UUIDs im Hexadezimalformat mit Kleinbuchstaben hinzu, siehe <filename>/usr/share/doc/packages/syslinux/pxelinux.txt</filename>
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </table>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LABEL <replaceable>KENNUNG</replaceable> KERNEL <replaceable>IMAGE</replaceable> APPEND <replaceable>OPTIONEN</replaceable>...</option>
+    </term>
+    <listitem>
+     <para>
+      Wenn <replaceable>KENNUNG</replaceable> als der zu bootende Kernel angegeben wird, soll PXELINUX stattdessen <replaceable>IMAGE</replaceable> booten und dabei die angegebenen <option>APPEND</option>-Optionen heranziehen. Diese Optionen ersetzen die im globalen Abschnitt der Datei vor dem ersten Kommando <option>LABEL</option> angegebenen Optionen. Die Vorgabe für <replaceable>IMAGE</replaceable> ist dieselbe wie für <replaceable>KENNUNG</replaceable> und wenn keine <option>APPEND</option>-Optionen angegeben sind, wird standardmäßig der globale Eintrag verwendet (sofern vorhanden). Es sind bis zu 128 <option>LABEL</option>-Einträge zulässig.
+     </para>
+
+     <para>
+      PXELINUX verwendet die folgende Syntax:
+     </para>
+<screen>label <replaceable>MYLABEL</replaceable>
+  kernel <replaceable>MYKERNEL</replaceable>
+  append <replaceable>MYOPTIONS</replaceable></screen>
+     <para>
+      Kennungen werden wie Dateinamen umgesetzt und müssen nach der Umsetzung (sogenanntes Mangling) eindeutig sein. Die beiden Kennungen <quote>v2.6.30</quote> und <quote>v2.6.31</quote> wären beispielsweise unter PXELINUX nicht unterscheidbar, da beide auf denselben DOS-Dateinamen umgesetzt würden.
+     </para>
+     <para>
+      Der Kernel muss kein Linux-Kernel sein. Auch ein Bootsektor oder eine COMBOOT-Datei ist möglich.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>LOCALBOOT <replaceable>TYP</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Wenn Sie unter PXELINUX <option>LOCALBOOT 0</option> an Stelle einer <option>KERNEL</option>-Option angeben, bedeutet dies, dass diese bestimmte Kennung aufgerufen und die lokale Festplatte an Stelle eines Kernels gebootet wird.
+     </para>
+     <informaltable frame="topbot" rowsep="0">
+      <tgroup cols="2">
+
+       <thead>
+        <row>
+         <entry>
+          <para>
+           Argument
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Beschreibung
+          </para>
+         </entry>
+        </row>
+       </thead>
+       <tbody>
+        <row>
+         <entry>
+          <para>
+           <literal>0</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Führt einen normalen Bootvorgang aus
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>4</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Führt einen lokalen Bootvorgang mit dem noch im Arbeitsspeicher vorhandenen UNDI-Treiber (Universal Network Driver Interface) aus
+          </para>
+         </entry>
+        </row>
+        <row>
+         <entry>
+          <para>
+           <literal>5</literal>
+          </para>
+         </entry>
+         <entry>
+          <para>
+           Führt einen lokalen Bootvorgang mit dem gesamten PXE-Stack, einschließlich des UNDI-Treibers aus, der sich im Arbeitsspeicher befindet
+          </para>
+         </entry>
+        </row>
+       </tbody>
+      </tgroup>
+     </informaltable>
+     <para>
+      Alle anderen Werte sind nicht definiert. Wenn Sie die Werte für die UNDI- oder PXE-Stacks nicht wissen, geben Sie <literal>0</literal> an.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>TIMEOUT <replaceable>ZEITLIMIT</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Gibt in Einheiten von 1/10 Sekunde an, wie lange die Booteingabeaufforderung angezeigt werden soll, bevor der Bootvorgang automatisch gestartet wird. Das Zeitlimit wird aufgehoben, sobald der Benutzer eine Eingabe über die Tastatur vornimmt, da angenommen wird, dass der Benutzer die Eingabe des Kommandos abschließt. Mit einem Zeitlimit von Null wird das Zeitüberschreitungsoption deaktiviert (dies ist die Vorgabe). Der größtmögliche Wert für das Zeitlimit ist 35996 (etwas weniger als eine Stunde).
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>PROMPT<replaceable> flag_val</replaceable></option>
+    </term>
+    <listitem>
+     <para>
+      Wenn <option>flag_val</option> auf 0 gesetzt ist, wird die Booteingabeaufforderung nur angezeigt, wenn die Taste <keycap function="shift"/> oder <keycap function="alt"/> gedrückt wird oder die <keycap>Feststelltaste</keycap> oder die Taste <keycap>Rollen</keycap> gesetzt ist (dies ist die Standardeinstellung). Wenn <option>flag_val</option> 1 ist, wird die Booteingabeaufforderung immer angezeigt.
+     </para>
+<screen>F2  <replaceable>FILENAME</replaceable>
+F1  <replaceable>FILENAME</replaceable>
+..etc..
+F9  <replaceable>FILENAME</replaceable>
+F10 <replaceable>FILENAME</replaceable></screen>
+     <para>
+      Zeigt die angegebene Datei auf dem Bildschirm an, wenn an der Booteingabeaufforderung eine Funktionstaste gedrückt wird. Mithilfe dieser Option kann auch die Preboot-Online-Hilfe implementiert werden (für die Kernel-Kommandozeilenoptionen). Aus Gründen der Kompabilität mit früheren Versionen kann <keycap>F10</keycap> auch als <literal>F0</literal> verwendet werden. Beachten Sie, dass derzeit keine Möglichkeit besteht, Dateinamen an <keycap>F11</keycap> und <keycap>F12</keycap> zu binden.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-deployment-prep-boot-pxeprep">
+  <title>Vorbereiten des Zielsystems für PXE-Boot</title>
+
+  <para>
+   Bereiten Sie das System-BIOS für PXE-Boot vor, indem Sie die PXE-Option in die BIOS-Boot-Reihenfolge aufnehmen.
+  </para>
+
+  <warning>
+   <title>BIOS-Bootreihenfolge</title>
+   <para>
+    Die PXE-Option darf im BIOS nicht vor dem Boot-Parameter für die Festplatte stehen. Andernfalls würde dieses System versuchen, sich selbst bei jedem Booten neu zu installieren.
+   </para>
+  </warning>
+ </sect1>
+
+ <sect1 xml:id="sec-deployment-prep-boot-wol">
+  <title>Verwenden von Wake-on-LAN für Fernaktivierungen</title>
+   <para>
+       Wake-on-LAN (WOL) ist ein Ethernet-Standard zum Fernaktivieren eines Rechners durch Senden eines Aktivierungssignals über ein Netzwerk. Dieses Signal wird <quote>Magic Packet</quote> genannt. Installieren Sie WOL auf Client-Rechnern, um Fernaktivierungen zu ermöglichen, und auf jedem Rechner, den Sie zum Senden des Aktivierungssignals verwenden möchten. Das Magic Packet wird über UDP-Port 9 an die MAC-Adresse der Netzwerkschnittstelle auf dem Client-Rechner gesendet.
+   </para>
+   <para>
+       Beim Herunterfahren werden Rechner in der Regel nicht ganz ausgeschaltet, sondern verbleiben in einem Energiesparmodus. Wenn die Netzwerkschnittstelle WOL unterstützt, überwacht sie auf das Aktivierungssignal des Magic Packet, wenn das Gerät ausgeschaltet ist. Sie können das Magic Packet manuell senden oder Aktivierungen in einem Cron auf dem sendenden Rechner planen.
+   </para>
+
+  <sect2 xml:id="sec-deployment-prep-boot-wol-prereqs">
+       <title>Voraussetzungen</title>
+   <para>
+       WOL funktioniert sowohl mit kabelgebundenen als auch mit drahtlosen Ethernet-Karten, die es unterstützen.
+   </para>
+   <para>
+       Möglicherweise müssen Sie WOL in Ihrem System-BIOS/UEFI aktivieren.
+   </para>
+   <para>
+       Überprüfen Sie Ihre BIOS/UEFI-Einstellungen für PXE-Boot und stellen Sie sicher, dass es deaktiviert ist, um versehentliche Neuinstallationen zu verhindern.
+   </para>
+   <para>
+       Passen Sie Ihre Firewall so an, dass der Datenverkehr über UDP-Port 9 zugelassen wird.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-deployment-prep-boot-wiredethernet">
+       <title>Überprüfen der Unterstützung von kabelgebundenem Ethernet</title>
+   <para>
+       Führen Sie folgendes Kommando aus, um festzustellen, ob eine kabelgebundene Ethernet-Schnittstelle WOL unterstützt:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> ethtool eth0 | grep -i wake-on
+Supports Wake-on: pumbg
+Wake-on: g</screen>
+   <para>
+       Die Ausgabe im Beispiel zeigt, dass WOL von eth0 unterstützt wird, angezeigt durch das <literal>g</literal>-Flag in der Zeile <literal>Supports Wake-on</literal>. <literal>Wake-on: g</literal> zeigt an, dass WOL bereits aktiviert ist, sodass diese Schnittstelle bereit ist, Aktivierungssignale zu empfangen. Wenn WOL nicht aktiviert ist, aktivieren Sie es mit folgendem Kommando:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> ethtool -s wol g</screen>
+  </sect2>
+
+   <sect2 xml:id="sec-deployment-prep-boot-wirelessethernet">
+       <title>Überprüfen der Unterstützung für drahtlose Schnittstellen</title> 
+   <para>
+       Für Wakeup-over-wifi (WoWLAN) ist eine drahtlose Netzwerkschnittstelle erforderlich, die WoWLAN unterstützt. Testen Sie dies mit dem Kommando <command>iw</command>, das im Paket <package>iw</package> enthalten ist:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> zypper in iw</screen>
+   <para>
+       Suchen Sie den Gerätenamen:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> iw dev
+phy#0
+        Interface wlan2
+                ifindex 3
+                wdev 0x1
+                addr 9c:ef:d5:fe:01:7c
+                ssid accesspoint
+                type managed
+                channel 11 (2462 MHz), width: 20 MHz, center1: 2462 MHz
+                txpower 20.00 dBm</screen>
+   <para>
+       In diesem Beispiel lautet der Gerätename zum Abfragen der WoWLAN-Unterstützung <literal>phy#0</literal>. Dieses Beispiel zeigt, dass es nicht unterstützt wird:
+   </para>
+       <screen><prompt>&gt; </prompt><command>sudo</command> iw phy#0 wowlan show
+command failed: Operation not supported (-95)</screen>
+   <para>
+       Dieses Beispiel zeigt eine Schnittstelle, die WoWLAN unterstützt, aber nicht aktiviert ist:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> iw phy#0 wowlan show
+WoWLAN is disabled</screen>
+   <para>
+       Aktivieren Sie sie:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> iw phy#0 wowlan enable magic-packet
+WoWLAN is enabled:
+* wake up on magic packet</screen>
+</sect2>
+
+<sect2 xml:id="sec-deployment-prep-boot-wol-install">
+    <title>Installieren und Testen von WOL</title>
+    <para>
+        Zur Verwendung von WOL installieren Sie das Paket <package>wol</package> auf dem Client und den sendenden Rechnern:
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> zypper in wol</screen>
+    <para>          
+        Installieren Sie <package>wol-udev-rules</package> auf Ihren Client-Rechnern. Dieses Paket installiert eine udev-Regel, die WOL automatisch beim Start aktiviert.
+   </para>
+   <para>
+       Ermitteln Sie die MAC-Adresse der Netzwerkschnittstelle auf dem Client-Rechner:
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> ip addr show eth0|grep ether
+link/ether 7c:ef:a5:fe:06:7c brd ff:ff:ff:ff:ff:ff</screen>
+   <para>
+       In der Ausgabe des Beispiels ist <literal>7c:ef:a5:fe:06:7c</literal> die MAC-Adresse.
+   </para>
+   <para>
+       Fahren Sie Ihren Client-Rechner herunter und senden Sie ihm ein Aktivierungssignal von einem anderen Rechner im selben Teilnetz:
+   </para>
+   <screen><prompt>&gt; </prompt>wol <replaceable>7c:ef:a5:fe:06:7c</replaceable></screen>
+   <para>
+       Wenn sich Ihr Zielgerät und das zweite Gerät zwar im selben Netzwerk, aber in unterschiedlichen Teilnetzen befinden, geben Sie die Broadcast-Adresse für Ihr Zielgerät an:
+   </para>
+   <screen><prompt>&gt; </prompt>wol -i <replaceable>192.168.0.63 7c:ef:a5:fe:06:7c</replaceable></screen>
+   <para>
+       Da WOL auf Broadcast-Domänen beruht, muss sich der sendende Rechner im selben Netzwerk befinden, kann aber auch in einem anderen Netzwerksegment liegen.
+   </para>
+   <para>
+       Es ist möglich, das Magic Packet von einem anderen Netzwerk aus zu senden. Eine Möglichkeit ist die Portweiterleitung, wenn Ihr Router die Portweiterleitung auf eine Broadcast-Adresse unterstützt. Eine sicherere Methode ist es, sich über SSH mit einem Host innerhalb Ihres Netzwerks zu verbinden und das Magic Packet von dort aus zu senden.
+   </para>
+  </sect2>
+ </sect1>
+</chapter>
