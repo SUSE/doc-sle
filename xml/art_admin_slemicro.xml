@@ -1358,7 +1358,7 @@ After=etcd.service
   </section>
   
   <section xml:id="sec-starting-pcp">
-    <title>Starting the PCP container</title>
+    <title>Running the PCP container</title>
     
     <para>
       The following command shows minimal options that you need to use to run a PCP container:
@@ -1386,7 +1386,7 @@ After=etcd.service
     <term><option>-p <replaceable>HOST_IP:HOST_PORT:CONTAINER_PORT</replaceable></option></term>
     <listitem>
       <para>
-        Publishes ports of the container by mapping a container port onto a host port. If you don't specify <replaceable>HOST_IP</replaceable>, the ports will be mapped on the local host. If you omit the <replaceable>HOST_PORT</replaceable> value, a random port number will be used.
+        Publishes ports of the container by mapping a container port onto a host port. If you don't specify <replaceable>HOST_IP</replaceable>, the ports will be mapped on the local host. If you omit the <replaceable>HOST_PORT</replaceable> value, a random port number will be used. By default the <command>pmcd</command> daemon listens and exposes the PMAPI to receive metrics on the port <emphasis>44321</emphasis>, so it is recommended to map this port on the same port number on the host. The <command>pmproxy</command> daemon listens on exposes the REST PMWEBAPI to access metrics on the <emphasis>44322</emphasis> port by default, so it is recommended to map this port on the same host port number.
       </para>
     </listitem>
   </varlistentry>
@@ -1439,6 +1439,7 @@ After=etcd.service
         <term>PCP_SERVICES</term>
         <listitem>
           <para>is a comma separated list of services to start by &systemd; in the container.</para>
+          <para>Default services are: <literal>pmcd</literal>, <literal>pmie</literal>, <literal>pmlogger</literal>, <literal>pmproxy</literal>.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -1455,12 +1456,83 @@ After=etcd.service
       </varlistentry>
       </variablelist>
       <para>
-        If you need to use different configuration then provided by the environment variables, proceed as described further.
+        If you need to use different configuration then provided by the environment variables, proceed as described in <xref linkend="sec-pcp-services-configuration"/>.
       </para>
       </listitem>
     </varlistentry>
   </variablelist>
-<para>If you need a custom configuration that cannot be covered by the environment variables described above, create configuration files for the PCP services. For eample, for the <command>pmlogger</command> create a configuration file <filename>pmlogger.control</filename>:</para>
+  </section>
+
+
+  <section xml:id="sec-pcp-services-configuration">
+    <title>Configuring PCP services</title>
+    <para>
+      All services that run inside the PCP container have default configuration that might not suit your needs. If you need a custom configuration that cannot be covered by the environment variables described above, create configuration files for the PCP services and pass them to the PCP  using a bind mount.
+      </para>
+
+       
+    <section xml:id="sec-pmcd-daemon-configration">
+      <title>Custom <command>pmcd</command> daemon configuration</title>
+      <para>
+        To use custom configuration of the <command>pmcd</command> daemon, create a configuration file on the host machine, for example, <filename>pmcd</filename>. Then you can add the following attibutes to configure the <command>pmcd</command> daemon:
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term>PMCD_LOCAL</term>
+          <listitem>
+            <para>
+              Defines whether remote host can connect to the <command>pmcd</command> daemon. If set to <emphasis>0</emphasis>, remote connections to the daemon are allowed. If set to <emphasis>1</emphasis>, the daemon listens only on the local host. The default value is <emphasis>0</emphasis>.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>PMCD_MAXPENDING</term>
+          <listitem>
+            <para>
+              Defines the maximum count of pending connections to the agent. The default value is 5. 
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>PMCD_ROOT_AGENT</term>
+          <listitem>
+            <para>
+              If the <literal>pmdaroot</literal> is enabled (the value is set to <emphasis>1</emphasis>), adding a new PDMA does not trigger restarting of other PMDA. If <literal>pmdaroot</literal> is not enabled, <command>pmcd</command> will require to restart all PMDAs when a new PMDA is added. The default value is <emphasis>1</emphasis>.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>PMCD_RESTART_AGENTS</term>
+          <listitem>
+            <para>
+              If set to <emphasis>1</emphasis>, the <command>pmcd</command> daemon tries to restart any exited PMDA. Enable this option if only you have enabled <literal>pmdaroot</literal>, as <command>pmcd</command> itself does not have privileges to restart PMDA.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>PMCD_WAIT_TIMEOUT</term>
+          <listitem>
+            <para>
+              Defines the maximum time in seconds, <command>pmcd</command> can wait to accept a connection. After this time, the connection is reported as failed. The default value is <emphasis>60</emphasis>.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>PCP_NSS_INIT_MODE</term>
+          <listitem>
+            <para>
+              Defines the mode in which <command>pmcd</command> initializes the NSS certificate database when secured connections are used. The default value is <literal>readonly</literal>. You can set the mode to <literal>readwrite</literal>, but if the initialization fails in this case, the default value is used as fallback.
+            </para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+    </section>
+
+
+    <section xml:id="sec-pmlogger-configuration">
+      <title>Custom <command>pmlogger</command> configuration</title>
+
+      <para>For example, for the <command>pmlogger</command> create a configuration file <filename>pmlogger.control</filename>:</para>
 <screen>
 $version=1.1
 
@@ -1474,6 +1546,31 @@ remote.pmcdhost.corp  n   n PCP_ARCHIVE_DIR/remote_pmcd -N -r -T24h10m -c config
   <para>
     The example above runs a cotainer with only <command>pmlogger</command>.
   </para>
+    </section>
+  </section>
+
+  <section xml:id="sec-autostart-onboot">
+    <title>Starting the PCP container onboot automatically</title>
+    <para>
+      After you run the PCP container, you can configure &systemd; to start the container onboot. To do so, follow the procedure below:
+    </para>
+    <procedure>
+      <step>
+        <para>
+          Create a unit file for the container by using the <command>podman generate systemd</command> command:
+        </para>
+        <screen>&prompt.root;podman generate systemd --name <replaceable>CONTAINER_NAME</replaceable> > /etc/systemd/system/container-<replaceable>CONTAINER_NAME</replaceable>.service</screen>
+        <para>
+          where <replaceable>CONTAINER_NAME</replaceable> is the name of the PCP container you used when running the container from the container image.
+        </para>
+      </step>
+      <step>
+      <para>
+        Enable the service in &systemd;
+      </para>
+      <screen>&prompt.root;systemctl enable container-<replaceable>CONTAINER_NAME</replaceable></screen>      
+      </step>
+    </procedure>
   </section>
  </section>
 
