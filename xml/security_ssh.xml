@@ -40,9 +40,9 @@
    a client-server protocol. Any host running the
    <systemitem class="daemon">sshd</systemitem>
    daemon can accept connections from any other host. Every host running
-   <systemitem class="daemon">sshd</systemitem> can have their own custom
+   <systemitem class="daemon">sshd</systemitem> can have their own
    custom configurations, such as limiting who can have access, and which
-   authentication protocols are allowed.
+   authentication methods are allowed.
   </para>
   <para>
    The <package>openssh</package> package installs the server, client,
@@ -175,20 +175,21 @@
    </listitem>
   </varlistentry>
  </variablelist>
-</sect1>
+ </sect1>
 
-<sect1 xml:id="sec-ssh-server-config">
+ <sect1 xml:id="sec-ssh-server-config">
  <title>Server hardening</title>
  <para>
   OpenSSH ships with a usable default server configuration, but there are
   additional steps you can take to secure your server.
  </para>
  <para>
-  The default server configuration file, <filename>/etc/ssh/sshd_config</filename>,
+  The default server configuration file,
+<filename>/etc/ssh/sshd_config</filename>,
   contains the default configuration, and all the defaults are commented
   out. Override any default item by entering your own configuration item,
   uncommented, like the following example that sets a different listening
-  port, and specifies the listening IPv4 address:
+  port, and specifies the listening IPv4 address on a multi-homed host:
  </para>
  <screen>
 #Port 22
@@ -196,6 +197,17 @@ Port <replaceable>2022</replaceable>
 
 #ListenAddress 0.0.0.0
 ListenAddress <replaceable>192.168.10.100</replaceable></screen>
+
+<important>
+ <title>Update /etc/services</title>
+ <para>
+  When you use non-standard listening ports, first check the
+  <filename>/etc/services</filename> file for unused ports.
+  Select any unused port above 1024. Then document the ports you are using
+  in <filename>/etc/services</filename>.
+ </para>
+</important>
+
  <para>
   The following settings for <filename>/etc/ssh/sshd_config</filename>
   strengthen access controls:
@@ -215,15 +227,23 @@ AllowGroups <replaceable>ldapadmins backupadmins</replaceable>
 DenyGroups <replaceable>users</replaceable>
 
 # Allow or deny certain users. If you use both, DenyUsers is read first
-AllowUsers <replaceable>user1 user2 user3</replaceable>
-DenyUsers <replaceable>user4</replaceable>
+AllowUsers <replaceable>user1 user2@example.com user3</replaceable>
+DenyUsers <replaceable>user4 user5@192.168.10.10</replaceable>
 
 # Allow root logins only with public key authentication
 PermitRootLogin prohibit-password
 
 # Disable password authentication and allow only public key authentication
 # for all users
-PasswordAuthentication no</screen>
+PasswordAuthentication no
+
+# Length of time the server waits for a user to log in and complete the
+# connection. The default is 120 seconds:
+LoginGraceTime <replaceable>60</replaceable>
+
+# Limit the number of failed connection attempts. The default is 6
+MaxAuthTries <replaceable>4</replaceable>
+</screen>
 
  <para>
   After changing <filename>/etc/ssh/sshd_config</filename>, run the syntax
@@ -248,42 +268,101 @@ PasswordAuthentication no</screen>
  <para>
   Private keys should be 0644/-rw-r--r--, owned by root:root.
  </para>
-</sect1>
+ <para>
+  You may restrict logins from subnets with PAM (Pluggable Authentication
+  Modules). The following steps configure remote login restrictions for
+  certain users. These restrictions affect all OpenSSH commands,
+  including <command>ssh</command>
+  (<xref linkend="sec-ssh-programm"/>),
+  <command>scp</command> (<xref linkend="sec-ssh-copy"/>), and
+  <command>sftp</command> (<xref linkend="sec-ssh-sftp"/>).
+  </para>
+  <procedure xml:id="pro-ssh-restrict-logins">
+   <title>Configuring remote login restrictions</title>
+   <para>
+    Perform the following steps to configure user remote login restrictions:
+    </para>
+   <step>
+    <para>
+     Edit the file <filename>/etc/pam.d/sshd</filename> and append the
+     following at the end of the <literal>auth</literal> block:
+    </para>
+    <screen>auth required pam_access.so</screen>
+   </step>
+   <step>
+    <para>
+     Edit the file <filename>/etc/security/access.conf</filename> to
+     configure individual restrictions. In this example the users &rootuser;
+     and &exampleuser; are restricted to the &exampledomain1ip;.0/&subnetmask;
+     network, while the &exampleuserII; user can only login from within the
+     &exampledomain2ip;.0/&subnetmask; network:
+    </para>
+<screen>
++ : root :<replaceable>&exampledomain1ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
++ : &exampleuser_plain; :<replaceable>&exampledomain1ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
++ : &exampleuserII_plain; :<replaceable>&exampledomain2ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
+- : ALL : ALL</screen>
+   <para>
+    Do not forget the last line which denies access for all other users from
+    all sources, and be careful not to lock yourself out of the system.
+   </para>
+   <para>
+    For more configuration options, refer to the examples in the file and to
+    <command>man access.conf</command>.
+   </para>
+   </step>
+  </procedure>
+  <warning>
+   <title>Do not use pam-config</title>
+   <para>
+    Do not use the <command>pam-config</command> utility here. It only
+    supports <systemitem>git pam_access</systemitem> as a global module. The
+    configuration above is not suitable to be used globally for all services
+    and can completely deny access to the system.
+   </para>
+  </warning>
+ </sect1>
 
 <sect1 xml:id="sec-ssh-programm">
   <title>Password authentication</title>
   <para>
-   With <command>ssh</command> you may log in to remote
-   systems and work interactively. To log in to the host
-   <literal>&exampleserver;</literal> as user &exampleuser; enter one of
-   the following commands:
+   With password authentication, you must have a user account on the
+   remote machine. In the following example, user &exampleuserIII; logs into
+   the host &exampleserver;:
   </para>
 
-<screen>&prompt.user;<command>ssh &exampleuser_plain;@&exampleserver;</command>
-&prompt.user;<command>ssh -l &exampleuser_plain; &exampleserver;</command></screen>
+<screen>&prompt.user;<command>ssh
+&exampleuserIII_plain;@&exampleserver;</command>
+</screen>
 
   <para>
-   Type <literal>exit</literal> and press Enter to close an SSH session.
+   Type <literal>exit</literal> and press <keycap>Enter</keycap> to close an
+   SSH session.
   </para>
-
   <para>
    If the user name is the same on both machines, you can omit it, and then
-   using <command>ssh &exampleserver;</command> is sufficient. The remote
-   host prompts for the remote user's password. After a successful
-   authentication, you can work on the remote command line or use
-   interactive applications, such as &yast; in text mode.
+   using <command>ssh <replaceable>HOST_NAME</replaceable></command> is
+   sufficient. The remote host prompts for the remote user's password. After
+   a successful authentication, you can work on the command line or
+   use interactive applications, such as &yast; in text mode.
   </para>
-
   <para>
-   You may also run  non-interactive commands on remote systems using
-   <command>ssh</command> <replaceable>USER_NAME</replaceable> <replaceable>HOST</replaceable>
-   <replaceable>COMMAND</replaceable>.
-   <replaceable>COMMAND</replaceable> needs to be properly quoted. Multiple
+   You may also run non-interactive commands (log in, run the command, then
+   exit) on remote systems using the
+   <command>ssh <replaceable>USER_NAME HOST COMMAND</replaceable></command>
+syntax.
+   <replaceable>COMMAND</replaceable> must be properly quoted. Multiple
    commands can be concatenated as on a local shell:
   </para>
 
-<screen>&prompt.user;<command>ssh root@&exampleserver; "dmesg -T | tail -n 25"</command>
-&prompt.user;<command>ssh root@&exampleserver; "cat /etc/os-release &amp;&amp; uptime"</command></screen>
+<screen>&prompt.user;<command>ssh root@&exampleserver; "dmesg -T | tail -n
+25"</command>
+&prompt.user;<command>ssh root@&exampleserver; "cat /etc/os-release &amp;&amp;
+uptime"</command></screen>
+
+<!-- Public key auth
+     Passphrase-less public key auth
+     Certificate auth -->
 
   <sect2 xml:id="sec-ssh-programm-x">
    <title>Starting X11 applications on a remote host</title>
@@ -302,12 +381,13 @@ PasswordAuthentication no</screen>
     A quick test is to run a simple game from the remote machine, such as
     GNOME Mines:
    </para>
-   <screen>&prompt.user;<command>ssh &exampleuser_plain;@&exampleserver;</command>
+   <screen>&prompt.user;<command>ssh
+&exampleuserII_plain;@&exampleserver;</command>
 Password:
 Last login: Tue May 10 11:29:06 2022 from 192.168.163.13
 Have a lot of fun...
 
-&exampleuser_plain;@&exampleserver; gnome-mines</screen>
+&exampleuserII;@&exampleserver;<command>gnome-mines</command></screen>
    <para>
      The remote application should appear on your local machine just as
      though it were installed locally. (Note that network lag may affect
@@ -321,7 +401,8 @@ Have a lot of fun...
     <para>
      X11 forwarding requires the X Windows System, which is the default on
      &slea;, and not the Wayland display server protocol. The X Windows
-     System has built-in networking, while Wayland does not.
+     System has built-in networking, while Wayland does not. Wayland is not
+     supported on &slea;.
     </para>
     <para>
      Use the following command to learn if your system runs X or Wayland:
@@ -333,12 +414,21 @@ x11</screen>
     </para>
     <screen>&prompt.user;<command>echo $XDG_SESSION_TYPE</command>
 wayland</screen>
+    <para>
+     The systemd way is to query with <command>loginctl</command>:
+    </para>
+     <screen>&prompt.user;<command>loginctl show-session "$XDG_SESSION_ID" -p
+Type</command>
+Type=x11
+
+&prompt.user;<command>loginctl show-session "$XDG_SESSION_ID" -p Type</command>
+Type=wayland</screen>
    </important>
   </sect2>
 
   <!-- this section needs improving and expanding -->
   <sect2 xml:id="sec-ssh-programm-forwarding">
-   <title>Agent Forwarding</title>
+   <title>Agent forwarding</title>
    <para>
     By adding the <option>-A</option> option, the ssh-agent authentication
     mechanism is carried over to the next machine. This way, you can work
@@ -348,12 +438,11 @@ wayland</screen>
     <xref linkend="sec-ssh-authentic-key-copy"/> to learn the safe way
     to copy your public keys to other hosts.)
    </para>
-<!--
    <para>
     <literal>AllowAgentForwarding yes</literal> is the default in
     <filename>/etc/ssh/sshd_config</filename>. Change it to
     <literal>No</literal> to disable it.
-   </para> -->
+   </para>
   </sect2>
  </sect1>
 
@@ -363,7 +452,7 @@ wayland</screen>
    <command>scp</command> copies files to or from a remote machine.  If
    the user name on &wsI; is different than the user name on
    &exampleserver;, specify the latter using the
-   <option><replaceable>USER_NAME</replaceable>@host</option> format. If
+   <option><replaceable>USER_NAME</replaceable>&amp;host</option> format. If
    the file should be copied into a directory other than the remote
    user's home directory, specify it as
    &exampleserver;:<replaceable>DIRECTORY</replaceable>. The following
@@ -371,8 +460,10 @@ wayland</screen>
    vice versa.
   </para>
 
-<screen>&prompt.user;scp ~/MyLetter.tex &exampleuser_plain;@&exampleserver;:/tmp <co xml:id="co-scp-local-remote"/>
-&prompt.user;scp &exampleuser_plain;@&exampleserver;:/tmp/MyLetter.tex ~ <co xml:id="co-scp-remote-local"/></screen>
+<screen>&prompt.user;scp ~/MyLetter.tex
+&exampleuser_plain;@&exampleserver;:/tmp <co xml:id="co-scp-local-remote"/>
+&prompt.user;scp &exampleuser_plain;@&exampleserver;:/tmp/MyLetter.tex ~ <co
+xml:id="co-scp-remote-local"/></screen>
 <calloutlist>
  <callout arearefs="co-scp-local-remote">
   <para>local to remote</para>
@@ -382,12 +473,12 @@ wayland</screen>
  </callout>
 </calloutlist>
   <tip>
-   <title>The <option>-l</option> Option</title>
+   <title>The <option>-l</option> option</title>
    <para>
     With the <command>ssh</command> command, the option
     <option>-l</option> can be used to specify a remote user (as an
     alternative to the
-    <option><replaceable>USER_NAME</replaceable>@host</option>
+    <option><replaceable>USER_NAME</replaceable>&amp;host</option>
     format). With <command>scp</command> the option <option>-l</option>
     is used to limit the bandwidth consumed by <command>scp</command>.
    </para>
@@ -421,8 +512,9 @@ wayland</screen>
    heavier burden on the processors of both machines.
   </para>
  </sect1>
+
  <sect1 xml:id="sec-ssh-sftp">
-  <title><command>sftp</command>&mdash;Secure File Transfer</title>
+  <title><command>sftp</command>&mdash;secure file transfer</title>
 
   <sect2 xml:id="sec-ssh-sftp-using">
    <title>Using <command>sftp</command></title>
@@ -445,7 +537,7 @@ cd path                            Change remote directory to 'path'
 [...]</screen>
   </sect2>
   <sect2 xml:id="sec-ssh-sftp-perms">
-   <title>Setting Permissions for File Uploads</title>
+   <title>Setting permissions for file uploads</title>
    <para>
     As with a regular FTP server, a user cannot only download,
         but also upload files to a remote machine running an SFTP server
@@ -462,8 +554,7 @@ cd path                            Change remote directory to 'path'
        A umask works as a filter against the permissions of the original
        file on the local host. It can only withdraw permissions:
       </para>
-      <table>
-       <title/>
+      <informaltable>
        <tgroup cols="3">
         <colspec colnum="1" colname="1" colwidth="33*"/>
         <colspec colnum="2" colname="2" colwidth="33*"/>
@@ -541,7 +632,7 @@ cd path                            Change remote directory to 'path'
          </row>
         </tbody>
        </tgroup>
-      </table>
+      </informaltable>
       <para>
        To apply a umask on an SFTP server, edit the file
        <filename>/etc/ssh/sshd_configuration</filename>. Search for the line
@@ -552,7 +643,7 @@ cd path                            Change remote directory to 'path'
      </listitem>
     </varlistentry>
     <varlistentry>
-     <term>Explicitly Setting the Permissions</term>
+     <term>Explicitly setting the permissions</term>
      <listitem>
       <para>
        Explicitly setting the permissions sets the same permissions for all
@@ -574,9 +665,9 @@ cd path                            Change remote directory to 'path'
     </varlistentry>
    </variablelist>
   </sect2>
- </sect1>
- <sect1 xml:id="sec-ssh-sshdserver">
-  <title>The SSH Daemon (<systemitem class="daemon">sshd</systemitem>)</title>
+
+ <!-- <sect2 xml:id="sec-ssh-sshdserver">
+  <title>The SSH daemon (<systemitem class="daemon">sshd</systemitem>)</title>
 
   <para>
    To work with the SSH client programs <command>ssh</command> and
@@ -611,17 +702,18 @@ cd path                            Change remote directory to 'path'
   </para>
 
   <tip>
-   <title>Viewing the SSH Daemon Log File</title>
+   <title>Viewing the SSH daemon log file</title>
    <para>
     To watch the log entries from the <systemitem
     class="daemon">sshd</systemitem> use the following command:
    </para>
    <screen>&prompt.sudo;journalctl -u sshd</screen>
-  </tip>
+   </tip>
+  </sect2> -->
 
 
   <sect2>
-   <title>Maintaining SSH Keys</title>
+   <title>Maintaining SSH keys</title>
   <para>
    It is recommended to back up the private and public keys stored in
    <filename>/etc/ssh/</filename> in a secure, external location. In this
@@ -630,7 +722,7 @@ cd path                            Change remote directory to 'path'
   </para>
 
   <tip>
-   <title>Existing SSH Host Keys</title>
+   <title>Existing SSH host keys</title>
    <para>
     If you install &productname; on a machine with existing Linux
     installations, the installation routine automatically imports the SSH
@@ -693,7 +785,8 @@ cd path                            Change remote directory to 'path'
      have unique names. A useful convention is to name them with the creation
      date. Remember, a host key must not have a passphrase:
    </para>
-   <screen>&prompt.root;<command>ssh-keygen -t rsa -f ssh_host_rsa_2022-01 -C "main server"</command>
+   <screen>&prompt.root;<command>ssh-keygen -t rsa -f ssh_host_rsa_2022-01 -C
+"main server"</command>
 Generating public/private rsa key pair.
 Enter passphrase (empty for no passphrase):
 Enter same passphrase again:
@@ -714,7 +807,8 @@ The key's randomart image is:
 |       .oo++..   |
 +----[SHA256]-----+
 
-&prompt.root;<command>ssh-keygen -t ed25519 -f ssh_host_ed25519_2022-01 -C "main server"</command>
+&prompt.root;<command>ssh-keygen -t ed25519 -f ssh_host_ed25519_2022-01 -C
+"main server"</command>
 Generating public/private ed25519 key pair.
 Enter passphrase (empty for no passphrase):
 Enter same passphrase again:
@@ -752,7 +846,8 @@ HostKey /etc/ssh/ssh_host_rsa_2022-01
 HostKey /etc/ssh/ssh_host_ed25519_2022-01</screen>
 
     <para>
-      Save your changes, then restart <systemitem class="daemon">sshd</systemitem>:
+      Save your changes, then restart <systemitem
+class="daemon">sshd</systemitem>:
     </para>
     <screen>&prompt.root;<command>systemctl restart sshd.service</command>
     </screen>
@@ -792,7 +887,8 @@ Accept updated hostkeys? (yes/no):</screen>
     </listitem>
     <listitem>
      <para>
-      <link xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
+      <link
+xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
      </para>
     </listitem>
     <listitem>
@@ -802,68 +898,6 @@ Accept updated hostkeys? (yes/no):</screen>
     </listitem>
    </itemizedlist>
   </sect2>
- </sect1>
-
-<sect1 xml:id="sec-ssh-authentic">
-  <title>SSH Authentication Mechanisms</title>
-
-  <para>
-   In its simplest form, authentication is done by entering the user's
-   password just as if logging in locally. However, having to memorize
-   passwords of several users on remote machines is inefficient. What is
-   more, these passwords may change. On the other hand&mdash;when
-   granting &rootuser; access&mdash;an administrator needs to be able
-   to quickly revoke such a permission without having to change the
-   &rootuser; password.
-  </para>
-
-  <para>
-   To accomplish a login that does not require to enter the remote
-   user's password, SSH uses another key pair, which needs to be generated
-   by the user. It consists of a public (<filename>id_rsa.pub</filename> or
-   <filename>id_dsa.pub</filename>) and a private key
-   (<filename>id_rsa</filename> or <filename>id_dsa</filename>).
-  </para>
-
-  <para>
-   To be able to log in without having to specify the remote user's
-   password, the public key of the <quote>SSH user</quote> must be
-   in <filename>~/.ssh/authorized_keys</filename>. This approach also
-   ensures that the remote user has got full control: adding the key
-   requires the remote user's password and removing the key revokes the
-   permission to log in from remote.
-  </para>
-
-  <para>
-   For maximum security such a key should be protected by a passphrase which
-   needs to be entered every time you use <command>ssh</command>,
-   <command>scp</command>, or <command>sftp</command>. Contrary to the
-   simple authentication, this passphrase is independent from the remote
-   user and therefore always the same.
-  </para>
-
-  <para>
-   An alternative to the key-based authentication described above, SSH also
-   offers a host-based authentication. With host-based authentication, users
-   on a trusted host can log in to another host on which this feature is
-   enabled using the same user name. &productname; is set up for using
-   key-based authentication, covering setting up host-based authentication
-   on &productname; is beyond the scope of this manual.
-  </para>
-
-  <note>
-<!-- fix for bug #398647 -->
-   <title>File Permissions for Host-Based Authentication</title>
-   <para>
-    If the host-based authentication is to be used, the file
-    <filename>/usr/lib/ssh/ssh-keysign</filename> should
-    have the setuid bit set, which is not the default setting in
-    &productname;. In such case, set the file permissions manually. You
-    should use <filename>/etc/permissions.local</filename> for this purpose,
-    to make sure that the setuid bit is preserved after security updates of
-    <package>openssh</package>.
-   </para>
-  </note>
 
   <sect2 xml:id="sec-ssh-authentic-gen-key">
    <title>Generating Client and Host SSH keys</title>
@@ -891,7 +925,8 @@ Accept updated hostkeys? (yes/no):</screen>
      SSH keys serve two purposes: authenticating servers with host keys, and
      authenticating clients. Host keys are stored in
      <filename>/etc/ssh</filename>. Client keys are specific to users, and
-     are stored in <filename>/home/<replaceable>user</replaceable>/.ssh</filename>.
+     are stored in
+<filename>/home/<replaceable>user</replaceable>/.ssh</filename>.
    </para>
    <para>
      Host keys must not have passphrases.
@@ -941,21 +976,24 @@ The key's randomart image is:
       <para>
         OpenSSH RSA keys can be a maximum of 16,384 bits. However, longer bit
         lengths are not necessarily more desirable. See the GnuPG FAQ for
-        more information, <link xlink:href="https://www.gnupg.org/faq/gnupg-faq.html#no_default_of_rsa4096"/>.
+        more information, <link
+xlink:href="https://www.gnupg.org/faq/gnupg-faq.html#no_default_of_rsa4096"/>.
       </para>
     </step>
     <step>
       <para>
       Create an RSA key pair with a custom name and a comment:
     </para>
-    <screen>&prompt.user;<command>ssh-keygen -f <replaceable>backup-server-key -C "infrastructure backup server"</replaceable></command>
+    <screen>&prompt.user;<command>ssh-keygen -f <replaceable>backup-server-key
+-C "infrastructure backup server"</replaceable></command>
       </screen>
     </step>
     <step>
      <para>
        Create an Ed25519 key pair with a comment:
      </para>
-     <screen>&prompt.user;<command>ssh-keygen -t ed25519 -f <replaceable>ldap-server-key -C "Internal HTTP server"</replaceable></command>
+     <screen>&prompt.user;<command>ssh-keygen -t ed25519 -f
+<replaceable>ldap-server-key -C "Internal HTTP server"</replaceable></command>
      </screen>
      <para>
        Ed25519 keys are fixed at 256 bits, which is equivalent in
@@ -966,7 +1004,8 @@ The key's randomart image is:
 
     <para>
       Host keys are managed a little differently. A host key must not
-      have a passphrase, and the key pairs are stored in <filename>/etc/ssh</filename>.
+      have a passphrase, and the key pairs are stored in
+<filename>/etc/ssh</filename>.
       OpenSSH automatically generates a set of host keys when it is
       installed, like the following example:
     </para>
@@ -1001,6 +1040,7 @@ total 608
       does not replace existing keys.
     </para>
     <important>
+     <title>Do not use DSA keys</title>
       <para>
         <command>ssh-keygen -A</command> still creates DSA keys, even though
         they have been deprecated as unsafe for several years. In OpenSSH 7.0
@@ -1019,14 +1059,15 @@ total 608
     </para>
     <screen>&prompt.user;<command>cd /etc/ssh</command>
 &prompt.sudo;<command>ssh-keygen -b 4096 -f "ssh_host_rsa_2022_02"</command>
-&prompt.sudo;<command>ssh-keygen -t ed25519 -f "ssh_host_ed25519_2022_02"</command></screen>
+&prompt.sudo;<command>ssh-keygen -t ed25519 -f
+"ssh_host_ed25519_2022_02"</command></screen>
     <para>
       You may name your new keys whatever you want.
     </para>
   </sect2>
 
   <sect2 xml:id="sec-ssh-authentic-key-copy">
-   <title>Copying an SSH Key</title>
+   <title>Copying an SSH key</title>
    <para>
     To copy a public SSH key to <filename>~/.ssh/authorized_keys</filename>
     of a user on a remote machine, use the command
@@ -1042,7 +1083,8 @@ ssh-copy-id -i &exampleuser_plain;@&exampleserver;
 ssh-copy-id -i ~/.ssh/id_dsa.pub  &exampleuser_plain;@&exampleserver;
 
 &prompt.user;<prompt>~notme/.ssh/id_rsa.pub</prompt>
-ssh-copy-id -i ~notme/.ssh/id_rsa.pub  &exampleuser_plain;@&exampleserver;</screen>
+ssh-copy-id -i ~notme/.ssh/id_rsa.pub
+&exampleuser_plain;@&exampleserver;</screen>
    <para>
     To successfully copy the key, you need to enter the remote
     user's password. To remove an existing key, manually edit
@@ -1072,7 +1114,7 @@ ssh-copy-id -i ~notme/.ssh/id_rsa.pub  &exampleuser_plain;@&exampleserver;</scre
     authenticate again.
    </para>
    <sect3 xml:id="sec-ssh-authentic-agent-x">
-    <title>Using <command>ssh-agent</command> in an X Session</title>
+    <title>Using <command>ssh-agent</command> in an X session</title>
     <para>
      On &productname;, the <command>ssh-agent</command> is automatically
      started by the &gnome; display manager. To also invoke
@@ -1091,7 +1133,8 @@ ssh-copy-id -i ~notme/.ssh/id_rsa.pub  &exampleuser_plain;@&exampleserver;</scre
        If it does not exist, use an existing template or copy it from
        <filename>/etc/skel</filename>:
       </para>
-<screen>if [ -f ~/.xinitrc.template ]; then mv ~/.xinitrc.template ~/.xinitrc; \
+<screen>if [ -f ~/.xinitrc.template ]; then mv ~/.xinitrc.template ~/.xinitrc;
+\
 else cp /etc/skel/.xinitrc.template ~/.xinitrc; fi</screen>
      </step>
      <step>
@@ -1113,7 +1156,7 @@ else cp /etc/skel/.xinitrc.template ~/.xinitrc; fi</screen>
     </procedure>
    </sect3>
    <sect3 xml:id="sec-ssh-authentic-agent-terminal">
-    <title>Using <command>ssh-agent</command> in a Terminal Session</title>
+    <title>Using <command>ssh-agent</command> in a terminal session</title>
     <para>
      In a terminal session you need to manually start the
      <command>ssh-agent</command> and then call <command>ssh-add</command>
@@ -1131,78 +1174,10 @@ eval $(ssh-agent)
     </para>
    </sect3>
   </sect2>
-
-<!-- fs 2012-10-02:
-
-     Not sure what to do with this...
-
-    <sect2 id="sec-ssh-authentic-host-based">
-   <title>Host-based Authentication</title>
-   <para></para>
-  </sect2>
--->
  </sect1>
- <sect1 xml:id="sec-ssh-restrict-logins">
-  <title>Restricting SSH Logins</title>
-  <para>
-   The SSH service on a machine can be restricted to allow logins only from a
-   certain IP subnet for a given account. Perform the following steps to
-   configure user remote login restrictions for <command>ssh</command> (<xref
-   linkend="sec-ssh-programm"/>), <command>scp</command> (<xref
-   linkend="sec-ssh-copy"/>), and <command>sftp</command> (<xref
-   linkend="sec-ssh-sftp"/>.
-  </para>
-  <procedure xml:id="pro-ssh-restrict-logins">
-   <!-- cwickert 2021-09-24 following lines are the 'new' format of procedures
-    with title and introduction inside. Commented out for consistency for now.
-   -->
-   <!-- <title>Configuring user remote login restrictions</title>
-   <para>
-    Perform the following steps to configure user remote login restrictions:
-    </para> -->
-   <step>
-    <para>
-     Edit the file <filename>/etc/pam.d/sshd</filename> and append the following
-     at the end of the <literal>auth</literal> block:
-    </para>
-    <screen>auth required pam_access.so</screen>
-   </step>
-   <step>
-    <para>
-     Edit the file <filename>/etc/security/access.conf</filename> to configure
-     individual restrictions. In this example the users &rootuser; and
-     &exampleuser; are restricted to the &exampledomain1ip;.0/&subnetmask;
-     network, while the &exampleuserII; user can only login from within the
-     &exampledomain2ip;.0/&subnetmask; network:
-    </para>
-<screen>
-+ : root : <replaceable>&exampledomain1ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
-+ : &exampleuser_plain; : <replaceable>&exampledomain1ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
-+ : &exampleuserII_plain; : <replaceable>&exampledomain2ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
-- : ALL : ALL</screen>
-   <para>
-    Do not forget the last line which denies access for all other users from all
-    sources, but be careful not to lock yourself out of the system.
-   </para>
-   <para>
-    For more configuration options, refer to the examples in the file and to
-    <command>man access.conf</command>.
-   </para>
-   </step>
-  </procedure>
-  <warning>
-   <title>Do Not Use <command>pam-config</command></title>
-   <para>
-    Do not use the <command>pam-config</command> utility here. It only supports
-    <systemitem>pam_access</systemitem> as a global module. The configuration
-    above is not suitable to be used globally for all services and can
-    completely deny access to the system.
-   </para>
-  </warning>
 
- </sect1>
  <sect1 xml:id="sec-ssh-port-forwarding">
-  <title>Port Forwarding</title>
+  <title>Port forwarding</title>
 
   <para>
    <command>ssh</command> can also be used to redirect TCP/IP connections.
@@ -1242,7 +1217,7 @@ eval $(ssh-agent)
  </sect1>
 
  <sect1 xml:id="sec-ssh-publickey">
-  <title>Adding and Removing Public Keys on an Installed System</title>
+  <title>Adding and removing public keys on an installed system</title>
   <para>
    In some environments, it is convenient or necessary to log in over SSH.
    As such, the user needs to provide a public SSH key. To add or remove
@@ -1285,7 +1260,7 @@ eval $(ssh-agent)
  </sect1>
 
  <sect1 xml:id="sec-security-ssh-moreinfo">
-  <title>For More Information</title>
+  <title>More information</title>
 
   <para/>
 
@@ -1358,14 +1333,15 @@ eval $(ssh-agent)
    </varlistentry>
    <varlistentry>
     <term>
-     <filename>/usr/share/doc/packages/openssh/README.SUSE</filename>
+     <filename>/usr/share/doc/packages/openssh-common/README.SUSE</filename>
     </term>
     <term>
-     <filename>/usr/share/doc/packages/openssh/README.FIPS</filename>
+     <filename>/usr/share/doc/packages/openssh-common/README.FIPS</filename>
     </term>
     <listitem>
      <para>
-      &suse; package specific documentation; changes in defaults with respect to
+      &suse; package specific documentation; changes in defaults with respect
+to
       upstream, notes on FIPS mode etc.
      </para>
     </listitem>
