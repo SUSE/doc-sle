@@ -46,7 +46,7 @@
   </para>
   <para>
    The <package>openssh</package> package installs the server, client,
-   file transfer commands, and helper utilities.
+   file transfer commands, and some utilities.
   </para>
   <para>
    OpenSSH supports several different types of authentication:
@@ -87,9 +87,10 @@
        who gains access to them can easily masquerade as the key owner.
       </para>
       <para>
-       A useful tool is <command>ssh-agent</command> and
-       related utilities for managing passphrase-protected keys. These
-       hold passphrases in memory, and apply them as needed.
+       A useful tool is Keychain, and related utilities, for managing
+       passphrase-protected keys. Keychain hold passphrases in memory for
+       the current session, and applies them as needed. After restart you
+       must enter the passphrases again.
       </para>
      </listitem>
     </varlistentry>
@@ -103,6 +104,24 @@
      </listitem>
     </varlistentry>
    </variablelist>
+
+  <para>
+   When establishing a secure connection with a remote host for the first
+   time, the client stores all public host keys in
+   <filename>~/.ssh/known_hosts</filename>. This prevents any
+   interception attacks, which capture your encryption keys, and then
+   substitute their own. Such attacks are detected either by a
+   host key that is not included in <filename>~/.ssh/known_hosts</filename>,
+   or by the server's inability to decrypt the session key in the absence of
+   an appropriate private counterpart. <!--mutual auth-->
+  </para>
+
+  <para>
+   If the public keys of a host have changed (that needs to be verified
+   before connecting to such a server), the offending keys can be
+   removed with <command>ssh-keygen -r
+   <replaceable>HOSTNAME</replaceable></command>.
+  </para>
 
  <para>
   &productname; installs the OpenSSH package by default, providing the
@@ -385,12 +404,12 @@ MaxAuthTries <replaceable>4</replaceable>
   </sect1>
 
    <sect1 xml:id="sec-ssh-authentic-gen-key">
-   <title>Creating Client and Host SSH keys</title>
+   <title>Creating Client and Host encryption keys</title>
    <para>
      There are several key types to choose from: DSA, RSA, ECDSA, ECDSA-SK,
-     Ed25519, and Ed25519-SK. DSA was deprecated several years, and disabled
-     in OpenSSH 7.0 and should not be used. RSA is the most universal as it
-     is older, and more widely used.
+     Ed25519, and Ed25519-SK. DSA was deprecated several years ago, and was
+     disabled in OpenSSH 7.0 and should not be used. RSA is the most
+     universal as it is older, and more widely used.
    </para>
    <para>
      Ed25519 and ECDSA are stronger and faster. Ed25519 is
@@ -409,8 +428,10 @@ MaxAuthTries <replaceable>4</replaceable>
    <para>
      SSH keys serve two purposes: authenticating servers with host keys, and
      authenticating clients. Host keys are stored in
-     <filename>/etc/ssh</filename>. Client keys are specific to users, and
-     are stored in <filename>/home/<replaceable>user</replaceable>/.ssh</filename>.
+     <filename>/etc/ssh</filename>. Client keys are users' personal keys,
+     and are stored in <filename>/home/<replaceable>user</replaceable>/.ssh</filename>.
+     <filename><replaceable>user</replaceable>/.ssh</filename> is not
+     created when OpenSSH is installed, so the user must create it.
    </para>
    <para>
      Host keys must not have passphrases.
@@ -418,12 +439,14 @@ MaxAuthTries <replaceable>4</replaceable>
    <para>
      In most cases, private client keys should have strong passwords.
    </para>
-   <para>
-     The following procedure shows how to create client keys.
-   </para>
 
-   <procedure xml:id="pro-ssh-key-client">
+   <sect2 xml:id="sec-create-ssh-key-client">
      <title>Creating client SSH key pairs</title>
+      <para>
+       The following procedure shows how to create client encryption keys.
+      </para>
+     <procedure xml:id="pro-create-ssh-client-keys">
+     <title>Creating default and customized keys</title>
     <step>
      <para>
       To generate a client key pair with the default parameters (RSA, 3072
@@ -432,13 +455,12 @@ MaxAuthTries <replaceable>4</replaceable>
      </para>
      <screen>&prompt.user;<command>ssh-keygen</command>
 Generating public/private rsa key pair.
-Enter file in which to save the key (/home/user/.ssh/id_rsa):
 Enter passphrase (empty for no passphrase):
 Enter same passphrase again:
-Your identification has been saved in /home/user/.ssh/id_rsa
-Your public key has been saved in /home/user/.ssh/id_rsa.pub
+Your identification has been saved in id_rsa
+Your public key has been saved in id_rsa.pub
 The key fingerprint is:
-SHA256:z0uJIuc7Doy07bFTe1ppZHLVrkD/bWWlBAF/PcHjblU user@server2
+SHA256:z0uJIuc7Doy07bFTe1ppZHLVrkD/bWWlBAF/PcHjblU user@host2
 The key's randomart image is:
 +---[RSA 3072]----+
 |          ..o... |
@@ -474,7 +496,7 @@ The key's randomart image is:
      <para>
        Create an Ed25519 key pair with a comment:
      </para>
-     <screen>&prompt.user;<command>ssh-keygen -t ed25519 -f <replaceable>ldap-server-key -C "Internal HTTP server"</replaceable></command>
+     <screen>&prompt.user;<command>ssh-keygen -t ed25519 -f <replaceable>ldap-server-key -C "Internal LDAP server"</replaceable></command>
      </screen>
      <para>
        Ed25519 keys are fixed at 256 bits, which is equivalent in
@@ -482,10 +504,14 @@ The key's randomart image is:
      </para>
     </step>
    </procedure>
+  </sect2>
 
+   <sect2 xml:id="sec-create-ssh-host-keys">
+    <title>Creating SSH server host keys</title>
     <para>
       Host keys are managed a little differently. A host key must not
-      have a passphrase, and the key pairs are stored in <filename>/etc/ssh</filename>.
+      have a passphrase, and the key pairs are stored in
+      <filename>/etc/ssh</filename>.
       OpenSSH automatically generates a set of host keys when it is
       installed, like the following example:
     </para>
@@ -522,39 +548,194 @@ total 608
     <important>
      <title>Do not use DSA keys</title>
       <para>
-        <command>ssh-keygen -A</command> still creates DSA keys, even though
+        <command>ssh-keygen -A</command> creates DSA keys, even though
         they have been deprecated as unsafe for several years. In OpenSSH
         7.0 they are still created, but disabled by not being listed in
         <filename>sshd_config</filename>. You may safely delete DSA keys.
       </para>
     </important>
     <para>
-      When you want to rotate host keys, you must create the new keys
-      individually, because they must exist at the same time as your
-      old host keys. Your clients will authenticate with the old keys,
-      and then receive the list of new keys. They need unique names,
-      to not conflict with the old keys. The following example creates new
-      RSA and Ed25519 host keys, labeled with the year and month they were
-      created. Remember, the new host ukeys must not have passphrases:
+     When you want to rotate host keys
+     (see <xref linkend="sec-ssh-sshdserver-rotation"/>), you must create
+     the new keys
+     individually, because they must exist at the same time as your
+     old host keys. Your clients will authenticate with the old keys,
+     and then receive the list of new keys. They need unique names,
+     to not conflict with the old keys. The following example creates new
+     RSA and Ed25519 host keys, labeled with the year and month they were
+     created. Remember, the new host keys must not have passphrases:
     </para>
     <screen>&prompt.user;<command>cd /etc/ssh</command>
-&prompt.sudo;<command>ssh-keygen -b 4096 -f "ssh_host_rsa_2022_02"</command>
-&prompt.sudo;<command>ssh-keygen -t ed25519 -f "ssh_host_ed25519_2022_02"</command></screen>
+&prompt.sudo;<command>ssh-keygen -b 4096 -f "SSH_HOST_RSA_2022_02"</command>
+&prompt.sudo;<command>ssh-keygen -t ed25519 -f "SSH_HOST_ED25519_2022_02"</command></screen>
     <para>
       You may name your new keys whatever you want.
     </para>
+   </sect2>
   </sect1>
+
+   <sect1 xml:id="sec-ssh-sshdserver-rotation">
+   <title>Rotating host keys</title>
+   <para>
+    As of version 6.8, OpenSSH includes a protocol extension that
+    supports host key rotation. Server admins must periodically
+    retire old host keys and create new keys, for example if a key has been
+    compromised, or it is time to upgrade to stronger keys. Before OpenSSH
+    6.8, if <literal>StrictHostKeyChecking</literal>
+    was set to <literal>yes</literal> in <filename>ssh_config</filename>
+    on client machines, clients would see a warning that the host key had
+    changed, and were not allowed to connect. Then the users would have to
+    manually delete the server's public key from their
+    <filename>known_hosts</filename> file, reconnect, and manually accept the
+    new key. Any automated SSH connections, such as scheduled backups, would
+    fail.
+   </para>
+   <para>
+     The new host key rotation scheme provides a method to distribute new
+     keys without service interruptions. When clients connect, the server
+     sends them a list of new keys. Then the next time they log in they are
+     asked if they wish to accept the changes. Give users a few days to
+     connect and receive the new keys, and then remove the old keys. The
+     <filename>known_hosts</filename> files on the clients are automatically
+     updated, with new keys added and the old keys removed.
+   </para>
+    <para>
+      Setting up host key rotations requires creating new keys on the server,
+      some changes to <filename>/etc/ssh/sshd_config</filename> on the
+      server, and to <filename>/etc/ssh/ssh_config</filename> on the clients.
+   </para>
+   <para>
+     First create your new key or keys. The following example creates a new
+     RSA key and a new Ed25519 key, with comments. The new keys must
+     have unique names. A useful convention is to name them with the creation
+     date. Remember, a host key must not have a passphrase:
+   </para>
+   <screen>&prompt.root;<command>ssh-keygen -t rsa -f ssh_host_rsa_2022-01 -C "main server"</command>
+Generating public/private rsa key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ssh_host_rsa_2022-01
+Your public key has been saved in ssh_host_rsa_2022-01.pub
+The key fingerprint is:
+SHA256:F1FIF2aqOz7D3mGdsjzHpH/kjUWZehBN3uG7FM4taAQ main server
+The key's randomart image is:
++---[RSA 3072]----+
+|         .Eo*.oo |
+|          .B .o.o|
+|          o . .++|
+|         . o ooo=|
+|        S . o +*.|
+|         o o.oooo|
+|       .o ++oo.= |
+|       .+=o+o + .|
+|       .oo++..   |
++----[SHA256]-----+
+
+&prompt.root;<command>ssh-keygen -t ed25519 -f ssh_host_ed25519_2022-01 -C "main server"</command>
+Generating public/private ed25519 key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ssh_host_ed25519_2022-01
+Your public key has been saved in ssh_host_ed25519_2022-01.pub
+The key fingerprint is:
+SHA256:2p9K0giXv7WsRnLjwjs4hJ8EFcoX1FWR4nQz6fxnjxg main server
+The key's randomart image is:
++--[ED25519 256]--+
+|   .+o ...o+     |
+| . .... o *      |
+|  o..  o = o     |
+|  ..   .. o      |
+|   o. o S  .     |
+|  . oo.*+   E o  |
+|   + ++==..  = o |
+|    = +oo= o. . .|
+|     ..=+o=      |
++----[SHA256]-----+</screen>
+
+   <para>
+     Record the fingerprints, for users to verify the new keys.
+   </para>
+   <para>
+     Add the new key names to <filename>/etc/ssh/sshd_config</filename>, and
+     uncomment any existing keys that are in use:
+   </para>
+   <screen>## Old keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+
+## New replacement keys
+HostKey /etc/ssh/ssh_host_rsa_2022-01
+HostKey /etc/ssh/ssh_host_ed25519_2022-01</screen>
+
+    <para>
+      Save your changes, then restart <systemitem class="daemon">sshd</systemitem>:
+    </para>
+    <screen>&prompt.root;<command>systemctl restart sshd.service</command>
+    </screen>
+    <para>
+      The <filename>/etc/ssh/ssh_config</filename> file on the clients must
+      include the following settings:
+    </para>
+    <screen>UpdateHostKeys ask
+StrictHostKeyChecking yes</screen>
+    <para>
+      Test connecting from a client by opening an SSH session to the server
+      to receive the new keys list. Log out, then log back in. When you log
+      back in you should see something like the following message:
+    </para>
+    <screen>The server has updated its host keys.
+These changes were verified by the server's existing trusted key.
+Deprecating obsolete hostkey: ED25519
+SHA256:V28d3VpHgjsCoV04RBCZpLo5c0kEslCZDVdIUnCvqPI
+Deprecating obsolete hostkey:
+RSA SHA256:+NR4DVdbsUNsqJPIhISzx+eqD4x/awCCwijZ4a9eP8I
+Accept updated hostkeys? (yes/no):</screen>
+    <para>
+      You may set <literal>UpdateHostKeys ask</literal> to
+      <literal>UpdateHostKeys yes</literal> to apply the changes
+      automatically, and avoid asking users to approve the changes,
+      though asking them to review the changes and compare fingerprints is
+      safer.
+    </para>
+    <para>
+      For more information:
+    </para>
+
+   <itemizedlist>
+    <listitem>
+      <para>
+        <xref linkend="sec-ssh-authentic-gen-key"/>
+      </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+       man 5 ssh_config, man 5 sshd_config
+     </para>
+    </listitem>
+   </itemizedlist>
+ </sect1>
 
   <sect1 xml:id="sec-ssh-public-key-auth">
   <title>Public key authentication</title>
   <para>
-   The following example shows how to create a new personal (or client)
+   Public key authentication uses your own personal identity key to
+   authenticate, rather than a user account password.
+  </para>
+  <para>
+   The following example shows how to create a new personal
    RSA key pair with a comment, so you know what it is for. First change to
-   your ~/.ssh directory, then create the new key pair. Give it a strong
-   passphrase, and write it down in a safe place:
+   your <filename>~/.ssh</filename> directory (or create it if it does not
+   exist), then create the new key pair. Give it a strong passphrase, and
+   write the passphrase in a safe place:
   </para>
   <screen>&prompt.user;<command>cd ~/.ssh</command>
-&prompt.user;<command>ssh-keygen -C <replaceable>"web server1"</replaceable> -f <replaceable>id-web1</replaceable> -t <replaceable>rsa -b 4096</replaceable></command></screen>
+&prompt.user;<command>ssh-keygen -C <replaceable>"web server1"</replaceable> -f <replaceable>id-web1</replaceable> -t rsa -b <replaceable>4096</replaceable></command></screen>
   <para>
    Next, copy your new public key to the machine you want access to. You
    must already have a user account on this machine, and SSH access:
@@ -573,12 +754,32 @@ Have a lot of fun...</screen>
   </para>
   <para>
    To be effective, public key authentication should be enforced on
-   the SSH server, and password authentication not allowed (see
-   <xref linkend="ex-sshd-conf"/>). However,
-   in this case you cannot copy your new public key with
-   <command>ssh-copy-id</command>, and must use other means, such as
-   manually copying it to the <filename>~/.ssh/authorized_keys</filename>
-   file of the remote user.
+   the remote machine, and password authentication not allowed (see
+   <xref linkend="ex-sshd-conf"/>). If you do not have public key
+   authentication access on the remote machine already, you cannot copy your
+   new public key with <command>ssh-copy-id</command>, and must use other
+   means, such as manually copying it from a USB stick to the
+   <filename>~/.ssh/authorized_keys</filename> file of your remote
+   user account. Public keys are plain text, so you can copy them like
+   like any text. This is an example of an Ed25519 public key:
+  </para>
+  <screen>ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGtGHg2xn5KF4+OfejO9Bv+m
+   yRt5gc8/VunbTGB6d6+F shared server1</screen>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-passphrase-less-auth">
+  <title>Passphrase-less public key authentication</title>
+  <para>
+    This is public key authentication without a passphrase. Create
+    your new keys without a passphrase, and then use them the same
+    way as passphrase-protected keys. This is useful for automated services,
+    such as scripts and cron jobs. However, anyone who succeeds in stealing
+    the private key can easily masquerade as you, so you need to be very protective of a passphrase-less private key.
+  </para>
+  <para>
+   An alternative to using keys without passphrases is Keychain, which
+   remembers your private keys for you. You enter your passphrases at
+   system startup, then Keychain remembers them until shutdown.
   </para>
  </sect1>
 
@@ -926,186 +1127,13 @@ cd path                            Change remote directory to 'path'
 
 
   <sect2>
-   <title>Maintaining SSH keys</title>
+   <title>protecting SSH keys</title>
   <para>
    It is recommended to back up the private and public keys stored in
    <filename>/etc/ssh/</filename> in a secure, external location. In this
    way, key modifications can be detected or the old ones can be used again
    after having installed a new system.
   </para>
-
-  <tip>
-   <title>Existing SSH host keys</title>
-   <para>
-    If you install &productname; on a machine with existing Linux
-    installations, the installation routine automatically imports the SSH
-    host key with the most recent access time from an existing installation.
-   </para>
-  </tip>
-
-  <para>
-   When establishing a secure connection with a remote host for the first
-   time, the client stores all public host keys in
-   <filename>~/.ssh/known_hosts</filename>. This prevents any
-   man-in-the-middle attacks&mdash;attempts by foreign SSH servers to use
-   spoofed names and IP addresses. Such attacks are detected either by a
-   host key that is not included in <filename>~/.ssh/known_hosts</filename>,
-   or by the server's inability to decrypt the session key in the absence of
-   an appropriate private counterpart.
-  </para>
-
-  <para>
-   If the public keys of a host have changed (that needs to be verified
-   before connecting to such a server), the offending keys can be
-   removed with <command>ssh-keygen -r
-   <replaceable>HOSTNAME</replaceable></command>.
-  </para>
-  </sect2>
-
-  <sect2 xml:id="sec-ssh-sshdserver-rotation">
-   <title>Rotating host keys</title>
-   <para>
-    As of version 6.8, OpenSSH includes a protocol extension that
-    supports host key rotation. Server admins must periodically
-    retire old host keys and create new keys, for example if a key has been
-    compromised, or it is time to upgrade to stronger keys. Before OpenSSH
-    6.8, if <literal>StrictHostKeyChecking</literal>
-    was set to <literal>yes</literal> in <filename>ssh_config</filename>
-    on client machines, clients would see a warning that the host key had
-    changed, and were not allowed to connect. Then the users would have to
-    manually delete the server's public key from their
-    <filename>known_hosts</filename> file, reconnect, and manually accept the
-    new key. Any automated SSH connections, such as scheduled backups, would
-    fail.
-   </para>
-   <para>
-     The new host key rotation scheme provides a method to distribute new
-     keys without service interruptions. When clients connect, the server
-     sends them a list of new keys. Then the next time they log in they are
-     asked if they wish to accept the changes. Give users a few days to
-     connect and receive the new keys, and then remove the old keys. The
-     <filename>known_hosts</filename> files on the clients are automatically
-     updated, with new keys added and the old keys removed.
-   </para>
-    <para>
-      Setting up host key rotations requires creating new keys on the server,
-      some changes to <filename>/etc/ssh/sshd_config</filename> on the
-      server, and to <filename>/etc/ssh/ssh_config</filename> on the clients.
-   </para>
-   <para>
-     First create your new key or keys. The following example creates a new
-     RSA key and a new Ed25519 key, with comments. The new keys must
-     have unique names. A useful convention is to name them with the creation
-     date. Remember, a host key must not have a passphrase:
-   </para>
-   <screen>&prompt.root;<command>ssh-keygen -t rsa -f ssh_host_rsa_2022-01 -C "main server"</command>
-Generating public/private rsa key pair.
-Enter passphrase (empty for no passphrase):
-Enter same passphrase again:
-Your identification has been saved in ssh_host_rsa_2022-01
-Your public key has been saved in ssh_host_rsa_2022-01.pub
-The key fingerprint is:
-SHA256:F1FIF2aqOz7D3mGdsjzHpH/kjUWZehBN3uG7FM4taAQ main server
-The key's randomart image is:
-+---[RSA 3072]----+
-|         .Eo*.oo |
-|          .B .o.o|
-|          o . .++|
-|         . o ooo=|
-|        S . o +*.|
-|         o o.oooo|
-|       .o ++oo.= |
-|       .+=o+o + .|
-|       .oo++..   |
-+----[SHA256]-----+
-
-&prompt.root;<command>ssh-keygen -t ed25519 -f ssh_host_ed25519_2022-01 -C "main server"</command>
-Generating public/private ed25519 key pair.
-Enter passphrase (empty for no passphrase):
-Enter same passphrase again:
-Your identification has been saved in ssh_host_ed25519_2022-01
-Your public key has been saved in ssh_host_ed25519_2022-01.pub
-The key fingerprint is:
-SHA256:2p9K0giXv7WsRnLjwjs4hJ8EFcoX1FWR4nQz6fxnjxg root@server2
-The key's randomart image is:
-+--[ED25519 256]--+
-|   .+o ...o+     |
-| . .... o *      |
-|  o..  o = o     |
-|  ..   .. o      |
-|   o. o S  .     |
-|  . oo.*+   E o  |
-|   + ++==..  = o |
-|    = +oo= o. . .|
-|     ..=+o=      |
-+----[SHA256]-----+</screen>
-
-   <para>
-     Record the fingerprints, for users to verify the new keys.
-   </para>
-   <para>
-     Add the new key names to <filename>/etc/ssh/sshd_config</filename>, and
-     uncomment any existing keys that are in use:
-   </para>
-   <screen>## Old keys
-HostKey /etc/ssh/ssh_host_rsa_key
-HostKey /etc/ssh/ssh_host_ed25519_key
-HostKey /etc/ssh/ssh_host_ecdsa_key
-
-## New replacement keys
-HostKey /etc/ssh/ssh_host_rsa_2022-01
-HostKey /etc/ssh/ssh_host_ed25519_2022-01</screen>
-
-    <para>
-      Save your changes, then restart <systemitem class="daemon">sshd</systemitem>:
-    </para>
-    <screen>&prompt.root;<command>systemctl restart sshd.service</command>
-    </screen>
-    <para>
-      The <filename>/etc/ssh/ssh_config</filename> file on the clients must
-      include the following settings:
-    </para>
-    <screen>UpdateHostKeys ask
-StrictHostKeyChecking yes</screen>
-    <para>
-      Test connecting from a client by opening an SSH session to the server
-      to receive the new keys list. Log out, then log back in. When you log
-      back in you should see something like the following message:
-    </para>
-    <screen>The server has updated its host keys.
-These changes were verified by the server's existing trusted key.
-Deprecating obsolete hostkey: ED25519
-SHA256:V28d3VpHgjsCoV04RBCZpLo5c0kEslCZDVdIUnCvqPI
-Deprecating obsolete hostkey:
-RSA SHA256:+NR4DVdbsUNsqJPIhISzx+eqD4x/awCCwijZ4a9eP8I
-Accept updated hostkeys? (yes/no):</screen>
-    <para>
-      You may set <literal>UpdateHostKeys ask</literal> to
-      <literal>UpdateHostKeys yes</literal> to apply the changes
-      automatically, and avoid asking the user to approve the changes, though
-      asking them to review the changes and compare fingerprints is safer.
-    </para>
-    <para>
-      For more information:
-    </para>
-
-<itemizedlist>
-    <listitem>
-      <para>
-        <xref linkend="sec-ssh-authentic-gen-key"/>
-      </para>
-    </listitem>
-    <listitem>
-     <para>
-      <link xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-       man 5 ssh_config, man 5 sshd_config
-     </para>
-    </listitem>
-   </itemizedlist>
   </sect2>
 
   <sect2 xml:id="sec-ssh-authentic-agent">
