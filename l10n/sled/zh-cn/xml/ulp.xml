@@ -1,1 +1,118 @@
-../../../../xml/ulp.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="ulp.xml" version="5.0" xml:id="cha-ulp" xml:lang="zh-cn">
+ <title>用户空间在线增补</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    本文档介绍用户空间在线增补的基本原理和用法。
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec-ulp">
+  <title>关于用户空间在线增补</title>
+
+  <para>
+   用户空间在线增补 (ULP) 是指在不中断正在运行的进程的情况下将补丁应用到该进程所使用的库的过程。在线增补操作使用作为 <systemitem>libpulp</systemitem> 的一部分的 <systemitem>ulp</systemitem> 工具来执行。
+  </para>
+
+  <para>
+   <systemitem>libpulp</systemitem> 是可实现用户空间在线增补的框架。它由 <systemitem>libpulp.so</systemitem> 库和用于使库可在线增补以及应用在线补丁的工具（<systemitem>ulp</systemitem> 二进制文件）组成。
+  </para>
+
+  <sect2 xml:id="sec-ulp-prereqs">
+   <title>先决条件</title>
+   <para>
+    要使 ULP 正常工作，必须满足两个要求。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      要使库可在线增补，必须使用 <option>-fpatchable-function-entry</option> GCC 标志编译库。不需要更改库源代码。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      进程必须预装载 <systemitem>libpulp.so</systemitem> 库。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="sec-ulp-libpulp">
+   <title>使用 libpulp</title>
+   <para>
+    要对应用程序使用 <systemitem>libpulp</systemitem>，必须执行以下步骤：
+   </para>
+   <orderedlist>
+    <listitem>
+     <para>
+      使库可在线增补。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      启动应用程序时，使用以下命令预装载 <systemitem>libpulp</systemitem>：<command>LD_PRELOAD=/usr/lib64/libpulp.so ./<replaceable>APPLICATION</replaceable></command>。
+     </para>
+    </listitem>
+   </orderedlist>
+   <sect3 xml:id="sec-ulp-prep-lib">
+    <title>准备可在线增补的库</title>
+    <para>
+     为了使库能够在线增补，它必须在所有函数调用中包含 <literal>NOP</literal> 序言。GCC 版本 8 及更高版本以及 SUSE Linux Enterprise Server 随附的 GCC 版本专门为此提供了 <option>-fpatchable-function-entry</option>。因此，在 AMD64/Intel 64 体系结构上，使用 <option>-fpatchable-function-entry=16,14</option> 标志编译一个用 C 编写的库就足以使该库可在线增补。
+    </para>
+    <para>
+     Glibc、libssl.so.1.1 和 libcrypto.so.1.1 库原本就可在 SUSE Linux Enterprise 15 SP4 上在线增补。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-ulp-livepatch-check">
+    <title>检查库是否可在线增补</title>
+    <para>
+     要检查库是否可在线增补，请使用以下命令：
+    </para>
+<screen>ulp livepatchable <replaceable>LIBRARY</replaceable></screen>
+   </sect3>
+   <sect3 xml:id="sec-ulp-apply-livepatch">
+    <title>应用在线补丁</title>
+    <para>
+     可以使用 <systemitem>ulp trigger</systemitem> 命令应用在线补丁，例如：
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.ulp</screen>
+    <para>
+     在此示例中，<literal>PID</literal> 是正在运行的进程的 PID，该进程使用的库要进行增补，<literal>LIVEPATCH.ulp</literal> 是实际的在线补丁文件。
+    </para>
+    <para>
+     <literal>live patching succeeded</literal> 消息表示在线增补操作成功。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-ulp-revert-livepatch">
+    <title>还原在线补丁</title>
+    <para>
+     <command>ulp trigger</command> 可用于还原在线补丁。可以通过两种方法还原在线补丁。您可以通过应用相应的 <filename>.rev</filename> 补丁来还原在线补丁：
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.rev</screen>
+    <para>
+     或者，可以去除与特定库关联的所有补丁。例如：
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable> --revert-all=<replaceable>LIBRARY</replaceable></screen>
+    <para>
+     在上面的示例中，<replaceable>LIBRARY</replaceable> 指的是实际的库，例如：<systemitem>libcrypto.so.1.1</systemitem>。
+    </para>
+    <para>
+     当原始在线补丁的源代码不可用时，或者当您希望去除特定的旧补丁并应用新补丁，但又不想让目标应用程序运行可能不安全的代码时，后一种方法可能很有用。例如：
+    </para>
+<screen>ulp trigger -p <replaceable>PID</replaceable>  --revert-all=libcrypto.so.1.1 new_livepatch2.ulp</screen>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-ulp-info">
+  <title>更多信息</title>
+
+  <para>
+   项目的 <link xlink:href="https://github.com/SUSE/libpulp">Git 储存库</link>中提供了有关 <systemitem>libpulp</systemitem> 的更多信息。
+  </para>
+ </sect1>
+</chapter>
