@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE appendix
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="pv-to-fv">
+ <title>&xen;: converting a paravirtual (PV) guest into a fully virtual (FV/HVM) guest</title>
+ <para>
+  This chapter explains how to convert a &xen; paravirtual machine into a &xen;
+  fully virtualized machine.
+ </para>
+ <procedure>
+  <title>Guest side</title>
+  <para>
+   In order to start the guest in FV mode, you need to run the following steps
+   inside the guest.
+  </para>
+  <step>
+   <para>
+    Prior to converting the guest, apply all pending patches and reboot the
+    guest.
+   </para>
+  </step>
+  <step>
+   <para>
+    FV machines use the <literal>-default</literal> kernel. If this kernel is
+    not already installed, install the <literal>kernel-default</literal>
+    package (while running in PV mode).
+   </para>
+  </step>
+  <step>
+   <para>
+    PV machines typically use disk names such as <literal>vda*</literal>. These
+    names must be changed to the FV <literal>hd*</literal> syntax. This change
+    must be done in the following files:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      <filename>/etc/fstab</filename>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <filename>/boot/grub/menu.lst</filename> (&slsa; 11 only)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <filename>/boot/grub*/device.map</filename>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <filename>/etc/sysconfig/bootloader</filename>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <filename>/etc/default/grub</filename> (&slsa; 12 and 15 only)
+     </para>
+    </listitem>
+   </itemizedlist>
+   <note>
+    <title>Prefer UUIDs</title>
+    <para>
+     You should use UUIDs or logical volumes within your
+     <filename>/etc/fstab</filename>. Using UUIDs simplifies the use of attached
+     network storage, multipathing, and virtualization. To find the UUID of
+     your disk, use the command <command>blkid</command>.
+    </para>
+   </note>
+  </step>
+  <step>
+   <para>
+    To avoid any error regenerating the <filename>initrd</filename> with the required modules, you
+    can create a symbolic link from <filename>/dev/hda2</filename> to
+    <filename>/dev/xvda2</filename> etc. by using the <command>ln</command>:
+   </para>
+<screen>ln -sf /dev/xvda2 /dev/hda2
+ln -sf /dev/xvda1 /dev/hda1
+.....</screen>
+  </step>
+  <step>
+   <para>
+    PV and FV machines use different disk and network driver modules. These FV
+    modules must be added to the initrd manually. The expected modules are
+    <literal>xen-vbd</literal> (for disk) and <literal>xen-vnif</literal> (for
+    network). These are the only PV drivers for a fully virtualized &vmguest;.
+    All other modules, such as <literal>ata_piix</literal>,
+    <literal>ata_generic</literal> and <literal>libata</literal>, should be
+    added automatically.
+   </para>
+   <tip>
+    <title>Adding modules to the initrd</title>
+    <itemizedlist>
+     <listitem>
+      <para>
+       On &slsa; 11, you can add modules to the
+       <literal>INITRD_MODULES</literal> line in the
+       <filename>/etc/sysconfig/kernel</filename> file. For example:
+      </para>
+<screen>INITRD_MODULES="xen-vbd xen-vnif"</screen>
+      <para>
+       Run <command>dracut</command> to build a new initrd containing the
+       modules.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       On &slsa; 12 and 15, open or create
+       <filename>/etc/dracut.conf.d/10-virt.conf</filename> and add the modules
+       with <literal>force_drivers</literal> by adding a line as in the example
+       below (mind the leading whitespace):
+      </para>
+<screen>force_drivers+=" xen-vbd xen-vnif"</screen>
+      <para>
+       Run <command>dracut -f --kver
+       <replaceable>KERNEL_VERSION</replaceable>-default</command> to build a
+       new initrd (for the default version of the kernel) that contains the
+       required modules.
+      </para>
+      <note>
+       <title>Find your kernel version</title>
+       <para>
+        Use the <command>uname -r</command> command to get the current version
+        used on your system.
+       </para>
+      </note>
+     </listitem>
+    </itemizedlist>
+   </tip>
+  </step>
+  <step>
+   <para>
+    Before shutting down the guest, set the default boot parameter to the
+    <literal>-default</literal> kernel using <command>yast
+    bootloader</command>.
+   </para>
+  </step>
+  <step>
+   <para>
+    Under &productname; 11, if you have an X server running on your guest, you
+    need to adjust the <filename>/etc/X11/xorg.conf</filename> file in order to
+    adjust the X driver. Search for <literal>fbdev</literal> and change to
+    <literal>cirrus</literal>.
+   </para>
+<screen>Section "Device"
+          Driver       "cirrus"
+          ......
+          EndSection</screen>
+   <note>
+    <title>&productname; 12/15 and Xorg</title>
+    <para>
+     Under &productname; 12/15, Xorg will automatically adjust the driver
+     needed to be able to get a working X server.
+    </para>
+   </note>
+  </step>
+  <step>
+   <para>
+    Shut down the guest.
+   </para>
+  </step>
+ </procedure>
+ <procedure>
+  <title>Host side</title>
+  <para>
+   The following steps explain the action that you need to perform on the host.
+  </para>
+  <step>
+   <para>
+    To start the guest in FV mode, the configuration of the VM must be modified
+    to match an FV configuration. Editing the configuration of the VM can
+    easily be done using <command>virsh edit [DOMAIN]</command>. The following
+    changes are recommended:
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      Make sure the machine, the type, and the <literal>loader</literal> entries
+      in the OS section are changed from <literal>xenpv</literal> to
+      <literal>xenfv</literal>. The updated OS section should look similar to:
+     </para>
+<screen>&lt;os&gt;
+          &lt;type arch='x86_64' machine='xenfv'&gt;hvm&lt;/type&gt;
+          &lt;loader&gt;/usr/lib/xen/boot/hvmloader&lt;/loader&gt;
+          &lt;boot dev='hd'/&gt;
+&lt;/os&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      In the OS section, remove anything that is specific to PV guests:
+     </para>
+     <itemizedlist>
+      <listitem>
+<screen>&lt;bootloader&gt;pygrub&lt;/bootloader&gt;</screen>
+      </listitem>
+      <listitem>
+<screen>&lt;kernel&gt;/usr/lib/grub2/x86_64-xen/grub.xen&lt;/kernel&gt;</screen>
+      </listitem>
+      <listitem>
+<screen>&lt;cmdline&gt;xen-fbfront.video=4,1024,768&lt;/cmdline&gt;</screen>
+      </listitem>
+     </itemizedlist>
+    </listitem>
+    <listitem>
+     <para>
+      In the devices section, add the qemu emulator as:
+     </para>
+<screen>&lt;emulator&gt;/usr/lib/xen/bin/qemu-system-i386&lt;/emulator&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      Update the disk configuration so the target device and bus use the FV
+      syntax. This requires replacing the <literal>xen</literal> disk bus with
+      <literal>ide</literal>, and the <literal>vda</literal> target device with
+      <literal>hda</literal>. The changes should look similar to:
+     </para>
+<screen>&lt;target dev='hda' bus='ide'/&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      Change the bus for the mouse and keyboard from <literal>xen</literal> to
+      <literal>ps2</literal>. Also add a new USB tablet device:
+     </para>
+<screen>&lt;input type='mouse' bus='ps2'/&gt;
+          &lt;input type='keyboard' bus='ps2'/&gt;
+&lt;input type='tablet' bus='usb'/&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      Change the console target type from <literal>xen</literal> to
+      <literal>serial</literal>:
+     </para>
+<screen>&lt;console type='pty'&gt;
+          &lt;target type='serial' port='0'/&gt;
+&lt;/console&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      Change the video configuration from <literal>xen</literal> to
+      <literal>cirrus</literal>, with 8&nbsp;MB of VRAM:
+     </para>
+<screen>&lt;video&gt;
+          &lt;model type='cirrus' vram='8192' heads='1' primary='yes'/&gt;
+&lt;/video&gt;</screen>
+    </listitem>
+    <listitem>
+     <para>
+      If desired, add <literal>acpi</literal> and <literal>apic</literal> to
+      the features of the VM:
+     </para>
+<screen>&lt;features&gt;
+          &lt;acpi/&gt;
+          &lt;apic/&gt;
+&lt;/features&gt;</screen>
+    </listitem>
+   </itemizedlist>
+  </step>
+  <step>
+   <para>
+    Start the guest (using <command>virsh</command> or
+    <command>virt-manager</command>). If the guest is running kernel-default
+    (as verified through <command>uname -a</command>), the machine is running
+    in Fully Virtual mode.
+   </para>
+  </step>
+ </procedure>
+ <note>
+  <title>guestfs-tools</title>
+  <para>
+   To script this process, or work on disk images directly, you can use the
+   guestfs-tools suite (see <xref linkend="sec-guestfs-tools"/> for more
+   information). Numerous tools exist there to help modify disk images.
+  </para>
+ </note>
+</chapter>

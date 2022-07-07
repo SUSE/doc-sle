@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<chapter version="5.0" xml:id="cha-images-combustion"
+ xmlns="http://docbook.org/ns/docbook"
+ xmlns:xi="http://www.w3.org/2001/XInclude"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+ <title>Configuring with Combustion</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    This chapter describes Combustion&dash;the tool used to configure your
+    system on first boot according to your configuration.
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec-about-combustion">
+  <title>About Combustion</title>
+
+  <para>
+   Combustion is a dracut module that enables you to configure your system on
+   its first boot. Combustion reads a provided file, called
+   <filename>script</filename> and executes commands in it and thus perform
+   changes to the file system. You can use Combustion to change the default
+   partitions, set users' passwords, create files, install packages, etc.
+  </para>
+
+  <para>
+   The Combustion dracut module is invoked after the
+   <literal>ignition.firstboot</literal> argument is passed to the kernel
+   command line. Combustion then reads configuration from
+   <filename>script</filename>. Combustion tries to configure network, if the
+   network flag has been found in <filename>script</filename>. After
+   <literal>/sysroot</literal> is mounted, Combustion tries to activate all
+   mount points in <filename>/etc/fstab</filename> and then call
+   <command>transactional-update</command> to apply other changes (like setting
+   &rootuser; password or installing packages).
+  </para>
+
+  <para>
+   When using Combustion, you need to label the configuration device with the
+   name <literal>combustion</literal>, create a specific directory structure in
+   that configuration medium, and include a configuration file named
+   <filename>script</filename>. In the root directory of the configuration
+   medium, create a directory called <filename>combustion</filename> and place
+   the <filename>script</filename> into this directory along with other
+   files&mdash;SSH key, configuration files, etc. The directory structure then
+   should look as follows:
+  </para>
+
+<screen>
+&lt;root directory&gt;
+└── combustion
+    └── script
+    └── other files
+
+	</screen>
+
+  <para>
+   You can use Combustion to configure your QEMU/KVM virtual machine. In this
+   case, pass the location of the <filename>script</filename> file using the
+   <literal>fw_cfg</literal> parameter of the <command>qemu</command> command:
+  </para>
+
+<screen>
+	-fw_cfg name=opt/org.opensuse.combustion/script,file=/var/combustion-script
+	</screen>
+
+  <para>
+   Combustion can be used along with Ignition. If you intend to do so, label
+   your configuration medium <literal>ignition</literal> and include the
+   <filename>ignition</filename> directory with the
+   <filename>config.ign</filename> to your directory structure as shown below:
+  </para>
+
+<screen>
+&lt;root directory&gt;
+└── combustion
+    └── script
+    └── other files
+└── ignition 
+    └── config.ign
+	</screen>
+
+  <para>
+   In this scenario, Ignition runs before Combustion.
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-combustion-script">
+  <title>The <filename>script</filename> configuration file</title>
+
+  <para>
+   The <filename>script</filename> configuration file is a set of commands that
+   are executed on your system in a transactional-update shell. This section
+   provides examples for performing various configuration tasks by using
+   Combustion.
+  </para>
+
+  <important>
+   <title>Include interpreter declaration</title>
+   <para>
+    As the <filename>script</filename> file is interpreted by bash, make sure
+    to start the file with the interpreter declaration at the first line:
+   </para>
+<screen>
+ #!/bin/bash
+ </screen>
+  </important>
+
+  <para>
+   If you want to log in to your system, include at least the &rootuser;
+   password. Though it is recommend to establish the authentication using SSH
+   keys. If you need to use a &rootuser; password, make sure to configure a
+   secure password. In case you use a randomly generated password, use at least
+   10 characters. If you create your password manually, use even more than 10
+   characters and combine uppercase and lowercase letters, and numbers.
+  </para>
+
+  <sect2 xml:id="sec-script-network">
+   <title>Network configuration</title>
+   <para>
+    To configure and use network connection during the first boot, add the
+    following statement to your <filename>script</filename>:
+   </para>
+<screen>
+ # combustion: network
+ </screen>
+   <para>
+    Using this statement will pass the <literal>rd.neednet=1</literal> argument
+    to dracut. If you do not use the statement, the system will be configured
+    without any network connection.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-script-partitioning">
+   <title>Partitioning</title>
+   <para>
+    &slema; raw images are delivered with a default partitioning scheme as
+    described in <xref linkend="sec-default-partitioning"/>. You might want to
+    use a different partitioning. The following set of example snippets moves the
+    <filename>/home</filename> to a different partition.
+   </para>
+   <note>
+    <title>Performing changes outside of directories included in snapshots</title>
+    <para>
+     The following script performs changes that are not included in snapshots.
+     If the script fails and the snapshot get discarded, some changes remains
+     visible and cannot be reverted (like the changes to the
+     <literal>/dev/vdb</literal> device.)
+    </para>
+   </note>
+   <para>
+    The following snippet creates a GPT with a single partition on the
+    <literal>/dev/vdb</literal> device:
+   </para>
+<screen>
+sfdisk /dev/vdb &lt;&lt;EOF
+label: gpt
+type=linux
+EOF 
+
+partition=/dev/vdb1
+   </screen>
+   <para>
+    The partition is formatted to BTRFS:
+   </para>
+<screen>
+wipefs --all ${partition}
+mkfs.btrfs ${partition} 
+   </screen>
+   <para>
+    Possible content of <filename>/home</filename> is moved to the new
+    <filename>/home</filename> folder location by the following snippet:
+   </para>
+<screen>
+mount /home
+mount ${partition} /mnt 
+rsync -aAXP /home/ /mnt/
+umount /home /mnt
+   </screen>
+   <para>
+    The snippet below removes an old entry in <filename>/etc/fstab</filename>
+    and creates a new entry:
+   </para>
+<screen>
+awk -i inplace '$2 != "/home"' /etc/fstab
+echo "$(blkid -o export ${partition} | grep ^UUID=) /home btrfs defaults 0 0" >>/etc/fstab
+   </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-cript-security">
+   <title>Setting a password for &rootuser;</title>
+   <para>
+    Before you set the &rootuser; password, generate a hash of the password,
+    e.g. by using the <command>openssl passwd -6</command>. To set the
+    password, add the following to your <filename>script</filename>:
+   </para>
+<screen>
+ echo 'root:$5$.wn2BZHlEJ5R3B1C$TAHEchlU.h2tvfOpOki54NaHpGYKwdNhjaBuSpDotD7' | chpasswd -e
+ </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-script-sshkeys">
+   <title>Adding SSH keys</title>
+   <para>
+    The following snippet creates a directory to store the &rootuser;'s SSH key
+    and then copies the public SSH key located on the configuration device to
+    the <filename>authorized_keys</filename> file.
+   </para>
+<screen>
+ mkdir -pm700 /root/.ssh/
+cat id_rsa_new.pub >> /root/.ssh/authorized_keys
+ </screen>
+   <note>
+    <para>
+     The SSH service must be enabled in case you need to use remote login via
+     SSH. For details, refer to <xref linkend="sec-script-services"/>.
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-script-services">
+   <title>Enabling services</title>
+   <para>
+    You may need to enable some services, for example the SSH service. To
+    enable the SSH service add the following line to
+    <filename>script</filename>:
+   </para>
+<screen>
+ systemctl enable sshd.service
+ </screen>
+  </sect2>
+
+  <sect2 xml:id="sec-script-install">
+   <title>Installing packages</title>
+   <important>
+    <title>Network connection and registering your system might be necessary</title>
+    <para>
+     As some package may require additional subscription, you might need to
+     register your system beforehand. Also available network connection may be
+     needed to install additional packages.
+    </para>
+   </important>
+   <para>
+    During the first boot configuration, you can install additional packages to
+    your system. For example, you can install the <literal>vim</literal> editor
+    by adding:
+   </para>
+<screen>
+zypper --non-interactive install vim-small
+ </screen>
+   <note>
+    <para>
+     Bear in mind that you will not be able to use <command>zypper</command>
+     after the configuration is complete and you boot to the configured system.
+     To perform changes later, you must use the
+     <command>transactional-update</command> command to create a changed
+     snapshot. For details, refer to <xref linkend="sec-transactional-udate"/>.
+    </para>
+   </note>
+  </sect2>
+ </sect1>
+</chapter>

@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE sect1
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+
+<sect1 xmlns="http://docbook.org/ns/docbook" 
+       xmlns:xi="http://www.w3.org/2001/XInclude" 
+       xmlns:xlink="http://www.w3.org/1999/xlink" 
+       version="5.0" 
+       xml:id="sec-security-ldap-migrate">
+
+  <title>Migrating to &ds389; from OpenLDAP</title>
+   <para>
+     OpenLDAP is deprecated<phrase os="sles;sled"> and no longer supported as of
+     &sle; 15&nbsp;SP3</phrase>.
+     It has been replaced by &ds389;. &suse; provides the
+     <command>openldap_to_ds</command> utility to assist with migration, included
+     in the <package>389-ds</package> package.
+   </para>
+   <para>
+     The <command>openldap_to_ds</command> utility is designed to automate as
+     much of the migration as possible. However, every LDAP deployment is
+     different, and it is not possible to write a tool that satisfies all
+     situations. It is likely there will be some manual steps to perform, and
+     you should test your migration procedure thoroughly before attempting a
+     production migration.
+   </para>
+
+  <sect2 xml:id="sec-security-ldap-migrate-test">
+  <title>Testing migration from OpenLDAP</title>
+   <para>
+     There are enough differences between OpenLDAP and &ds389; that
+     migration will probably involve repeated testing and adjustments.
+     It can be helpful to do a quick migration test to get an idea of what
+     steps will be necessary for a successful migration.
+   </para>
+   <para>
+     Prerequisites:
+   </para>
+   <itemizedlist>
+    <listitem>
+      <para>
+        A running &ds389; instance.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+       An OpenLDAP <filename>slapd</filename> configuration file or directory
+       in dynamic ldif format.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+        An ldif file backup of your OpenLDAP database.
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+     If your slapd configuration is not in dynamic ldif format, create a
+     dynamic copy with <command>slaptest</command>. Create a
+     <filename>slapd.d</filename> directory, for example 
+     <filename>/root/slapd.d/</filename>, then run the following command:
+   </para>
+   <screen>&prompt.sudo;<command>slaptest -f /etc/openldap/slapd.conf -F /root/slapd.d</command>
+     </screen>
+     <para>
+       This results in several files similar to the following example:
+     </para>
+     <screen>&prompt.sudo;<command>ls /root/slapd.d/*</command>
+
+/root/slapd.d/cn=config.ldif
+
+/root/slapd.d/cn=config:
+cn=module{0}.ldif  cn=schema.ldif                 olcDatabase={0}config.ldif
+cn=schema          olcDatabase={-1}frontend.ldif  olcDatabase={1}mdb.ldif
+</screen>
+   <para>
+     Create one ldif file per suffix. In the following examples, the suffix
+     is 
+     dc=<replaceable>LDAP1</replaceable>,dc=<replaceable>COM</replaceable>. If you are using the
+     <filename>/etc/openldap/slapd.conf</filename>
+     format, use the following command to create the ldif backup file:
+   </para>
+   <screen>
+&prompt.sudo;<command>slapcat -f /etc/openldap/slapd.conf -b dc=<replaceable>LDAP1</replaceable>,dc=<replaceable>COM</replaceable></command> \
+<command>-l <replaceable>/root/LDAP1-COM</replaceable>.ldif</command>
+   </screen>
+   <para>
+     Use <command>openldap_to_ds</command> to analyze the configuration and
+     files, and show a migration plan without changing anything:
+   </para>
+   <screen>&prompt.sudo;<command>openldap_to_ds <replaceable>LDAP1</replaceable></command>\
+<command>/root/slapd.d <replaceable>/root/LDAP1-COM</replaceable>.ldif.ldif</command></screen>
+   <para>
+     This performs a dry run and does not change anything. The output looks
+     like this:
+   </para>
+   <screen>Examining OpenLDAP Configuration ...
+Completed OpenLDAP Configuration Parsing.
+Examining Ldifs ...
+Completed Ldif Metadata Parsing.
+The following migration steps will be performed:
+ * Schema Skip Unsupported Attribute -> otherMailbox (0.9.2342.19200300.100.1.22)
+ * Schema Skip Unsupported Attribute -> dSAQuality (0.9.2342.19200300.100.1.49)
+ * Schema Skip Unsupported Attribute -> singleLevelQuality (0.9.2342.19200300.100.1.50)
+ * Schema Skip Unsupported Attribute -> subtreeMinimumQuality (0.9.2342.19200300.100.1.51)
+ * Schema Skip Unsupported Attribute -> subtreeMaximumQuality (0.9.2342.19200300.100.1.52)
+ * Schema Create Attribute -> suseDefaultBase (SUSE.YaST.ModuleConfig.Attr:2)
+ * Schema Create Attribute -> suseNextUniqueId (SUSE.YaST.ModuleConfig.Attr:3)
+[...]
+ * Schema Create ObjectClass -> suseDhcpConfiguration (SUSE.YaST.ModuleConfig.OC:10)
+ * Schema Create ObjectClass -> suseMailConfiguration (SUSE.YaST.ModuleConfig.OC:11)
+ * Database Reindex -> dc=example,dc=com
+ * Database Import Ldif -> dc=example,dc=com from example.ldif - 
+excluding entry attributes = [{'structuralobjectclass', 'entrycsn'}]
+No actions taken. To apply migration plan, use '--confirm'
+</screen>
+   <para>
+     The following example performs the migration, and the output looks
+     different from the dry run:
+   </para>
+   <screen>&prompt.sudo;<command>openldap_to_ds <replaceable>LDAP1</replaceable> /root/slapd.d <replaceable>/root/LDAP1-COM</replaceable>.ldif --confirm</command>
+Starting Migration ... This may take some time ...
+migration: 1 / 40 complete ...
+migration: 2 / 40 complete ...
+migration: 3 / 40 complete ...
+[...]
+Index task index_all_05252021_120216 completed successfully
+post: 39 / 40 complete ...
+post: 40 / 40 complete ...
+🎉 Migration complete!
+----------------------
+You should now review your instance configuration and data:
+ * [ ] - Create/Migrate Database Access Controls (ACI)
+ * [ ] - Enable and Verify TLS (LDAPS) Operation
+ * [ ] - Schedule Automatic Backups
+ * [ ] - Verify Accounts Can Bind Correctly
+ * [ ] - Review Schema Inconistent ObjectClass -> pilotOrganization (0.9.2342.19200300.100.4.20)
+ * [ ] - Review Database Imported Content is Correct -> dc=ldap1,dc=com
+</screen>
+
+   <para>
+     When the migration is complete, <command>openldap_to_ds</command>
+     creates a checklist of post-migration tasks that must be completed.
+     It is a best practice to document all of your post-migration steps,
+     so that you can reproduce them in your post-production procedures.
+     Then test clients and application integrations to the migrated &ds389;
+     instance.
+   </para>
+   <important>
+     <title>Develop a rollback plan</title>
+     <para>
+       It is essential to develop a rollback plan in case of any failures.
+       This plan should define a successful migration, the tests to determine
+       what worked and what needs to be fixed, which steps are critical, what
+       can be deferred until later, how to decide when to undo any changes,
+       how to undo them with minimal disruption, and which other teams need to be involved.
+     </para>
+   </important>
+   <para>
+     Due to the variability of deployments, it is difficult to provide
+     a recipe for a successful production migration. Once you have
+     thoroughly tested the migration process and verified that you will
+     get good results, there are some general steps that will help:
+   </para>
+   <itemizedlist>
+    <listitem>
+      <para>
+        Lower all hostname/DNS TTLs to 5 minutes 48 hours before the change, to 
+        allow a fast rollback to your existing OpenLDAP deployment.
+      </para>
+    </listitem>
+    <listitem>
+      <para>
+        Pause all data synchronization and incoming data processes, so that data 
+        in the OpenLDAP environment does not change during the migration process.
+      </para>
+    </listitem>
+    <listitem>
+      <para>
+        Have all &ds389; hosts ready for deployment before the migration.
+      </para>
+    </listitem>
+    <listitem>
+      <para>
+        Have your test migration documentation readily available.
+      </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ <sect2 xml:id="sec-security-ldap-migrate-plan">
+  <title>Planning your migration</title>
+  <para>
+   As OpenLDAP is a <quote>box of parts</quote> and highly customizable, it is
+   not possible to prescribe a <quote>one size fits all</quote> migration.
+   It is necessary to assess your
+   current environment and configuration with OpenLDAP and other integrations.
+   This includes, and is not limited to:
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     Replication topology
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     High availability and load balancer configurations
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     External data flows (IGA, HR, AD, etc.)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Configured overlays (plug-ins in &ds389;)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Client configuration and expected server features
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Customized schema
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     TLS configuration
+    </para>
+   </listitem>
+  </itemizedlist>
+  <para>
+   Plan what your &ds389; deployment will look like in the end. This includes
+   the same list, except replace overlays with plugins. Once you have assessed
+   your current environment, and planned what your &ds389; environment will
+   look like, you can then form a migration plan. We recommended to build
+   the &ds389; environment in parallel to your OpenLDAP environment to allow
+   switching between them.
+  </para>
+  <para>
+   Migrating from OpenLDAP to &ds389; is a one-way migration. There are enough
+   differences between the two that they cannot interoperate, and there is not
+   a migration path from &ds389; to OpenLDAP. The following table highlights
+   the major similarities and differences.
+  </para>
+  <informaltable>
+   <tgroup cols="4">
+    <thead>
+     <row>
+      <entry>Feature</entry>
+      <entry>OpenLDAP</entry>
+      <entry>&ds389;</entry>
+      <entry>Compatible</entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>Two-way replication</entry>
+      <entry>SyncREPL</entry>
+      <entry>&ds389a;-specific system</entry>
+      <entry>No</entry>
+     </row>
+     <row>
+      <entry>MemberOf</entry>
+      <entry>Overlay</entry>
+      <entry>Plug-in</entry>
+      <entry>Yes, simple configurations only</entry>
+     </row>
+     <row>
+      <entry>External Auth</entry>
+      <entry>Proxy</entry>
+      <entry>-</entry>
+      <entry>No</entry>
+     </row>
+     <row>
+      <entry>Active Directory Synchronization</entry>
+      <entry>-</entry>
+      <entry>Winsync Plug-in</entry>
+      <entry>No</entry>
+     </row>
+     <row>
+      <entry>Inbuilt Schema</entry>
+      <entry>OLDAP Schemas</entry>
+      <entry>389 Schemas</entry>
+      <entry>Yes, supported by migration tool</entry>
+     </row>
+     <row>
+      <entry>Custom Schema</entry>
+      <entry>OLDAP Schemas</entry>
+      <entry>389 Schemas</entry>
+      <entry>Yes, supported by migration tool</entry>
+     </row>
+     <row>
+      <entry>Database Import</entry>
+      <entry>LDIF</entry>
+      <entry>LDIF</entry>
+      <entry>Yes, supported by migration tool</entry>
+     </row>
+     <row>
+      <entry>Password hashes</entry>
+      <entry>Varies</entry>
+      <entry>Varies</entry>
+      <entry>Yes, all formats supported excluding Argon2</entry>
+     </row>
+     <row>
+      <entry>OpenLDAP to &ds389a; replication</entry>
+      <entry>-</entry>
+      <entry>-</entry>
+      <entry>No mechanism to replicate to &ds389a; is possible</entry>
+     </row>
+     <row>
+      <entry>Time-based one-time password (TOTP)</entry>
+      <entry>TOTP overlay</entry>
+      <entry>-</entry>
+      <entry>No, currently not supported</entry>
+     </row>
+     <row>
+      <entry>entryUUID</entry>
+      <entry>Part of OpenLDAP</entry>
+      <entry>Plug-in</entry>
+      <entry>Yes</entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </informaltable>
+ </sect2>
+</sect1>

@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE sect1
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<sect1 xmlns="http://docbook.org/ns/docbook" 
+       xmlns:xi="http://www.w3.org/2001/XInclude" 
+       xmlns:xlink="http://www.w3.org/1999/xlink" 
+       version="5.0" 
+       xml:id="sec-security-ldap-active-directory-sync">
+  
+ <title>Synchronizing with Microsoft &ad;</title>
+  <para>
+    &ds389; supports synchronizing some user and group content 
+    from Microsoft's &ad;, so that Linux clients can use 
+    &ds389a; for their identity information without the normally required 
+    domain join process. This also allows &ds389a; to extend and use its 
+    other features with the data synchronised from &ad;.
+  </para>
+  
+  <sect2 xml:id="sec-security-ldap-synchronization-planning">
+  <title>Planning your synchronization topology</title>
+  <para>
+    Due to how the synchronization works, only a single &ds389; server and 
+    &ad; server are involved. The &ad; server must be a full Domain 
+    Controller, and not a Read Only Domain Controller (RODC).  
+    The Global Catalog is not required on the DC that is synchronized, as 
+    &ds389a; only replicates the content of a single forest in a domain.
+  </para>
+  <para>
+    You must first chooose the direction of your data flow. There are three 
+    options: from &ada; to &ds389a;, from &ds389a; to &ada;, or bi-
+    directional.
+  </para>
+  <note>
+    <title>No password synchronization</title>
+    <para>
+      Passwords cannot be synchronised between &ds389a; and &ad;.
+      This may change in the future, to support &ad; to &ds389a; password
+      flow.
+    </para>
+    </note>
+    <para>
+      Your topology will look like the following diagram. The &ds389; and 
+      &ad; topologies may differ, but the most important factor is to have 
+      only a single connection between &ds389a; and &ad;. It is very
+      important to account for this in your disaster recovery and backup 
+      plans for both &ds389a; and &ada;, to ensure that you correctly restore 
+      only a single replication connection between these topologies.
+    </para>
+    <screen>
+┌────────────────┐       ┌────────────────┐               ┌────────────────┐       ┌────────────────┐
+│                │       │                │               │                │       │                │
+│     389-ds     │◀─────▶│     389-ds     │◀ ─ ─ ─ ─ ─ ─ ▶│       AD       │◀─────▶│       AD       │
+│                │       │                │               │                │       │                │
+└────────────────┘       └────────────────┘               └────────────────┘       └────────────────┘
+         ▲                        ▲                                ▲                        ▲        
+         │                        │                                │                        │        
+         ▼                        ▼                                ▼                        ▼        
+┌────────────────┐       ┌────────────────┐               ┌────────────────┐       ┌────────────────┐
+│                │       │                │               │                │       │                │
+│     389-ds     │◀─────▶│     389-ds     │               │       AD       │◀─────▶│       AD       │
+│                │       │                │               │                │       │                │
+└────────────────┘       └────────────────┘               └────────────────┘       └────────────────┘
+</screen>
+</sect2>
+
+<sect2 xml:id="sec-security-ldap-synchronization-ad-prerequisites">
+  <title>Prerequisites for &ad;</title>
+  <para>
+    A security group that is granted the "Replicating Directory Changes" 
+    permission is required. For example, you have created a group named 
+    "Directory Server Sync". Follow the steps in the "How to grant the 
+    'Replicating Directory Changes' permission for the Microsoft Metadirectory Services ADMA service account" 
+    (<link xlink:href="https://docs.microsoft.com/en-US/troubleshoot/windows-server/
+    windows-security/grant-replicating-directory-changes-permission-adma-service"/> to set this up.
+  </para>
+  <warning>
+    <title>Strong security needed</title>
+    <para>
+      You should consider members of this group to be of equivalent security 
+      importance to Domain Administrators. Members of this group have the 
+      ability to read sensitive content from the Active Directory 
+      environment, so you should use strong, randomly-generated service 
+      account passwords for these accounts, and carefully audit membership to this group.
+    </para>
+  </warning>
+  <para>
+    You should also create a service account that is a member of this group. 
+  </para>
+  <para>
+    Your &ad; environment must have certificates configured for LDAPS to 
+    ensure that authentication between &ds389a; and &ada; is secure. 
+    Authentication with Generic Security Services API/Kerberos (GSSAPI/KRB) 
+    cannot be used.
+  </para>
+</sect2>
+
+<sect2 xml:id="sec-security-ldap-synchronization-389ds-prerequisites">
+  <title>Prerequisites for &ds389;</title>
+  <para>
+    The &ds389; server must have a backend database already configured with 
+    Organization Units (OUs) for entries to be synchronised into.
+  </para>
+  <para>
+    The &ds389; server must have a replica ID configured as though the server 
+    is a read-write replica. (For details about setting up replication see
+    <xref linkend="sec-security-ldap-replication"/>).
+  </para>
+</sect2>
+
+<sect2 xml:id="sec-security-ldap-synchronization-agreement">
+  <title>Creating an agreement from &ad; to &ds389;</title>
+  <para>
+    The following example command, which is run on the &ds389;
+    server, creates a replication agreement from &ad; to &ds389;:
+  </para>
+  <screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt create --suffix <replaceable>dc=example,dc=com</replaceable></command> \
+  <command>--host <replaceable>AD-HOSTNAME</replaceable> --port 636 --conn-protocol LDAPS</command> \
+  --bind-dn <command>"<replaceable>cn=SERVICE-ACCOUNT,cn=USERS,dc=AD,dc=EXAMPLE,dc=COM</replaceable>"</command> \
+  <command>--bind-passwd "<replaceable>PASSWORD</replaceable>" --win-subtree "<replaceable>cn=USERS,dc=AD,dc=EXAMPLE,dc=COM</replaceable>"</command> \
+  <command>--ds-subtree <replaceable>ou=AD,dc=EXAMPLE,dc=COM</replaceable> --one-way-sync fromWindows</command> \
+  <command>--sync-users=on --sync-groups=on --move-action delete</command> \
+  <command>--win-domain <replaceable>AD-DOMAIN</replaceable> adsync_agreement</command></screen>
+
+<para>
+  Once the agreement has been created, you must perform an initial resynchronization:
+</para>
+<screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt init --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+
+<para>
+  Use the following command to check the status of the initialization:
+</para>
+<screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt init-status --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+
+<note>
+  <title>Some entries are not synchronized</title>
+  <para>
+    In some cases, an entry may not be synchronized, even if the init status reports success. Check your &ds389a; log files in 
+    <filename>/var/log/dirsrv/slapd-INSTANCE-NAME/errors</filename>.
+  </para>
+  </note>
+  <para>
+    Check the status of the agreement with the following command:
+  </para>
+  <screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt status --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+  <para>
+    Whe you are performing maintenance on the &ad; or &ds389; topology, you 
+    can pause the agreement with the following command:
+  </para>
+  <screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt disable --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+  <para>
+    Resume the agreement with the following command:
+  </para>
+  <screen>&prompt.sudo;<command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt enable --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+</sect2>
+</sect1>
