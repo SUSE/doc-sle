@@ -2958,10 +2958,399 @@ size=64G features='3 queue_if_no_path pg_init_retries 50'<co xml:id="mp.co.top.f
  <sect1 xml:id="sec-multipath-trouble">
   <title>Troubleshooting MPIO</title>
 
-  <para>
-   This section describes some known issues and possible solutions for MPIO.
-  </para>
+  <sect2 xml:id="sec-multipath-trouble-emergency">
+  <title>Emergency shell during boot, timeout waiting for device</title>
 
+  <para>
+    If a system runs into emergency mode on a system with multipath,
+    the reason is almost always one of
+  </para>
+  <itemizedlist>
+    <listitem>
+      <para>
+	Inconsistent configuration of multipath device
+	selection,
+      </para>
+    </listitem>
+    <listitem>
+      <para>
+	or use of non-existing device references.
+      </para>
+    </listitem>
+  </itemizedlist>
+
+  <sect3 xml:id="sec-multipath-trouble-select">
+  <title>Understanding device selection issues</title>
+  <para>A block device can only either be
+    part of a multipath map or be used directly (mounted as filesystem,
+    used as swap, LVM physical volume, or otherwise). If a device is already
+    mounted, an attempt by multipathd to make it part of a multipath map will
+    fail with a "Device or resoure busy" error. Vice-versa, the same error
+    results if <command>systemd</command>
+    attempts to mount a device which has already made part of a multipath map.
+  </para>
+  <para>
+    Storage device activation during boot is handled by a complex interaction
+    between <command>systemd</command>, <systemitem>udev</systemitem>,
+    <command>multipathd</command> and some other
+    tools. <systemitem>udev</systemitem> rules play a
+    central role. They set device properties that indicate to other subsystems
+    how a device should be used. The multipath-related udev rules set the
+    following properties for devices that are selected for multipathing:
+  </para>
+    <screen>SYSTEMD_READY=0
+DM_MULTIPATH_DEVICE_PATH=1</screen>
+  <para>
+    Partition devices inherit these properties from their parents.
+  </para>
+  <para>
+    If these properties don't get set correctly, if some tool doesn't respect
+    them, or if they get set too late, a race condition between
+    <command>multipathd</command> and some other subsystem may result.
+    Only one of the contenders can win the race; the other will see a "Device
+    or resource busy" error.
+  </para>
+  <para>
+    One problem in this context is that the tools of the LVM2 suite do not
+    evaluate udev properties by default. They rely on their own logic for
+    determining whether a device is a multipath component, which sometimes
+    does not match the logic of the rest of the system.
+    A workaround for this is described in
+    <xref linkend="sec-multipath-lvm" xrefstyle="SectTitleOnPage"/>.
+  </para>
+  <note>
+    <title>Example of boot deadlock</title>
+  <para>
+    Consider a system with multipathing where the root device is not
+    multipathed, and no blacklist entries have been created
+    (see <xref linkend="vl-multipath-planning-type-noroot-noinitrd" xrefstyle="SectTitleOnPage"/>
+    in <xref linkend="sec-multipath-planning-type-noroot"
+    xrefstyle="SectTitleOnPage"/>). The root file system is mounted
+    in the initial RAM disk. <command>systemd</command> switches to the root
+    file system and <command>multipathd</command> starts up.
+    Because the device is already mounted, <command>multipathd</command>
+    fails to set up the multipath map for it.
+    Because the root device is not blacklisted, it is considered a
+    multipath device, and <literal>SYSTEMD_READY=0</literal> is set on it.
+  </para>
+  <para>
+    Later in the boot process, the system attempts to mount additional file
+    systems like <filename>/var</filename> and <filename>/home</filename>.
+    More often than not, these file systems will be on the same device as the
+    root file system,
+    usually as BTRFS subvolumes of the root file system itself.
+    But systemd cannot mount them
+    because of <literal>SYSTEMD_READY=0</literal>.
+    <emphasis>We are in a deadlock</emphasis>:
+    The dm-multipath device cannot be created, and the underlying device
+    is blocked for systemd. The additional file systems cannot be mounted,
+    resulting in boot failure.
+  </para>
+  <para>
+    <emphasis role="bold">Don't worry: This problem is solved.</emphasis>
+    <command>multipathd</command> detects this
+    situation and releases the device to <command>systemd</command> which can
+    then proceed mounting the file system. However, it is important to
+    understand the general problem, which can still occur in more
+    subtle ways.
+  </para>
+  </note>
+  </sect3>
+  <sect3 xml:id="sec-multipath-trouble-ref">
+    <title>Understanding device referencing issues</title>
+    <para>
+      An example of a device referencing issue has been given
+      in <xref linkend="sec-multipath-initrd-persistent"
+      xrefstyle="SectTitleOnPage"/>.
+      Typically, there are multiple symbolic links pointing to a device
+      node (see <xref linkend="sec-multipath-referring"
+      xrefstyle="SectTitleOnPage"/>). But these links do not exist always;
+      <command>udev</command> creates them according the current udev rules.
+      For example, if multipathing is off, symbolic links under
+      <filename>/dev/mapper/</filename> for multipath devices will be missing.
+      Thus any reference to a <filename>/dev/mapper/</filename> device will
+      fail.
+    </para>
+    <para>
+      Such references can appear in various places, notably in
+      <filename>/etc/fstab</filename> and <filename>/etc/crypttab</filename>,
+      in the initial RAM disk, or even on the kernel command line.
+    </para>
+    <para>
+      The safest way to circumvent this problem is to avoid using the kind of device
+      references that are not persistent between boots, or depend on system
+      configuration. It is well known that device node names like
+      <filename>/dev/sda</filename> should be avoided in
+      <filename>/etc/fstab</filename>. It is generally recommended to refer to
+      filesystems (and similar entities like swap space) by properties of the
+      file system itself (like UUID or label) rather than the containing
+      device. If such references are not
+      available and device references are required, for example in
+      <filename>/etc/crypttab</filename>, the options should be evaluated
+      carefully. For example, in <xref linkend="sec-multipath-referring"
+      xrefstyle="SectTitleOnPage"/>, the best option might be the
+      <filename>/dev/disk/by-id/wwn-</filename> link, because it would also
+      work with <literal>multipath=off</literal>.
+    </para>
+  </sect3>
+  <sect3 xml:id="sec-multipath-trouble-steps">
+    <title>Troubleshooting steps in emergency mode</title>
+    <para>
+      As there are many error situations that differ in subtle
+      ways, it is impossible to provide a step-by-step recovery guide.
+      But with the background knowledge from the previous subsections, you
+      should be able to figure out the problem if a system runs into emergency
+      mode because of multipathing issues.
+      Before you begin debugging, make sure you have checked the following
+      questions:
+    </para>
+    <itemizedlist>
+      <listitem>
+	<para>
+	  Is the multipath service enabled?
+	</para>
+      </listitem>
+      <listitem>
+	<para>
+	  Is the multipath dracut module included in the initrd?
+	</para>
+      </listitem>
+      <listitem>
+	<para>
+	  Is my root device configured as a multipath device? If no, is the
+	  root device properly blacklisted, or am I simply relying on the
+	  absence of the multipath module in the initial RAM disk
+	  (see <xref linkend="sec-multipath-planning-type-noroot"
+	  xrefstyle="SectTitleOnPage"/>)?
+	</para>
+      </listitem>
+      <listitem>
+	<para>
+	  Does the system enter emergency mode before or after switching to
+	  the real root file system?
+	</para>
+      </listitem>
+    </itemizedlist>
+    <para>
+      If you are unsure with respect to the last question, here is a
+      sample dracut emergency prompt as it would be printed before switching root:
+    </para>
+  <screen>Generating "/run/initramfs/rdsosreport.txt"
+Entering emergency mode. Exit the shell to continue.
+Type "journalctl" to view system logs.
+
+You might want to save "/run/initramfs/rdsosreport.txt" to a USB stick or /boot
+after mounting them and attach it to a bug report.
+
+Give root password for maintenance
+(or press Control-D to continue):</screen>
+   <para>
+      Mention of <filename>rdsosreport.txt</filename> is a clear indication
+      that the system is still running from the initial RAM disk. If you are still
+      uncertain, log in and check for the existence of the file
+      <filename>/etc/initrd-release</filename>. If this file exists, you
+      are guaranteed to be in an initial RAM disk environment.
+   </para>
+   <para>
+     If emergency mode is entered after switching root, the
+     emergency prompt looks similar, but <filename>rdsosreport.txt</filename>
+     is not mentioned:
+   </para>
+   <screen>Timed out waiting for device dev-disk-by\x2duuid-c4a...cfef77d.device.
+[DEPEND] Dependency failed for Local File Systems.
+[DEPEND] Dependency failed for Postfix Mail Transport Agent.
+Welcome to emergency shell
+Give root password for maintenance
+(or press Control-D to continue):</screen>
+
+    <procedure>
+      <title>Steps for analyzing the situation in emergency mode</title>
+      <step>
+	<para>
+	  Try to figure out what failed, by examining failed systemd units and
+	  the journal.
+	</para>
+	<screen>&prompt.root;systemctl --failed
+&prompt.root;journalctl -b -o short-monotonic</screen>
+	<para>When looking at the journal, determine the
+	  <emphasis>first</emphasis> failed unit. When you have found the first
+	  failure, examine the messages before and around that point in time very
+	  carefully. Are there any warnings or other suspicious messages?
+	</para>
+	<para>
+	  Watch out for the root
+	  switch ("<literal>Switching root.</literal>") and for messages about
+	  SCSI devices, device-mapper, multipath, and LVM2. Look for
+	  <command>systemd</command> messages about devices and file systems
+	  ("<literal>Found device</literal>…", "<literal>Mounting</literal>…",
+	  "<literal>Mounted</literal>…").
+	</para>
+      </step>
+      <step>
+	<para>
+	  Examine the existing devices, both low-level devices and device
+	  mapper devices (note that some of the commands below may not
+	  be available in the initial RAM disk):
+	</para>
+	<screen>&prompt.root;cat /proc/partitions
+&prompt.root;ls -l /sys/class/block
+&prompt.root;ls -l /dev/disk/by-id/* /dev/mapper/*
+&prompt.root;dmsetup ls --tree
+&prompt.root;lsblk
+&prompt.root;lsscsi
+</screen>
+        <para>
+	  From the output of the commands above, you should get an idea whether the
+	  low-level devices were successfully probed, and whether or not any
+	  multipath maps and multipath partitions were set up.
+	</para>
+      </step>
+      <step>
+	<para>
+	  If the device mapper multipath setup is not as you expect, examine
+	  the udev properties, in particular <literal>SYSTEMD_READY</literal>
+	  (see above)
+	</para>
+	<screen>&prompt.root;udevadm info -e</screen>
+      </step>
+      <step>
+	<para>
+	  If the previous step showed unexpected udev properties, something
+	  may have gone wrong during udev rule processing. Check other
+	  properties, in particular those used for device identification
+	  (see <xref linkend="sec-multipath-conf-file-wwid"
+	  xrefstyle="SecTitleOnPage"/>). If the udev properties are correct,
+	  check the journal for <command>multipathd</command> messages again. Watch out
+	  for "<literal>Device or resource busy</literal>" messages.
+	</para>
+      </step>
+      <step>
+	<para>
+	  If the system failed to mount or otherwise activate a device, it is
+	  often helpful to try to activate this device manually:
+	</para>
+	<screen>&prompt.root;mount /var
+&prompt.root;swapon -a
+&prompt.root;vgchange -a y</screen>
+        <para>
+	  More often than not, the manual activation will succeed and allow
+	  too proceed with system boot (usually by simply logging out from the
+	  emergency shell) and examine the situation further in the booted
+	  system.
+	</para>
+	<para>
+	  If manual activation fails, you will probably see error messages
+	  that provide clues what is going wrong. You can also
+	  try the commands again with increased verbosity.
+	</para>
+      </step>
+      <step>
+	<para>
+	  At this point, you should have some idea what went wrong (if not,
+	  contact &suse; support and be prepared to answer most of the
+	  questions raised above).
+	</para>
+	<para>
+	  With a bit of luck, you will be able to rectify the situation with a
+	  few shell commands, exit the emergency shell, and boot successfully.
+	  You will still need to adjust your configuration to make sure the
+	  same problem won't occur again in the future.
+	</para>
+	<para>
+	  Otherwise, you will need to boot the rescue system, set up the
+	  devices manually in order to <command>chroot</command>
+	  into the real root file system, and
+	  attempt to fix the problem based on the insight you got in the
+	  previous steps. Be aware that in this situation,
+	  he storage stack for the root file system may be different
+	  from normal. Depending on your setup, you may have force addition or
+	  omission of dracut modules when building a new initial RAM disk.
+	  See also <xref linkend="sec-multipath-initrd-disable"
+	  xrefstyle="SecTitleOnPage"/>.
+	</para>
+      </step>
+      <step>
+	<para>
+	  If the problem occurs frequently or even on every boot attempt,
+	  try booting with increased verbosity in order to get more
+	  information about the failure. The following kernel parameters, or
+	  a combination of them, are often helpful (don't blindly set them
+	  all, this is just a list of suggestions):
+	</para>
+	<informalexample>
+	  <screen>udev.log-priority=debug<co xml:id="mp.co.kparm.udev"/>
+systemd.log_level=debug<co xml:id="mp.co.kparm.sl"/>
+systemd.show_status=0<co xml:id="mp.co.kparm.ss"/>
+splash=verbose<co xml:id="mp.co.kparm.pl"/>
+printk.devkmsg=on<co xml:id="mp.co.kparm.devk"/>
+log_buf_len=4M<co xml:id="mp.co.kparm.lb"/>
+ignore_loglevel<co xml:id="mp.co.kparm.ig"/>
+scsi_mod.scsi_logging_level=020400<co xml:id="mp.co.kparm.sc"/>
+rd.debug<co xml:id="mp.co.kparm.rd"/>
+	  </screen>
+          <calloutlist>
+	    <callout arearefs="mp.co.kparm.udev">
+	      <para>
+		Increase the log level of <command>systemd-udevd</command> and
+		udev rule processing.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.sl">
+	      <para>
+		Increase the log level of <command>systemd</command>.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.ss">
+	      <para>
+		Suppress status messages of <command>systemd</command>, which
+		tend to clutter the screen and make debugging more difficult.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.pl">
+	      <para>
+		Tell the <command>plymouth</command> program to print messages
+		to the console. Use this instead of <literal>splash=silent quiet</literal>.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.devk">
+	      <para>
+		Tell the kernel not to apply rate limiting for messages
+		received via <filename>/dev/kmsg</filename> from user space.
+		This avoids log messages being dropped during the times while
+		<command>journald</command> is not running.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.lb">
+	      <para>
+		Increase the kernel's log buffer size to avoid wrap-around.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.ig">
+	      <para>
+		Make the kernel print all messages to the system console.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.sc">
+	      <para>
+		Increase the logging level of the kernel's SCSI subsystem.
+	      </para>
+	    </callout>
+	    <callout arearefs="mp.co.kparm.rd">
+	      <para>
+		Trace the scripts in the initial RAM disk.
+	      </para>
+	    </callout>
+	  </calloutlist>
+	</informalexample>
+	<para>
+	  In addition, it may make sense to enable logging for
+	  certain drivers, and configure a serial console to capture the
+	  output during boot.
+	</para>
+      </step>
+    </procedure>
+  </sect3>
+  </sect2>
 
   <sect2 xml:id="sec-multipath-trouble-root">
    <title>The System Exits to Emergency Shell at Boot When Multipath Is Enabled</title>
