@@ -2511,11 +2511,9 @@ blacklist_exceptions {
       <listitem>
 	<para>
 	  If set to <literal>on</literal> or <literal>fpin</literal>,
-	  &ldquo;marginal&rdquo; path devices (devices that exhibit lots of
-	  transient errors) are moved to a separate group with lower priority
-	  than all other path groups. This option is available since
-	  &productnameshort;&nbsp;15SP3; the <literal>fpin</literal> value since
-	  &productnameshort;&nbsp;15SP4. See <systemitem>multipath.conf(5)</systemitem>.
+	  &ldquo;marginal&rdquo; path devices are sorted into a separate path
+	  group. This is independent of the path grouping algorithm in use.
+	  See <xref linkend="sec-multipath-marginal" xrefstyle="SecTitleOnPage"/>.
 	</para>
       </listitem>
     </varlistentry>
@@ -2796,6 +2794,152 @@ defaults {
        </listitem>
      </varlistentry>
    </variablelist>
+   <sect2 xml:id="sec-multipath-marginal">
+     <title>Handling Unreliable (&ldquo;Marginal&rdquo;) Path Devices</title>
+     <para>
+       Unstable conditions in the fabric can cause path devices to behave
+       erratically. They exhibit frequent I/O errors, recover, and fail again.
+       Such path devices are also denoted &ldquo;marginal&rdquo; or
+       &ldquo;shaky&rdquo; paths. This section summarizes the options that
+       <systemitem>multipath-tools</systemitem> provides to deal with this
+       problem.
+     </para>
+
+     <note>
+       <title>multipathd's marginal path checking algorithm</title>
+       <para>
+	 If a path the device exhibits a second failure (good → bad transition)
+	 before <literal>marginal_path_double_failed_time</literal>
+	 elapses after a first failure, <command>multipathd</command>
+	 starts monitoring the path at a rate of 10 requests per second,
+	 for a monitoring period of
+	 <literal>marginal_path_err_sample_time</literal>. If the error rate
+	 during the monitoring period exceeds
+	 <literal>marginal_path_err_rate_threshold</literal>, the path
+	 is classified as marginal. After
+	 <literal>marginal_path_err_recheck_gap_time</literal>,
+	 the path transitions to normal state again.
+       </para>
+       <para>
+	 This algorithm is used if all four numeric
+	 <literal>marginal_path_</literal> parameters
+	 are set to a positive value,
+	 and <literal>marginal_pathgroups</literal> is
+	 not set to <literal>fpin</literal>.
+	 It is available since &sles;&nbsp;15&nbsp;SP1 and
+	 &sles;&nbsp;12&nbsp;SP5.
+       </para>
+     </note>
+
+     <variablelist>
+       <varlistentry>
+	 <term>marginal_path_double_failed_time</term>
+	 <listitem>
+	   <para>
+	     Maximum time (in seconds)
+	     between two path failures that triggers
+	     path monitoring.
+	   </para>
+	 </listitem>
+       </varlistentry>
+       <varlistentry>
+	 <term>marginal_path_err_sample_time</term>
+	 <listitem>
+	   <para>
+	     Length (in seconds) of the path monitoring interval.
+	   </para>
+	 </listitem>
+       </varlistentry>
+       <varlistentry>
+	 <term>marginal_path_err_rate_threshold</term>
+	 <listitem>
+	   <para>
+	     Minimum error rate (per thousand I/Os).
+	   </para>
+	 </listitem>
+       </varlistentry>
+       <varlistentry>
+	 <term>marginal_path_err_recheck_gap_time</term>
+	 <listitem>
+	   <para>
+	     Time (in seconds) to keep the path in marginal state.
+	   </para>
+	 </listitem>
+       </varlistentry>
+       <varlistentry>
+	 <term>marginal_pathgroups</term>
+	 <listitem>
+	   <para>
+	     This option is available since
+	     &productnameshort;&nbsp;15SP3.
+	     Possible values are:
+	   </para>
+	   <variablelist>
+	     <varlistentry>
+	       <term>off</term>
+	       <listitem>
+		 <para>
+		   Marginal state is determined by <command>multipathd</command> (see below).
+		   Marginal paths are not reinstated
+		   as long as they remain in marginal state. This is the
+		   default, and the behavior in &sles; releases before SP3,
+		   where the <literal>marginal_pathgroups</literal> option was unavailable.
+		 </para>
+	       </listitem>
+	     </varlistentry>
+	     <varlistentry>
+	       <term>on</term>
+	       <listitem>
+		 <para>
+		   Like <literal>off</literal>, but instead of keeping them in
+		   failed state, marginal paths are moved  to a
+		   separate path group, which will be assigned lower priority than
+		   all other path groups (see <xref linkend="sec-multipath-grouping"
+		   xrefstyle="SecTitleOnPage"/>). Paths in this path group will only
+		   be used for I/O if all paths in other path groups have failed.
+		 </para>
+	       </listitem>
+	     </varlistentry>
+	     <varlistentry>
+	       <term>fpin</term>
+	       <listitem>
+		 <para>
+		   This setting is available from &productnameshort;&nbsp;15SP4.
+		   Marginal path state is derived from FPIN events (see
+		   below).
+		   Marginal paths are moved into a separate path group, as described
+		   for<literal>off</literal>.
+		   This setting
+		   requires no further host-side configuration. It is the
+		   recommended way to handle marginal paths on Fibre Channel
+		   fabrics that support FPIN.
+		 </para>
+		 <note>
+		   <title>FPIN based marginal path detection</title>
+		   <para>
+		   <command>multipathd</command> listens for Fibre
+		   Channel Performance Impact Notifications (FPIN).
+		   If an FPIN-LI (Link Integrity) event is received for a
+		   path device, the path will enter marginal state. This state will
+		   last until a RSCN or Link up event is received on the Fibre
+		   channel adapter the device is connected to.
+		   </para>
+		 </note>
+	       </listitem>
+	     </varlistentry>
+	   </variablelist>
+	 </listitem>
+       </varlistentry>
+     </variablelist>
+     <para>
+       A simpler algorithm using the parameters
+       <literal>san_path_err_threshold</literal>,
+       <literal>san_path_err_forget_rate</literal>, and
+       <literal>san_path_err_recovery time</literal> is also available and
+       recommended for &sles;&nbsp;15 (GA).
+       See the &ldquo;Shaky paths detection&rdquo; secion in <systemitem>multipath.conf(5)</systemitem>.
+     </para>
+   </sect2>
  </sect1>
  <sect1 xml:id="sec-multipath-best-practice">
   <title>Best practice</title>
