@@ -2039,7 +2039,283 @@ defaults {
   </sect2>
 
  </sect1>
- <sect1 xml:id="sec-multipath-select-devices">
+ <sect1 xml:id="sec-multipath-grouping">
+  <title>Configuring path grouping and priorities</title>
+
+  <para>
+    Path devices in multipath maps are grouped in <emphasis>path
+    groups</emphasis>, also called <emphasis>priority groups</emphasis>.
+    Only one path group receives I/O at any given time.
+    <command>multipathd</command> assigns <emphasis>priorities</emphasis>
+    to path groups. Out of the path groups with active paths, the group
+    with the highest priority is activated according
+    to the configured failback policy for the map
+    (see <xref linkend="sec-multipath-policies-default" xrefstyle="SecTitleOnPage"/>).
+    The priority of a path group is the average of the priorities of the
+    active path devices in the path group. The path priority is an integer
+    value calculated from the device properties (see the description of the
+    <literal>prio</literal> option below).
+  </para>
+  <para>This section describes the <filename>multipath.conf</filename>
+    configuration parameters relevant for priority determination and path
+    grouping.
+  </para>
+  <variablelist>
+    <varlistentry>
+      <term>path_grouping_policy</term>
+      <listitem>
+	<para>
+	  Specifies the method used combine paths
+	  into groups. Only the most important policies are listed here;
+	  see <systemitem>multipath.conf(5)</systemitem> for other
+	  less frequently used values.
+	</para>
+	<variablelist>
+	  <varlistentry>
+	    <term>failover</term>
+	    <listitem>
+	      <para>
+		One path per path group. This setting is useful
+		for traditional &ldquo;active/passive&rdquo; storage arrays.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>multibus</term>
+	    <listitem>
+	      <para>
+		All paths in one priority group.
+		This is useful for traditional &ldquo;active/active&rdquo;
+		arrays.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>group_by_prio</term>
+	    <listitem>
+	      <para>
+		Path devices with the same path priority are grouped
+		together.
+		This option is useful for modern arrays that support
+		asymmetric access states, like <acronym>ALUA</acronym>.
+		Combined with the <literal>alua</literal> or
+		<literal>sysfs</literal> priority algorithms, the priority
+		groups set up by <command>multipathd</command> will match the
+		primary target port groups that the storage array reports through
+		ALUA-related SCSI commands.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	</variablelist>
+	<para>
+	  Using the same policy names, the path grouping policy for
+	  a multipath map can be changed temporarily with the command
+	</para>
+	<screen>&prompt.sudo;multipath -p <replaceable>POLICY_NAME</replaceable> <replaceable>MAP_NAME</replaceable></screen>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>marginal_pathgroups</term>
+      <listitem>
+	<para>
+	  If set to <literal>on</literal> or <literal>fpin</literal>,
+	  &ldquo;marginal&rdquo; path devices are sorted into a separate path
+	  group. This is independent of the path grouping algorithm in use.
+	  See <xref linkend="sec-multipath-marginal" xrefstyle="SecTitleOnPage"/>.
+	</para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>detect_prio</term>
+      <listitem>
+	<para>
+	  If this is set to <literal>yes</literal> (default, recommended),
+	  <command>multipathd</command> automatically detects the best
+	  algorithm to set the priority for a storage device, and ignores
+	  the <literal>prio</literal> setting.
+	  In practice, this means using the <literal>sysfs</literal> prio
+	  algorithm if <acronym>ALUA</acronym> support is detected.
+	</para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>prio</term>
+      <listitem>
+	<para>
+	  Determines the method to derive priorities for path devices.
+	  If you override this, don't forget to set also
+	</para>
+	<screen>
+defaults {
+	  detect_prio no
+}
+	</screen>
+	<para>
+	  The following list
+	  contains only the most important methods. Several other methods
+	  are available, mainly to support legacy hardware. See
+	  <systemitem>multipath.conf(5)</systemitem> for the full list.
+	</para>
+	<variablelist>
+	  <varlistentry>
+	    <term>alua</term>
+	    <listitem>
+	      <para>
+		Uses SCSI-3 ALUA access states to derive path priority values.
+		The optional <literal>exclusive_pref_bit</literal> argument can be used to
+		determine the behavior for devices that have the ALUA
+		&ldquo;preferred primary target port group&rdquo;
+		(<acronym>PREF</acronym>) bit set:
+	      </para>
+	      <screen>
+	prio alua
+	prio_args exclusive_pref_bit
+	      </screen>
+	      <para>
+		If this option is set, &ldquo;preferred&rdquo; paths get a
+		priority bonus over other active/optimized paths. Otherwise,
+		all active/optimized paths are assigned the same priority.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>sysfs</term>
+	    <listitem>
+	      <para>
+		Like <literal>alua</literal>, but instead of sending SCSI
+		commands to the device, obtains the access states from
+		<systemitem>sysfs</systemitem>. This causes less I/O load
+		than <literal>alua</literal>, but isn't suitable for all
+		storage arrays with ALUA support.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>const</term>
+	    <listitem>
+	      <para>
+		Uses a constant value for all paths.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>path_latency</term>
+	    <listitem>
+	      <para>
+		Measures I/O latency (time from I/O submission to completion)
+		on path devices, and assigns higher priority to devices with
+		lower latency. See <systemitem>multipath.conf(5)</systemitem>
+		for details. This algorithm is still experimental.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>weightedpath</term>
+	    <listitem>
+	      <para>
+		Assigns a priority to paths based on their name, serial
+		number, Host/Bus/Device/Lun ID (<acronym>HBTL</acronym>),
+		or Fibre Channel WWN.
+		The priority value doesn't change over time. The
+		method requires a <literal>prio_args</literal> argument, see
+		<systemitem>multipath.conf(5)</systemitem> for details. For example:
+	      </para>
+	      <screen>
+	prio weightedpath
+	prio_args "hbtl 2:.*:.*:.* 10 hbtl 3:.*:.*:.* 20 hbtl .* 1"
+	      </screen>
+	      <para>
+		This assigns devices on SCSI host 3 a higher priority than
+		devices on SCSI host 2, and all others a lower priority.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	</variablelist>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>prio_args</term>
+      <listitem>
+	<para>
+	  Some <literal>prio</literal> algorithms require extra
+	  arguments. These are specified in this option, with syntax depending
+	  on the algorithm. See above.
+	</para>
+      </listitem>
+    </varlistentry>
+    <varlistentry>
+      <term>path_selector</term>
+      <listitem>
+	<para>
+	  The name of a kernel module that is used for load balancing between
+	  the paths of the active path group. The available choices depend on
+	  the kernel configuration. For historical reasons, the name must always
+	  be enclosed in quotes and followed by a &ldquo;0&rdquo; in
+	  <filename>multipath.conf</filename>, like this:
+	</para>
+	<screen>    path_selector "queue-length 0"</screen>
+	<variablelist>
+	  <varlistentry>
+	    <term>service-time</term>
+	    <listitem>
+	      <para>
+		Estimates the time pending I/O will need to complete on all
+		paths, and selects the path with the lowest value. This is the
+		default.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>historical-service-time</term>
+	    <listitem>
+	      <para>
+		Estimates future service time based on the historical
+		service time (about which it keeps a moving average)
+		and the number of outstanding requests.
+		Estimates the time pending I/O will need to complete on all
+		paths, and selects the path with the lowest value.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>queue-length</term>
+	    <listitem>
+	      <para>
+		Selects the path with the lowest number of currently pending
+		I/O requests.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>round-robin</term>
+	    <listitem>
+	      <para>
+		Switches paths in round-robin fashion. The number of requests
+		submitted to a path before switching to the next one can be
+		adjust with the options <literal>rr_min_io_rq</literal>
+		and <literal>rr_weight</literal>.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	  <varlistentry>
+	    <term>io-affinity</term>
+	    <listitem>
+	      <para>
+		This path selector does currently not work with <systemitem>multipath-tools</systemitem>.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+	</variablelist>
+      </listitem>
+    </varlistentry>
+  </variablelist>
+  <para>
+    After modifying the <filename>/etc/multipath.conf</filename> file,
+    apply your settings as described in <xref
+    linkend="sec-multipath-conf-file-apply" xrefstyle="SecTitleOnPage"/>.
+  </para>
+</sect1>
+<sect1 xml:id="sec-multipath-select-devices">
    <title>Selecting devices for multipathing</title>
 
    <para>
@@ -2576,281 +2852,6 @@ blacklist_exceptions {
 
  </sect1>
 
- <sect1 xml:id="sec-multipath-grouping">
-  <title>Configuring path grouping and priorities</title>
-  <para>
-    Path devices in multipath maps are grouped in <emphasis>path
-    groups</emphasis>, also called <emphasis>priority groups</emphasis>.
-    Only one path group receives I/O at any given time.
-    <command>multipathd</command> assigns <emphasis>priorities</emphasis>
-    to path groups. Out of the path groups with active paths, the group
-    with the highest priority is activated according
-    to the configured failback policy for the map
-    (see <xref linkend="sec-multipath-policies-default" xrefstyle="SecTitleOnPage"/>).
-    The priority of a path group is the average of the priorities of the
-    active path devices in the path group. The path priority is an integer
-    value calculated from the device properties (see the description of the
-    <literal>prio</literal> option below).
-  </para>
-  <para>This section describes the <filename>multipath.conf</filename>
-    configuration parameters relevant for priority determination and path
-    grouping.
-  </para>
-  <variablelist>
-    <varlistentry>
-      <term>path_grouping_policy</term>
-      <listitem>
-	<para>
-	  Specifies the method used combine paths
-	  into groups. Only the most important policies are listed here;
-	  see <systemitem>multipath.conf(5)</systemitem> for other
-	  less frequently used values.
-	</para>
-	<variablelist>
-	  <varlistentry>
-	    <term>failover</term>
-	    <listitem>
-	      <para>
-		One path per path group. This setting is useful
-		for traditional &ldquo;active/passive&rdquo; storage arrays.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>multibus</term>
-	    <listitem>
-	      <para>
-		All paths in one priority group.
-		This is useful for traditional &ldquo;active/active&rdquo;
-		arrays.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>group_by_prio</term>
-	    <listitem>
-	      <para>
-		Path devices with the same path priority are grouped
-		together.
-		This option is useful for modern arrays that support
-		asymmetric access states, like <acronym>ALUA</acronym>.
-		Combined with the <literal>alua</literal> or
-		<literal>sysfs</literal> priority algorithms, the priority
-		groups set up by <command>multipathd</command> will match the
-		primary target port groups that the storage array reports through
-		ALUA-related SCSI commands.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	</variablelist>
-	<para>
-	  Using the same policy names, the path grouping policy for
-	  a multipath map can be changed temporarily with the command
-	</para>
-	<screen>&prompt.sudo;multipath -p <replaceable>POLICY_NAME</replaceable> <replaceable>MAP_NAME</replaceable></screen>
-      </listitem>
-    </varlistentry>
-    <varlistentry>
-      <term>marginal_pathgroups</term>
-      <listitem>
-	<para>
-	  If set to <literal>on</literal> or <literal>fpin</literal>,
-	  &ldquo;marginal&rdquo; path devices are sorted into a separate path
-	  group. This is independent of the path grouping algorithm in use.
-	  See <xref linkend="sec-multipath-marginal" xrefstyle="SecTitleOnPage"/>.
-	</para>
-      </listitem>
-    </varlistentry>
-    <varlistentry>
-      <term>detect_prio</term>
-      <listitem>
-	<para>
-	  If this is set to <literal>yes</literal> (default, recommended),
-	  <command>multipathd</command> automatically detects the best
-	  algorithm to set the priority for a storage device, and ignores
-	  the <literal>prio</literal> setting.
-	  In practice, this means using the <literal>sysfs</literal> prio
-	  algorithm if <acronym>ALUA</acronym> support is detected.
-	</para>
-      </listitem>
-    </varlistentry>
-    <varlistentry>
-      <term>prio</term>
-      <listitem>
-	<para>
-	  Determines the method to derive priorities for path devices.
-	  If you override this, don't forget to set also
-	</para>
-	<screen>
-defaults {
-	  detect_prio no
-}
-	</screen>
-	<para>
-	  The following list
-	  contains only the most important methods. Several other methods
-	  are available, mainly to support legacy hardware. See
-	  <systemitem>multipath.conf(5)</systemitem> for the full list.
-	</para>
-	<variablelist>
-	  <varlistentry>
-	    <term>alua</term>
-	    <listitem>
-	      <para>
-		Uses SCSI-3 ALUA access states to derive path priority values.
-		The optional <literal>exclusive_pref_bit</literal> argument can be used to
-		determine the behavior for devices that have the ALUA
-		&ldquo;preferred primary target port group&rdquo;
-		(<acronym>PREF</acronym>) bit set:
-	      </para>
-	      <screen>
-	prio alua
-	prio_args exclusive_pref_bit
-	      </screen>
-	      <para>
-		If this option is set, &ldquo;preferred&rdquo; paths get a
-		priority bonus over other active/optimized paths. Otherwise,
-		all active/optimized paths are assigned the same priority.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>sysfs</term>
-	    <listitem>
-	      <para>
-		Like <literal>alua</literal>, but instead of sending SCSI
-		commands to the device, obtains the access states from
-		<systemitem>sysfs</systemitem>. This causes less I/O load
-		than <literal>alua</literal>, but isn't suitable for all
-		storage arrays with ALUA support.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>const</term>
-	    <listitem>
-	      <para>
-		Uses a constant value for all paths.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>path_latency</term>
-	    <listitem>
-	      <para>
-		Measures I/O latency (time from I/O submission to completion)
-		on path devices, and assigns higher priority to devices with
-		lower latency. See <systemitem>multipath.conf(5)</systemitem>
-		for details. This algorithm is still experimental.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>weightedpath</term>
-	    <listitem>
-	      <para>
-		Assigns a priority to paths based on their name, serial
-		number, Host/Bus/Device/Lun ID (<acronym>HBTL</acronym>),
-		or Fibre Channel WWN.
-		The priority value doesn't change over time. The
-		method requires a <literal>prio_args</literal> argument, see
-		<systemitem>multipath.conf(5)</systemitem> for details. For example:
-	      </para>
-	      <screen>
-	prio weightedpath
-	prio_args "hbtl 2:.*:.*:.* 10 hbtl 3:.*:.*:.* 20 hbtl .* 1"
-	      </screen>
-	      <para>
-		This assigns devices on SCSI host 3 a higher priority than
-		devices on SCSI host 2, and all others a lower priority.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	</variablelist>
-      </listitem>
-    </varlistentry>
-    <varlistentry>
-      <term>prio_args</term>
-      <listitem>
-	<para>
-	  Some <literal>prio</literal> algorithms require extra
-	  arguments. These are specified in this option, with syntax depending
-	  on the algorithm. See above.
-	</para>
-      </listitem>
-    </varlistentry>
-    <varlistentry>
-      <term>path_selector</term>
-      <listitem>
-	<para>
-	  The name of a kernel module that is used for load balancing between
-	  the paths of the active path group. The available choices depend on
-	  the kernel configuration. For historical reasons, the name must always
-	  be enclosed in quotes and followed by a &ldquo;0&rdquo; in
-	  <filename>multipath.conf</filename>, like this:
-	</para>
-	<screen>    path_selector "queue-length 0"</screen>
-	<variablelist>
-	  <varlistentry>
-	    <term>service-time</term>
-	    <listitem>
-	      <para>
-		Estimates the time pending I/O will need to complete on all
-		paths, and selects the path with the lowest value. This is the
-		default.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>historical-service-time</term>
-	    <listitem>
-	      <para>
-		Estimates future service time based on the historical
-		service time (about which it keeps a moving average)
-		and the number of outstanding requests.
-		Estimates the time pending I/O will need to complete on all
-		paths, and selects the path with the lowest value.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>queue-length</term>
-	    <listitem>
-	      <para>
-		Selects the path with the lowest number of currently pending
-		I/O requests.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>round-robin</term>
-	    <listitem>
-	      <para>
-		Switches paths in round-robin fashion. The number of requests
-		submitted to a path before switching to the next one can be
-		adjust with the options <literal>rr_min_io_rq</literal>
-		and <literal>rr_weight</literal>.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	  <varlistentry>
-	    <term>io-affinity</term>
-	    <listitem>
-	      <para>
-		This path selector does currently not work with <systemitem>multipath-tools</systemitem>.
-	      </para>
-	    </listitem>
-	  </varlistentry>
-	</variablelist>
-      </listitem>
-    </varlistentry>
-  </variablelist>
-  <para>
-    After modifying the <filename>/etc/multipath.conf</filename> file,
-    apply your settings as described in <xref
-    linkend="sec-multipath-conf-file-apply" xrefstyle="SecTitleOnPage"/>.
-  </para>
- </sect1>
 
  <sect1 xml:id="sec-multipath-conf-misc">
    <title>Miscellaneous options in <filename>multipath.conf</filename></title>
