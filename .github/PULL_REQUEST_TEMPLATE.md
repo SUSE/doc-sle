@@ -12,7 +12,6 @@ Describe the overall goals of this pull request.
 When opening a PR, check all versions of the documentation that your PR applies to.
 
 - SLE 15/openSUSE Leap 15.x
-  - [ ] SLE 15 SP1
   - [ ] SLE 15 GA
 - SLE 12
   - [ ] SLE 12 SP5
