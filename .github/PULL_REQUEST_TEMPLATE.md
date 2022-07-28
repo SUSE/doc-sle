@@ -1,12 +1,31 @@
-### Description
-A few sentences describing the overall goals of this pull request.
-If there are relevant Bugzilla or FATE entries, reference them.
+### PR creator: Description
 
-### Checklist
-* Check all items that apply.
+Describe the overall goals of this pull request.
 
-*Are backports required?*
 
 - [ ] To maintenance/SLE12SP3
 - [ ] To maintenance/SLE12SP4
 - [ ] To maintenance/SLE15SP0
+
+### PR creator: Are there any relevant issues/feature requests?
+
+* bsc#...
+* jsc#SLE-...
+
+### PR creator: Which product versions do the changes apply to?
+
+When opening a PR, check all versions of the documentation that your PR applies to.
+
+- SLE 15/openSUSE Leap 15.x
+  - [ ] SLE 15 SP1
+  - [ ] SLE 15 GA
+- SLE 12
+  - [ ] SLE 12 SP5
+  - [ ] SLE 12 SP4
+
+### PR reviewer only: Have all backports been applied?
+
+The doc team member merging your PR will take care of backporting to older documents.
+When opening a PR, do *not* set the following check box.
+
+- [ ] all necessary backports are done
