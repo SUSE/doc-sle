@@ -18,7 +18,7 @@ When opening a PR, check all versions of the documentation that your PR applies 
   - [ ] SLE 15 SP3/openSUSE Leap 15.3
   - [ ] SLE 15 SP2/openSUSE Leap 15.2
   - [ ] SLE 15 SP1
-  - [ ] SLE 15 GA
+  - [ ] SLE 15 SP0
 - SLE 12
   - [ ] SLE 12 SP5
   - [ ] SLE 12 SP4
