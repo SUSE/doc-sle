@@ -23,7 +23,6 @@ When opening a PR, check all versions of the documentation that your PR applies 
 - SLE 12
   - [ ] SLE 12 SP5
   - [ ] SLE 12 SP4
-  - [ ] SLE 12 SP3
 
 ### PR reviewer only: Have all backports been applied?
 
