@@ -205,6 +205,18 @@
  <sect1 xml:id="sec-audit-bigpicture">
   <title>Introducing the components of Linux audit</title>
 
+  <important>
+   <title>audispd merged into auditd</title>
+   <para>
+    In &sles;&nbsp;15&nbsp;SP4 the code for
+    <systemitem class="daemon">audispd</systemitem> has
+    been merged into <systemitem class="daemon">auditd</systemitem>.
+    All <systemitem class="daemon">audispd</systemitem> configurations
+    are now in <filename>/etc/audit/auditd.conf</filename> and
+    <filename>/etc/audit/plugins.d</filename>.
+   </para>
+  </important>
+
   <para>
    The following figure illustrates how the various components of audit
    interact with each other:
@@ -293,19 +305,6 @@
     </listitem>
    </varlistentry>
    <varlistentry>
-    <term>audispd</term>
-    <listitem>
-     <para>
-      The audit dispatcher daemon
-      (<systemitem class="daemon">audispd</systemitem>) can be used to relay
-      event notifications to other applications instead of (or in addition
-      to) writing them to disk in the audit log. For more information about
-      <systemitem class="daemon">audispd</systemitem>, refer to
-      <xref linkend="sec-audit-audisp"/>.
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
     <term>autrace</term>
     <listitem>
      <para>
@@ -345,7 +344,7 @@
   <title>Configuring the audit daemon</title>
 
   <para>
-   Before you can actually start generating audit logs and processing them,
+   Before you can start generating audit logs and processing them,
    configure the audit daemon itself.
 
 <!-- fs 2016-11-17: bsc #918655
@@ -395,36 +394,52 @@ AUDITD_DISABLE_CONTEXTS="no"</screen>
    determines how the audit system functions when the daemon has been
    started. For most use cases, the default settings shipped with
    &productname; should suffice. For CAPP environments, most of these
-   parameters need tweaking. The following list briefly introduces the
-   parameters available:
+   parameters need tweaking. The following example is the default
+   configuration:
   </para>
-
-<screen>log_file = /var/log/audit/audit.log
+  <example>
+   <title>Default /etc/audit/auditd.conf</title>
+<screen>
+local_events = yes
+write_logs = yes
+log_file = /var/log/audit/audit.log
+log_group = audit
 log_format = RAW
-log_group = root
-priority_boost = 4
-flush = INCREMENTAL
-freq = 20
+flush = INCREMENTAL_ASYNC
+freq = 50
+max_log_file = 8
 num_logs = 5
-disp_qos = lossy
-dispatcher = /sbin/audispd
+priority_boost = 4
 name_format = NONE
 ##name = mydomain
-max_log_file = 6
 max_log_file_action = ROTATE
 space_left = 75
 space_left_action = SYSLOG
+verify_email = yes
 action_mail_acct = root
 admin_space_left = 50
 admin_space_left_action = SUSPEND
 disk_full_action = SUSPEND
 disk_error_action = SUSPEND
-##tcp_listen_port =
+use_libwrap = yes
+##tcp_listen_port = 60
 tcp_listen_queue = 5
 tcp_max_per_addr = 1
 ##tcp_client_ports = 1024-65535
 tcp_client_max_idle = 0
-cp_client_max_idle = 0</screen>
+transport = TCP
+distribute_network = no
+q_depth = 1200
+overflow_action = SYSLOG
+max_restarts = 10
+plugin_dir = /etc/audit/plugins.d
+end_of_event_timeout = 2</screen>
+</example>
+
+  <para>
+   Refer to <command>man 5 auditd.conf</command> for an explanation of these
+   options.
+  </para>
 
   <para>
    Depending on whether you want your environment to satisfy the
@@ -433,340 +448,6 @@ cp_client_max_idle = 0</screen>
    CAPP requirements, a <quote>CAPP Environment</quote> note tells you how
    to adjust the configuration.
   </para>
-
-  <variablelist>
-   <varlistentry>
-    <term><literal>log_file</literal>, <literal>log_format</literal> and
-      <literal>log_group</literal>
-    </term>
-    <listitem>
-     <para>
-      <literal>log_file</literal> specifies the location where the audit
-      logs should be stored. <literal>log_format</literal> determines how
-      the audit information is written to disk and
-      <literal>log_group</literal> defines the group that owns the log
-      files. Possible values for <literal>log_format</literal> are
-      <literal>raw</literal> (messages are stored exactly as the kernel
-      sends them) or <literal>nolog</literal> (messages are discarded and
-      not written to disk). The data sent to the audit dispatcher is not
-      affected if you use the <literal>nolog</literal> mode. The default
-      setting is <literal>raw</literal> and you should keep it if you want
-      to be able to create reports and queries against the audit logs using
-      the <command>aureport</command> and <command>ausearch</command> tools.
-      The value for <literal>log_group</literal> can either be specified
-      literally or using the group's ID.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       In a CAPP environment, have the audit log reside on its own
-       partition. By doing so, you can be sure that the space detection of
-       the audit daemon is accurate and that you do not have other processes
-       consuming this space.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>priority_boost</literal>
-    </term>
-    <listitem>
-     <para>
-      Determine how much of a priority boost the audit daemon should get.
-      Possible values are 0 to 20. The resulting nice value calculates like
-      this: 0 - priority_boost
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>flush</literal> and <literal>freq</literal>
-    </term>
-    <listitem>
-     <para>
-      Specifies whether, how, and how often the audit logs should be written
-      to disk. Valid values for <literal>flush</literal> are
-      <literal>none</literal>, <literal>incremental</literal>,
-      <literal>data</literal>, and <literal>sync</literal>.
-      <literal>none</literal> tells the audit daemon not to make any special
-      effort to write the audit data to disk. <literal>incremental</literal>
-      tells the audit daemon to explicitly flush the data to disk. A
-      frequency must be specified if <literal>incremental</literal> is used.
-      A <literal>freq</literal> value of <literal>20</literal> tells the
-      audit daemon to request that the kernel flush the data to disk after
-      every 20 records. The <literal>data</literal> option keeps the data
-      portion of the disk file synchronized at all times while the
-      <literal>sync</literal> option takes care of both metadata and data.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       In a CAPP environment, make sure that the audit trail is always fully
-       up to date and complete. Therefore, use <literal>sync</literal> or
-       <literal>data</literal> with the <literal>flush</literal> parameter.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>num_logs</literal>
-    </term>
-    <listitem>
-     <para>
-      Specify the number of log files to keep if you have given
-      <literal>rotate</literal> as the
-      <literal>max_log_file_action</literal>. Possible values range from
-      <literal>0</literal> to <literal>99</literal>. A value less than
-      <literal>2</literal> means that the log files are not rotated.
-      As you increase the number of files to rotate, you increase the amount
-      of work required of the audit daemon. While doing this rotation,
-      <systemitem class="daemon">auditd</systemitem> cannot always service
-      new data arriving from the kernel as quickly, which can result
-      in a backlog condition (triggering
-      <systemitem class="daemon">auditd</systemitem> to react according to
-      the failure flag, described in <xref linkend="sec-audit-auditctl"/>).
-      In this situation, increasing the backlog limit is recommended. Do so
-      by changing the value of the <literal>-b</literal> parameter in the
-      <filename>/etc/audit/audit.rules</filename> file.
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>disp_qos</literal> and <literal>dispatcher</literal>
-    </term>
-    <listitem>
-     <para>
-      The dispatcher is started by the audit daemon during its start. The
-      audit daemon relays the audit messages to the application specified in
-      <literal>dispatcher</literal>. This application must be a highly
-      trusted one, because it needs to run as &rootuser;.
-      <literal>disp_qos</literal> determines whether you allow for
-      <literal>lossy</literal> or <literal>lossless</literal> communication
-      between the audit daemon and the dispatcher.
-     </para>
-     <para>
-      If you select <literal>lossy</literal>, the audit daemon might discard
-      some audit messages when the message queue is full. These events still
-      get written to disk if <literal>log_format</literal> is set to
-      <literal>raw</literal>, but they might not get through to the
-      dispatcher. If you select <literal>lossless</literal> the audit
-      logging to disk is blocked until there is an empty spot in the message
-      queue. The default value is <literal>lossy</literal>.
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>name_format</literal> and <literal>name</literal>
-    </term>
-    <listitem>
-     <para>
-      <literal>name_format</literal> controls how computer names are
-      resolved. Possible values are <literal>none</literal> (no name will be
-      used), <literal>hostname</literal> (value returned by <command>gethostname</command>),
-      <literal>fqd</literal> (fully qualified host name as received through
-      a DNS lookup), <literal>numeric</literal> (IP address) and
-      <literal>user</literal>. <literal>user</literal> is a custom string
-      that needs to be defined with the <literal>name</literal> parameter.
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>max_log_file</literal> and <literal>max_log_file_action</literal>
-    </term>
-    <listitem>
-     <para>
-      <literal>max_log_file</literal> takes a numerical value that specifies
-      the maximum file size in megabytes that the log file can reach before
-      a configurable action is triggered. The action to be taken is
-      specified in <literal>max_log_file_action</literal>. Possible values
-      for <literal>max_log_file_action</literal> are
-      <literal>ignore</literal>, <literal>syslog</literal>,
-      <literal>suspend</literal>, <literal>rotate</literal>, and
-      <literal>keep_logs</literal>. <literal>ignore</literal> tells the
-      audit daemon to do nothing when the size limit is reached,
-      <literal>syslog</literal> tells it to issue a warning and send it to
-      syslog, and <literal>suspend</literal> causes the audit daemon to stop
-      writing logs to disk, leaving the daemon itself still alive.
-      <literal>rotate</literal> triggers log rotation using the
-      <literal>num_logs</literal> setting. <literal>keep_logs</literal> also
-      triggers log rotation, but does not use the <literal>num_log</literal>
-      setting, so always keeps all logs.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       To keep a complete audit trail in CAPP environments, the
-       <literal>keep_logs</literal> option should be used. If using a
-       separate partition to hold your audit logs, adjust
-       <literal>max_log_file</literal> and <literal>num_logs</literal> to
-       use the entire space available on that partition. Note that the more
-       files that need to be rotated, the longer it takes to get back to
-       receiving audit events.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry xml:id="var-audit-auditd-space-left">
-    <term><literal>space_left</literal> and <literal>space_left_action</literal>
-    </term>
-    <listitem>
-     <para>
-      <literal>space_left</literal> takes a numerical value in megabytes of
-      remaining disk space that triggers a configurable action by the audit
-      daemon. The action is specified in
-      <literal>space_left_action</literal>. Possible values for this
-      parameter are <literal>ignore</literal>, <literal>syslog</literal>,
-      <literal>email</literal>, <literal>exec</literal>,
-      <literal>suspend</literal>, <literal>single</literal>, and
-      <literal>halt</literal>. <literal>ignore</literal> tells the audit
-      daemon to ignore the warning and do nothing, <literal>syslog</literal>
-      has it issue a warning to syslog, and <literal>email</literal> sends
-      an e-mail to the account specified under
-      <literal>action_mail_acct</literal>. <literal>exec</literal> plus a
-      path to a script executes the given script. Note that it is not
-      possible to pass parameters to the script. <literal>suspend</literal>
-      tells the audit daemon to stop writing to disk but remain alive while
-      <literal>single</literal> triggers the system to be brought down to
-      single user mode. <literal>halt</literal> triggers a full shutdown of
-      the system.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       Make sure that <literal>space_left</literal> is set to a value that
-       gives the administrator enough time to react to the alert and allows
-       it to free enough disk space for the audit daemon to continue to
-       work. Freeing disk space would involve calling <command>aureport
-       -t</command> and archiving the oldest logs on a separate archiving
-       partition or resource. The actual value for
-       <literal>space_left</literal> depends on the size of your deployment.
-       Set <literal>space_left_action</literal> to <literal>email</literal>.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>action_mail_acct</literal>
-    </term>
-    <listitem>
-     <para>
-      Specify an e-mail address or alias to which any alert messages should
-      be sent. The default setting is <literal>root</literal>, but you can
-      enter any local or remote account as long as e-mail and the network
-      are properly configured on your system and
-      <filename>/usr/lib/sendmail</filename> exists.
-     </para>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>admin_space_left</literal> and <literal>admin_space_left_action</literal>
-    </term>
-    <listitem>
-     <para>
-      <literal>admin_space_left</literal> takes a numerical value in
-      megabytes of remaining disk space. The system is already running low
-      on disk space when this limit is reached and the administrator has one
-      last chance to react to this alert and free disk space for the audit
-      logs. The value of <literal>admin_space_left</literal> should be lower
-      than the value for <literal>space_left</literal>. The possible values
-      for <literal>admin_space_left_action</literal> are the same as for
-      <literal>space_left_action</literal>.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       Set <literal>admin_space_left</literal> to a value that would allow
-       the administrator's actions to be recorded. The action should be set
-       to <literal>single</literal>.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>disk_full_action</literal>
-    </term>
-    <listitem>
-     <para>
-      Specify which action to take when the system runs out of disk space for
-      the audit logs. Valid values are <literal>ignore</literal>,
-      <literal>syslog</literal>, <literal>rotate</literal>,
-      <literal>exec</literal>, <literal>suspend</literal>,
-      <literal>single</literal>, and <literal>halt</literal>. For an
-      explanation of these values refer to <xref
-      linkend="var-audit-auditd-space-left"/>.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       As the <literal>disk_full_action</literal> is triggered when there is
-       absolutely no more room for any audit logs, you should bring the
-       system down to single-user mode (<literal>single</literal>) or shut
-       it down completely (<literal>halt</literal>).
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>disk_error_action</literal>
-    </term>
-    <listitem>
-     <para>
-      Specify which action to take when the audit daemon encounters any kind
-      of disk error while writing the logs to disk or rotating the logs. The
-      possible value are the same as for
-      <literal>space_left_action</literal>.
-     </para>
-     <note>
-      <title>CAPP environment</title>
-      <para>
-       Use <literal>syslog</literal>, <literal>single</literal>, or
-       <literal>halt</literal> depending on your site's policies regarding
-       the handling of any kind of hardware failure.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>tcp_listen_port</literal>, <literal>tcp_listen_queue</literal>,
-      <literal>tcp_client_ports</literal>, <literal>tcp_client_max_idle</literal>, and
-<literal>tcp_max_per_addr</literal>
-    </term>
-    <listitem>
-     <para>
-      The audit daemon can receive audit events from other audit daemons.
-      The TCP parameters let you control incoming connections. Specify a
-      port between 1 and 65535 with <literal>tcp_listen_port</literal> on
-      which the <systemitem class="daemon">auditd</systemitem> will listen.
-      <literal>tcp_listen_queue</literal> lets you configure a maximum value
-      for pending connections. Make sure not to set a value too small, since
-      the number of pending connections may be high under certain
-      circumstances, such as after a power outage.
-      <literal>tcp_client_ports</literal> defines which client ports are
-      allowed. Either specify a single port or a port range with numbers
-      separated by a dash (for example 1-1023 for all privileged ports).
-     </para>
-     <para>
-      Specifying a single allowed client port may make it difficult for the
-      client to restart their audit subsystem, as it will be unable to
-      re-create a connection with the same host addresses and ports until
-      the connection closure TIME_WAIT state times out. If a client does not
-      respond anymore, <systemitem class="daemon">auditd</systemitem>
-      complains. Specify the number of seconds after which this will happen
-      with <literal>tcp_client_max_idle</literal>. Keep in mind that this
-      setting is valid for all clients and therefore should be higher than
-      any individual client heartbeat setting, preferably by a factor of
-      two. <literal>tcp_max_per_addr</literal> is a numeric value
-      representing how many concurrent connections from one IP address are
-      allowed.
-     </para>
-     <tip>
-      <para>
-       We recommend using privileged ports for client and server to prevent
-       non-root (CAP_NET_BIND_SERVICE) programs from binding to those ports.
-      </para>
-     </tip>
-    </listitem>
-   </varlistentry>
-  </variablelist>
 
   <para>
    When the daemon configuration in
@@ -833,7 +514,7 @@ cp_client_max_idle = 0</screen>
    <listitem>
      <para>
       <command>auditctl</command> <option>-S</option> specifies which system
-      call to audit. Before running <command>auditctl -S</command> on your system, 
+      call to audit. Before running <command>auditctl -S</command> on your system,
       add <option>-F arch=b64</option> to prevent the architecture mismatch
       warning.
      </para>
@@ -868,7 +549,7 @@ backlog_limit 64
 lost 0
 backlog 0
 backlog_wait_time 15000
-loginuid_immutable 0 unlocked    
+loginuid_immutable 0 unlocked
 </screen>
   </example>
 
@@ -905,8 +586,8 @@ loginuid_immutable 0 unlocked
        <para>
         Set the enable flag. [0..2] 0=disable, 1=enable, 2=enable and lock
         down the configuration. Note that this only disables logging syscalls,
-        and other events may still be logged. (See 
-        <command>man 3 audit_set_enabled</command> in the 
+        and other events may still be logged. (See
+        <command>man 3 audit_set_enabled</command> in the
         <package>audit-devel</package>.)
        </para>
       </entry>
@@ -1309,11 +990,11 @@ exit,always success!=0 syscall=open</screen>
     <filename>/var/log/audit</filename> directory.
    </para>
    <para>
-     The logs record two types of information: record types and event 
+     The logs record two types of information: record types and event
      fields. The record types are identified by <literal>type=</literal> in
      each log entry. Event fields are all other items on the left side of
-     the equals signs. In the following examples, 
-     <literal>type=SYSCALL</literal> and <literal>type=CWD</literal>are 
+     the equals signs. In the following examples,
+     <literal>type=SYSCALL</literal> and <literal>type=CWD</literal>are
      record types, and <literal>arch=c000003e</literal> and
      <literal>syscall=2</literal> are event fields, followed by their values.
    </para>
@@ -1323,7 +1004,7 @@ exit,always success!=0 syscall=open</screen>
      a complete list of record types and their definitions.
    </para>
    <para>
-     Run the <command>ausyscall --dump</command> command to see a table of 
+     Run the <command>ausyscall --dump</command> command to see a table of
      syscall numbers, and what they represent:
    </para>
    <screen>&prompt.user;ausyscall --dump
@@ -1335,16 +1016,16 @@ Using x86_64 syscall table:
 4       stat
 5       fstat
 [...]</screen>
-   <para>    
-    The first example is a simple <command>less</command> command. The second 
-    example covers a great deal of PAM activity in the logs when a user tries 
+   <para>
+    The first example is a simple <command>less</command> command. The second
+    example covers a great deal of PAM activity in the logs when a user tries
     to remotely log in to a machine running audit.
    </para>
    <example xml:id="ex-audit-aureport-logtrail">
     <title>A simple audit event&mdash;viewing the audit log</title>
-<screen>type=SYSCALL msg=audit(1234874638.599:5207): arch=c000003e syscall=2 
+<screen>type=SYSCALL msg=audit(1234874638.599:5207): arch=c000003e syscall=2
 success=yes exit=4 a0=62fb60 a1=0 a2=31 a3=0 items=1 ppid=25400 pid
-=25616 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 
+=25616 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0
 tty=pts1 ses=1164 comm="less" exe="/usr/bin/less" key="doc_log"
 type=CWD msg=audit(1234874638.599:5207):  cwd="/root"
 type=PATH msg=audit(1234874638.599:5207): item=0 name="/var/log/audit/
@@ -2654,16 +2335,10 @@ total  type
    systems to use <systemitem class="daemon">auditd</systemitem> to receive
    enhanced detection information.
   </para>
-
   <para>
-   <systemitem class="daemon">audispd</systemitem> is a daemon which
-   controls the audit dispatcher. It is normally started by
-   <systemitem class="daemon">auditd</systemitem>.
-   <systemitem class="daemon">audispd</systemitem> takes audit events and
-   distributes them to the programs which want to analyze them in real time.
-   Configuration of <systemitem class="daemon">auditd</systemitem> is stored
-   in <filename>/etc/audisp/audispd.conf</filename>. The file has the
-   following options:
+   The configuration of <systemitem class="daemon">auditd</systemitem> is
+   stored in <filename>/etc/audit/auditd.conf</filename>. The file includes
+   the following options:
   </para>
 
   <variablelist>
@@ -2686,7 +2361,7 @@ total  type
       Specifies the way the audit daemon will react to the internal queue
       overflow. Possible values are <option>ignore</option> (nothing
       happens), <option>syslog</option> (issues a warning to syslog),
-      <option>suspend</option> (audispd will stop processing events),
+      <option>suspend</option> (stop processing events),
       <option>single</option> (the computer system will be put in single
       user mode), or <option>halt</option> (shuts the system down).
      </para>
@@ -2724,7 +2399,7 @@ total  type
     </term>
     <listitem>
      <para>
-      Specifies a user defined string which identifies the machine. The
+      Specifies a user-defined string which identifies the machine. The
       <option>name_format</option> option must be set to
       <option>user</option>, otherwise this option is ignored.
      </para>
@@ -2742,8 +2417,8 @@ total  type
    </varlistentry>
   </variablelist>
 
-  <example>
-   <title>Example /etc/audisp/audispd.conf</title>
+    <example>
+   <title>Example /etc/audit/auditd.conf</title>
 <screen>
   q_depth = 250
   overflow_action = SYSLOG
@@ -2754,8 +2429,7 @@ total  type
 
   <para>
    The plug-in programs install their configuration files in a special
-   directory dedicated to <systemitem class="daemon">audispd</systemitem>
-   plug-ins. It is <filename>/etc/audisp/plugins.d</filename> by default.
+   directory, <filename>/etc/audit/plugins.d</filename>.
    The plug-in configuration files have the following options:
   </para>
 
@@ -2766,7 +2440,7 @@ total  type
     <listitem>
      <para>
       Specifies if the program will use
-      <systemitem class="daemon">audispd</systemitem>. Possible values are
+      <systemitem class="daemon">auditd</systemitem>. Possible values are
       <option>yes</option> or <option>no</option>.
      </para>
     </listitem>
@@ -2835,12 +2509,12 @@ total  type
    </varlistentry>
   </variablelist>
 
-  <example>
-   <title>Example /etc/audisp/plugins.d/syslog.conf</title>
+ <example>
+   <title>Example /etc/audit/plugins.d/syslog.conf</title>
 <screen>
   active = no
   direction = out
-  path = builtin_syslog
+  path = /sbin/audisp-syslog
   type = builtin
   args = LOG_INFO
   format = string</screen>
