@@ -1,1 +1,670 @@
-../../../../xml/hardware_nvdimm.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="hardware_nvdimm.xml" version="5.0" xml:id="cha-nvdimm">
+ <title>持久内存</title>
+ <info>
+  <abstract>
+   <para>
+    本章包含有关使用配备非易失性主内存的 SUSE Linux Enterprise 的附加信息。此类内存称为<emphasis>持久内存</emphasis>，由一个或多个 NVDIMM 构成。
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <sect1 xml:id="sec-nvdimm-intro">
+  <title>简介</title>
+
+  <para>
+   持久内存是一种新型的计算机储存，其速度接近动态 RAM (DRAM)，同时兼具 RAM 的按字节寻址能力以及固态硬盘 (SSD) 的性能。
+  </para>
+
+  <para>
+   SUSE 目前支持在采用 AMD64/Intel 64 和 POWER 体系结构的计算机上，对 SUSE Linux Enterprise Server 使用持久性内存。
+  </para>
+  
+  <para>
+   与传统的 RAM 一样，持久内存直接安装在主板上的内存插槽中。因此，它的物理外形规格与 RAM 相同，以 DIMM 的形式提供。这些内存称为 NVDIMM：非易失性双列直插式内存模块。
+  </para>
+
+  <para>
+   不过，与 RAM 不同，持久内存在多个方面类似于基于闪存的 SSD。后两者采用固态内存电路的形式，但除此之外，两者都提供非易失性储存：系统断电或者重启动后，内存中的内容会得到保留。使用这两种媒体时，写入数据的速度比读取数据要慢；两者都支持有限的重新写入周期数。最后，与 SSD 一样，如果在特定的应用方案中更适合对持久内存进行扇区级别的访问，则也可以这样做。
+  </para>
+
+  <para>
+   不同的型号使用不同形式的电子储存媒体，例如 Intel 3D XPoint，或者将 NAND 闪存与 DRAM 结合使用。另外，行业正在开发新形式的非易失性 RAM。这意味着，不同的供应商和 NVDIMM 型号会提供不同的性能和持久性特征。
+  </para>
+
+  <para>
+   由于涉及的储存技术处于早期开发阶段，不同供应商的硬件可能会施加不同的限制。因此，以下叙述适用于一般性的场合。
+  </para>
+  
+  <para>
+   持久内存的速度最多比 DRAM 要慢 10 倍，但比闪存要快大约 1000 倍。可在其中按字节重新写入数据，而不像在闪存中一样，需要擦除整个扇区，然后重新写入数据。最后，尽管重新写入周期数有限，但大部分形式的持久内存可以应对数百万次重新写入，相比之下，闪存只能应对数千个周期。
+  </para>
+  
+  <para>
+   这会产生两种重要后果：
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     使用最新的技术无法运行仅包含持久内存的系统，因此无法实现完全非易失性的主内存。必须混合使用传统的 RAM 和 NVDIMM。操作系统和应用程序将在传统的 RAM 中执行，而 NVDIMM 可提供极速的补充性储存。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     由于不同供应商的持久内存的性能特征不同，程序员可能需要考虑到特定服务器中 NVDIMM 的硬件规格，包括 NVDIMM 的数量，以及它们可以挂载到哪些内存插槽。这会影响超级管理程序的使用、不同主机之间的软件迁移等等。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   ACPI 标准版本 6 中定义了此新型储存子系统。但是，<filename>libnvdimm</filename> 支持该标准颁布之前的 NVDIMM，可以相同的方式使用这些内存。
+  </para>
+  
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-terms">
+  <title>术语</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>区域</term>
+    <listitem>
+     <para>
+      <emphasis>区域</emphasis>是持久内存中可划分为一个或多个<emphasis>名称空间</emphasis>的块。如果不事先将某个区域分配到名称空间，则您无法访问该区域的持久内存。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>名称空间</term>
+    <listitem>
+     <para>
+      非易失性储存的单个连续寻址范围，相当于 NVM Express SSD 的名称空间，或 SCSI 逻辑单元 (LUN)。名称空间作为单独的块设备显示在服务器的 <filename>/dev</filename> 目录中。根据所需的访问方法，名称空间可将多个 NVDIMM 中的储存合并成较大的卷，或者允许将这些储存分区成较小的卷。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>模式</term>
+    <listitem>
+     <para>
+      每个名称空间还具有一种<emphasis>模式</emphasis>，该模式定义要为该名称空间启用哪些 NVDIMM 功能。同一父区域的同级名称空间始终具有相同的类型，但可将其配置为使用不同的模式。名称空间模式包括：
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>devdax</term>
+       <listitem>
+        <para>
+         设备 DAX 模式。创建单字符设备文件 (<filename>/dev/dax<replaceable>X</replaceable>.<replaceable>Y</replaceable>
+         </filename>)。<emphasis>不</emphasis>需要创建文件系统。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>fsdax</term>
+       <listitem>
+        <para>
+         文件系统 DAX 模式。如果未指定其他模式，则使用默认值。创建块设备 (<filename>/dev/pmem<replaceable>X</replaceable> [.<replaceable>Y</replaceable>]</filename>)，支持将 DAX 用于 <literal>ext4</literal> 或 <literal>XFS</literal>。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>扇区</term>
+       <listitem>
+        <para>
+         适用于不执行元数据校验和计算的传统文件系统。适用于小型引导卷。与其他操作系统兼容。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>raw</term>
+       <listitem>
+        <para>
+         不包含卷标或元数据的内存磁盘。不支持 DAX。与其他操作系统兼容。
+        </para>
+        <note>
+         <para>
+          SUSE 不支持 <literal>raw</literal> 模式。无法在 <literal>raw</literal> 名称空间中挂载文件系统。
+         </para>
+        </note>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>类型</term>
+    <listitem>
+     <para>
+      每个名称空间和区域都有一种<emphasis>类型</emphasis>，该类型定义如何访问与该名称空间或区域关联的持久内存。名称空间的类型始终与其父区域的类型相同。有两种不同的类型：“持久内存”（可通过两种不同的方式进行配置），以及已弃用的“块模式”。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>持久内存 (PMEM)</term>
+       <listitem>
+        <para>
+         与 RAM 类似，PMEM 储存提供字节级别的访问。使用 PMEM 时，单个名称空间可以包含多个交错式的 NVDIMM，使这些 NVDIMM 都可用作单个设备。
+        </para>
+        <para>
+         可通过两种方式来配置 PMEM 名称空间。
+        </para>
+        <variablelist>
+         <varlistentry>
+          <term>将 PMEM 与 DAX 搭配使用</term>
+          <listitem>
+           <para>
+            为 Direct Access (DAX) 配置 PMEM 名称空间后，访问内存时会绕过内核的页面缓存，并直接进入媒体。软件可以单独直接读取或写入该名称空间的每个字节。
+           </para>
+          </listitem>
+         </varlistentry>
+         <varlistentry>
+          <term>使用块转换表 (BTT) 的 PMEM</term>
+          <listitem>
+           <para>
+            与在传统的磁盘驱动器中一样，将按扇区访问配置为以 BTT 模式运行的 PMEM 名称空间，而不是像在 RAM 中一样采用按字节寻址的模式。某个转换表机制会将访问活动批处理成扇区大小的单元。
+           </para>
+           <para>
+            BTT 的优点是具有数据保护功能。该储存子系统可确保完全写入底层媒体的每个扇区。如果某个扇区无法完全写入（即，如果写入操作由于某个原因失败），整个扇区将会回滚到其原先的状态。因此，无法在给定的扇区中进行部分写入。 
+           </para>
+           <para>
+            此外，对 BTT 名称空间的访问会由内核缓存。
+           </para>
+           <para>
+            缺点在于，BTT 名称空间不支持 DAX。
+           </para>
+          </listitem>
+         </varlistentry>
+        </variablelist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>块模式 (BLK)</term>
+       <listitem>
+        <para>
+         块模式储存将每个 NVDIMM 作为独立的设备进行寻址。此模式已遭弃用，且不再受支持。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <para>
+      除 <literal>devdax</literal> 名称空间以外，其他所有类型也必须使用文件系统格式化，如同使用传统的驱动器一样。<phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 支持将 <literal>ext2</literal>、<literal>ext4</literal> 和 <literal>XFS</literal> 文件系统用于此目的。
+     </para>
+   </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>直接访问 (DAX)</term>
+    <listitem>
+     <para>
+      DAX 允许将持久内存直接映射成进程的地址空间（例如，使用 <literal>mmap</literal> 系统调用进行映射）。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>DIMM 物理地址 (DPA)</term>
+    <listitem>
+     <para>
+      在单个 DIMM 的内存中充当偏移量的内存地址；即，在该 DIMM 中充当最低可寻址字节的从零开始的地址。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>标签</term>
+    <listitem>
+     <para>
+      储存在 NVDIMM 中的元数据，例如名称空间定义。可以使用 DSM 访问这些数据。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>设备特定的方法 (DSM)</term>
+    <listitem>
+     <para>
+      用于访问 NVDIMM 中的固件的 ACPI 方法。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-uses">
+  <title>使用案例</title>
+
+  <sect2 xml:id="sec-nvdimm-uses-pmem">
+   <title>将 PMEM 与 DAX 搭配使用</title>
+   <para>
+    必须注意，这种形式的内存访问<emphasis>不是</emphasis>事务性的。如果发生断电或其他系统故障，数据可能不会完全写入到储存中。仅当应用程序可以处理部分写入数据的情况时，PMEM 储存才适用。
+   </para>
+   <sect3>
+    <title>
+     可受益于较大字节可寻址储存量的应用程序</title>
+    <para>
+     如果服务器托管的某个应用程序可按字节直接使用较大的快速储存量，则程序员可以使用 <literal>mmap</literal> 系统调用，将持久内存块直接放入该应用程序的地址空间，而无需使用任何附加的系统 RAM。
+    </para>
+   </sect3>
+   <sect3>
+    <title>避免使用内核页面缓存</title>
+    <para>
+     如果您想节省用于页面缓存的 RAM，而是将 RAM 分配给应用程序，请避免使用内核页面缓存。例如，可以专门使用非易失性内存来保存虚拟机 (VM) 映像。由于这些映像不会缓存，因此可以减少主机上的缓存使用量，从而可在每台主机上配置更多的 VM。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2>
+   <title>将 PMEM 与 BTT 搭配使用</title>
+   <para>
+    当您想要使用一组 NVDIMM 中的持久内存作为类似于磁盘的极速储存池时，此方法非常有用。例如，将文件系统日志置于使用 BTT 的 PMEM 上，可以提升在发生电源故障或其他突发性中断后所执行文件系统恢复的可靠性（请参见<xref linkend="sec-nvdimm-setup-btt"/>）。
+   </para>
+   <para>
+    对于应用程序而言，此类设备仅显示为极速 SSD，并可像其他任何储存设备一样供您使用。例如，LVM 可以分布在持久内存的顶层，像平时一样正常工作。
+   </para>
+   <para>
+    BTT 的优点在于可以保证扇区写入的原子性，因此，即使是依赖于数据完整性的复杂应用程序也能保持正常工作。可通过标准的错误报告通道来运行媒体错误报告。 
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-nvdimm-tools">
+  <title>用于管理持久内存的工具</title>
+
+  <para>
+   要管理持久内存，必须安装 <literal>ndctl</literal> 软件包。安装此软件包也会安装 <filename>libndctl</filename> 软件包，后者提供一组用户空间库，用于配置 NVDIMM。
+  </para>
+  
+  <para>
+   这些工具通过 <filename>libnvdimm</filename> 库运行。该库支持三种类型的 NVDIMM：
+  </para>
+  
+  <itemizedlist>
+   <listitem>
+    <para>
+     PMEM
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     BLK
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     同步 PMEM 和 BLK。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   <command>ndctl</command> 实用程序提供一系列有用的<command>手册</command>页。可使用以下命令访问这些页面：
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ndctl help <replaceable>subcommand</replaceable></command></screen>
+
+  <para>
+   要查看可用子命令的列表，请使用：
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ndctl --list-cmds</command></screen>
+
+  <para>
+   可用的子命令包括：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>version</term>
+    <listitem>
+     <para>
+      显示 NVDIMM 支持工具的当前版本。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-namespace</term>
+    <listitem>
+     <para>
+      使指定的名称空间可供使用。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-namespace</term>
+    <listitem>
+     <para>
+      阻止使用指定的名称空间。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>create-namespace</term>
+    <listitem>
+     <para>
+      从指定的储存设备创建新的名称空间。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>destroy-namespace</term>
+    <listitem>
+     <para>
+      去除指定的名称空间。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-region</term>
+    <listitem>
+     <para>
+      使指定的区域可供使用。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-region</term>
+    <listitem>
+     <para>
+      阻止使用指定的区域。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>zero-labels</term>
+    <listitem>
+     <para>
+      擦除设备中的元数据。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>read-labels</term>
+    <listitem>
+     <para>
+      检索指定设备的元数据。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>list</term>
+    <listitem>
+     <para>
+      显示可用的设备。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>help</term>
+    <listitem>
+     <para>
+      显示有关工具用法的信息。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-setup">
+  <title>设置持久内存</title>
+
+  <sect2 xml:id="sec-nvdimm-setup-view">
+   <title>查看可用的 NVDIMM 储存</title>
+   <para>
+    可以使用 <command>ndctl</command> <literal>list</literal> 命令列出系统中所有可用的 NVDIMM。
+   </para>
+   <para>
+    在以下示例中，系统包含三个 NVDIMM，这些 NVDIMM 位于单个三通道交错集内。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl list --dimms</command>
+
+[
+ {
+  "dev":"nmem2",
+  "id":"8089-00-0000-12325476"
+ },
+ {
+  "dev":"nmem1",
+  "id":"8089-00-0000-11325476"
+ },
+ {
+  "dev":"nmem0",
+  "id":"8089-00-0000-10325476"
+ }
+]</screen>
+   <para>
+    如果结合不同的参数，<command>ndctl</command>
+    <literal>list</literal> 还可以列出可用的区域。
+   </para>
+   <note>
+    <para>
+     区域可能不会按数字顺序显示。
+    </para>
+   </note>
+   <para>
+    请注意，尽管只有三个 NVDIMM，但它们却显示为四个区域。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl list --regions</command>
+
+[
+ {
+  "dev":"region1",
+  "size":68182605824,
+  "available_size":68182605824,
+  "type":"blk"
+ },
+ {
+  "dev":"region3",
+  "size":202937204736,
+  "available_size":202937204736,
+  "type":"pmem",
+  "iset_id":5903239628671731251
+  },
+  {
+   "dev":"region0",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  },
+  {
+   "dev":"region2",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  }
+]</screen>
+   <para>
+    空间以两种不同的形式显示：三个 BLK 类型的独立 64 GB 区域，或者一个 PMEM 类型的合并 189 GB 区域，后者将三个交错式 NVDIMM 中的所有空间表示为单个卷。
+   </para>
+   <para>
+    请注意，<literal>available_size</literal> 的显示值与 <literal>size</literal> 的显示值相同。这意味着尚未分配任何空间。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-dax">
+   <title>将储存配置为使用 DAX 的单个 PMEM 名称空间</title>
+   <para>
+    第一个示例将三个 NVDIMM 配置成使用 Direct Access (DAX) 的单个 PMEM 名称空间。
+   </para>
+   <para>
+    第一个步骤是创建新的名称空间。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl create-namespace --type=<replaceable>pmem</replaceable> --mode=<replaceable>fsdax</replaceable> --map=<replaceable>memory</replaceable></command>
+{
+ "dev":"namespace3.0",
+ "mode":"memory",
+ "size":199764213760,
+ "uuid":"dc8ebb84-c564-4248-9e8d-e18543c39b69",
+ "blockdev":"pmem3"
+}</screen>
+   <para>
+    这会创建支持 DAX 的块设备 <filename>/dev/pmem3</filename>。设备名称中的 <literal>3</literal> 继承自父区域编号（在本例中为 <filename>region3</filename>）。
+   </para>
+   <para>
+    <option>--map=memory</option> 选项从 NVDIMM 中设置出一部分 PMEM 储存空间，以便可以使用这些空间来分配称作<literal>结构页面</literal>的内部内核数据结构。这样，便可以将新的 PMEM 名称空间与 <literal>O_DIRECT I/O</literal> 和 <literal>RDMA</literal> 等功能搭配使用。
+   </para>
+   <para>
+    最终 PMEM 名称空间的容量之所以小于父 PMEM 区域，是因为有一部分持久内存预留给了内核数据结构。
+   </para>
+   <para>
+    接下来，我们校验新的块设备是否可用于操作系统：
+   </para>
+<screen><prompt role="root"># </prompt><command>fdisk -l /dev/<replaceable>pmem3</replaceable></command>
+Disk /dev/pmem3: 186 GiB, 199764213760 bytes, 390164480 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    与其他任何驱动器一样，在使用该设备之前，必须先将其格式化。在本示例中，我们使用 XFS 将其格式化：
+   </para>
+<screen><prompt role="root"># </prompt><command>mkfs.xfs /dev/<replaceable>pmem3</replaceable></command>
+meta-data=/dev/pmem3      isize=256    agcount=4, agsize=12192640 blks
+         =                sectsz=4096  attr=2, projid32bit=1
+         =                crc=0        finobt=0, sparse=0
+data     =                bsize=4096   blocks=48770560, imaxpct=25
+         =                sunit=0      swidth=0 blks
+naming   =version 2       bsize=4096   ascii-ci=0 ftype=1
+log      =internal log    bsize=4096   blocks=23813, version=2
+         =                sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none            extsz=4096   blocks=0, rtextents=0</screen>
+   <para>
+    接下来，可将新的驱动器挂载到某个目录：
+   </para>
+<screen><prompt role="root"># </prompt><command>mount -o dax /dev/<replaceable>pmem3</replaceable> /mnt/<replaceable>pmem3</replaceable></command></screen>
+   <para>
+    然后，可以校验是否获得了一个支持 DAX 的设备：
+   </para>
+<screen><prompt role="root"># </prompt><command>mount | grep dax</command>
+/dev/pmem3 on /mnt/pmem3 type xfs (rw,relatime,attr2,dax,inode64,noquota)</screen>
+   <para>
+    结果是，我们已获得一个使用 XFS 文件系统格式化的，且装有 DAX 的 PMEM 名称空间。
+   </para>
+   <para>
+    对该文件系统中的文件进行任何 <literal>mmap()</literal> 调用都会返回直接映射到 NVDIMM 上的持久内存的虚拟地址，并且会完全绕过页面缓存。
+   </para>
+   <para>
+    对该文件系统中的文件进行任何 <literal>fsync</literal> 或 <literal>msync</literal> 调用仍可确保将修改后的数据完全写入到 NVDIMM。这些调用会刷新通过 <literal>mmap</literal> 映射在用户空间中修改的任何页面的关联处理器缓存行。
+   </para>
+   <sect3 xml:id="sec-nvdimm-setup-deldax">
+    <title>去除名称空间</title>
+    <para>
+     在创建使用相同储存的其他任何类型的卷之前，我们必须卸载此 PMEM 卷，然后将其去除。
+    </para>
+    <para>
+     首先卸载该卷：
+    </para>
+<screen><prompt role="root"># </prompt><command>umount /mnt/<replaceable>pmem3</replaceable></command></screen>
+    <para>
+     然后禁用名称空间：
+    </para>
+<screen><prompt role="root"># </prompt><command>ndctl disable-namespace <replaceable>namespace3.0</replaceable></command>
+disabled 1 namespace</screen>
+    <para>
+     然后删除该卷：
+    </para>
+<screen><prompt role="root"># </prompt><command>ndctl destroy-namespace <replaceable>namespace3.0</replaceable></command>
+destroyed 1 namespace</screen>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-btt">
+   <title>创建使用 BTT 的 PMEM 名称空间</title>
+   <para>
+     BTT 提供原子性扇区写入，因此，当您需要数据保护（例如，为 Ext4 和 XFS 日志提供数据保护）时，BTT 会是个不错的选择。如果发生电源故障，日志将受到保护且可恢复。以下示例演示如何创建使用 BTT 的扇区模式 PMEM 名称空间，以及如何将文件系统日志置于此名称空间。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl create-namespace --type=pmem --mode=sector</command>
+{
+ "dev":"namespace3.0",
+ "mode":"sector",
+ "uuid":"51ab652d-7f20-44ea-b51d-5670454f8b9b",
+ "sector_size":4096,
+ "blockdev":"pmem3s"
+}</screen>
+   <para>
+    接下来，校验新设备是否存在：
+   </para>
+<screen><prompt role="root"># </prompt><command>fdisk -l /dev/<replaceable>pmem3s</replaceable></command>
+Disk /dev/pmem3s: 188.8 GiB, 202738135040 bytes, 49496615 sectors
+Units: sectors of 1 * 4096 = 4096 bytes
+Sector size (logical/physical): 4096 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    与前面配置的支持 DAX 的 PMEM 名称空间一样，这个支持 BTT 的 PMEM 名称空间也会占用 NVDIMM 中的所有可用储存。
+   </para>   
+   <note>
+    <para>
+     设备名称 (<filename>/dev/<replaceable>pmem3s</replaceable></filename>) 中的尾部 <literal>s</literal> 表示<literal>扇区</literal> (sector)，可用于轻松辨别配置为使用 BTT 的名称空间。
+    </para>
+   </note>
+   <para>
+    可按前一示例中所述格式化和挂载卷。
+   </para>
+   <para>
+    此处显示的 PMEM 名称空间不能使用 DAX。它会使用 BTT 来提供<emphasis>扇区写入原子性</emphasis>。每次通过 PMEM 块驱动程序进行扇区写入时，BTT 都会分配一个新的扇区来接收新数据。完全写入新数据后，BTT 将以原子方式更新其内部映射结构，使新写入的数据可供应用程序使用。如果在此过程中的任意时间点发生电源故障，则写入内容将会完全丢失，在这种情况下，应用程序可以访问其旧数据，而这些数据仍旧保持不变。这可以防止出现所谓“扇区撕裂”的情况。
+   </para>
+   <para>
+    与其他任何标准块设备一样，可以使用某个文件系统格式化这个支持 BTT 的 PMEM 名称空间，并在该文件系统中使用它。无法将该名称空间与 DAX 搭配使用。但是，此块设备中的文件的 <literal>mmap</literal> 映射将使用页面缓存。
+   </para>
+  </sect2>
+  
+  <sect2 xml:id="sec-nvdimm-fs-journal">
+      <title>将文件系统日志置于 PMEM/BTT 上</title>
+   <para>
+      当您将文件系统日志置于一个单独的设备上时，该设备使用的文件系统块大小必须与该文件系统相同。此大小很有可能是 4096，您可以使用以下命令查找块大小：
+  </para>
+  <screen><prompt role="root"># </prompt><command>blockdev --getbsz /dev/<replaceable>sda3</replaceable></command></screen>
+  <para>
+      下面的示例会在单独的 NVDIMM 设备上创建新的 Ext4 日志，并在 SATA 设备上创建文件系统，然后将新文件系统关联到该日志：
+ </para>
+ <screen>
+<prompt role="root"># </prompt><command>mke2fs -b 4096 -O journal_dev /dev/<replaceable>pmem3s</replaceable></command>
+<prompt role="root"># </prompt><command>mkfs.ext4 -J device=/dev/<replaceable>pmem3s</replaceable> /dev/<replaceable>sda3</replaceable></command>
+</screen>
+  <para>
+      下面的示例会在 SATA 驱动器上创建新的 XFS 文件系统，并在单独的 NVDIMM 设备上创建日志：
+  </para>
+<screen><prompt role="root"># </prompt><command>mkfs.xfs -l logdev=/dev/<replaceable>pmem3s </replaceable> /dev/<replaceable>sda3</replaceable></command>  
+</screen>
+<para>
+    有关选项的详细信息，请参见 <command>man 8 mkfs.ext4</command> 和 <command>man 8 mkfs.ext4</command>。
+</para>
+</sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-nvdimm-moreinfo">
+  <title>更多信息</title>
+
+  <para>
+   可以在以下列表中找到关于此主题的更多信息：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="https://nvdimm.wiki.kernel.org/">持久内存 Wiki</link>
+    </para>
+    <para>
+     包含有关配置 NVDIMM 系统的指导、有关测试的信息，以及有关启用 NVDIMM 的规范的链接。随着 Linux 中 NVDIMM 支持功能的不断发展，此站点的内容也会不断扩充。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://pmem.io/">持久内存编程</link>
+    </para>
+    <para>
+     有关在 Linux 和其他操作系统中配置、使用非易失性内存，以及为使用此类内存的系统编程的信息。其中介绍了 NVM 库 (NVML)。该库旨在提供有用的 API 用于在用户空间中进行持久性内存编程。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://www.kernel.org/doc/Documentation/nvdimm/nvdimm.txt">LIBNVDIMM：非易失性设备</link>
+    </para>
+    <para>
+     此文档面向内核开发人员，包含在当前 Linux 内核树的“文档”目录中。其中探讨了涉及启用 NVDIMM 的不同内核模块，列出了有关内核实现的一些技术细节，并介绍了 <command>ndctl</command> 工具使用的 <filename>sysfs</filename> 内核接口。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://github.com/pmem/ndctl">GitHub：pmem/ndctl</link>
+    </para>
+    <para>
+     用于管理 Linux 内核中的 <command>libnvdimm</command> 子系统的实用程序库。另外还包含用户空间库，以及单元测试和文档。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

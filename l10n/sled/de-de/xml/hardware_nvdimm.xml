@@ -1,1 +1,670 @@
-../../../../xml/hardware_nvdimm.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="hardware_nvdimm.xml" version="5.0" xml:id="cha-nvdimm">
+ <title>Permanenter Speicher</title>
+ <info>
+  <abstract>
+   <para>
+    Dieses Kapitel enthält weitere Informationen zur Verwendung von SUSE Linux Enterprise   mit nicht-flüchtigem Hauptspeicher, auch als <emphasis>permanenter Speicher</emphasis> bekannt, der aus einem oder mehreren NVDIMMs besteht.
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <sect1 xml:id="sec-nvdimm-intro">
+  <title>Einführung</title>
+
+  <para>
+   Ein permanenter Speicher ist eine neue Art von Speicherung am Rechner. Er kombiniert annähernd so hohe Geschwindigkeiten wie bei dynamischen RAMs (DRAMs) mit der Byte-für-Byte-Adressierbarkeit des RAM und der Permanenz von Solid-State Drives (SSDs).
+  </para>
+
+  <para>
+   SUSE unterstützt aktuell die Verwendung eines permanenten Speichers mit SUSE Linux Enterprise Server auf Rechnern mit AMD64/Intel 64- und POWER-Architekturen.
+  </para>
+  
+  <para>
+   Wie bei herkömmlichen RAMs wird der permanente Speicher direkt am Speichersteckplatz der Hauptplatine installiert. Damit wird er im selben physischen Formfaktor bereitgestellt wie RAM – als DIMMs. Man nennt sie NVDIMMs: Non-Volatile Dual Inline Memory Modules.
+  </para>
+
+  <para>
+   Im Unterschied zu RAM ist ein permanenter Speicher in vielerlei Hinsicht Flash-basierten SSDs ähnlich. Beide basieren auf unterschiedliche Weise auf dem Stromkreis von Festkörperspeichern, bieten aber unabhängig davon einen nicht-flüchtigen Speicher. Dies bedeutet, dass ihre Inhalte beibehalten werden, wenn das System heruntergefahren oder neu gestartet wird. Bei beiden Varianten geht das Schreiben von Daten langsamer von statten als das Lesen und beide unterstützen eine begrenzte Anzahl von Neuschreibungszyklen. Wie bei SSDs ist der Zugriff auf Sektorebene des permanenten Speichers möglich, sollte dies für eine bestimmte Anwendung erforderlich sein.
+  </para>
+
+  <para>
+   Die unterschiedlichen Modelle verwenden verschiedene Arten von elektronischen Speichermedien, wie Intel 3D XPoint oder eine Kombination aus NAND-Flash und DRAM. Neue Arten von nicht-flüchtigen RAMs werden derzeit entwickelt. Verschiedene Anbieter und Modelle von NVDIMMs bieten unterschiedliche Eigenschaften für Leistung und Langlebigkeit.
+  </para>
+
+  <para>
+   Da sich die entsprechenden Speichertechnologien noch in der frühen Entwicklungsphase befinden, ist bei der Hardware verschiedener Anbieter möglicherweise mit unterschiedlichen Einschränkungen zu rechnen. Daher sind die folgenden Aussagen als Verallgemeinerungen zu betrachten.
+  </para>
+  
+  <para>
+   Ein permanenter Speicher ist bis zu zehn mal langsamer als DRAM, doch in etwa tausend mal schneller als Flash-Speicher. Im Gegensatz zum Vorgang des Auslöschens und Neuschreibens des gesamten Sektors beim Flash-Speicher kann der permanente Speicher auf Byte-zu-Byte-Basis neu geschrieben werden. Da die Neuschreibungszyklen begrenzt sind, können permanente Speicher schließlich Millionen von Neuschreibungen verarbeiten, verglichen mit Tausenden von Zyklen des Flash-Speichers.
+  </para>
+  
+  <para>
+   Das hat zwei erhebliche Folgen:
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     Beim aktuellen Stand der Technik ist es nicht möglich, ein System nur mit permanentem Speicher auszuführen und dadurch einen gänzlich nicht-flüchtigen Hauptspeicher zu erzielen. Sie müssen einen herkömmlichen RAM mit NVDIMMs kombinieren. Das Betriebssystem und die Anwendungen werden am herkömmlichen RAM ausgeführt und NVDIMMs bieten eine sehr schnelle ergänzende Speichermöglichkeit.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Aufgrund der Leistungsmerkmale der permanenten Speicher von verschiedenen Anbietern müssen Programmierer möglicherweise die Hardwarespezifikationen der NVDIMMs an einem bestimmten Server berücksichtigen, einschließlich deren Anzahl und belegten Speichersteckplätze. Dies wirkt sich auf die Verwendung des Hypervisors sowie die Migration von Software zwischen verschiedenen Host-Rechnern usw. aus.
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   Dieses neue Speicher-Untersystem ist in Version 6 des ACPI-Standards definiert. <filename>libnvdimm</filename> unterstützt jedoch NVDIMMs, die den Standard noch nicht erfüllen, wodurch diese auf gleiche Weise verwendet werden können.
+  </para>
+  
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-terms">
+  <title>Begriffe</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>Region</term>
+    <listitem>
+     <para>
+      Eine <emphasis>Region</emphasis> ist ein Block des permanenten Speichers, der in einen oder mehrere <emphasis>Namespace</emphasis>s unterteilt werden kann. Der Zugriff auf den permanenten Speicher einer Region ist erst nach dessen Zuordnung zu einem Namespace möglich.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Namespace</term>
+    <listitem>
+     <para>
+      Ein einzelner zusammenhängend adressierter Bereich eines nicht-flüchtigen Speichers, vergleichbar mit NVM Express SSD-Namespaces oder SCSI Logical Units (LUNs). Namespaces werden im <filename>/dev</filename>-Verzeichnis des Servers als separate Blockgeräte angezeigt. Abhängig von der erforderlichen Zugriffsmethode können Namespaces entweder Speicherplatz von verschiedenen NVDIMMs in größere Volumes zusammenfassen oder dessen Partitionierung in kleinere Volumes zulassen.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Modus</term>
+    <listitem>
+     <para>
+      Jeder Namespace weist auch einen <emphasis>Modus</emphasis> auf, der definiert, welche NVDIMM-Funktionen für diesen Namespace aktiviert sind. Gleichgeordnete Namespaces der selben übergeordneten Region sind im Typ immer gleich, werden jedoch möglicherweise mit verschiedenen Modi konfiguriert. Namespace-Modi:
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>devdax</term>
+       <listitem>
+        <para>
+         Geräte-DAX-Modus. Erstellt eine Einzelzeichen-Gerätedatei (<filename> /dev/dax<replaceable>X</replaceable>.<replaceable>Y</replaceable>
+         </filename>). Die Erstellung eines Dateisystems ist <emphasis>nicht</emphasis> erforderlich.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>fsdax</term>
+       <listitem>
+        <para>
+         Dateisystem-DAX-Modus. Standardmodus, falls kein anderer Modus angegeben wird. Erstellt ein Blockgerät (<filename>/dev/pmem<replaceable>X</replaceable> [.<replaceable>Y</replaceable>]</filename>), das DAX für <literal>ext4</literal> oder <literal>XFS</literal> unterstützt.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>sector</term>
+       <listitem>
+        <para>
+         Für veraltete Dateisysteme, die keine Checksumme für Metadaten erstellen. Geeignet für kleine Boot-Volumes. Kompatibel mit anderen Betriebssystemen.
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>raw</term>
+       <listitem>
+        <para>
+         Ein Speicherdatenträger ohne Kennung oder Metadaten. Keine Unterstützung von DAX. Kompatibel mit anderen Betriebssystemen.
+        </para>
+        <note>
+         <para>
+          Der <literal>raw</literal>-Modus wird von SUSE nicht unterstützt. Es ist nicht möglich, Dateisysteme auf <literal>raw</literal>-Namespaces einzuhängen.
+         </para>
+        </note>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Typ</term>
+    <listitem>
+     <para>
+      Jeder Namespace und jede Region weist einen <emphasis>Typ</emphasis> auf, der definiert, auf welche Weise auf den permanenten Speicher, der mit diesem Namespace oder dieser Region verknüpft ist, zugegriffen wird. Ein Namespace hat immer denselben Typ wie dessen übergeordnete Region. Zwei verschiedene Typen stehen zur Verfügung: Permanenter Speicher, der auf zwei verschiedene Arten konfiguriert werden kann, sowie der veraltete Block-Modus.
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>Permanenter Speicher (PMEM)</term>
+       <listitem>
+        <para>
+         Der PMEM-Speicher bietet Zugriff auf Byte-Ebene, ähnlich wie RAM. Mit PMEM kann ein einzelner Namespace mehrere überlappende NVDIMMs enthalten und alle können als Einzelgerät verwendet werden.
+        </para>
+        <para>
+         Ein PMEM-Namespace kann auf zwei Arten konfiguriert werden.
+        </para>
+        <variablelist>
+         <varlistentry>
+          <term>PMEM mit DAX</term>
+          <listitem>
+           <para>
+            Ein für den Direktzugriff (DAX) konfigurierter Namespace bedeutet, dass beim Zugreifen auf den Arbeitsspeicher der Seiten-Cache des Kernels umgangen und direkt auf das Medium zugegriffen wird. Die Software kann jedes Byte des Namespace separat lesen oder schreiben.
+           </para>
+          </listitem>
+         </varlistentry>
+         <varlistentry>
+          <term>PMEM mit BTT (Block Translation Table)</term>
+          <listitem>
+           <para>
+            Wie bei einem herkömmlichen Festplattenlaufwerk wird auf einen für den Betrieb im BTT-Modus konfigurierten PMEM-Namespace Sektor für Sektor zugegriffen, im Unterschied zu dem eher RAM-ähnlichen Byte-adressierbaren Modell. Durch einen Übersetzungstabellen-Mechanismus werden die Zugriffe in Einheiten von Sektorgröße eingeteilt.
+           </para>
+           <para>
+            Der Vorteil von BTT ist der Datenschutz. Das Speicher-Untersystem sorgt dafür, dass jeder Sektor vollständig auf das zugrunde liegende Medium geschrieben wird. Wenn ein Sektor nicht vollständig geschrieben wird (also wenn der Schreibvorgang aus jeglichen Gründen fehlschlägt), wird ein Rollback des gesamten Sektors auf den ursprünglichen Status vorgenommen. Daher kann ein Sektor nicht teilweise geschrieben werden. 
+           </para>
+           <para>
+            Der Zugriff auf BTT-Namespaces wird zudem vom Kernel im Cache gespeichert.
+           </para>
+           <para>
+            Der Nachteil ist, dass kein Direktzugriff auf BTT-Namespaces möglich ist.
+           </para>
+          </listitem>
+         </varlistentry>
+        </variablelist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>Block-Modus (BLK)</term>
+       <listitem>
+        <para>
+         Beim Speichern im Block-Modus wird jeder NVDIMM als separates Gerät adressiert. Dieser Modus ist inzwischen veraltet und wird nicht mehr unterstützt.
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <para>
+      Abgesehen von <literal>devdax</literal>-Namespaces müssen alle anderen Typen mit einem Dateisystem formatiert werden, genau wie bei einem herkömmlichen Laufwerk. <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> unterstützt dafür die Dateisysteme <literal>ext2</literal>, <literal>ext4</literal> und <literal>XFS</literal>.
+     </para>
+   </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Direktzugriff (Direct Access, DAX)</term>
+    <listitem>
+     <para>
+      Durch DAX kann ein permanenter Speicher direkt im Adressbereich eines Prozesses zugeordnet werden, beispielsweise über den Systemaufruf <literal>mmap</literal>.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Physikalische DIMM-Adresse (DPA)</term>
+    <listitem>
+     <para>
+      Eine Speicheradresse als Offset in den Speicher eines einzelnen DIMMs, das heißt beginnend bei Null als niedrigstem adressierbaren Byte in diesem DIMM.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Kennung</term>
+    <listitem>
+     <para>
+      Im NVDIMM gespeicherte Metadaten wie beispielsweise Namespace-Definitionen. Der Zugriff ist über DSM möglich.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Gerätespezifische Methode (Device-specific method, DSM)</term>
+    <listitem>
+     <para>
+      ACPI-Methode für den Zugriff auf die Firmware eines NVDIMM.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-uses">
+  <title>Einsatzbereiche</title>
+
+  <sect2 xml:id="sec-nvdimm-uses-pmem">
+   <title>PMEM mit DAX</title>
+   <para>
+    Es ist wichtig zu wissen, dass diese Art von Speicherzugriff <emphasis>keine</emphasis> Transaktion ist. Im Fall eines Stromausfalls oder eines anderen Systemfehlers werden die Daten möglicherweise nicht vollständig in den Speicher geschrieben. Ein PMEM-Speicher ist nur für Anwendungen geeignet, die teilweise geschriebene Daten verarbeiten können.
+   </para>
+   <sect3>
+    <title>
+     Anwendungen, die von einem großen Byte-adressierbaren Speicher profitieren</title>
+    <para>
+     Wenn am Server eine Anwendung gehostet wird, die direkt einen großen Teil eines schnellen Speichers Byte für Byte verwendet, kann der Programmierer mit dem Systemaufruf <literal>mmap</literal> Blöcke des permanenten Speichers direkt in den Adressbereich der Anwendung stellen, ohne auf zusätzlichen System-RAM zurückgreifen zu müssen.
+    </para>
+   </sect3>
+   <sect3>
+    <title>Vermeiden des Kernel-Seiten-Caches</title>
+    <para>
+     Vermeiden Sie den Kernel-Seiten-Cache, wenn Sie den RAM für den Seiten-Cache aufsparen und ihn stattdessen anderen Anwendungen zuweisen möchten. Dieser könnte beispielsweise zum Speichern von VM-Images vorgesehen werden. Diese Images würden nicht in den Cache gestellt werden, was die Cache-Auslastung am Host reduzieren und mehr VMs pro Host zulassen würde.
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2>
+   <title>PMEM mit BTT</title>
+   <para>
+    Diese Variante ist nützlich, wenn Sie den permanenten Speicher auf einigen NVDIMMs als einen Datenträger-ähnlichen Pool von sehr schnellen Speichern verwenden möchten. Wird beispielsweise das Dateisystemjournal auf PMEM mit BTT platziert, erhöht sich dadurch die Zuverlässigkeit der Dateisystemwiederherstellung nach Stromausfall oder sonstiger plötzlicher Unterbrechung (siehe <xref linkend="sec-nvdimm-setup-btt"/>).
+   </para>
+   <para>
+    Anwendungen halten diese Geräte für sehr schnelle SSDs, die wie jedes andere Speichergerät verwendet werden. LVM kann beispielsweise auf den permanenten Speicher aufgesetzt werden und funktioniert normal.
+   </para>
+   <para>
+    BTT hat den Vorteil, dass die Unteilbarkeit beim Schreiben in den Sektor gewährleistet ist. Somit bleiben sogar sehr anspruchsvolle und von Datenintegrität abhängige Anwendungen funktionsfähig. Die Erstellung von Fehlerberichten funktioniert über standardmäßige Kanäle zur Fehlerberichterstellung. 
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-nvdimm-tools">
+  <title>Tools zur Verwaltung eines permanenten Speichers</title>
+
+  <para>
+   Zur Verwaltung eines permanenten Speichers muss das Paket <literal>ndctl</literal> installiert werden. Dadurch wird auch das Paket <filename>libndctl</filename> installiert. Es enthält einige Benutzerbereich-Bibliotheken zum Konfigurieren von NVDIMMs.
+  </para>
+  
+  <para>
+   Diese Tools arbeiten mit der Bibliothek <filename>libnvdimm</filename>, die drei Typen von NVDIMM unterstützt:
+  </para>
+  
+  <itemizedlist>
+   <listitem>
+    <para>
+     PMEM
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     BLK
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     PMEM und BLK gleichzeitig
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   Das <command>ndctl</command>-Dienstprogramm enthält einige nützliche <command>man</command>-Seiten, auf die mit dem folgenden Kommando zugegriffen wird:
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ndctl help <replaceable>subcommand</replaceable></command></screen>
+
+  <para>
+   Eine Liste der verfügbaren Unterkommandos erhalten Sie mit:
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ndctl --list-cmds</command></screen>
+
+  <para>
+   Folgende Unterkommandos stehen zur Verfügung:
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>version</term>
+    <listitem>
+     <para>
+      Zeigt die aktuelle Version der NVDIMM-Unterstützungstools an.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-namespace</term>
+    <listitem>
+     <para>
+      Stellt den angegebenen Namespace zur Verfügung.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-namespace</term>
+    <listitem>
+     <para>
+      Verhindert die Verwendung des angegebenen Namespace.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>create-namespace</term>
+    <listitem>
+     <para>
+      Erstellt einen neuen Namespace aus den angegebenen Speichergeräten.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>destroy-namespace</term>
+    <listitem>
+     <para>
+      Entfernt den angegebenen Namespace.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-region</term>
+    <listitem>
+     <para>
+      Stellt die angegebene Region zur Verfügung.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-region</term>
+    <listitem>
+     <para>
+      Verhindert die Verwendung der angegebenen Region.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>zero-labels</term>
+    <listitem>
+     <para>
+      Löscht die Metadaten von einem Gerät.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>read-labels</term>
+    <listitem>
+     <para>
+      Ruft die Metadaten vom angegebenen Gerät ab.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>list</term>
+    <listitem>
+     <para>
+      Zeigt verfügbare Geräte an.
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>help</term>
+    <listitem>
+     <para>
+      Zeigt Informationen zur Verwendung des Tools an.
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-setup">
+  <title>Einrichten eines permanenten Speichers</title>
+
+  <sect2 xml:id="sec-nvdimm-setup-view">
+   <title>Anzeigen des verfügbaren NVDIMM-Speichers</title>
+   <para>
+    Mit dem Kommando <command>ndctl</command> <literal>list</literal> werden alle verfügbaren NVDIMMs in einem System aufgelistet.
+   </para>
+   <para>
+    Im folgenden Beispiel hat das System drei NVDIMMs, die sich in einem einzelnen, dreikanaligen überlappenden Set befinden.
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl list --dimms</command>
+
+[
+ {
+  "dev":"nmem2",
+  "id":"8089-00-0000-12325476"
+ },
+ {
+  "dev":"nmem1",
+  "id":"8089-00-0000-11325476"
+ },
+ {
+  "dev":"nmem0",
+  "id":"8089-00-0000-10325476"
+ }
+]</screen>
+   <para>
+    Mit einem anderen Parameter listet <command>ndctl</command>
+    <literal>list</literal> auch die verfügbaren Regionen auf.
+   </para>
+   <note>
+    <para>
+     Regionen erscheinen möglicherweise nicht in numerischer Reihenfolge.
+    </para>
+   </note>
+   <para>
+    Beachten Sie, dass zwar nur drei NVDIMMs vorhanden sind, doch vier Regionen angezeigt werden.
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl list --regions</command>
+
+[
+ {
+  "dev":"region1",
+  "size":68182605824,
+  "available_size":68182605824,
+  "type":"blk"
+ },
+ {
+  "dev":"region3",
+  "size":202937204736,
+  "available_size":202937204736,
+  "type":"pmem",
+  "iset_id":5903239628671731251
+  },
+  {
+   "dev":"region0",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  },
+  {
+   "dev":"region2",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  }
+]</screen>
+   <para>
+    Der Speicherplatz ist auf zwei verschiedene Arten verfügbar: entweder als drei separate 64 GB-Regionen vom Typ BLK oder als eine kombinierte 189 GB-Region vom Typ PMEM, die den gesamten Speicherplatz auf den drei überlappenden NVDIMMs als ein einziges Volume darstellt.
+   </para>
+   <para>
+    Beachten Sie, dass der angezeigte Wert für <literal>available_size</literal> identisch ist mit dem Wert für <literal>size</literal>. Dies bedeutet, dass noch kein Speicherplatz zugeordnet wurde.
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-dax">
+   <title>Konfigurieren des Speichers als einzelnen PMEM-Namespace mit DAX</title>
+   <para>
+    Im ersten Beispiel konfigurieren wir unsere drei NVDIMMs in einem einzelnen PMEM-Namespace mit Direktzugriff (DAX).
+   </para>
+   <para>
+    Im ersten Schritt erstellen wir einen neuen Namespace.
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl create-namespace --type=<replaceable>pmem</replaceable> --mode=<replaceable>fsdax</replaceable> --map=<replaceable>memory</replaceable></command>
+{
+ "dev":"namespace3.0",
+ "mode":"memory",
+ "size":199764213760,
+ "uuid":"dc8ebb84-c564-4248-9e8d-e18543c39b69",
+ "blockdev":"pmem3"
+}</screen>
+   <para>
+    Dadurch wird ein Blockgerät <filename>/dev/pmem3</filename> erstellt, das DAX unterstützt. Die <literal>3</literal> im Gerätenamen wird von der Nummer der übergeordneten Region übernommen, in diesem Fall <filename>region3</filename>.
+   </para>
+   <para>
+    Die Option <option>--map=memory</option> reserviert einen Teil des PMEM-Speicherplatzes auf den NVDIMMs für die Zuordnung interner Kernel-Datenstrukturen namens <literal>struct pages</literal>. Dadurch kann der neue PMEM-Namespace mit Funktionen wie <literal>O_DIRECT I/O</literal> und <literal>RDMA</literal> verwendet werden.
+   </para>
+   <para>
+    Aufgrund der Reservierung eines Teils des permanenten Speichers für Kernel-Datenstrukturen hat der resultierende PMEM-Namespace eine geringere Kapazität als die übergeordnete PMEM-Region.
+   </para>
+   <para>
+    Als nächstes überprüfen wir, ob das neue Blockgerät für das Betriebssystem verfügbar ist:
+   </para>
+<screen><prompt role="root"># </prompt><command>fdisk -l /dev/<replaceable>pmem3</replaceable></command>
+Disk /dev/pmem3: 186 GiB, 199764213760 bytes, 390164480 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    Bevor es verwendet werden kann, muss es wie jedes andere Gerät formatiert werden. In diesem Beispiel formatieren wir es mit XFS:
+   </para>
+<screen><prompt role="root"># </prompt><command>mkfs.xfs /dev/<replaceable>pmem3</replaceable></command>
+meta-data=/dev/pmem3      isize=256    agcount=4, agsize=12192640 blks
+         =                sectsz=4096  attr=2, projid32bit=1
+         =                crc=0        finobt=0, sparse=0
+data     =                bsize=4096   blocks=48770560, imaxpct=25
+         =                sunit=0      swidth=0 blks
+naming   =version 2       bsize=4096   ascii-ci=0 ftype=1
+log      =internal log    bsize=4096   blocks=23813, version=2
+         =                sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none            extsz=4096   blocks=0, rtextents=0</screen>
+   <para>
+    Danach können wir das neue Laufwerk in ein Verzeichnis einhängen:
+   </para>
+<screen><prompt role="root"># </prompt><command>mount -o dax /dev/<replaceable>pmem3</replaceable> /mnt/<replaceable>pmem3</replaceable></command></screen>
+   <para>
+    Dann überprüfen wir, ob wir nun über ein DAX-fähiges Gerät verfügen:
+   </para>
+<screen><prompt role="root"># </prompt><command>mount | grep dax</command>
+/dev/pmem3 on /mnt/pmem3 type xfs (rw,relatime,attr2,dax,inode64,noquota)</screen>
+   <para>
+    Das Ergebnis ist ein PMEM-Namespace, der mit dem XFS-Dateisystem formatiert und mit DAX eingehängt ist.
+   </para>
+   <para>
+    <literal>mmap()</literal>-Aufrufe von Dateien in diesem Dateisystem geben virtuelle Adressen zurück, die direkt dem permanenten Speicher auf unseren NVDIMMs zugeordnet werden. Der Seiten-Cache wird dabei voll umgangen.
+   </para>
+   <para>
+    <literal>fsync</literal>- oder <literal>msync</literal>-Aufrufe von Dateien in diesem Dateisystem stellen weiterhin sicher, dass geänderte Daten vollständig in die NVDIMMs geschrieben werden. Diese Aufrufe löschen die Zeilen des Prozessor-Cache, die mit Seiten verknüpft sind, die im Benutzerbereich über <literal>mmap</literal>-Zuordnungen geändert wurden.
+   </para>
+   <sect3 xml:id="sec-nvdimm-setup-deldax">
+    <title>Entfernen eines Namespace</title>
+    <para>
+     Bevor wir einen anderen Volume-Typ erstellen, der den selben Speicher verwendet, müssen wir das PMEM-Volume aushängen und dann entfernen.
+    </para>
+    <para>
+     Hängen Sie es zunächst aus:
+    </para>
+<screen><prompt role="root"># </prompt><command>umount /mnt/<replaceable>pmem3</replaceable></command></screen>
+    <para>
+     Deaktivieren Sie dann den Namespace:
+    </para>
+<screen><prompt role="root"># </prompt><command>ndctl disable-namespace <replaceable>namespace3.0</replaceable></command>
+disabled 1 namespace</screen>
+    <para>
+     Löschen Sie es nun:
+    </para>
+<screen><prompt role="root"># </prompt><command>ndctl destroy-namespace <replaceable>namespace3.0</replaceable></command>
+destroyed 1 namespace</screen>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-btt">
+   <title>Erstellen eines PMEM-Namespace mit BTT</title>
+   <para>
+     BTT sorgt für Unteilbarkeit beim Schreiben in den Sektor, was es zu einer guten Wahl macht, wenn Datenschutz erforderlich ist, zum Beispiel für Ext4- und XFS-Journale. Bei Stromausfall sind die Journale geschützt und sollten wiederherstellbar sein. Die folgenden Beispiele zeigen, wie ein PMEM-Namespace mit BTT im Sektormodus erstellt und wie das Dateisystemjournal in diesem Namespace platziert wird.
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl create-namespace --type=pmem --mode=sector</command>
+{
+ "dev":"namespace3.0",
+ "mode":"sector",
+ "uuid":"51ab652d-7f20-44ea-b51d-5670454f8b9b",
+ "sector_size":4096,
+ "blockdev":"pmem3s"
+}</screen>
+   <para>
+    Überprüfen Sie als Nächstes, ob das Gerät vorhanden ist:
+   </para>
+<screen><prompt role="root"># </prompt><command>fdisk -l /dev/<replaceable>pmem3s</replaceable></command>
+Disk /dev/pmem3s: 188.8 GiB, 202738135040 bytes, 49496615 sectors
+Units: sectors of 1 * 4096 = 4096 bytes
+Sector size (logical/physical): 4096 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    Wie der vorher konfigurierte DAX-fähige PMEM-Namespace verbraucht dieser BTT-fähige Namespace den gesamten verfügbaren Speicherplatz auf den NVDIMMs.
+   </para>   
+   <note>
+    <para>
+     Das angehängte <literal>s</literal> am Ende des Gerätenamens (<filename>/dev/<replaceable>pmem3s</replaceable></filename>) steht für <literal>sector</literal>. Damit lassen sich Namespaces, die zur Verwendung von BTT konfiguriert wurden, leicht unterscheiden.
+    </para>
+   </note>
+   <para>
+    Das Volume wird wie im vorigen Beispiel formatiert und eingehängt.
+   </para>
+   <para>
+    Der hier gezeigte PMEM-Namespace kann DAX nicht verwenden. Stattdessen verwendet er BTT für die <emphasis>Unteilbarkeit beim Schreiben des Sektors</emphasis>. Bei jedem Schreiben des Sektors über den PMEM-Blocktreiber ordnet BTT einen neuen Sektor zu, um neue Daten zu empfangen. BTT aktualisiert ungeteilt die internen Zuordnungsstrukturen, nachdem alle neuen Daten vollständig geschrieben sind, sodass die neu geschriebenen Daten den Anwendungen zur Verfügung stehen. Wenn zu irgendeinem Zeitpunkt dieses Vorgangs der Strom ausfällt, sind alle geschriebenen Daten verloren und die Anwendung hat Zugriff auf die alten Daten, die noch intakt sind. Dadurch wird der Zustand der sogenannten „zerrissenen Sektoren“ verhindert.
+   </para>
+   <para>
+    Dieser BTT-fähige PMEM-Namespace wird wie ein Dateisystem formatiert und verwendet, genau wie jedes andere Standard-Blockgerät. Die Verwendung mit DAX ist nicht möglich. <literal>mmap</literal>-Zuordnungen für Dateien auf diesem Blockgerät verwenden jedoch den Seiten-Cache.
+   </para>
+  </sect2>
+  
+  <sect2 xml:id="sec-nvdimm-fs-journal">
+      <title>Platzieren des Dateisystemjournals auf PMEM/BTT</title>
+   <para>
+      Wird das Dateisystemjournal auf einem separaten Gerät platziert, muss es dieselbe Dateisystem-Blockgröße wie das Dateisystem verwenden. Sie beträgt höchstwahrscheinlich 4096 und Sie finden die Blockgröße mit diesem Kommando:
+  </para>
+  <screen><prompt role="root"># </prompt><command>blockdev --getbsz /dev/<replaceable>sda3</replaceable></command></screen>
+  <para>
+      Im folgenden Beispiel wird ein neues Ext4-Journal auf einem separaten NVDIMM-Gerät erstellt und das Dateisystem auf einem SATA-Gerät. Dann wird das neue Dateisystem an das Journal angehängt:
+ </para>
+ <screen>
+<prompt role="root"># </prompt><command>mke2fs -b 4096 -O journal_dev /dev/<replaceable>pmem3s</replaceable></command>
+<prompt role="root"># </prompt><command>mkfs.ext4 -J device=/dev/<replaceable>pmem3s</replaceable> /dev/<replaceable>sda3</replaceable></command>
+</screen>
+  <para>
+      Im folgenden Beispiel wird ein neues XFS-Dateisystem auf einem SATA-Laufwerk erstellt und das Journal auf einem separaten NVDIMM-Gerät:
+  </para>
+<screen><prompt role="root"># </prompt><command>mkfs.xfs -l logdev=/dev/<replaceable>pmem3s </replaceable> /dev/<replaceable>sda3</replaceable></command>  
+</screen>
+<para>
+    Detaillierte Informationen zu den Optionen finden Sie in <command>man 8 mkfs.ext4</command> und <command>man 8 mkfs.ext4</command>.
+</para>
+</sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-nvdimm-moreinfo">
+  <title>Weitere Informationen</title>
+
+  <para>
+   Für weitere Informationen zu diesem Thema siehe die folgende Liste:
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="https://nvdimm.wiki.kernel.org/"> Permanenter Speicher – Wiki</link>
+    </para>
+    <para>
+     Enthält Anweisungen zum Konfigurieren von NVDIMM-Systemen, Informationen zu Tests sowie Links zu Spezifikationen für die Aktivierung von NVDIMMs. Diese Site wird im Zuge der NVDIMM-Unterstützung in Linux entwickelt.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://pmem.io/"> Permanenter Speicher – Programmierung</link>
+    </para>
+    <para>
+     Informationen zum Konfigurieren, Verwenden und Programmieren von Systemen mit nicht-flüchtigem Speicher unter Linux und anderen Betriebssystemen. Behandelt die NVM-Bibliothek (NVML), die nützliche APIs zum Programmieren mit permanentem Speicher im Benutzerbereich bereitstellt.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://www.kernel.org/doc/Documentation/nvdimm/nvdimm.txt"> LIBNVDIMM: Nicht-flüchtige Geräte</link>
+    </para>
+    <para>
+     Für Kernel-Entwickler gedacht und Teil des Dokumentationsverzeichnisses im aktuellen Linux-Kernel-Baum. Es beschreibt die verschiedenen Kernel-Module, die an der NVDIMM-Aktivierung beteiligt sind, gibt einige technische Details zur Kernel-Implementierung und erläutert die <filename>sysfs</filename>-Schnittstelle zum Kernel, die vom <command>ndctl</command>-Tool verwendet wird.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://github.com/pmem/ndctl">GitHub: pmem/ndctl</link>
+    </para>
+    <para>
+     Dienstprogramm-Bibliothek zur Verwaltung des <command>libnvdimm</command>-Untersystems im Linux-Kernel. Enthält zudem Benutzerbereich-Bibliotheken sowie Einheitentests und eine Dokumentation.
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

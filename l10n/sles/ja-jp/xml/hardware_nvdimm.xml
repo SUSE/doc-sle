@@ -1,1 +1,670 @@
-../../../../xml/hardware_nvdimm.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="hardware_nvdimm.xml" version="5.0" xml:id="cha-nvdimm">
+ <title>永続的なメモリ</title>
+ <info>
+  <abstract>
+   <para>
+    この章では、1つ以上のNVDIMMで構成される「永続的なメモリ」とも呼ばれる不揮発性メインメモリとSUSE Linux Enterprise の使用に関する追加情報を記載します。<emphasis></emphasis>
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <sect1 xml:id="sec-nvdimm-intro">
+  <title>概要</title>
+
+  <para>
+   永続的なメモリとは、新しいタイプのコンピュータストレージで、動的RAM (DRAM)に近い速度を発揮し、RAMのバイト単位のアドレス指定、およびソリッドステートドライブ(SSD)のパフォーマンスを併せ持ちます。
+  </para>
+
+  <para>
+   SUSEは現在、AMD64/Intel 64およびPOWERアーキテクチャを搭載したマシン上のSUSE Linux Enterprise Serverでの永続的なメモリの使用をサポートしています。
+  </para>
+  
+  <para>
+   従来のRAMと同様に、永続的なメモリはメインボードのメモリスロットに直接設置されます。そのため、RAM、DIMMと同じ物理フォームファクタで提供されます。これらは、NVDIMM、不揮発性デュアルインラインメモリモジュールとして知られています。
+  </para>
+
+  <para>
+   ただし、永続的なメモリはいくつかの点においてRAMとは異なり、フラッシュベースのSSDに類似しています。これらは両方ともソリッドステートメモリ回路の形態に基づいていますが、それにもかかわらず、両方とも非揮発性ストレージを提供し、システムの電源がオフにされたり、再起動されてもそのコンテンツは保持されます。両方の形態のメディアについて、データの書き込みは読み取りよりも低速で、両方とも限定された回数のリライトサイクルをサポートしています。また、SSDと同様に、特定の用途でより適している場合には、永続的なメモリへのセクタレベルのアクセスが可能です。
+  </para>
+
+  <para>
+   モデルごとに、Intel 3D XPointや、NANDフラッシュとDRAMを組み合わせるなど、さまざまな形態の電子ストレージメディアを使用します。新たな形態の不揮発性RAMも開発中です。つまり、NVDIMMのさまざまなベンダーおよびモデルで、さまざまなパフォーマンスや耐久性特性が提供されることを意味しています。
+  </para>
+
+  <para>
+   含まれるストレージテクノロジーは開発の初期段階であるため、さまざまなベンダーのハードウェアに異なった制限が与えられる場合があります。この一般的な内容は次のとおりです。
+  </para>
+  
+  <para>
+   永続的なメモリはDRAMより最大10倍低速ですが、フラッシュストレージより約1000倍高速です。フラッシュメモリの全セクタの消去およびリライトプロセスではなく、バイト単位でリライト可能です。つまり、リライトサイクルは限定されていますが、ほとんどの形態の永続的なメモリが、フラッシュストレージの数千サイクルと比較すると、何百万サイクルのリライトを処理することができます。
+  </para>
+  
+  <para>
+   ただし、この結果次の2つの制約を受けます。
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     現在のテクノロジーでは、永続的なメモリのみを使用してシステムを実行し、不揮発性メインメモリを完全に得ることはできません。従来のRAMとNVDIMM両方の混在したものを使用する必要があります。オペレーティングシステムおよびアプリケーションは、非常に高速な追加のストレージを提供するNVDIMMとともに、従来のRAMで実行されます。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     さまざまなベンダーの永続的なメモリのパフォーマンス特性は、使われているNVDIMM数、および装着に適したメモリスロットなど、特定のサーバのNVDIMMのハードウェア仕様をプログラマが認識している必要があるということを示しています。これは、ハイパーバイザーの使用、異なるホストマシン間のソフトウェアのマイグレーションなどに影響します。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   この新しいストレージサブシステムはACPI標準のバージョン6で定義されています。ただし、<filename>libnvdimm</filename>はプレ標準のNVDIMMをサポートし、同様に使用することができます。
+  </para>
+  
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-terms">
+  <title>用語</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>地域</term>
+    <listitem>
+     <para>
+      <emphasis></emphasis>「領域」とは1つ以上の<emphasis></emphasis>「ネームスペース」に分けることが可能な永続的なメモリのブロックです。領域の永続的なメモリにアクセスするには、まず、その領域をネームスペースに割り当てる必要があります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ネームスペース</term>
+    <listitem>
+     <para>
+      NVM Express SSDネームスペース、またはSCSI論理ユニット番号(LUN)と比較可能な、非揮発性ストレージの単一の連続アドレス指定範囲。ネームスペースはサーバの<filename>/dev</filename>ディレクトリに個別のブロックデバイスとして表示されます。要求されるアクセス方法に従って、ネームスペースは複数のNVDIMMから大きなボリュームにストレージを混合したり、より小さなボリュームにパーティショニングしたりできます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>モード</term>
+    <listitem>
+     <para>
+      <emphasis></emphasis>各ネームスペースには、そのネームスペースに対して有効化されるNVDIMM機能を定義する「モード」もあります。同じ親領域の兄弟ネームスペースは常に同じタイプですが、異なるモードに設定することもできます。ネームスペースのモードは次のとおりです。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>devdax</term>
+       <listitem>
+        <para>
+         Device-DAXモード。単一文字のデバイスファイルを作成します(<filename> /dev/dax<replaceable>X</replaceable>.<replaceable>Y</replaceable>
+         </filename>).<emphasis></emphasis>ファイルシステムの作成は必要「ありません」。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>fsdax</term>
+       <listitem>
+        <para>
+         File system-DAXモード。他のモードが指定されない場合のデフォルトです。ブロックデバイス(<filename>/dev/pmem<replaceable>X</replaceable> [.<replaceable>Y</replaceable>]</filename>)を作成します。これは<literal>ext4</literal>または<literal>XFS</literal>用のDAXをサポートします。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>sector</term>
+       <listitem>
+        <para>
+         メタデータのチェックサムを実行しないレガシーファイルシステム用。小さなブートボリュームに適しています。他のオペレーティングシステムと互換性があります。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>raw</term>
+       <listitem>
+        <para>
+         ラベルまたはメタデータのないメモリディスク。DAXをサポートしません。他のオペレーティングシステムと互換性があります。
+        </para>
+        <note>
+         <para>
+          <literal>raw</literal>モードはSUSEによってサポートされていません。<literal>raw</literal>ネームスペースにファイルシステムをマウントすることはできません。
+         </para>
+        </note>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>タイプ</term>
+    <listitem>
+     <para>
+      各ネームスペースおよび領域には、そのネームスペースまたは領域に関連付けられた永続的なメモリへのアクセス方法を定義する「タイプ」があります。<emphasis></emphasis>ネームスペースは常に親領域と同じタイプを持ちます。2つの異なる方法で設定可能な永続的なメモリと、非推奨のブロックモードの2つのタイプがあります。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>永続的なメモリ(PMEM)</term>
+       <listitem>
+        <para>
+         PMEMストレージはRAMのようにバイトレベルのアクセスを提供します。PMEMを使用すると、単一ネームスペースに複数のインターリーブされたNVDIMMを含めることができ、すべてを単一デバイスとして使用できます。
+        </para>
+        <para>
+         PMEMネームスペースを設定するには2つの方法があります。
+        </para>
+        <variablelist>
+         <varlistentry>
+          <term>DAXを使用したPMEM</term>
+          <listitem>
+           <para>
+            直接アクセス(DAX)用に設定されるPMEMネームスペースとは、メモリへのアクセスがカーネルのページキャッシュをバイパスして、メディアに直接行われることを意味します。ソフトウェアはネームスペースのすべてのバイトを直接、個別に読み書きできます。
+           </para>
+          </listitem>
+         </varlistentry>
+         <varlistentry>
+          <term>ブロック変換テーブル(BTT)を使用したPMEM</term>
+          <listitem>
+           <para>
+            BTTモードで動作するように設定されたPMEMネームスペースは、どちらかというとRAMのようなバイトアドレス指定可能なモデルではなく、従来のディスクドライブのようにセクタベースでアクセスされます。変換テーブルメカニズムバッチはセクタサイズのユニットにアクセスします。
+           </para>
+           <para>
+            BTTの利点はデータ保護です。ストレージサブシステムは、各セクタが基盤となるメディアに完全に書き込まれるようにします。セクタが完全に書き込まれない場合(すなわち、何らかの理由により、書き込み操作に失敗する場合)、セクタ全体が以前の状態にロールバックされます。したがって、指定されたセクタは部分的に書き込まれることはありません。 
+           </para>
+           <para>
+            また、BTＴネームスペースへのアクセスはカーネルによってキャッシュされます。
+           </para>
+           <para>
+            この欠点は、BTTネームスペースにはDAXができない点です。
+           </para>
+          </listitem>
+         </varlistentry>
+        </variablelist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>ブロックモード(BLK)</term>
+       <listitem>
+        <para>
+         ブロックモードストレージは、各NVDIMMを個別のデバイスとしてアドレス指定します。この使用は非推奨で、サポートされなくなりました。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <para>
+      <literal>devdax</literal>ネームスペースを除き、他のすべてのタイプは従来のドライブのように、ファイルシステムでフォーマットされる必要があります。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>では、これに対して<literal>ext2</literal>、<literal>ext4</literal>、および<literal>XFS</literal>ファイルシステムをサポートしています。
+     </para>
+   </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>直接アクセス(DAX)</term>
+    <listitem>
+     <para>
+      DAXでは、たとえば<literal>mmap</literal>システムコールを使用して、永続的なメモリをプロセスのアドレススペースに直接マップすることができます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>DIMM物理アドレス(DPA)</term>
+    <listitem>
+     <para>
+      単一DIMMメモリへのオフセットとしてのメモリアドレス。つまりそのDIMM上で最も小さいアドレス指定可能なバイトとして0から開始します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ラベル</term>
+    <listitem>
+     <para>
+      ネームスペース定義など、NVDIMMに保存されるメタデータ。これにはDSMを使用してアクセスできます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>デバイス固有のメソッド(DSM)</term>
+    <listitem>
+     <para>
+      NVDIMM上のファームウェアにアクセスするためのACPIメソッド。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-uses">
+  <title>使用例</title>
+
+  <sect2 xml:id="sec-nvdimm-uses-pmem">
+   <title>DAXを使用したPMEM</title>
+   <para>
+    この形態のメモリアクセスはトランザクションが「可能ではない」ことに注意することが重要です。<emphasis></emphasis>電源異常などのシステム障害が発生する場合には、データがストレージに完全に書き込まれない場合があります。PMEMストレージはアプリケーションが部分的に書き込まれたデータの状態を処理できる場合にのみ適しています。
+   </para>
+   <sect3>
+    <title>
+     バイトアドレス指定可能なストレージの大容量を活用するアプリケーション</title>
+    <para>
+     サーバがバイト単位の大容量高速ストレージを直接使用可能なアプリケーションをホストする場合、プログラマは<literal>mmap</literal>システムコールを使用して、追加のシステムRAMを使用せずに、永続的なメモリのブロックをアプリケーションのアドレススペースに直接配置することができます。
+    </para>
+   </sect3>
+   <sect3>
+    <title>カーネルページキャッシュの使用を避ける</title>
+    <para>
+     ページキャッシュ用のRAMの使用を節約し、代わりにそれを使用するアプリケーションに指定したい場合に、カーネルページキャッシュの使用を避けます。たとえば、非揮発性メモリを仮想マシン(VM)イメージの保持専用にすることができます。これらはキャッシュされませんが、ホスト上のキャッシュ使用率を削減し、ホストごとのVMを増やすことができます。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2>
+   <title>BTTを使用したPMEM</title>
+   <para>
+    高速ストレージのディスクのようなプールとしてNVDIMMのセットに永続的なメモリを使用したい場合に役立ちます。たとえば、BTTを使用してファイルシステムジャーナルをPMEMに配置すると、停電やその他の突然の中断後のファイルシステムの回復の信頼性が向上します(<xref linkend="sec-nvdimm-setup-btt"/>を参照)。
+   </para>
+   <para>
+    アプリケーションに対して、このようなデバイスは高速SSDとして認識され、他のストレージデバイスのように使用できます。たとえば、LVMは永続的なメモリの上部に階層化することができ、通常のように動作します。
+   </para>
+   <para>
+    BTTの利点は、セクタ書き込みの原子性が保証されるため、データ整合性に依存する高度なアプリケーションでも機能し続けるという点です。メディアエラーレポートは標準のエラーレポーティングチャネルを介して機能します。 
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-nvdimm-tools">
+  <title>永続的なメモリを管理するためのツール</title>
+
+  <para>
+   永続的なメモリを管理するには、<literal>ndctl</literal>パッケージをインストールする必要があります。これをインストールすることにより、NVDIMMを設定するためのユーザスペースライブラリのセットを提供する<filename>libndctl</filename>パッケージもインストールされます。
+  </para>
+  
+  <para>
+   これらのツールは、3タイプのNVDIMMをサポートする、<filename>libnvdimm</filename>ライブラリを介して機能します。
+  </para>
+  
+  <itemizedlist>
+   <listitem>
+    <para>
+     PMEM
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     BLK
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     同時のPMEMとBLK
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   <command>ndctl</command>ユーティリティには、次のコマンドを使用してアクセス可能な、便利な<command>man</command>ページセットがあります。
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ndctl help <replaceable>subcommand</replaceable></command></screen>
+
+  <para>
+   使用可能なサブコマンドのリストを表示するには、次を使用します。
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ndctl --list-cmds</command></screen>
+
+  <para>
+   使用可能なサブコマンドには次のものがあります。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>バージョン</term>
+    <listitem>
+     <para>
+      NVDIMMサポートツールの現在のバージョンを表示します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-namespace</term>
+    <listitem>
+     <para>
+      指定されたネームスペースを使用できるようにします。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-namespace</term>
+    <listitem>
+     <para>
+      指定されたネームスペースが使用されないようにします。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>create-namespace</term>
+    <listitem>
+     <para>
+      指定されたストレージデバイスから新しいネームスペースを作成します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>destroy-namespace</term>
+    <listitem>
+     <para>
+      指定されたネームスペースを削除します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable-region</term>
+    <listitem>
+     <para>
+      指定された領域を使用できるようにします。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>disable-region</term>
+    <listitem>
+     <para>
+      指定された領域が使用されないようにします。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>zero-labels</term>
+    <listitem>
+     <para>
+      デバイスからメタデータを消去します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>read-labels</term>
+    <listitem>
+     <para>
+      指定されたデバイスのメタデータを取得します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>リスト</term>
+    <listitem>
+     <para>
+      使用可能なデバイスを表示します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>help</term>
+    <listitem>
+     <para>
+      ツールの使用に関する情報を表示します。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-nvdimm-setup">
+  <title>永続的なメモリのセットアップ</title>
+
+  <sect2 xml:id="sec-nvdimm-setup-view">
+   <title>使用可能なNVDIMMストレージの表示</title>
+   <para>
+    <command>ndctl</command> <literal>list</literal>コマンドを使用して、システム内で使用可能なすべてのNVDIMMを一覧表示できます。
+   </para>
+   <para>
+    次の例では、システムにトリプルチャネルでインターリーブされた単一セットの3個のNVDIMMがあります。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl list --dimms</command>
+
+[
+ {
+  "dev":"nmem2",
+  "id":"8089-00-0000-12325476"
+ },
+ {
+  "dev":"nmem1",
+  "id":"8089-00-0000-11325476"
+ },
+ {
+  "dev":"nmem0",
+  "id":"8089-00-0000-10325476"
+ }
+]</screen>
+   <para>
+    別のパラメータ、<command>ndctl</command>
+    <literal>list</literal>を使用して、使用可能な領域を一覧表示することもできます。
+   </para>
+   <note>
+    <para>
+     領域は番号順に表示されない場合があります。
+    </para>
+   </note>
+   <para>
+    3つのNVDIMMしかありませんが、4つの領域として表示されることに注意してください。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl list --regions</command>
+
+[
+ {
+  "dev":"region1",
+  "size":68182605824,
+  "available_size":68182605824,
+  "type":"blk"
+ },
+ {
+  "dev":"region3",
+  "size":202937204736,
+  "available_size":202937204736,
+  "type":"pmem",
+  "iset_id":5903239628671731251
+  },
+  {
+   "dev":"region0",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  },
+  {
+   "dev":"region2",
+   "size":68182605824,
+   "available_size":68182605824,
+   "type":"blk"
+  }
+]</screen>
+   <para>
+    スペースは次の2つの異なる形態で利用できます: 。BLKタイプの3つの個別の64GB領域として、または3つがインターリーブされたNVDIMM上にすべてのスペースを提供するPMEMタイプの1つに結合された189GB領域を単一のボリュームとして。
+   </para>
+   <para>
+    <literal>available_size</literal>に表示される値は、<literal>size</literal>の値と同じであることに注意してください。これは、スペースのどれもまだ割り当てられていないということを意味します。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-dax">
+   <title>DAXを使用した単一のPMEMネームスペースとしてストレージを設定する</title>
+   <para>
+    最初の例として、直接アクセス(DAX)を使用した単一のPMEMネームスペースに3つのNVDIMMを設定します。
+   </para>
+   <para>
+    最初のステップは、新しいネームスペースを作成することです。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl create-namespace --type=<replaceable>pmem</replaceable> --mode=<replaceable>fsdax</replaceable> --map=<replaceable>memory</replaceable></command>
+{
+ "dev":"namespace3.0",
+ "mode":"memory",
+ "size":199764213760,
+ "uuid":"dc8ebb84-c564-4248-9e8d-e18543c39b69",
+ "blockdev":"pmem3"
+}</screen>
+   <para>
+    これにより、DAXをサポートする、ブロックデバイス<filename>/dev/pmem3</filename>が作成されます。デバイス名の<literal>3</literal> (この場合は<filename>region3</filename>)は、親地域番号から継承されます。
+   </para>
+   <para>
+    <option>--map=memory</option>オプションにより、NVDIMM上にPMEMストレージスペースの一部が置かれ、これは<literal>struct pages</literal>と呼ばれる内部カーネルデータ構造を割り当てるために使用できます。これにより、新しいPMEMネームスペースが<literal>O_DIRECT I/O</literal>や<literal>RDMA</literal>などの機能で使用できるようになります。
+   </para>
+   <para>
+    カーネルデータ構造用に一部の永続的なメモリを予約するのは、生成されるPMEMネームスペースの容量がPMEM親領域よりも小さいためです。
+   </para>
+   <para>
+    次に、新しいブロックデバイスがオペレーティングシステムで利用可能であることを確認します。
+   </para>
+<screen><prompt role="root"># </prompt><command>fdisk -l /dev/<replaceable>pmem3</replaceable></command>
+Disk /dev/pmem3: 186 GiB, 199764213760 bytes, 390164480 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    使用する前に、他のドライブのように、フォーマットする必要があります。この例では、XFSを使用してフォーマットします。
+   </para>
+<screen><prompt role="root"># </prompt><command>mkfs.xfs /dev/<replaceable>pmem3</replaceable></command>
+meta-data=/dev/pmem3      isize=256    agcount=4, agsize=12192640 blks
+         =                sectsz=4096  attr=2, projid32bit=1
+         =                crc=0        finobt=0, sparse=0
+data     =                bsize=4096   blocks=48770560, imaxpct=25
+         =                sunit=0      swidth=0 blks
+naming   =version 2       bsize=4096   ascii-ci=0 ftype=1
+log      =internal log    bsize=4096   blocks=23813, version=2
+         =                sectsz=4096  sunit=1 blks, lazy-count=1
+realtime =none            extsz=4096   blocks=0, rtextents=0</screen>
+   <para>
+    次に、新しいドライブを特定のディレクトリにマウントできます。
+   </para>
+<screen><prompt role="root"># </prompt><command>mount -o dax /dev/<replaceable>pmem3</replaceable> /mnt/<replaceable>pmem3</replaceable></command></screen>
+   <para>
+    ここで、DAX対応デバイスがあることを確認できます。
+   </para>
+<screen><prompt role="root"># </prompt><command>mount | grep dax</command>
+/dev/pmem3 on /mnt/pmem3 type xfs (rw,relatime,attr2,dax,inode64,noquota)</screen>
+   <para>
+    これで、XFSファイルシステムでフォーマットされ、DAXでマウントされたPMEMネームスペースが設定されます。
+   </para>
+   <para>
+    <literal>mmap()</literal>は、ファイルに呼び出しを行い、ファイルシステムはNVDIMM上の永続的なメモリに直接マップする仮想アドレスを返し、ページキャッシュを完全にバイパスします。
+   </para>
+   <para>
+    そのファイルシステム内のファイルに対する<literal>fsync</literal>または<literal>msync</literal>呼び出しが行われても、変更されたデータは完全にNVDIMMに書き込まれています。これらの呼び出しは<literal>mmap</literal>マッピングを介してユーザスペースで変更されているページに関連付けられているプロセッサキャッシュラインをフラッシュします。
+   </para>
+   <sect3 xml:id="sec-nvdimm-setup-deldax">
+    <title>ネームスペースの削除</title>
+    <para>
+     同じストレージを使用する他のボリュームタイプを作成する前に、このPMEMボリュームをアンマウントしてから削除する必要があります。
+    </para>
+    <para>
+     まず、このボリュームをアンマウントします。
+    </para>
+<screen><prompt role="root"># </prompt><command>umount /mnt/<replaceable>pmem3</replaceable></command></screen>
+    <para>
+     次にネームスペースを無効にします。
+    </para>
+<screen><prompt role="root"># </prompt><command>ndctl disable-namespace <replaceable>namespace3.0</replaceable></command>
+disabled 1 namespace</screen>
+    <para>
+     そして削除します。
+    </para>
+<screen><prompt role="root"># </prompt><command>ndctl destroy-namespace <replaceable>namespace3.0</replaceable></command>
+destroyed 1 namespace</screen>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-nvdimm-setup-btt">
+   <title>BTTを使用したPMEMネームスペースの作成</title>
+   <para>
+     BTTはセクタ書き込みの原子性を提供します。これは、Ext4ジャーナルやXFSジャーナルなどのデータ保護が必要な場合に適しています。電源障害が発生した場合、ジャーナルは保護され、回復可能である必要があります。次の例は、BTTを使用したPMEMネームスペースをセクタモードで作成する方法と、このネームスペースにファイルシステムジャーナルを配置する方法を示しています。
+   </para>
+<screen><prompt role="root"># </prompt><command>ndctl create-namespace --type=pmem --mode=sector</command>
+{
+ "dev":"namespace3.0",
+ "mode":"sector",
+ "uuid":"51ab652d-7f20-44ea-b51d-5670454f8b9b",
+ "sector_size":4096,
+ "blockdev":"pmem3s"
+}</screen>
+   <para>
+    次に、新しいデバイスが存在することを確認します。
+   </para>
+<screen><prompt role="root"># </prompt><command>fdisk -l /dev/<replaceable>pmem3s</replaceable></command>
+Disk /dev/pmem3s: 188.8 GiB, 202738135040 bytes, 49496615 sectors
+Units: sectors of 1 * 4096 = 4096 bytes
+Sector size (logical/physical): 4096 bytes / 4096 bytes
+I/O size (minimum/optimal): 4096 bytes / 4096 bytes</screen>
+   <para>
+    以前に設定したDAX対応PMEMネームスペースと同様に、このBTT対応PMEMネームスペースはNVDIMM上で使用可能なすべてのストレージを消費します。
+   </para>   
+   <note>
+    <para>
+     デバイス名の最後の<literal>s</literal> (<filename>/dev/<replaceable>pmem3s</replaceable></filename>)は、<literal>sector</literal>を表し、BTTを使用するように設定されるネームスペースを簡単に区別するために使用されます。
+    </para>
+   </note>
+   <para>
+    ボリュームは前の例と同様に、フォーマットし、マウントできます。
+   </para>
+   <para>
+    ここに表示されるPMEMネームスペースはDAXを使用することはできません。その代わりに、BTTを使用して、「セクタ書き込みの原子性」<emphasis></emphasis>を提供します。PMEMブロックドライバからのセクタ書き込みが行われるたびに、BTTは新しいセクタを割り当てて新しいデータを受け取ります。BTT原子性により、新しいデータが完全に書き込まれた後で、その内部マッピング構造をアップデートし、新しく書き込まれたデータがアプリケーションで利用できるようにします。このプロセス中に任意のポイントで電源障害が発生した場合、書き込みは完全に消失しますが、アプリケーションはまだ存在する古いデータにアクセスできます。これにより、「tornセクタ」と呼ばれる状況が回避されます。
+   </para>
+   <para>
+    このBTT対応PMEMネームスペースは他の標準ブロックデバイスのようにファイルシステムでフォーマットして使用できます。DAXと併用することはできません。ただし、このブロックデバイス上のファイルの<literal>mmap</literal>マッピングはページキャッシュを使用します。
+   </para>
+  </sect2>
+  
+  <sect2 xml:id="sec-nvdimm-fs-journal">
+      <title>PMEM/BTTにファイルシステムジャーナルを配置する</title>
+   <para>
+      別のデバイスにファイルシステムジャーナルを配置する場合は、ファイルシステムと同じファイルシステムブロックサイズを使用する必要があります。これは4096である可能性が高く、次のコマンドでブロックサイズを確認できます。
+  </para>
+  <screen><prompt role="root"># </prompt><command>blockdev --getbsz /dev/<replaceable>sda3</replaceable></command></screen>
+  <para>
+      次の例では、別のNVDIMMデバイスに新しいExt4ジャーナルを作成し、SATAデバイスにファイルシステムを作成してから、新しいファイルシステムをジャーナルに接続します。
+ </para>
+ <screen>
+<prompt role="root"># </prompt><command>mke2fs -b 4096 -O journal_dev /dev/<replaceable>pmem3s</replaceable></command>
+<prompt role="root"># </prompt><command>mkfs.ext4 -J device=/dev/<replaceable>pmem3s</replaceable> /dev/<replaceable>sda3</replaceable></command>
+</screen>
+  <para>
+      次の例では、SATAドライブに新しいXFSファイルシステムを作成し、別のNVDIMMデバイスにジャーナルを作成します。
+  </para>
+<screen><prompt role="root"># </prompt><command>mkfs.xfs -l logdev=/dev/<replaceable>pmem3s </replaceable> /dev/<replaceable>sda3</replaceable></command>  
+</screen>
+<para>
+    オプションに関する詳細については、<command>man 8 mkfs.ext4</command>および<command>man 8 mkfs.ext4</command>を参照してください。
+</para>
+</sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-nvdimm-moreinfo">
+  <title>詳細情報</title>
+
+  <para>
+   このトピックの詳細については、次のリストを参照してください。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="https://nvdimm.wiki.kernel.org/">永続的なメモリのWiki</link>
+    </para>
+    <para>
+     NVDIMMシステムを構成するための手順、テストに関する情報、およびNVDIMMの有効化に関連する仕様へのリンクが記載されています。LinuxのNVDIMMサポートは現在開発中のため、このサイトも構築中です。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://pmem.io/">永続的なメモリのプログラミング</link>
+    </para>
+    <para>
+     Linuxおよび他のオペレーティングシステムの下で、非揮発性メモリを搭載したシステムを設定、使用、およびプログラミングする方法に関する情報。ユーザスペースの永続的なメモリをプログラミングするために役立つAPIを提供することを目的とした、NVMライブラリ(NVML)について説明しています。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://www.kernel.org/doc/Documentation/nvdimm/nvdimm.txt">LIBNVDIMM: 非揮発性デバイス</link>
+    </para>
+    <para>
+     これは、カーネル開発者を対象としており、現在のLinuxカーネルツリーのドキュメントディレクトリの一部です。NVDIMM有効化に含まれている異なるカーネルモジュール、カーネル実装のテクニカル詳細、<command>ndctl</command>ツールによって使用されるカーネルへの<filename>sysfs</filename>インタフェースについて説明しています。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://github.com/pmem/ndctl">GitHub: pmem/ndctl</link>
+    </para>
+    <para>
+     Linuxカーネルの<command>libnvdimm</command>サブシステムを管理するためのユーティリティライブラリ。ユーザスペースライブラリ、ユニットテスト、およびマニュアルも含まれます。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>
