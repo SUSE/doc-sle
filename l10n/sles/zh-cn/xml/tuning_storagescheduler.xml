@@ -1,1 +1,297 @@
-../../../../xml/tuning_storagescheduler.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="tuning_storagescheduler.xml" version="5.0" xml:id="cha-tuning-io">
+  
+ <title>微调 I/O 性能</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  I/O 调度用于控制将输入/输出操作提交到储存空间的方式。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 提供适合不同工作负载的各种 I/O 算法（称为<literal>电梯算法</literal>）。电梯算法有助于减少搜寻操作并可指定 I/O 请求的优先级。
+ </para>
+ <para>
+  如何选择最合适的 I/O 电梯算法不仅取决于工作负载，还取决于硬件。例如，每个 ATA 磁盘系统、SSD、RAID 阵列或网络储存系统都需要不同的微调策略。
+ </para>
+ 
+ <sect1 xml:id="cha-tuning-io-switch">
+  <title>切换 I/O 调度</title>
+
+  <para>
+   <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 在引导时会选取默认的 I/O 调度程序，您可以针对每个块设备即时更改此设置。例如，可为托管系统分区的设备以及托管数据库的设备设置不同的算法。
+  </para>
+
+
+  <para>
+   根据设备是否报告为旋转磁盘为每个设备选择默认 I/O 调度程序。如果是旋转磁盘，则选取 <systemitem class="resource">BFQ</systemitem> I/O 调度程序。其他设备默认选择 <systemitem class="resource">MQ-DEADLINE</systemitem> 或 <systemitem class="resource">NONE</systemitem>。
+  </para>
+
+  <para>
+   要更改正在运行的系统中特定设备的电梯算法，请运行以下命令：
+  </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> echo <replaceable>SCHEDULER</replaceable> &gt; /sys/block/<replaceable>DEVICE</replaceable>/queue/scheduler</screen>
+
+  <para>
+   此处，<replaceable>SCHEDULER</replaceable> 是 <option>bfq</option>、<option>none</option>、<option>kyber</option> 或 <option>mq-deadline</option> 其中之一。<replaceable>DEVICE</replaceable> 是块设备（例如 <systemitem>sda</systemitem>）。请注意，此项更改在重引导期间不会保留。要对特定设备进行永久性的 I/O 调度程序更改，请将 <filename>/usr/lib/udev/rules.d/60-io-scheduler.rules</filename> 复制到 <filename>/etc/udev/rules.d/60-io-scheduler.rules</filename>，并根据需要编辑后一个文件。
+  </para>
+
+  <note os="sles" arch="zseries">
+   <title>IBM Z 上的默认调度程序</title>
+   <para>
+    在 IBM Z 上，储存设备的默认 I/O 调度程序由设备驱动程序设置。
+   </para>
+  </note>
+
+  <note os="sles" arch="x86_64">
+   <title>已去除 <literal>elevator</literal> 引导参数</title>
+   <para>
+     已去除 <literal>elevator</literal> 引导参数。blk-mq I/O 路径取代了 cfq，前者并不包含 <literal>elevator</literal> 引导参数。
+   </para>
+  </note>
+
+ </sect1>
+
+ <sect1 xml:id="cha-tuning-io-schedulers-blkmq">
+   <title>使用 blk-mq I/O 路径的可用 I/O 电梯算法</title>
+     <para>
+       下面是 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上可用于使用 blk-mq I/O 路径的设备的电梯算法列表。如果某个电梯算法包含可调参数，可使用以下命令设置这些参数：
+     </para>
+
+<screen>echo <replaceable>VALUE</replaceable> &gt; /sys/block/<replaceable>DEVICE</replaceable>/queue/iosched/<replaceable>TUNABLE</replaceable></screen>
+
+  <para>
+   在上述命令中，<replaceable>VALUE</replaceable> 是 <replaceable>TUNABLE</replaceable> 的所需值，<replaceable>DEVICE</replaceable> 是块设备。
+  </para>
+
+  <para>
+   要确定某个设备（例如 <systemitem>sda</systemitem>）适用哪些电梯算法，请运行以下命令（当前选择的调度程序列在方括号中）：
+  </para>
+
+<screen><prompt>&gt; </prompt>cat /sys/block/sda/queue/scheduler
+[mq-deadline] kyber bfq none</screen>
+
+  <note os="sles" arch="x86_64">
+    <title>从传统块切换到 blk-mq I/O 路径时的调度程序选项</title>
+    <para>
+      从设备的传统块切换到 blk-mq I/O 路径时，<option>none</option> 选项大致相当于 <option>noop</option>，<option>mq-deadline</option> 相当于 <option>deadline</option>，<option>bfq</option> 相当于 <option>cfq</option>。
+     </para>
+  </note>
+
+  <sect2 xml:id="sec-tuning-io-schedulers-mqdeadline">
+   <title><systemitem class="resource">MQ-DEADLINE</systemitem></title>
+   <para>
+     <systemitem class="resource">MQ-DEADLINE</systemitem> 是以延迟为导向的 I/O 调度程序。<systemitem class="resource">MQ-DEADLINE</systemitem> 具有以下可调参数：
+   </para>
+
+   <table xml:id="tab-tunables-mq-deadline">
+     <title><systemitem class="resource">MQ-DEADLINE</systemitem> 可调参数</title>
+     <tgroup cols="2">
+       <colspec colnum="1" colname="1" colwidth="3000*"/>
+       <colspec colnum="2" colname="2" colwidth="7000*"/>
+       <thead>
+	 <row>
+	   <entry><para>文件</para></entry>
+	   <entry><para>说明</para></entry>
+	 </row>
+       </thead>
+       <tbody>
+	 <row>
+	   <entry><para><filename>writes_starved</filename></para></entry>
+	   <entry><para> 控制优先处理读取操作而不是写入操作的次数。值 <literal>3</literal> 表示在执行写入操作之前可以执行三次读取操作，读取操作按照相同的选择准则进行调度。
+	   </para><para>默认值为 <literal>3</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>read_expire</filename></para></entry>
+	   <entry><para> 设置读取操作的最后期限（当前时间加 <literal>read_expire</literal> 值），以毫秒为单位。
+	   </para><para>默认值为 <literal>500</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>write_expire</filename></para></entry>
+	   <entry><para> 设置写入操作的最后期限（当前时间加 <literal>write_expire</literal> 值），以毫秒为单位。
+	   </para><para>默认值为 <literal>5000</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>front_merges</filename></para></entry>
+	   <entry><para> 启用 (1) 或禁用 (0) 前端合并请求尝试。
+	   </para><para>默认值为 <literal>1</literal>。</para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>fifo_batch</filename></para></entry>
+	   <entry><para> 设置每批的最大请求数（仅检查批的最后期限失效时间）。使用此参数可在延迟与吞吐量之间实现平衡。如果设置为 <literal>1</literal>（即每批一个请求），则会产生“先到先得”行为，通常可将延迟降到最低。设置更大的值通常会提高吞吐量。
+	   </para><para>默认值为 <literal>16</literal>。
+	   </para></entry>
+	 </row>
+       </tbody>
+     </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-io-schedulers-none">
+   <title><systemitem class="resource">NONE</systemitem></title>
+   <para>
+     如果选择 <systemitem class="resource">NONE</systemitem> 作为 blk-mq 的 I/O 电梯算法选项，则不会使用任何 I/O 调度程序，并且 I/O 请求将传递给设备，而不做进一步的 I/O 调度交互。
+   </para>
+   <para>
+     <systemitem class="resource">NONE</systemitem> 是 NVM Express 设备的默认值。与其他 I/O 电梯算法选项相比，此选项不会产生开销，被认为是通过多个队列向此类设备传递 I/O 请求最快的方式。
+   </para>
+   <para>
+     <systemitem class="resource">NONE</systemitem> 没有可调参数。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-io-schedulers-bfq">
+   <title><systemitem class="resource">BFQ</systemitem>（预算公平队列）</title>
+   <para>
+     <systemitem class="resource">BFQ</systemitem> 是以公平性为导向的调度程序。其描述为“基于 CFQ 片服务模式的按比例储存 I/O 调度算法。但 BFQ 会向进程指派预算（以扇区数计）而不是时间片。”（信息来源：<link xlink:href="https://github.com/torvalds/linux/blob/6f7da290413ba713f0cdd9ff1a2a9bb129ef4f6c/block/bfq-iosched.c#L31">linux-4.12/block/bfq-iosched.c</link>）
+   </para>
+   <para>
+     <systemitem class="resource">BFQ</systemitem> 允许向调度决策期间要考虑的任务指派 I/O 优先级（请参见<xref linkend="cha-tuning-resources-disk-ionice"/>）。
+   </para>
+   <para>
+     <systemitem class="resource">BFQ</systemitem> 调度程序具有以下可调参数：
+   </para>
+   <table xml:id="tab-tunables-bfq">
+     <title><systemitem class="resource">BFQ</systemitem> 可调参数</title>
+     <tgroup cols="2">
+       <colspec colnum="1" colname="1" colwidth="3000*"/>
+       <colspec colnum="2" colname="2" colwidth="7000*"/>
+       <thead>
+	 <row>
+	   <entry><para>文件</para></entry>
+	   <entry><para>说明</para></entry>
+	 </row>
+       </thead>
+       <tbody>
+	 <row>
+	   <entry><para><filename>slice_idle</filename></para></entry>
+	   <entry><para>值以毫秒为单位，指定处于空闲状态多长时间，以等待对空队列发出下一个请求。
+	   </para><para>默认值为 <literal>8</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>slice_idle_us</filename></para></entry>
+	   <entry><para>与 <filename>slice_idle</filename> 相同，但以微秒为单位。
+	   </para><para>默认值为 <literal>8000</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>low_latency</filename></para></entry>
+	   <entry><para>启用 (1) 或禁用 (0) <systemitem class="resource">BFQ</systemitem> 的低延迟模式。此模式优先处理特定的应用程序（例如，如果是交互式的），使其保持较低的延迟。
+	   </para><para>默认值为 <literal>1</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>back_seek_max</filename></para></entry>
+	   <entry><para> 向后搜寻的最大值（以 KB 为单位）。
+	   </para><para>默认值为 <literal>16384</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>back_seek_penalty</filename></para></entry>
+	   <entry><para> 用于计算向后搜寻的成本。
+	   </para><para>默认值为 <literal>2</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>fifo_expire_async</filename></para></entry>
+	   <entry><para> 用于设置异步请求超时的值（以毫秒为单位）。
+	   </para><para>默认值为 <literal>250</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>fifo_expire_sync</filename></para></entry>
+	   <entry><para> 值以毫秒为单位，指定同步请求的超时。
+	   </para><para>默认值为 <literal>125</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>timeout_sync</filename></para></entry>
+	   <entry><para> 选择某个任务（队列）后，为其提供服务的最长时间（以毫秒为单位）。
+	   </para><para>默认值为 <literal>124</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>max_budget</filename></para></entry>
+	   <entry><para> 在 <literal>timeout_sync</literal> 内为其提供服务的扇区数上限。如果设置为 <literal>0，</literal> <systemitem class="resource">BFQ</systemitem> 将在内部根据 <filename>timeout_sync</filename> 和估计的峰值速率计算出一个值。
+	   </para><para>默认值为 <literal>0</literal>（设置为自动微调）。 </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>strict_guarantees</filename></para></entry>
+	   <entry><para> 启用 (1) 或禁用 (0)，需要 <systemitem class="resource">BFQ</systemitem> 特定队列处理，才能在特定条件下做出更严格的带宽共享保证。
+	   </para><para>默认值为 <literal>0</literal>。
+	   </para></entry>
+	 </row>
+       </tbody>
+     </tgroup>
+   </table>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-io-schedulers-kyber">
+   <title><systemitem class="resource">KYBER</systemitem></title>
+   <para>
+    <systemitem class="resource">KYBER</systemitem> 是以延迟为导向的 I/O 调度程序。使用它可以设置读取操作和同步写入操作的目标延迟，并限制 I/O 请求以尝试符合这些目标延迟。
+   </para>
+   <table xml:id="tab-tunables-kyber">
+     <title><systemitem class="resource">KYBER</systemitem> 可调参数</title>
+     <tgroup cols="2">
+       <colspec colnum="1" colname="1" colwidth="3000*"/>
+       <colspec colnum="2" colname="2" colwidth="7000*"/>
+       <thead>
+	 <row>
+	   <entry><para>文件</para></entry>
+	   <entry><para>说明</para></entry>
+	 </row>
+       </thead>
+       <tbody>
+	 <row>
+	   <entry><para><filename>read_lat_nsec</filename></para></entry>
+	   <entry><para>设置读取操作的目标延迟，以纳秒为单位。
+	   </para><para>默认值为 <literal>2000000</literal>。
+	   </para></entry>
+	 </row>
+	 <row>
+	   <entry><para><filename>write_lat_nsec</filename></para></entry>
+	   <entry><para>设置写入操作的目标延迟，以纳秒为单位。
+	   </para><para>默认值为 <literal>10000000</literal>。
+	   </para></entry>
+	 </row>
+       </tbody>
+     </tgroup>
+   </table>
+
+  </sect2>
+ </sect1>
+ 
+ <sect1 xml:id="cha-tuning-io-barrier">
+  <title>I/O 屏障微调</title>
+
+  <para>
+   在完成 fsync 之后或在事务提交期间，某些文件系统（例如 Ext3 或 Ext4）会向磁盘发送写屏障。写屏障会强制按正确排序写入，以确保能安全使用非永久磁盘写入缓存（但会使性能有一定程度的下降）。如果您的磁盘以这样或那样的方式采用了电池供电机制，禁用屏障可以安全地改善性能。
+  </para>
+
+  <important>
+  <title>XFS 中的 <option>nobarrier</option> 已弃用</title>
+  <para>
+  请注意，XFS 的 <option>nobarrier</option> 选项已完全弃用，它在 SUSE Linux Enterprise 15 SP2 和更高版本中不是有效的挂载选项。任何显式指定该标志的 XFS 挂载命令将无法挂载文件系统。为防止发生这种问题，请确保不存在任何包含 <option>nobarrier</option> 选项的脚本或 fstab 项。
+  </para>
+  </important>
+
+  <para>
+   您可以使用 <option>nobarrier</option> 挂载选项禁用发送写屏障。
+  </para>
+
+  <warning>
+   <title>禁用屏障可能导致数据丢失</title>
+   <para>
+    当磁盘无法保证在电源故障情况下正确写入缓存时，禁用屏障可能会导致严重的文件系统损坏和数据丢失。
+   </para>
+  </warning>
+ </sect1>
+
+</chapter>
