@@ -80,6 +80,75 @@
    如果您已在 YaST 中选择<guimenu>更新现有系统</guimenu>作为安装模式，则可以选择在以后的某个时间执行（系统）备份。您可以选择包含所有已修改的文件以及 <filename>/etc/sysconfig</filename> 目录中的文件。但是，此备份尚不完整，因为缺少了上述所有其他重要目录。在 <filename>/var/adm/backup</filename> 目录中查找备份。
   </para>
  </sect1>
+ <sect1 xml:id="sec-update-preparation-disk">
+  <title>检查可用磁盘空间</title>
+
+  <para>
+   从旧版本到新版本，软件的大小有增长的趋势。因此，在进行更新之前，请查看可用分区空间。如果您怀疑磁盘空间不足，请先备份数据，再通过调整分区大小等方法来增大可用空间。对于每个分区应该具有多少空间，没有一般的经验可以借鉴。空间要求取决于特定的分区配置文件和选定的软件。
+  </para>
+
+  <note os="sles;sled">
+   <title>在 YaST 中自动检查是否有足够空间</title>
+   <para>
+    在更新过程中，YaST 会检查可用磁盘空间的容量，并在安装大小可能超出可用空间时向用户显示警告。在该情况下，执行更新会导致<emphasis>系统不可用</emphasis>！只有在您完全了解自己要进行的操作的情况下（通过事先测试），才能跳过警告继续更新。
+   </para>
+  </note>
+
+  <sect2 os="sles;sled" xml:id="sec-update-preparation-disk-space">
+   <title>检查非 Btrfs 文件系统上的磁盘空间</title>
+   <para>
+    使用 <command>df</command> 命令可列出可用磁盘空间。例如，在<xref linkend="ex-update-df"/>中，根分区为 <filename>/dev/sda3</filename>（作为 <filename>/</filename> 挂载）。
+   </para>
+   <example xml:id="ex-update-df">
+    <title>使用 <command>df -h</command> 列示信息</title>
+    
+    <screen os="sles">Filesystem     Size  Used Avail Use% Mounted on
+     /dev/sda3       74G   22G   53G  29% /
+     tmpfs          506M     0  506M   0% /dev/shm
+     /dev/sda5      116G  5.8G  111G   5% /home
+     /dev/sda1       44G    4G   40G   9% /data</screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="sec-update-preparation-disk-btrfs-on-root">
+   <title>检查 Btrfs 根文件系统上的磁盘空间</title>
+   
+   <para>
+    在 Btrfs 文件系统上，<command>df</command> 的输出可能有误导性，因为除了原始数据分配的空间以外，Btrfs 文件系统还会为元数据分配并使用空间。
+   </para>
+   <para>
+    因此，即使看上去仍有大量的可用空间，Btrfs 文件系统也可能会报告空间不足。发生这种情况时，为元数据分配的全部空间都已用尽。<phrase os="sles">有关如何检查 Btrfs 文件系统上已用和可用空间的细节，请参见<xref linkend="sec-filesystems-major-btrfs-suse-space"/>。</phrase>有关详细信息，请参见 <phrase os="sles;sled"><command>man 8 btrfs-filesystem</command> 和 </phrase><link xlink:href="https://btrfs.wiki.kernel.org/index.php/FAQ"/>。
+   </para>
+   
+   <para os="sles;sled">
+    如果在计算机上使用 Btrfs 作为根文件系统，请确保有足够的可用空间。检查所有挂载分区上的可用空间。在最坏的情况下，升级进程需要将当前根文件系统的所有磁盘空间（不含 <filename>/.snapshot</filename>）用于存放新快照。
+   </para>
+   
+   <para>
+    下列建议已证实值得采纳：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      包括 Btrfs 在内的所有文件系统都需要有足够的可用磁盘空间来下载和安装大型 RPM。只有在安装新 RPM 之后，旧 RPM 的空间才会释放。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      对于包含快照的 Btrfs，至少需要有当前安装所需的可用空间。建议提供两倍于当前安装大小的可用空间。
+     </para>
+     <para>
+      如果没有足够的可用空间，您可以尝试使用 <command>snapper</command> 删除旧快照：
+     </para>
+     <screen><prompt role="root"># </prompt><command>snapper</command> list
+      <prompt role="root"># </prompt><command>snapper</command> delete NUMBER</screen>
+     <para>
+      但这种做法并不总是有用。在迁移之前，大多数快照只会占用极少的空间。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
  <sect1 xml:id="sec-update-preparation-packagelist">
   <title>列出已安装的软件包和软件源</title>
 
@@ -151,133 +220,128 @@
    </step>
   </procedure>
  </sect1>
- <sect1 os="sles" xml:id="sec-update-preparation-sle11">
-  <title>从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 SP4 升级</title>
-
+ <sect1 xml:id="sec-update-preparation-ltss">
+  <title>禁用 LTSS 扩展</title>
   <para>
-   如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 SP4 上使用的是 MySQL、PostgreSQL 或基于 Java MD5 的证书，请按以下各节所述准备系统。此外，请务必查看本章的其他各节，以了解其他需要执行的准备工作。
+   如果您将具有长期服务包支持 (LTSS) 的 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 系统升级到只提供标准支持的版本，升级将会失败，并显示错误<literal>没有适用的迁移</literal>。之所以发生此情况，是因为 <command>zypper migration</command> 会尝试迁移<emphasis>所有</emphasis>软件源，但新版本尚无 LTSS 软件源。
   </para>
+  <para>
+   要解决该问题，请在升级前先禁用 LTSS 扩展。
+  </para>
+  <procedure>
+   <step>
+    <para>
+     检查是否启用了 LTSS 扩展：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> SUSEConnect --list-extensions | grep LTSS
+SUSE Linux Enterprise Server LTSS 12 SP4 x86_64 (Installed)
+Deactivate with: SUSEConnect -d -p SLES-LTSS/12.4/x86_64</screen>
+   </step>
+   <step>
+    <para>
+     运行上方 <command>SUSEConnect</command> 输出中显示的命令禁用 LTSS 扩展：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> SUSEConnect -d -p SLES-LTSS/12.4/x86_64
+Deregistered SUSE Linux Enterprise Server LTSS 12 SP4 x86_64
+To server: https://scc.suse.com/</screen>
+   </step>
+   <step>
+    <para>
+     使用 <command>zypper lr</command> 校验 LTSS 软件源已不存在。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
+ <sect1 os="sles" xml:id="sec-update-preparation-versions">
+  <title>执行特定于版本的升级步骤</title>
+  <para>
+   根据您要升级的 SUSE Linux Enterprise 版本，您需要执行一些额外的任务。以下小节概述了特定于版本的升级步骤。
+  </para>
+  <sect2 os="sles" xml:id="sec-update-preparation-sle11">
+   <title>从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 SP4 升级</title>
 
-  <sect2 xml:id="sec-update-preparation-sle11-postgresql">
-   <title>迁移 PostgreSQL 数据库</title>
-   
+   <important>
+    <title>不再支持直接从 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 11 升级到 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase></title>
+    <para>
+     自 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15 SP4 起，不再支持直接从 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 11 升级。有关此升级的详细信息，请参见<xref linkend="vl-update-paths-supported"/>。
+    </para>
+   </important>
+
    <para>
-    如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 上使用的是 PostgreSQL 数据库，则需要升级数据库。有关详细信息，请参见<xref linkend="sec-update-preparation-postgresql"/>。
+    如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 SP4 上使用的是 PostgreSQL、MySQL 或基于 Java MD5 的证书，请按以下各节所述准备系统。此外，请务必查看本章的其他各节，以了解其他需要执行的准备工作。
    </para>
+
+   <sect3 xml:id="sec-update-preparation-sle11-postgresql">
+    <title>迁移 PostgreSQL 数据库</title>
+    
+    <para>
+     如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 上使用的是 PostgreSQL 数据库，则需要升级数据库。有关详细信息，请参见<xref linkend="sec-update-preparation-postgresql"/>。
+    </para>
+   </sect3>
+
+   <sect3 xml:id="sec-update-preparation-sle11-mariadb">
+    <title>迁移 MySQL 数据库</title>
+    <para>
+     如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 11 上使用的是 MySQL 数据库，则需要升级数据库。从 SUSE Linux Enterprise 12 开始，SUSE 已从 MySQL 转移到 MariaDB。在开始任何升级操作之前，强烈建议您备份数据库。有关详细信息，请参见 <xref linkend="sec-update-preparation-mariadb"/>。
+    </para>
+   </sect3>
+
+   <sect3 xml:id="sec-update-preparation-sle11-ssl">
+    <title>创建用于 Java 应用程序的非 MD5 服务器证书</title>
+    <remark>toms 2016-07-27: from bsc#970153, c#24</remark>
+    <remark>jufa 2021-02-09: FIXME check if still relevant, check which versions are affected</remark>
+    <remark>cwickert-2022-07-07: Change occurred during the upgrade from
+     java-1_8_0-openjdk-1.8.0.65-1.13 to java-1_8_0-openjdk-1.8.0.72-3.2, means
+     for SLES it happened between SLES 12 GA and SP1. So still relevant.
+    </remark>
+    <para>
+     作为安全措施，Java 中不再支持基于 MD5 的证书。如果您的证书是以 MD5 形式创建的，请按照<xref linkend="sec-update-preparation-ssl"/>中的步骤重新创建证书。
+    </para>
+   </sect3>
   </sect2>
 
-  <sect2 xml:id="sec-update-preparation-sle11-mariadb">
-   <title>迁移 MySQL 数据库</title>
-   <remark>toms 2015-09-03: already reviewed by Ondrej and Kristýna.</remark>
-   <para>
-    从 SUSE Linux Enterprise 12 开始，SUSE 已从 MySQL 转移到 MariaDB。在开始任何升级操作之前，强烈建议您备份数据库。
-   </para>
-   <para>
-    要进行数据库迁移，请执行以下操作：
-   </para>
-   <procedure>
-    <step>
-     <para>
-      登录到 SUSE Linux Enterprise 11 计算机。
-     </para>
-    </step>
-    <step>
-     <para>
-      创建转储文件：
-     </para>
-<screen><prompt role="root"># </prompt><command>mysqldump</command> -u root -p --all-databases &gt; mysql_backup.sql</screen>
-     <para>
-      默认情况下，<command>mysqldump</command> 不会转储 <literal>INFORMATION_SCHEMA</literal> 或 <literal>performance_schema</literal> 数据库。有关详细信息，请参见<link xlink:href="https://dev.mysql.com/doc/refman/5.5/en/mysqldump.html"/>。
-     </para>
-    </step>
-    <step>
-     <para>
-      将您的转储文件、配置文件 <filename>/etc/my.cnf</filename> 以及 <filename>/etc/mysql/</filename> 目录储存在安全位置，以供日后调查（<emphasis>不要</emphasis>用于安装！）。
-     </para>
-    </step>
-    <step>
-     <para>
-      执行 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 升级。升级后，以前的配置文件 <filename>/etc/my.cnf</filename> 仍将保持不变。新配置保存在 <filename>/etc/my.cnf.rpmnew</filename> 文件中。
-     </para>
-    </step>
-    <step>
-     <para>
-      根据需要配置 MariaDB 数据库。<emphasis>不要</emphasis>使用以前的配置文件和目录，只是将其用作提醒，并对其进行改编。
-     </para>
-    </step>
-    <step>
-     <para>
-      确保启动 MariaDB 服务器：
-     </para>
-<screen><prompt role="root"># </prompt><command>systemctl</command> start mariadb</screen>
-     <para>
-      如果您希望每次引导时都启动 MariaDB 服务器，请启用以下服务：
-     </para>
-<screen><prompt role="root"># </prompt><command>systemctl</command> enable mariadb</screen>
-    </step>
-    <step>
-     <para>
-      通过连接数据库来校验 MariaDB 是否正常运行：
-     </para>
-<screen><prompt role="root"># </prompt><command>mariadb</command> -u root -p</screen>
-    </step>
-   </procedure>
-  </sect2>
+  <sect2 os="sles" xml:id="sec-update-preparation-sle12">
+   <title>从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 SP5 升级</title>
 
-  <sect2 xml:id="sec-update-preparation-sle11-ssl">
-   <title>创建用于 Java 应用程序的非 MD5 服务器证书</title>
-   <remark>toms 2016-07-27: from bsc#970153, c#24</remark>
-   <remark>jufa 2021-02-09: FIXME check if still relevant, check which versions are affected</remark>
    <para>
-    作为安全措施，Java 中不再支持基于 MD5 的证书。如果您之前创建的证书是 MD5 证书，请执行以下步骤重新创建证书：
+    如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 SP5 上使用的是 PostgreSQL、MariaDB 或基于 Java MD5 的证书，请按以下各节所述准备系统。此外，请务必查看本章的其他各节，以了解其他需要执行的准备工作。
    </para>
-   <procedure>
-    <step>
-     <para>
-      打开终端窗口并以 <systemitem class="username">root</systemitem> 身份登录。
-     </para>
-    </step>
-    <step>
-     <para>
-      创建一个私用密钥：
-     </para>
-<screen><prompt role="root"># </prompt><command>openssl</command> genrsa -out server.key 1024</screen>
-     <para>
-      如果需要强度更高的密钥，请将 <literal>1024</literal> 替换为更大的数字，例如 <literal>4096</literal>。
-     </para>
-    </step>
-    <step>
-     <para>
-      创建证书签名请求 (CSR)：
-     </para>
-<screen><prompt role="root"># </prompt><command>openssl</command> req -new -key server.key -out server.csr</screen>
-    </step>
-    <step>
-     <para>
-      对证书自我签名：
-     </para>
-<screen><prompt role="root"># </prompt><command>openssl</command> x509 -req -days 365 -in server.csr -signkey server.key -out server.crt</screen>
-    </step>
-    <step>
-     <para>
-      创建 PEM 文件：
-     </para>
-<screen><prompt role="root"># </prompt><command>cat</command> server.key server.crt &gt; server.pem</screen>
-    </step>
-    <step>
-     <para>
-      将 <filename>server.crt</filename>、<filename>server.csr</filename>、<filename>server.key</filename> 和 <filename>server.pem</filename> 文件放在可在其中找到密钥的相应目录中。例如，对于 Tomcat，此目录为 <filename>/etc/tomcat/ssl/</filename>。
-     </para>
-    </step>
-   </procedure>
+
+   <sect3 xml:id="sec-update-preparation-sle12-postgresql">
+    <title>迁移 PostgreSQL 数据库</title>
+    <para>
+     如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 上使用的是 PostgreSQL 数据库，则需要升级数据库。有关详细信息，请参见 <xref linkend="sec-update-preparation-postgresql"/>。
+    </para>
+   </sect3>
+
+   <sect3 xml:id="sec-update-preparation-sle12-mariadb">
+    <title>迁移 MariaDB 数据库</title>
+    <para>
+     如果您在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 上使用的是 MariaDB 数据库，则需要升级数据库。有关详细信息，请参见 <xref linkend="sec-update-preparation-mariadb"/>。
+    </para>
+   </sect3>
+
+   <sect3 xml:id="sec-update-preparation-sle12-ssl">
+    <title>创建用于 Java 应用程序的非 MD5 服务器证书</title>
+    <remark>toms 2016-07-27: from bsc#970153, c#24</remark>
+    <remark>jufa 2021-02-09: FIXME check if still relevant, check which versions are affected</remark>
+    <remark>cwickert-2022-07-07: Change occurred during the upgrade from
+     java-1_8_0-openjdk-1.8.0.65-1.13 to java-1_8_0-openjdk-1.8.0.72-3.2, means
+     for SLES it happened between SLES 12 GA and SP1. So still relevant.
+    </remark>
+    <para>
+     作为安全措施，Java 中不再支持基于 MD5 的证书。如果您的证书是以 MD5 形式创建的，请按照<xref linkend="sec-update-preparation-ssl"/>中的步骤重新创建证书。
+    </para>
+   </sect3>
   </sect2>
  </sect1>
+
  <sect1 os="sles" xml:id="sec-update-preparation-postgresql">
   <title>迁移 PostgreSQL 数据库</title>
 
   <para>
    
-   <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 随附 PostgreSQL 数据库版本 10、12 和 13。虽然默认版本是版本 13，但我们仍会通过 <literal>Legacy</literal> 模块提供版本 10 和 12，以便您可以从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的早期版本升级。
+   <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 随附 PostgreSQL 数据库版本 13 和 14。虽然默认版本是 14，但我们仍会通过 <literal>Legacy</literal> 模块提供版本 13，以便您可以从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的早期版本升级。
   </para>
 
   <para>
@@ -425,6 +489,108 @@ postgres &gt; <command>pg_upgrade</command> \
    有关升级数据库或使用逻辑复制等替代方法的详细信息，请参见 <link xlink:href="https://www.postgresql.org/docs/13/upgrading.html"/> 上的官方 PostgreSQL 文档。
   </para>
  </sect1>
+
+ <sect1 os="sles" xml:id="sec-update-preparation-mariadb">
+  <title>迁移 MySQL 或 MariaDB 数据库</title>
+  <remark>toms 2015-09-03: already reviewed by Ondrej and Kristýna.</remark>
+  <para>
+   从 SUSE Linux Enterprise 12 开始，SUSE 已从 MySQL 转移到 MariaDB。在开始任何升级操作之前，强烈建议您备份数据库。
+  </para>
+  <para>
+   要进行数据库迁移，请执行以下操作：
+  </para>
+  <procedure>
+   <step>
+    <para>
+     创建转储文件：
+    </para>
+    <remark>cwickert 2022-07-07: '--add-drop-database' is required for <link xlink:href="https://bugzilla.suse.com/show_bug.cgi?id=1166786">BSC#1166786</link>&#x002E;</remark>
+    <screen><prompt role="root"># </prompt><command>mysqldump</command> -u root -p --all-databases --add-drop-database &gt; mysql_backup.sql</screen>
+    <para>
+     默认情况下，<command>mysqldump</command> 不会转储 <literal>INFORMATION_SCHEMA</literal> 或 <literal>performance_schema</literal> 数据库。有关详细信息，请参见<link xlink:href="https://mariadb.com/kb/en/mariadb-dumpmysqldump/"/>。
+    </para>
+   </step>
+   <step>
+    <para>
+     将您的转储文件、配置文件 <filename>/etc/my.cnf</filename> 以及 <filename>/etc/mysql/</filename> 目录储存在安全位置，以供日后调查（<emphasis>不要</emphasis>用于安装！）。
+    </para>
+   </step>
+   <step>
+    <para>
+     执行 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 升级。升级后，以前的配置文件 <filename>/etc/my.cnf</filename> 仍将保持不变。新配置保存在 <filename>/etc/my.cnf.rpmnew</filename> 文件中。
+    </para>
+   </step>
+   <step>
+    <para>
+     根据需要配置 MariaDB 数据库。<emphasis>不要</emphasis>使用以前的配置文件和目录，只是将其用作提醒，并对其进行改编。
+    </para>
+   </step>
+   <step>
+    <para>
+     确保启动 MariaDB 服务器：
+    </para>
+    <screen><prompt role="root"># </prompt><command>systemctl</command> start mariadb</screen>
+    <para>
+     如果您希望每次引导时都启动 MariaDB 服务器，请启用以下服务：
+    </para>
+    <screen><prompt role="root"># </prompt><command>systemctl</command> enable mariadb</screen>
+   </step>
+   <step>
+    <para>
+     通过连接数据库来校验 MariaDB 是否正常运行：
+    </para>
+    <screen><prompt role="root"># </prompt><command>mariadb</command> -u root -p</screen>
+   </step>
+  </procedure>
+ </sect1>
+
+ <sect1 xml:id="sec-update-preparation-ssl">
+  <title>创建用于 Java 应用程序的非 MD5 服务器证书</title>
+  <remark>toms 2016-07-27: from bsc#970153, c#24</remark>
+  <remark>jufa 2021-02-09: FIXME check if still relevant, check which versions are affected</remark>
+  <para>
+   作为安全措施，Java 中不再支持基于 MD5 的证书。如果您之前创建的证书是 MD5 证书，请执行以下步骤重新创建证书：
+  </para>
+  <procedure>
+   <step>
+    <para>
+     打开终端窗口并以 <systemitem class="username">root</systemitem> 身份登录。
+    </para>
+   </step>
+   <step>
+    <para>
+     创建一个私用密钥：
+    </para>
+    <screen><prompt role="root"># </prompt><command>openssl</command> genrsa -out server.key 1024</screen>
+    <para>
+     如果需要强度更高的密钥，请将 <literal>1024</literal> 替换为更大的数字，例如 <literal>4096</literal>。
+    </para>
+   </step>
+   <step>
+    <para>
+     创建证书签名请求 (CSR)：
+    </para>
+    <screen><prompt role="root"># </prompt><command>openssl</command> req -new -key server.key -out server.csr</screen>
+   </step>
+   <step>
+    <para>
+     对证书自我签名：
+    </para>
+    <screen><prompt role="root"># </prompt><command>openssl</command> x509 -req -days 365 -in server.csr -signkey server.key -out server.crt</screen>
+   </step>
+   <step>
+    <para>
+     创建 PEM 文件：
+    </para>
+    <screen><prompt role="root"># </prompt><command>cat</command> server.key server.crt &gt; server.pem</screen>
+   </step>
+   <step>
+    <para>
+     将 <filename>server.crt</filename>、<filename>server.csr</filename>、<filename>server.key</filename> 和 <filename>server.pem</filename> 文件放在可在其中找到密钥的相应目录中。例如，对于 Tomcat，此目录为 <filename>/etc/tomcat/ssl/</filename>。
+    </para>
+   </step>
+  </procedure>
+ </sect1>
  <sect1 xml:id="sec-update-preparation-vms">
   <title>关闭虚拟机 Guest</title>
 
@@ -522,75 +688,7 @@ postgres &gt; <command>pg_upgrade</command> \
    </step>
   </procedure>
  </sect1>
- <sect1 xml:id="sec-update-preparation-disk">
-  <title>磁盘空间</title>
 
-  <para>
-   从旧版本到新版本，软件的大小有增长的趋势。因此，在进行更新之前，请查看可用分区空间。如果您怀疑磁盘空间不足，请先备份数据，再通过调整分区大小等方法来增大可用空间。对于每个分区应该具有多少空间，没有一般的经验可以借鉴。空间要求取决于特定的分区配置文件和选定的软件。
-  </para>
-
-  <note os="sles;sled">
-   <title>在 YaST 中自动检查是否有足够空间</title>
-   <para>
-    在更新过程中，YaST 会检查可用磁盘空间的容量，并在安装大小可能超出可用空间时向用户显示警告。在该情况下，执行更新会导致<emphasis>系统不可用</emphasis>！只有在您完全了解自己要进行的操作的情况下（通过事先测试），才能跳过警告继续更新。
-   </para>
-  </note>
-
-  <sect2 os="sles;sled" xml:id="sec-update-preparation-disk-space">
-   <title>检查非 Btrfs 文件系统上的磁盘空间</title>
-   <para>
-    使用 <command>df</command> 命令可列出可用磁盘空间。例如，在<xref linkend="ex-update-df"/>中，根分区为 <filename>/dev/sda3</filename>（作为 <filename>/</filename> 挂载）。
-   </para>
-   <example xml:id="ex-update-df">
-    <title>使用 <command>df -h</command> 列示信息</title>
-
-<screen os="sles">Filesystem     Size  Used Avail Use% Mounted on
-/dev/sda3       74G   22G   53G  29% /
-tmpfs          506M     0  506M   0% /dev/shm
-/dev/sda5      116G  5.8G  111G   5% /home
-/dev/sda1       44G    4G   40G   9% /data</screen>
-   </example>
-  </sect2>
-
-  <sect2 xml:id="sec-update-preparation-disk-btrfs-on-root">
-   <title>检查 Btrfs 根文件系统上的磁盘空间</title>
-   
-   <para>
-    在 Btrfs 文件系统上，<command>df</command> 的输出可能有误导性，因为除了原始数据分配的空间以外，Btrfs 文件系统还会为元数据分配并使用空间。
-   </para>
-   <para>
-    因此，即使看上去仍有大量的可用空间，Btrfs 文件系统也可能会报告空间不足。发生这种情况时，为元数据分配的全部空间都已用尽。<phrase os="sles">有关如何检查 Btrfs 文件系统上已用和可用空间的细节，请参见<xref linkend="sec-filesystems-major-btrfs-suse-space"/>。</phrase>有关详细信息，请参见 <phrase os="sles;sled"><command>man 8 btrfs-filesystem</command> 和 </phrase><link xlink:href="https://btrfs.wiki.kernel.org/index.php/FAQ"/>。
-   </para>
-   
-   <para os="sles;sled">
-    如果在计算机上使用 Btrfs 作为根文件系统，请确保有足够的可用空间。检查所有挂载分区上的可用空间。在最坏的情况下，升级进程需要将当前根文件系统的所有磁盘空间（不含 <filename>/.snapshot</filename>）用于存放新快照。
-   </para>
-   
-   <para>
-    下列建议已证实值得采纳：
-   </para>
-   <itemizedlist>
-    <listitem>
-     <para>
-      包括 Btrfs 在内的所有文件系统都需要有足够的可用磁盘空间来下载和安装大型 RPM。只有在安装新 RPM 之后，旧 RPM 的空间才会释放。
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      对于包含快照的 Btrfs，至少需要有当前安装所需的可用空间。建议提供两倍于当前安装大小的可用空间。
-     </para>
-     <para>
-      如果没有足够的可用空间，您可以尝试使用 <command>snapper</command> 删除旧快照：
-     </para>
-<screen><prompt role="root"># </prompt><command>snapper</command> list
-<prompt role="root"># </prompt><command>snapper</command> delete NUMBER</screen>
-     <para>
-      但这种做法并不总是有用。在迁移之前，大多数快照只会占用极少的空间。
-     </para>
-    </listitem>
-   </itemizedlist>
-  </sect2>
- </sect1>
  <sect1 xml:id="sec-autoyast-profiles" os="sles">
   <title>AutoYaST 配置文件中的更改（从 SLE 12 到 15）</title>
 
