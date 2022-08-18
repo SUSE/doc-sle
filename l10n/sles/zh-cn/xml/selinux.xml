@@ -1,1 +1,873 @@
-../../../../xml/selinux.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="selinux.xml" version="5.0" xml:id="cha-selinux">
+ <title>配置 SELinux</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  在本章中，您将了解如何在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上设置和管理 SELinux。其中包括以下主题：
+ </para>
+ <itemizedlist mark="bullet" spacing="normal">
+  <listitem>
+   <para>
+    为何要使用 SELinux？
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    了解 SELinux
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    设置 SELinux
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    管理 SELinux
+   </para>
+  </listitem>
+ </itemizedlist>
+ <sect1 xml:id="sec-selinux-why">
+  <title>为何要使用 SELinux？</title>
+
+  <para>
+   SELinux 是作为附加的 Linux 安全解决方案开发的，它运用了 Linux 内核中的安全框架。其目的是提供更精细的安全策略，从而可以超越标准的自主访问控制 (DAC)、传统的所有者/组/全局文件权限控制，以及读取/写入/执行权限控制。
+  </para>
+
+  <para>
+   下面的示例解释了为何需要 SELinux 这样的解决方案（或其类似产品 <phrase>AppArmor</phrase>）：
+  </para>
+
+  <para>
+   <quote>有一天早上，我发现我的服务器被黑客入侵了。这台服务器运行的是安装了全套补丁的 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>。服务器上配置了防火墙，并且不提供任何不需要的服务。进一步的分析表明，黑客是通过一个有漏洞的 PHP 脚本入侵的，这个脚本是这台服务器上运行的某个 Apache 虚拟主机的一部分。入侵者设法通过 Apache Web 服务器所用的 <systemitem class="username">wwwrun</systemitem> 帐户获得了外壳访问权限。入侵者以这个 <systemitem class="username">wwwrun</systemitem> 用户的身份在 <filename>/var/tmp</filename> 和 <filename>/tmp</filename> 目录中创建了多个脚本，这些脚本组成了针对多台服务器发起分布式拒绝服务攻击的僵尸网络。</quote>
+  </para>
+
+  <para>
+   对于这次攻击，有意思的地方在于，它是在一台实际上并无任何错误的服务器上发生的。所有文件权限已正确设置，但入侵者还是设法进入了系统。此示例说明了在某些情况下需要额外的安全性。
+  </para>
+
+  
+
+  <para>
+   SELinux 使用附加到对象（例如文件和网络套接字）的标签并将其用于访问控制决策。
+  </para>
+
+  
+
+
+  
+
+  <sect2 xml:id="sec-selinux-support">
+   <title>支持状态</title>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 支持 SELinux 框架。<phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 提供了在服务器上使用 SELinux 而需要的所有二进制文件和库。
+   </para>
+   <para>
+     未包含策略，您必须构建自己的策略。不支持第三方策略。有关安装用于测试的 openSUSE 策略的信息，请参见<xref linkend="sec-selinux-install"/>和<xref linkend="sec-selinux-getpolicy"/>。     
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-selinux-component">
+   <title>了解 SELinux 组件</title>
+   <para>
+    在开始配置 SELinux 之前，您应该对 SELinux 的组织方式有个大致的了解。重要组件包括以下三个：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      Linux 内核中的安全框架
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      SELinux 库和二进制文件
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      SELinux 策略
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的默认内核支持 SELinux 以及管理 SELinux 所需的工具。关于 SELinux，管理员最重要的工作是管理策略。
+   </para>
+   <para>
+    在 SELinux 策略中，安全性标签将应用到 Linux 服务器上的不同对象。这些对象通常是用户、端口、进程和文件。使用这些安全性标签可以创建规则，用于定义在服务器上允许和不允许执行哪些操作。SELinux 默认会拒绝任何操作，而创建适当的规则可以允许进行确实有必要的访问。因此，您要在系统上使用的所有程序应该都有相应的规则。
+   </para>
+   <para>
+    或者，您可以将系统的某些组成部分配置为以非受限模式运行，这意味着特定的端口、程序、用户、文件和目录将不受 SELinux 的保护。如果您只想使用 SELinux 来保护某些必不可少的服务，此模式将十分有用。但如果这样做，您的系统不会受到全面的保护，最好是将 SELinux 应用于整个系统。
+   </para>
+   <para>
+    要确保为系统提供适当的保护，您需要有 SELinux 策略。这必须是一个定制的策略，其中的所有文件都带有标签，并且所有服务和用户也都带有安全性标签，以指明哪些文件和目录可由服务器上的哪些用户和进程访问。制定此类策略涉及到巨大的工作量。
+   </para>   
+   
+   <para>
+    请注意，免费提供的 SELinux 策略在您的服务器上也许可以正常运行，但不太可能会提供与自定义策略同等程度的保护。SUSE 不支持第三方策略。
+   </para>
+  </sect2>
+ </sect1>
+ 
+ <sect1 xml:id="sec-selinux-policy">
+  <title>SELinux 策略概览</title>
+  <para>
+   策略是 SELinux 中的关键组件。您的 SELinux 策略需定义用于指定哪些对象可以访问系统上的哪些文件、目录、端口和进程的规则。为此，需为所有这些对象定义一个安全环境。在已应用策略来标记文件系统的 SELinux 系统上，您可对任何目录使用 <command>ls -Z</command> 命令来查找该目录中各文件的安全环境。<xref linkend="ex-selnx-con-set" xrefstyle="select:label quotedtitle nopage"/>显示了采用 SELinux 标记文件系统的 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 系统上 <filename>/</filename> 目录中各目录的安全环境设置。
+  </para>
+
+  <example xml:id="ex-selnx-con-set">
+   <title>使用 <command>ls -Z</command> 查找安全环境设置</title>
+<screen><prompt>&gt; </prompt>ls -Z /
+system_u:object_r:bin_t bin
+system_u:object_r:boot_t boot
+system_u:object_r:device_t dev
+system_u:object_r:etc_t etc
+system_u:object_r:home_root_t home
+system_u:object_r:lib_t lib
+system_u:object_r:lib_t lib64
+system_u:object_r:lost_found_t lost+found
+system_u:object_r:mnt_t media
+system_u:object_r:mnt_t mnt
+system_u:object_r:usr_t opt
+system_u:object_r:proc_t proc
+system_u:object_r:default_t root
+system_u:object_r:bin_t sbin
+system_u:object_r:security_t selinux
+system_u:object_r:var_t srv
+system_u:object_r:sysfs_t sys
+system_u:object_r:tmp_t tmp
+system_u:object_r:usr_t usr
+system_u:object_r:var_t var</screen>
+  </example>
+
+  <para>
+   安全环境中最重要的一行是环境类型。这是安全环境的一部分，它通常以 <literal>_t</literal> 结尾。它告知 SELinux 允许对象进行哪种形式的访问。策略中指定了规则，用于定义哪种类型的用户或角色有权访问哪种类型的环境。例如，使用如下所示的规则可以进行这样的定义：
+  </para>
+
+<screen>allow user_t bin_t:file {read execute gettattr};</screen>
+
+  <para>
+   此示例规则允许环境类型为 <systemitem class="username">user_t</systemitem> 的用户（此用户称为源对象）使用 <literal>read</literal>、<literal>execute</literal> 和 <literal>getattr</literal> 权限访问环境类型为 <filename>bin_t</filename> 的“file”类对象（目标）。
+  </para>
+
+  <para>
+   SELinux 策略包含巨量的规则。为使其更易于管理，通常会将策略分割成多个模块。这样，管理员便可为不同的系统组件打开或关闭保护。
+  </para>
+
+  <para>
+   为系统编译策略时，您可以选择使用模块化策略或单体式策略，如果选择后者，将使用一个巨型策略来保护系统上的一切组件。强烈建议使用模块化策略，而不要使用单体式策略。模块化策略要容易管理得多。
+  </para>
+ </sect1>
+ 
+ <sect1 xml:id="sec-selinux-install">
+  <title>安装 SELinux 软件包</title>
+  <para>
+    如果您通过 Zypper 安装 SELinux，请使用 <command>--search-descriptions</command> 选项搜索所有相关软件包。您将看到以下示例所示的列表：
+  </para>
+  <screen><prompt>&gt; </prompt><command>zypper se --search-descriptions selinux</command>
+libselinux-devel 
+libselinux1 
+libselinux1-32bit
+libsemanage-devel
+libsemanage1 
+libsepol-devel 
+libsepol1 
+mcstrans 
+policycoreutils 
+python3-policycoreutils
+python3-selinux 
+python3-semanage
+python3-setools 
+restorecond
+selinux-tools
+setools-console
+setools-devel 
+setools-java
+setools-libs
+setools-tcl
+  </screen>
+  <para>
+    不必安装所有这些软件包。请安装以下软件包：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in restorecond policycoreutils setools-console</command></screen>
+  <para>
+    如果您偏好使用 YaST，请在软件管理模块中搜索“selinux”，然后安装 <package>restorecond</package>、<package>policycoreutils</package> 和 <package>setools-console</package>。
+  </para>
+  
+  <para>
+    这不会安装策略。有关安装用于测试的 openSUSE 策略的信息，请参见<xref linkend="sec-selinux-getpolicy"/>。 
+  </para>
+</sect1>
+
+  <sect1 xml:id="sec-selinux-getpolicy">
+  <title>安装 SELinux 策略</title>
+  <para>
+   策略是 SELinux 不可或缺的组件。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 不包含默认策略，您必须针对您的安装构建一个自定义策略。应根据您的特定需求自定义 SELinux 策略；如需帮助，请咨询您的 SUSE 支持工程师。
+  </para>
+  <para>
+    获取可安装和测试的策略的一种方法是从 <link xlink:href="https://download.opensuse.org/repositories/security:/SELinux/"/> 下载。这样就可以提供适用于 SLE 和 openSUSE 的软件源。复制与您的 SLE 版本匹配的软件源链接，并使用 Zypper 添加该软件源：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper ar -f https://download.opensuse.org/repositories/security:/SELinux/SLE_15_SP4/ Security-SELinux</command>
+      </screen>
+  <para>
+    如果您偏好 YaST，请使用软件源模块。
+  </para>
+  <para>
+    此软件源提供一些附加软件包（包括策略），例如：
+  </para>
+  <screen>
+selinux-autorelabel
+selinux-policy 
+selinux-policy-devel
+selinux-policy-doc
+selinux-policy-minimum 
+selinux-policy-mls
+selinux-policy-sandbox
+selinux-policy-targeted
+setools-gui
+setroubleshoot
+setroubleshoot-plugins
+setroubleshoot-server
+</screen>
+  <para>
+   请安装以下软件包：
+ </para>
+ <screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in selinux-policy-targeted selinux-policy-devel selinux-autorelabel</command></screen>
+ <para>
+   下一步是修改 GRUB 2 引导加载器，以永久启用 SELinux 并设置 SELinux 模式。（<xref linkend="sec-selinux-grub"/>）。
+  </para>
+</sect1>
+
+ <sect1 xml:id="sec-selinux-grub">
+   <title>修改 GRUB 2 引导加载器</title>   
+<para>
+   安装 SELinux 软件包后，通过编辑 <filename>/etc/default/grub</filename> 或使用 YaST 修改 GRUB 2 引导加载器。
+  </para>
+  <para>
+    在 <filename>/etc/default/grub</filename> 中，将以下行添加到 <literal>GRUB_CMDLINE_LINUX_DEFAULT=</literal> 行：
+  </para>
+  <screen>security=selinux selinux=1 enforcing=0</screen>
+  <para>
+    然后运行 <command>grub2-mkconfig -o /boot/grub2/grub.cfg</command> 命令来重构建您的 GRUB 2 配置。
+  </para>
+  <para>
+    在 YaST 中，打开<menuchoice> <guimenu>系统</guimenu> <guimenu>引导加载器</guimenu> <guimenu>内核参数</guimenu></menuchoice>。将 <literal>security=selinux selinux=1 enforcing=0</literal> 添加到<guimenu>可选内核命令行参数</guimenu>。
+  </para>
+  <para>
+   这些选项用于以下目的：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>security=selinux</literal>
+    </term>
+    <listitem>
+     <para>
+      此选项告知内核要使用 SELinux 而非 <phrase>AppArmor</phrase>
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>selinux=1</literal>
+    </term>
+    <listitem>
+     <para>
+      此选项用于启用 SELinux
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>enforcing=0</literal>
+    </term>
+    <listitem>
+     <para>
+      此选项将 SELinux 置于宽松模式。在此模式下，SELinux 可完全正常运行，但不会强制执行策略中的任何安全性设置。请使用此模式来测试和配置您的系统。要启用 SELinux 保护，请在系统完全正常运行后，将该选项更改为 <literal>enforcing=1</literal>，并在 <filename>/etc/selinux/config</filename> 中添加 <literal>SELINUX=enforcing</literal>。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+      
+  <para>
+   现在可以重引导。系统启动需要一段时间，因为 SELinux 需要重新标记整个文件系统。完成后，运行 <command>sestatus -v</command> 命令以校验系统是否正常工作。此命令应该会返回类似于<xref linkend="ex-selnx-sestatus" xrefstyle="select:label quotedtitle nopage"/>中的输出。
+  </para>
+
+  <example xml:id="ex-selnx-sestatus">
+   <title>校验 SELinux 是否正常运行</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>sestatus -v</command>
+SELinux status:                 enabled
+SELinuxfs mount:                /selinux
+Current mode:                   permissive
+Mode from config file:          permissive
+Policy version:                 26
+Policy from config file:        minimum
+
+Process contexts:
+Current context:                root:staff_r:staff_t
+Init context:                   system_u:system_r:init_t
+/sbin/mingetty                  system_u:system_r:sysadm_t
+/usr/sbin/sshd                  system_u:system_r:sshd_t
+
+File contexts:
+Controlling term:               root:object_r:user_devpts_t
+/etc/passwd                     system_u:object_r:etc_t
+/etc/shadow                     system_u:object_r:shadow_t
+/bin/bash                       system_u:object_r:shell_exec_t
+/bin/login                      system_u:object_r:login_exec_t
+/bin/sh                         system_u:object_r:bin_t -&gt; system_u:object_r:shell_exec_t
+/sbin/agetty                    system_u:object_r:getty_exec_t
+/sbin/init                      system_u:object_r:init_exec_t
+/sbin/mingetty                  system_u:object_r:getty_exec_t
+/usr/sbin/sshd                  system_u:object_r:sshd_exec_t
+/lib/libc.so.6                  system_u:object_r:lib_t -&gt; system_u:object_r:lib_t
+/lib/ld-linux.so.2              system_u:object_r:lib_t -&gt; system_u:object_r:ld_so_t</screen>
+  </example>
+ </sect1>
+ 
+ <sect1 xml:id="sec-selinux-configure">
+  <title>配置 SELinux</title>
+  <para>
+   现在，您有了一个完全正常运行的 SELinux 系统，接下来我们来进一步配置这个系统。在当前状态下，SELinux 可正常运行，但并未处于强制模式。这意味着，它不会限制任何活动，但会记录如果处于强制模式下它将会执行的所有操作。请查看日志文件以了解不允许哪些活动。作为第一项测试，请将 SELinux 置于强制模式，并在采取以下做法之后确定您是否仍可使用服务器：检查在 <filename>/etc/selinux/config</filename> 中设置了 <option>SELINUX=enforcing</option> 的同时，是否在 GRUB 2 配置文件中设置了 <option>enforcing=1</option> 选项。重引导服务器，然后检查它是否仍可按预期方式正常启动。如果是，请保留当前设置，然后开始修改服务器，并使一切按预期方式工作。不过，您有可能甚至无法正常引导服务器。在这种情况下，请切换回 SELinux 的非强制模式，然后开始调整服务器。
+  </para>
+  <para>
+    在开始调整服务器之前，请校验 SELinux 安装。您已使用 <command>sestatus -v</command> 命令查看当前模式、进程和文件环境。接下来，运行
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage boolean -l</command></screen>
+   <para>
+    以列出所有可用的布尔开关，同时校验您是否可以访问该策略。<xref linkend="ex-selnx-ls-bool"/>显示了此命令的部分输出。
+   </para>
+   <example xml:id="ex-selnx-ls-bool">
+    <title>获取布尔值列表并校验策略访问权限</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage boolean -l</command>
+SELinux boolean                          Description
+ftp_home_dir                   -&gt; off   ftp_home_dir
+mozilla_read_content           -&gt; off   mozilla_read_content
+spamassassin_can_network       -&gt; off   spamassassin_can_network
+httpd_can_network_relay        -&gt; off   httpd_can_network_relay
+openvpn_enable_homedirs        -&gt; off   openvpn_enable_homedirs
+gpg_agent_env_file             -&gt; off   gpg_agent_env_file
+allow_httpd_awstats_script_anon_write -&gt; off   allow_httpd_awstats_script_anon_write
+httpd_can_network_connect_db   -&gt; off   httpd_can_network_connect_db
+allow_ftpd_full_access         -&gt; off   allow_ftpd_full_access
+samba_domain_controller        -&gt; off   samba_domain_controller
+httpd_enable_cgi               -&gt; off   httpd_enable_cgi
+virt_use_nfs                   -&gt; off   virt_use_nfs</screen>
+    <para>
+     在此阶段，可输出有用信息的另一个命令是
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage fcontext -l</command></screen>
+    <para>
+     此命令会显示策略提供的默认文件环境设置（有关此命令的部分输出，请参见<xref linkend="ex-selnx-fcon" xrefstyle="select:label quotedtitle nopage"/>）。
+    </para>
+   </example>
+   <example xml:id="ex-selnx-fcon">
+    <title>获取文件环境信息</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage fcontext -l</command>
+/var/run/usb(/.*)?                                 all files          system_u:object_r:hotplug_var_run_t
+/var/run/utmp                                      regular file       system_u:object_r:initrc_var_run_t
+/var/run/vbe.*                                     regular file       system_u:object_r:hald_var_run_t
+/var/run/vmnat.*                                   socket             system_u:object_r:vmware_var_run_t
+/var/run/vmware.*                                  all files          system_u:object_r:vmware_var_run_t
+/var/run/watchdog\.pid                             regular file       system_u:object_r:watchdog_var_run_t
+/var/run/winbindd(/.*)?                            all files          system_u:object_r:winbind_var_run_t
+/var/run/wnn-unix(/.*)                             all files          system_u:object_r:canna_var_run_t
+/var/run/wpa_supplicant(/.*)?                      all files          system_u:object_r:NetworkManager_var_run_t
+/var/run/wpa_supplicant-global                     socket             system_u:object_r:NetworkManager_var_run_t
+/var/run/xdmctl(/.*)?                              all files          system_u:object_r:xdm_var_run_t
+/var/run/yiff-[0-9]+\.pid                          regular file       system_u:object_r:soundd_var_run_t</screen>
+   </example>
+ </sect1>
+ <sect1 xml:id="sec-selinux-manage">
+  <title>管理 SELinux</title>
+
+  <para>
+   基本 SELinux 配置现在可以正常运行，接下来可以配置 SELinux 来保护您的服务器。SELinux 中使用一组额外的规则来具体定义哪个进程或用户可以访问哪些文件、目录或端口。为此，SELinux 会将一个环境应用到每个文件、目录、进程和端口。此环境是一个安全性标签，定义应如何处理此文件、目录、进程或端口。这些环境标签由 SELinux 策略使用，该策略具体定义应该对环境标签执行什么操作。默认情况下，该策略会阻止所有非默认访问，这意味着，作为管理员，您需要在服务器上启用所有非默认的功能。
+  </para>
+
+  <sect2 xml:id="sec-selinux-viewcontext">
+   <title>查看安全环境</title>
+   <para>
+    如上文所述，您可以标记文件、目录和端口。每个标签中都使用了不同的环境。要能够执行日常管理工作，您最需要关注的就是类型环境。作为管理员，您基本上要处理的都是类型环境。许多命令允许您使用 <option>-Z</option> 选项列出当前环境设置。<xref linkend="ex-selnx-def-con" xrefstyle="select:label quotedtitle nopage"/>中显示了根目录中的目录采用了什么环境设置。
+   </para>
+   <example xml:id="ex-selnx-def-con">
+    <title>根目录中各目录的默认环境</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>ls -Z</command>
+dr-xr-xr-x. root root system_u:object_r:bin_t:s0       bin
+dr-xr-xr-x. root root system_u:object_r:boot_t:s0      boot
+drwxr-xr-x. root root system_u:object_r:cgroup_t:s0    cgroup
+drwxr-xr-x+ root root unconfined_u:object_r:default_t:s0 data
+drwxr-xr-x. root root system_u:object_r:device_t:s0    dev
+drwxr-xr-x. root root system_u:object_r:etc_t:s0       etc
+drwxr-xr-x. root root system_u:object_r:home_root_t:s0 home
+dr-xr-xr-x. root root system_u:object_r:lib_t:s0       lib
+dr-xr-xr-x. root root system_u:object_r:lib_t:s0       lib64
+drwx------. root root system_u:object_r:lost_found_t:s0 lost+found
+drwxr-xr-x. root root system_u:object_r:mnt_t:s0       media
+drwxr-xr-x. root root system_u:object_r:autofs_t:s0    misc
+drwxr-xr-x. root root system_u:object_r:mnt_t:s0       mnt
+drwxr-xr-x. root root unconfined_u:object_r:default_t:s0 mnt2
+drwxr-xr-x. root root unconfined_u:object_r:default_t:s0 mounts
+drwxr-xr-x. root root system_u:object_r:autofs_t:s0    net
+drwxr-xr-x. root root system_u:object_r:usr_t:s0       opt
+dr-xr-xr-x. root root system_u:object_r:proc_t:s0      proc
+drwxr-xr-x. root root unconfined_u:object_r:default_t:s0 repo
+dr-xr-x---. root root system_u:object_r:admin_home_t:s0 root
+dr-xr-xr-x. root root system_u:object_r:bin_t:s0       sbin
+drwxr-xr-x. root root system_u:object_r:security_t:s0  selinux
+drwxr-xr-x. root root system_u:object_r:var_t:s0       srv
+-rw-r--r--. root root unconfined_u:object_r:swapfile_t:s0 swapfile
+drwxr-xr-x. root root system_u:object_r:sysfs_t:s0     sys
+drwxrwxrwt. root root system_u:object_r:tmp_t:s0       tmp
+-rw-r--r--. root root unconfined_u:object_r:etc_runtime_t:s0 tmp2.tar
+-rw-r--r--. root root unconfined_u:object_r:etc_runtime_t:s0 tmp.tar
+drwxr-xr-x. root root system_u:object_r:usr_t:s0       usr
+drwxr-xr-x. root root system_u:object_r:var_t:s0       var</screen>
+   </example>
+   <para>
+    在上面的列表中，您可以看到所有目录的完整环境。它由用户、角色和类型组成。s0 设置指示多级别安全环境中的安全性级别。本文不讨论这些环境。在此类环境中，请确保设置了 s0。环境类型定义在目录中允许哪种活动。例如，我们来比较一下环境类型为 <filename>admin_home_t</filename> 的 <filename>/root</filename> 目录与环境类型为 <filename>home_root_t</filename> 的 <filename>/home</filename> 目录。SELinux 策略中会为这些环境类型定义不同种类的访问。
+   </para>
+   <para>
+    安全性标签不仅与文件相关联，还与端口和进程等其他项相关联。例如，在<xref linkend="ex-selnx-set-proc" xrefstyle="select:label quotedtitle nopage"/>中，您可以看到服务器上进程的环境设置。
+   </para>
+   <example xml:id="ex-selnx-set-proc">
+    <title>使用 <command>ps Zaux</command> 显示进程的 SELinux 设置</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>ps Zaux</command>
+LABEL                           USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+system_u:system_r:init_t        root         1  0.0  0.0  10640   808 ?        Ss   05:31   0:00 init [5]
+system_u:system_r:kernel_t      root         2  0.0  0.0      0     0 ?        S    05:31   0:00 [kthreadd]
+system_u:system_r:kernel_t      root         3  0.0  0.0      0     0 ?        S    05:31   0:00 [ksoftirqd/0]
+system_u:system_r:kernel_t      root         6  0.0  0.0      0     0 ?        S    05:31   0:00 [migration/0]
+system_u:system_r:kernel_t      root         7  0.0  0.0      0     0 ?        S    05:31   0:00 [watchdog/0]
+system_u:system_r:sysadm_t      root      2344  0.0  0.0  27640   852 ?        Ss   05:32   0:00 /usr/sbin/mcelog --daemon --config-file /etc/mcelog/mcelog.conf
+system_u:system_r:sshd_t        root      3245  0.0  0.0  69300  1492 ?        Ss   05:32   0:00 /usr/sbin/sshd -o PidFile=/var/run/sshd.init.pid
+system_u:system_r:cupsd_t       root      3265  0.0  0.0  68176  2852 ?        Ss   05:32   0:00 /usr/sbin/cupsd
+system_u:system_r:nscd_t        root      3267  0.0  0.0 772876  1380 ?        Ssl  05:32   0:00 /usr/sbin/nscd
+system_u:system_r:postfix_master_t root   3334  0.0  0.0  38320  2424 ?        Ss   05:32   0:00 /usr/lib/postfix/master
+system_u:system_r:postfix_qmgr_t postfix  3358  0.0  0.0  40216  2252 ?        S    05:32   0:00 qmgr -l -t fifo -u
+system_u:system_r:crond_t       root      3415  0.0  0.0  14900   800 ?        Ss   05:32   0:00 /usr/sbin/cron
+system_u:system_r:fsdaemon_t    root      3437  0.0  0.0  16468  1040 ?        S    05:32   0:00 /usr/sbin/smartd
+system_u:system_r:sysadm_t      root      3441  0.0  0.0  66916  2152 ?        Ss   05:32   0:00 login -- root
+system_u:system_r:sysadm_t      root      3442  0.0  0.0   4596   800 tty2     Ss+  05:32   0:00 /sbin/mingetty tty2</screen>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="sec-selinux-selectmode">
+   <title>选择 SELinux 模式</title>
+   <para>
+    在 SELinux 中可以使用三种不同的模式：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>强制：</term>
+     <listitem>
+      <para>
+       这是默认模式。SELinux 根据策略中的规则保护服务器，并将其所有活动记录到审计日志中。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>宽松：</term>
+     <listitem>
+      <para>
+       此模式用于查错。如果设置为“宽松”，SELinux 将不保护您的服务器，但仍会将发生的所有情况记录到日志文件中。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>已禁用：</term>
+     <listitem>
+      <para>
+       在此模式下，SELinux 处于完全关闭状态，并且不会记录任何日志，但文件系统标签不会从文件系统中去除。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    您已了解如何在引导时使用强制引导参数通过 GRUB 2 设置当前的 SELinux 模式。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-selinux-modifycontext">
+   <title>修改 SELinux 环境类型</title>
+   <para>
+    管理员的一项重要工作是设置文件的环境类型，以确保 SELinux 正常工作。
+   </para>
+   <para>
+    如果在特定的目录中创建了一个文件，该文件默认将继承父目录的环境类型。但是，如果将某个文件从一个位置移到另一个位置，它将保留在原来的位置中所用的环境类型。
+   </para>
+   <para>
+    要设置文件的环境类型，可以使用 <command>semanage fcontext</command> 命令。使用此命令可将新环境类型写入策略，但不会立即更改实际的环境类型！要应用策略中的环境类型，需要接着运行 <command>restorecon</command> 命令。
+   </para>
+   <para>
+    使用 <command>semanage fcontext</command> 时的难点在于找出您实际需要的环境。可使用
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage fcontext -l</command></screen>
+   <para>
+    列出策略中的所有环境，但从该列表中找出所需的实际环境可能有点困难，因为该列表很长（请参见<xref linkend="ex-selnx-semanage" xrefstyle="select:label quotedtitle nopage"/>）。
+   </para>
+   <example xml:id="ex-selnx-semanage">
+    <title>查看默认文件环境</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage fcontext -l | less</command>
+SELinux fcontext                                   type               Context
+
+/                                                  directory          system_u:object_r:root_t:s0
+/.*                                                all files          system_u:object_r:default_t:s0
+/[^/]+                                             regular file       system_u:object_r:etc_runtime_t:s0
+/\.autofsck                                        regular file       system_u:object_r:etc_runtime_t:s0
+/\.autorelabel                                     regular file       system_u:object_r:etc_runtime_t:s0
+/\.journal                                         all files          X:&gt;&gt;None&gt;&gt;
+/\.suspended                                       regular file       system_u:object_r:etc_runtime_t:s0
+/a?quota\.(user|group)                             regular file       system_u:object_r:quota_db_t:s0
+/afs                                               directory          system_u:object_r:mnt_t:s0
+/bin                                               directory          system_u:object_r:bin_t:s0
+/bin/.*                                            all files          system_u:object_r:bin_t:s0</screen>
+   </example>
+   <para>
+    可以通过三种方式找出您的服务可用的环境设置：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      安装服务并查看所用的默认环境设置：这是最简单的做法，也是建议的做法。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      查阅特定服务的手册页。某些服务提供了以 <literal>_selinux</literal> 结尾的手册页，其中包含查找正确环境设置所需的所有信息。
+     </para>
+     <para>
+      找到正确的环境设置后，使用 <command>semanage fcontext</command> 应用该设置。此命令接受 <option>-t</option> 环境类型作为第一个参数，后接您要将环境设置应用到的目标目录或文件的名称。要将环境应用到目标目录（要在其中应用该环境）中已存在的所有对象，请将正则表达式 <literal>(/.*)? </literal> 添加到该目录的名称中。这表示：选择性匹配名称为一个斜线后接任何字符的对象。<command>semanage</command> 手册页的示例部分包含了 <command>semanage</command> 的一些实用的用法示例。有关正则表达式的详细信息，请参见 <link xlink:href="http://www.regular-expressions.info/"/> 上的教程及其他资源。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      显示系统上所有可用环境类型的列表：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>seinfo -t</command></screen>
+     <para>
+      由于仅使用该命令会输出非常多的信息，应将它与 <command>grep</command> 或类似命令结合使用，以过滤结果。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="sec-selinux-applyfilecontext">
+   <title>应用文件环境</title>
+   <para> 为帮助您正确应用 SELinux 环境，以下过程说明了如何使用 <command>semanage fcontext</command> 和 <command>restorecon</command> 设置环境。您会发现，在首次尝试时，具有非默认文档根的 Web 服务器不会工作。更改 SELinux 环境后，它就会正常工作：</para>
+   <procedure>
+    <step>
+     <para>
+      创建 <filename>/web</filename> 目录，然后对其进行更改：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>mkdir /web  &amp;&amp; cd /web</command></screen>
+    </step>
+    <step>
+     <para>
+      使用文本编辑器创建包含文本“welcome to my Web site”的 <filename>/web/index.html</filename> 文件。
+     </para>
+    </step>
+    <step>
+     <para>
+      使用编辑器打开 <filename>/etc/apache2/default-server.conf</filename> 文件，将 DocumentRoot 一行更改为 <literal>DocumentRoot /web</literal>
+     </para>
+    </step>
+    <step>
+     <para>
+      启动 Apache Web 服务器：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl start apache2</command></screen>
+    </step>
+    <step>
+     <para>
+      与您的本地 Web 服务器建立会话：
+     </para>
+<screen><prompt>&gt; </prompt><command>w3m localhost</command></screen>
+     <para>
+      您会收到<emphasis>连接被拒绝</emphasis>消息。按 <keycap function="enter"/>，然后按 <command>q</command> 退出 w3m。
+     </para>
+    </step>
+    <step>
+     <para>
+      找到默认 Apache <literal>DocumentRoot</literal>（即 <filename>/srv/www/htdocs</filename>）的当前环境类型。此类型应当设置为 <filename>httpd_sys_content_t</filename>：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>ls -Z /srv/www</command></screen>
+    </step>
+    <step>
+     <para>
+      在策略中设置新环境，然后按 <keycap function="enter"/>：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage fcontext -a -f "" -t httpd_sys_content_t '/web(/.*) ?'</command></screen>
+    </step>
+    <step>
+     <para>
+      应用新环境类型：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>restorecon /web</command></screen>
+    </step>
+    <step>
+     <para>
+      显示目录 <filename>/web</filename> 中各文件的环境。您将看到，新环境类型已正确设置到 <filename>/web</filename> 目录，但未设置到其包含的内容。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>ls -Z /web</command></screen>
+    </step>
+    <step>
+     <para>
+      以递归方式将新环境应用到 <filename>/web</filename> 目录。现已正确设置类型环境。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>restorecon -R /web</command></screen>
+    </step>
+    <step>
+     <para>
+      重启动 Web 服务器：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl restart apache2</command></screen>
+     <para>
+      现在，您应该可以访问 <filename>/web</filename> 目录的内容了。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-selinux-configurepolicy">
+   <title>配置 SELinux 策略</title>
+   <para>
+    更改策略行为的最简单的方法是使用布尔值。这些布尔值是一些开关，可用来更改策略中的设置。要找出可用的布尔值，请运行
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage boolean -l</command></screen>
+   <para>
+    此命令会显示一个较长的布尔值列表，其中简短说明了每个布尔值的作用。找到想要设置的布尔值后，可以使用 <command>setsebool -P</command> 后接您要更改的布尔值的名称。使用 <command>setsebool</command> 时，务必始终使用 <option>-P</option> 选项。此选项会将设置写入到磁盘上的策略文件，这是确保系统重引导后自动应用布尔值的唯一方式。
+   </para>
+   <para>
+    下面的过程提供了更改布尔设置的示例
+   </para>
+   <procedure>
+    <step>
+     <para>
+      列出与 FTP 服务器相关的布尔值。</para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage boolean -l | grep ftp</command></screen>
+    </step>
+    <step>
+     <para>
+      关闭布尔值：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>setsebool allow_ftpd_anon_write off</command></screen>
+     <para>
+      请注意，写入更改不会花费太长时间。然后校验布尔值是否确实关闭：</para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semanage boolean -l|grep ftpd_anon</command></screen>
+    </step>
+    <step>
+     <para>
+      重引导服务器。
+     </para>
+    </step>
+    <step>
+     <para>
+      再次检查以确认 <literal>allow_ftpd_anon_write</literal> 布尔值是否仍处于开启状态。由于此布尔设置尚未写入策略，因此您会发现它处于关闭状态。
+     </para>
+    </step>
+    <step>
+     <para>
+      切换布尔值并将设置写入策略：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>setsebool -P allow_ftpd_anon_write</command></screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-selinux-module">
+   <title>使用 SELinux 模块</title>
+   <para>
+    默认情况下，SELinux 使用模块化策略。这意味着，实现 SELinux 功能的策略不是单个巨型策略，而是由许多较小模块构成。每个模块都涉及 SELinux 配置的特定部分。引入 SELinux 模块概念的目的是方便第三方供应商使其服务与 SELinux 兼容。要获取各 SELinux 模块的概览，可以使用 <command>semodule -l</command> 命令。此命令会列出 SELinux 当前使用的所有模块及其版本号。
+   </para>
+   <para>
+    作为管理员，您可以开启或关闭模块。如果您只想禁用 SELinux 的某个部件（而不是所有部件），以便在不受 SELinux 保护的情况下运行特定的服务，此功能非常有用。尤其是在尚无完全受支持的 SELinux 策略的 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 中，有效的做法可能是关闭您不需要的所有模块，以便将精力集中在确实需要 SELinux 保护的服务上。要关闭 SELinux 模块，请使用
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>semodule -d <replaceable>MODULENAME</replaceable></command></screen>
+   <para>
+    要再次将它开启，可以使用
+   </para>
+   <screen><prompt>&gt; </prompt><command>sudo</command> <command>semodule -e modulename</command></screen>
+   
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-selinux-troubleshoot">
+  <title>查错</title>
+
+  <para>
+   默认情况下，如果 SELinux 是导致出错的原因，系统会将与此结果相关的日志消息发送到 <filename>/var/log/audit/audit.log</filename> 文件。这涉及到 auditd 服务是否正在运行。如果您发现 <filename>/var/log/audit</filename> 是空的，请使用以下命令启动 auditd 服务
+  </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl start auditd</command></screen>
+
+  <para>
+   并使用以下命令在系统目标中启用它
+  </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl enable auditd</command></screen>
+
+  <para>
+   <xref linkend="ex-selnx-li-auditlog" xrefstyle="select:label quotedtitle nopage"/>中提供了 <filename>/var/log/audit/audit.log</filename> 的部分示例内容
+  </para>
+
+  <example xml:id="ex-selnx-li-auditlog">
+   <title><filename>/etc/audit/audit.log</filename> 中的示例行</title>
+<screen>type=DAEMON_START msg=audit(1348173810.874:6248): auditd start, ver=1.7.7 format=raw kernel=3.0.13-0.27-default auid=0 pid=4235 subj=system_u:system_r:auditd_t res=success
+type=AVC msg=audit(1348173901.081:292): avc:  denied  { write } for  pid=3426 comm="smartd" name="smartmontools" dev=sda6 ino=581743 scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=dir
+type=AVC msg=audit(1348173901.081:293): avc:  denied  { remove_name } for  pid=3426 comm="smartd" name="smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state~" dev=sda6 ino=582390 scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=dir
+type=AVC msg=audit(1348173901.081:294): avc:  denied  { unlink } for  pid=3426 comm="smartd" name="smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state~" dev=sda6 ino=582390 scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=file
+type=AVC msg=audit(1348173901.081:295): avc:  denied  { rename } for  pid=3426 comm="smartd" name="smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state" dev=sda6 ino=582373 scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=file
+type=AVC msg=audit(1348173901.081:296): avc:  denied  { add_name } for  pid=3426 comm="smartd" name="smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state~" scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=dir
+type=AVC msg=audit(1348173901.081:297): avc:  denied  { create } for  pid=3426 comm="smartd" name="smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state" scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=file
+type=AVC msg=audit(1348173901.081:298): avc:  denied  { write open } for  pid=3426 comm="smartd" name="smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state" dev=sda6 ino=582390 scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=file
+type=AVC msg=audit(1348173901.081:299): avc:  denied  { getattr } for  pid=3426 comm="smartd" path="/var/lib/smartmontools/smartd.WDC_WD2500BEKT_75PVMT0-WD_WXC1A21E0454.ata.state" dev=sda6 ino=582390 scontext=system_u:system_r:fsdaemon_t tcontext=system_u:object_r:var_lib_t tclass=file
+type=AVC msg=audit(1348173901.309:300): avc:  denied  { append } for  pid=1316</screen>
+  </example>
+
+  <para>
+   乍看之下，<filename>audit.log</filename> 中的行读起来有点困难。但如果仔细分析，就会发现它们不是那么难以理解。每一行都可细分为不同的部分。例如，最后一行包含以下部分：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>type=AVC</literal>：</term>
+    <listitem>
+     <para>
+      每个 SELinux 相关审计日志行都以类型标识 <literal>type=AVC</literal> 开头
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>msg=audit(1348173901.309:300)</literal>： </term>
+    <listitem>
+     <para>
+      这是时戳，遗憾的是，它是以纪元时间（自 1970 年 1 月 1 日开始经过的秒数）写入的。您可以针对纪元时间表示法中点号前面的部分使用 <command>date -d</command>，以确定该事件是何时发生的：
+     </para>
+<screen><prompt>&gt; </prompt><command>date -d @1348173901</command>
+Thu Sep 20 16:45:01 EDT 2012</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>avc: denied { append }</literal>：</term>
+    <listitem>
+     <para>
+      已被拒绝的特定操作。在本例中，系统已拒绝将数据追加到文件。在浏览审计日志文件时，您可以看到其他系统操作，例如 write open、getattr 等等。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>for pid=1316</literal>：</term>
+    <listitem>
+     <para>
+      发起操作的命令或进程的进程 ID
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>comm=&quot;rsyslogd&quot;</literal>：</term>
+    <listitem>
+     <para>
+      与该 PID 关联的特定命令
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>name=&quot;smartmontools&quot;</literal>：</term>
+    <listitem>
+     <para>
+      操作主体的名称
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>dev=sda6 ino=582296</literal>：</term>
+    <listitem>
+     <para>
+      相关文件的块设备和 inode 编号
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>scontext=system_u:system_r:syslogd_t</literal>：</term>
+    <listitem>
+     <para>
+      源环境，即操作发起者的环境
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>tclass=file</literal>：</term>
+    <listitem>
+     <para>
+      主体的类标识
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   您可以采用另一种方法来取代在 audit.log 中自行截获事件的做法。您可以使用 <command>audit2allow</command> 命令，它会帮助分析 <filename>/var/log/audit/audit.log</filename> 中晦涩难懂的日志消息。audit2allow 查错会话一律由三个不同的命令组成。首先，您会使用 <command>audit2allow -w -a</command> 以更易于理解的方式显示审计信息。<command>audit2allow -w -a</command> 默认对 audit.log 文件运行。如果您要分析 audit.log 文件中的特定消息，请将此消息复制到临时文件，然后使用以下命令分析该临时文件：
+  </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>audit2allow -w -i <replaceable>FILENAME</replaceable></command></screen>
+
+  <example>
+   <title>分析审计消息</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>audit2allow -w -i testfile</command>
+type=AVC msg=audit(1348173901.309:300): avc:  denied  { append } for  pid=1316
+comm="rsyslogd" name="acpid" dev=sda6 ino=582296
+scontext=system_u:system_r:syslogd_t tcontext=system_u:object_r:apmd_log_t tclass=file</screen>
+  </example>
+
+  <variablelist>
+   <varlistentry>
+    <term>发生此问题的原因是：</term>
+    <listitem>
+     <para>
+      缺少类型强制 (TE) 允许规则。
+     </para>
+     <para>
+      要生成可装载的模块以允许这种访问，请运行
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>audit2allow</command></screen>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   要确定具体哪条规则拒绝了访问，您可以使用 <command>audit2allow -a</command> 显示已记录到 <filename>audit.log </filename> 文件的所有事件中的强制规则，或使用 <command>audit2allow -i <replaceable>FILENAME</replaceable></command> 显示应用于您储存在特定文件中的消息的规则：
+  </para>
+
+  <example>
+   <title>查看哪些行拒绝了访问</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>audit2allow -i testfile</command>
+#============= syslogd_t ==============
+allow syslogd_t apmd_log_t:file append;</screen>
+  </example>
+
+  <para>
+   要创建您可以装载以允许先前被拒绝的访问的 SELinux 模块 <literal>mymodule</literal>，请运行
+  </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>audit2allow -a -R -M mymodule</command></screen>
+
+  <para>
+   如果您要对已记录到 audit.log 的所有事件执行此操作，请使用 <option>-a -M</option> 命令参数。要仅针对特定文件中的特定消息执行此操作，请按下面的示例所示使用 <option>-i -M</option>：
+  </para>
+
+  <example>
+   <title>创建允许先前被拒绝的操作的策略模块</title>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>audit2allow -i testfile -M example</command>
+******************** IMPORTANT ***********************
+To make this policy package active, execute:
+
+semodule -i example.pp</screen>
+  </example>
+
+  <para>
+   如 <command>audit2allow</command> 命令所示，您现在可按以下方式运行此模块：使用 <command>semodule -i</command> 命令，后接 <command>audit2allow</command> 为您创建的模块的名称（在上例中为 <filename>example.pp</filename>）。
+  </para>
+ </sect1>
+</chapter>

@@ -1,1 +1,614 @@
-../../../../xml/security_vpnserver.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="security_vpnserver.xml" version="5.0" xml:id="cha-security-vpnserver">
+
+
+
+ <title>配置 VPN 服务器</title>
+ <info>
+      <abstract>
+        <para>
+    现今，互联网连接费用低廉，几乎在任何地方都可以上网，但并非所有连接都是安全的。利用虚拟专用网 (VPN)，您可以在不安全的网络（例如互联网或 Wi-Fi）内创建安全网络。VPN 可通过不同的方式实现，并用于多种目的。本章重点介绍如何使用 <link xlink:href="https://openvpn.net">OpenVPN</link> 来通过安全广域网 (WAN) 链接各分支办公室。
+
+        </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+
+
+
+ <sect1 xml:id="sec-security-vpn-overview">
+  <title>概念概述</title>
+
+  <para>
+   本节定义了 VPN 相关的一些术语，并简要概述了一些方案。
+  </para>
+
+  <sect2 xml:id="sec-security-vpn-terminology">
+   <title>术语</title>
+   <variablelist>
+    <varlistentry>
+     <term>端点</term>
+     <listitem>
+      <para>
+       隧道的两<quote>端</quote>：源客户端和目标客户端。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Tap 设备</term>
+     <listitem>
+      <para>
+       Tap 设备可模拟以太网设备（OSI 模型中的第 2 层包，例如以太网帧）。Tap 设备用于创建网桥,可处理以太网帧。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Tun 设备</term>
+     <listitem>
+      <para>
+       Tun 设备可模拟点对点网络（OSI 模型中的第 3 层包，例如 IP 包）。Tun 设备用于路由，可处理 IP 帧。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>隧道</term>
+     <listitem>
+      <para>
+       通过主公共网络链接两个位置。从技术角度看，隧道是客户端设备与服务器设备之间的连接。隧道通常会加密，但按定义它确实需要加密。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec-security-vpn-scenarios">
+   <title>VPN 方案</title>
+   <para>
+    每当您设置 VPN 连接时，您的 IP 包就会通过安全<emphasis>隧道</emphasis>传输。隧道可以使用 <emphasis>tun</emphasis> 或 <emphasis>tap</emphasis> 设备。这些设备是虚拟网络内核驱动程序，用于实现以太网帧或 IP 帧/包的传输。
+   </para>
+   <para>
+    任何用户空间程序（例如 OpenVPN）都可以将自身挂接到 tun 或 tap 设备，以接收操作系统发送的包。该程序还可以向此类设备写入包。
+   </para>
+   <para>
+    设置和构建 VPN 连接的解决方案有许多。本节重点介绍 OpenVPN 软件包。不像其他 VPN 软件，OpenVPN 可在两种模式下运行：
+   </para>
+
+   <variablelist>
+    <varlistentry>
+     <term>路由式 VPN</term>
+     <listitem>
+      <para>
+       路由是可设置的简易解决方案。它的效率比桥接式 VPN 更高，缩放能力更强。此外，它允许用户调整 MTU（最大传输单元）以提高效率。但在异构环境中，如果您的网关上没有 Samba 服务器，NetBIOS 广播不会正常工作。如果您需要 IPv6，两端上 tun 设备的驱动程序必须显式支持此协议。<xref linkend="fig-vpn-scenario-routed-1"/>中描绘了此方案。
+      </para>
+      <remark>
+       FIXME: This para is a bit involved and terse for an introduction. Maybe
+       it could be fixed to provide some more context around what the Samba and
+       NetBIOS thing means. - sknorr, 2016-07-21
+      </remark>
+      <figure xml:id="fig-vpn-scenario-routed-1">
+       <title>路由式 VPN</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_routed1.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_routed1.svg" width="50%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>桥接式 VPN</term>
+     <listitem>
+      <para>
+       桥接是更复杂的解决方案。如果您需要在不设置 Samba 或 WINS 服务器的情况下通过 VPN 浏览 Windows 文件共享，则建议使用桥接。使用非 IP 协议（例如 IPX）或依赖于网络广播的应用程序也需要用到桥接式 VPN。但是，桥接式 VPN 的效率比路由式 VPN 要低。另一项劣势是它的缩放能力不强。下列插图描绘了此方案。
+      </para>
+
+      <figure xml:id="fig-vpn-scenario-briged-1">
+       <title>桥接式 VPN - 方案 1</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_bridged1.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_bridged1.svg" width="50%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+
+      <figure xml:id="fig-vpn-scenario-briged-2">
+       <title>桥接式 VPN - 方案 2</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_bridged2.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_bridged2.svg" width="50%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+
+      <figure xml:id="fig-vpn-scenario-briged-3">
+       <title>桥接式 VPN - 方案 3</title>
+       <mediaobject>
+        <imageobject role="html">
+         <imagedata fileref="vpn_bridged3.png" width="80%"/>
+        </imageobject>
+        <imageobject role="fo">
+         <imagedata fileref="vpn_bridged3.svg" width="50%"/>
+        </imageobject>
+       </mediaobject>
+      </figure>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    桥接与路由之间的主要差别在于，路由式 VPN 无法进行 IP 广播，而桥接式 VPN 则可以。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-security-vpn-simplest">
+  <title>设置简单测试方案</title>
+
+  <para>
+   在下面的示例中，我们将创建一个点对点 VPN 隧道。该示例说明如何在一个客户端与某个服务器之间创建 VPN 隧道。假设您的 VPN 服务器将使用私用 IP 地址（例如 <systemitem class="ipaddress"><replaceable>IP_OF_SERVER</replaceable></systemitem>），客户端将使用 IP 地址 <systemitem class="ipaddress"><replaceable>IP_OF_CLIENT</replaceable></systemitem>。请确保选择的地址与其他 IP 地址不冲突。
+  </para>
+
+  <warning>
+   <title>仅用于测试</title>
+   <para>
+    下面的方案仅为示例，旨在帮助您熟悉 VPN 技术。<emphasis>请勿</emphasis>使用此示例作为真实方案，因为它可能会损害 IT 基础结构的安全性！
+   </para>
+   <remark>
+    I see why it impacts security. But why is safety mentioned? Will the
+    servers implode? - sknorr, 2016-07-21
+   </remark>
+  </warning>
+
+  <tip>
+   <title>配置文件的名称</title>
+   <para>
+    为了简化 OpenVPN 配置文件的处理，我们建议采取以下做法：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      将 OpenVPN 配置文件放在目录 <filename>/etc/openvpn</filename> 中。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      将配置文件命名为 <filename><replaceable>MY_CONFIGURATION</replaceable>.conf</filename>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果有多个文件属于同一配置，请将这些文件放在某个子目录（例如 <filename>/etc/openvpn/<replaceable>MY_CONFIGURATION</replaceable></filename>）中。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </tip>
+
+  <sect2 xml:id="sec-security-vpn-simplest-vpnserv">
+   <title>配置 VPN 服务器</title>
+   <para>
+    要配置 VPN 服务器，请执行以下操作：
+   </para>
+   <procedure xml:id="pro-security-vpn-simplest-vpnserv">
+    <title>VPN 服务器配置</title>
+    <step>
+     <para>
+      在稍后要用作 VPN 服务器的计算机上安装 <systemitem class="resource">openvpn</systemitem> 软件包。
+     </para>
+    </step>
+    <step>
+     <para>
+      在外壳上，以 <systemitem class="username">root</systemitem> 身份创建 VPN 机密密钥：
+     </para>
+<screen><prompt role="root"># </prompt>openvpn --genkey --secret /etc/openvpn/secret.key</screen>
+    </step>
+    <step>
+     <para>
+      将机密密钥复制到客户端：
+     </para>
+<screen><prompt role="root"># </prompt>scp /etc/openvpn/secret.key root@<replaceable>IP_OF_CLIENT</replaceable>:/etc/openvpn/</screen>
+    </step>
+    <step>
+     <para>
+      创建包含以下内容的 <filename>/etc/openvpn/server.conf</filename> 文件：
+     </para>
+
+<screen>dev tun
+ifconfig <replaceable>IP_OF_SERVER</replaceable> <replaceable>IP_OF_CLIENT</replaceable>
+secret secret.key</screen>
+    </step>
+    <step>
+     <para>
+      通过创建包含以下内容的 <filename>/etc/sysconfig/network/ifcfg-tun0</filename> 文件设置 tun 设备配置：
+     </para>
+<screen>STARTMODE='manual'
+BOOTPROTO='static'
+TUNNEL='tun'
+TUNNEL_SET_OWNER='nobody'
+TUNNEL_SET_GROUP='nobody'
+LINK_REQUIRED=no
+PRE_UP_SCRIPT='systemd:openvpn@server'
+PRE_DOWN_SCRIPT='systemd:openvpn@service'</screen>
+     <para>
+      <literal>openvpn@server</literal> 表示法指向位于 <filename>/etc/openvpn/server.conf</filename> 的 OpenVPN 服务器配置文件。有关详细信息，请参见 <filename>/usr/share/doc/packages/openvpn/README.SUSE</filename>。
+     </para>
+    </step>
+    <step xml:id="st-security-vpn-simplest-vpnserv-yast">
+     <para>
+      如果您使用防火墙，请启动 YaST 并打开 UDP 端口 1194（<menuchoice><guimenu>安全和用户</guimenu><guimenu>防火墙</guimenu><guimenu>允许的服务</guimenu></menuchoice>）。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过将 tun 设备设置为 <literal>up</literal> 启动 OpenVPN 服务器服务：
+     </para>
+     <screen><prompt>&gt; </prompt><command>sudo</command> <command>wicked ifup tun0</command></screen>
+     <para>
+      此时应会看到确认消息：
+     </para>
+     <screen>tun0            up</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-security-vpn-simplest-vpnclient">
+   <title>配置 VPN 客户端</title>
+   <para>
+    要配置 VPN 客户端，请执行以下操作：
+   </para>
+   <procedure>
+    <title>VPN 客户端配置</title>
+    <step>
+     <para>
+      在客户端 VPN 计算机上安装 <systemitem class="resource">openvpn</systemitem> 软件包。
+     </para>
+    </step>
+    <step>
+     <para>
+      创建包含以下内容的 <filename>/etc/openvpn/client.conf</filename>：
+     </para>
+<screen>remote <replaceable>DOMAIN_OR_PUBLIC_IP_OF_SERVER</replaceable>
+dev tun
+ifconfig <replaceable>IP_OF_CLIENT</replaceable> <replaceable>IP_OF_SERVER</replaceable>
+secret secret.key</screen>
+     <para>
+      请将第一行中的占位符 <replaceable>IP_OF_CLIENT</replaceable> 替换为服务器的域名或公共 IP 地址。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过创建包含以下内容的 <filename>/etc/sysconfig/network/ifcfg-tun0</filename> 文件设置 tun 设备配置：
+     </para>
+<screen>STARTMODE='manual'
+BOOTPROTO='static'
+TUNNEL='tun'
+TUNNEL_SET_OWNER='nobody'
+TUNNEL_SET_GROUP='nobody'
+LINK_REQUIRED=no
+PRE_UP_SCRIPT='systemd:openvpn@client'
+PRE_DOWN_SCRIPT='systemd:openvpn@client'</screen>
+    </step>
+    <step>
+     <para>
+      如果您使用防火墙，请按<xref linkend="pro-security-vpn-simplest-vpnserv"/>的<xref linkend="st-security-vpn-simplest-vpnserv-yast"/> 中所述启动 YaST 并打开 UDP 端口 1194。
+     </para>
+    </step>
+    <step>
+     <para>
+      通过将 tun 设备设置为 <literal>up</literal> 启动 OpenVPN 服务器服务：
+     </para>
+     <screen><prompt>&gt; </prompt><command>sudo</command> <command>wicked ifup tun0</command></screen>
+     <para>
+      此时应会看到确认消息：
+     </para>
+     <screen>tun0            up</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-security-vpn-simplest-use">
+   <title>测试 VPN 示例方案</title>
+   <para>
+    OpenVPN 成功启动后，使用以下命令测试 tun 设备的可用性：
+   </para>
+<screen>ip addr show tun0</screen>
+   <para>
+    要校验 VPN 连接，请在客户端和服务器端使用 <command>ping</command> 来确定它们能否相互连接。从客户端 ping 服务器：
+   </para>
+<screen>ping -I tun0 <replaceable>IP_OF_SERVER</replaceable></screen>
+   <para>
+    从服务器 ping 客户端：
+   </para>
+<screen>ping -I tun0 <replaceable>IP_OF_CLIENT</replaceable></screen>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-security-vpn-ca">
+  <title>使用证书颁发机构设置 VPN 服务器</title>
+
+  <para>
+   <xref linkend="sec-security-vpn-simplest" xrefstyle="select:label number"/> 中的示例用于测试，但不可用于日常工作。本节说明如何构建一个同时允许多个连接的 VPN 服务器。此过程使用公共密钥基础结构 (PKI) 完成。PKI 由以下组件构成：服务器和每个客户端的一对公共密钥和私用密钥，以及一个用来为每个服务器证书和客户端证书签名的证书颁发机构 (CA)。
+  </para>
+
+  <para>
+   此设置涉及以下基本步骤：
+  </para>
+
+  <procedure>
+   <step>
+    <para>
+     <xref linkend="sec-security-vpn-certs"/>
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec-security-vpn-config-server"/>
+    </para>
+   </step>
+   <step>
+    <para>
+     <xref linkend="sec-security-vpn-config-clients"/>
+    </para>
+   </step>
+  </procedure>
+
+  <sect2 xml:id="sec-security-vpn-certs">
+   <title>创建证书</title>
+   <para>
+    在可以建立 VPN 连接之前，客户端必须对服务器证书进行身份验证。相对地，服务器也必须对客户端证书进行身份验证。此过程称为<emphasis>相互身份验证</emphasis>。
+   </para>
+   <para>
+    <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 不支持创建证书。以下内容假设您已在另一个系统上创建了 CA 证书、服务器证书和客户端证书。
+   </para>
+   <para>
+    服务器证书需要采用 PEM 格式，未加密的密钥需采用 PEM 格式。将 PEM 版本复制到 VPN 服务器上的 <filename>/etc/openvpn/server_crt.pem</filename> 中。未加密版本需放到 <filename>/etc/openvpn/server_key.pem</filename> 中。
+   </para>
+   <para>
+    客户端证书需采用 PKCS12（首选）或 PEM 格式。PKCS12 格式的证书需要包含 CA 链，并且需要复制到 <filename>/etc/openvpn/<replaceable>CLIENT</replaceable>.p12</filename> 中。如果您有包含 CA 链的 PEM 格式客户端证书，请将其复制到 <filename>/etc/openvpn/<replaceable>CLIENT</replaceable>.pem</filename> 中。如果您已将 PEM 证书分割成客户端证书 (<filename>*.ca</filename>)、客户端密钥 (<filename>*.key</filename>) 和 CA 证书 (<filename>*.ca</filename>)，请将这些文件复制到每个客户端上的 <filename>/etc/openvpn/</filename> 中。
+   </para>
+   <para>
+    CA 证书需复制到服务器和每个客户端上的 <filename>/etc/openvpn/vpn_ca.pem</filename> 中。
+   </para>
+
+   <important>
+    <title>分割客户端证书</title>
+    <para>
+     如果您要将客户端证书分割成客户端证书、客户端密钥和 CA 证书，需要在相应客户端上的 OpenVPN 配置文件中提供相应的文件名（请参见<xref linkend="ex-vpn-serv-config"/>）。
+    </para>
+   </important>
+  </sect2>
+
+
+  <sect2 xml:id="sec-security-vpn-config-server">
+   <title>配置 VPN 服务器</title>
+   <para>
+    将 <filename>/usr/share/doc/packages/openvpn/sample-config-files/server.conf</filename> 复制到 <filename>/etc/openvpn/</filename> 中以作为配置文件的基础。然后根据需要对其进行自定义。
+   </para>
+   <example xml:id="ex-vpn-serv-config">
+    <title>VPN 服务器配置文件</title>
+<screen># /etc/openvpn/server.conf
+port 1194 <co xml:id="co-vpn-servconfig-port"/>
+proto udp <co xml:id="co-vpn-servconfig-proto"/>
+dev tun0 <co xml:id="co-vpn-servconfig-dev"/>
+
+# Security <co xml:id="co-vpn-servconfig-security"/>
+
+ca    vpn_ca.pem
+cert  server_crt.pem
+key   server_key.pem
+
+# ns-cert-type server 
+remote-cert-tls client <co xml:id="co-vpn-servconfig-remote-cert-tls"/>
+dh   server/dh2048.pem <co xml:id="co-vpn-servconfig-dh"/>
+
+server 192.168.1.0 255.255.255.0 <co xml:id="co-vpn-servconfig-server"/>
+ifconfig-pool-persist /var/run/openvpn/ipp.txt <co xml:id="co-vpn-servconfig-pool"/>
+
+# Privileges <co xml:id="co-vpn-serverconf-privilege"/>
+user nobody
+group nobody
+
+# Other configuration <co xml:id="co-vpn-servconfig-misc"/>
+keepalive 10 120
+comp-lzo
+persist-key
+persist-tun
+# status      /var/log/openvpn-status.tun0.log <co xml:id="co-vpn-serverconfig-status"/>
+# log-append  /var/log/openvpn-server.log <co xml:id="co-vpn-serverconfig-log-append"/>
+verb 4</screen>
+   </example>
+   <calloutlist>
+    <callout arearefs="co-vpn-servconfig-port">
+     <para>
+      OpenVPN 监听的 TCP/UDP 端口。需要在防火墙中打开该端口，具体请参见<xref linkend="cha-security-firewall"/>。VPN 的标准端口为 1194，因此您通常可以将此设置保持不变。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-servconfig-proto">
+     <para>
+      协议 UDP 或 TCP。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-servconfig-dev">
+     <para>
+      Tun 或 tap 设备。有关两者的差异，请参见<xref linkend="sec-security-vpn-terminology"/>。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-servconfig-security">
+     <para>
+      下面的行包含根服务器 CA 证书 (<literal>ca</literal>)、根 CA 密钥 (<literal>cert</literal>) 和服务器私用密钥 (<literal>key</literal>) 的相对或绝对路径。这些项是在<xref linkend="sec-security-vpn-certs"/>中生成的。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-servconfig-remote-cert-tls">
+     <para> 要求基于 RFC3280 TLS 规则使用显式密钥和扩展密钥为对等证书签名。 </para>
+    </callout>
+
+    <callout arearefs="co-vpn-servconfig-dh">
+     <para> Diffie-Hellman 参数。使用以下命令创建所需的文件： </para>
+<screen>openssl dhparam -out /etc/openvpn/dh2048.pem 2048</screen>
+
+    </callout>
+    <callout arearefs="co-vpn-servconfig-server">
+     <para>
+      提供 VPN 子网。可通过 <systemitem class="ipaddress">192.168.1.1</systemitem> 访问该服务器。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-servconfig-pool">
+     <para>
+      在给定文件中记录客户端及其虚拟 IP 地址的映射。当服务器关闭以及客户端（在重启动后）获取以前指派的 IP 地址时很有用。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-serverconf-privilege">
+     <para>
+      出于安全原因，请以降级的特权运行 OpenVPN 守护程序。为此，请指定应使用组和用户 <systemitem>nobody</systemitem>。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-servconfig-misc">
+     <para> 多个配置选项 — 请参见示例配置文件 <filename>/usr/share/doc/packages/openvpn/sample-config-files</filename> 中的注释。 </para>
+    </callout>
+    <callout arearefs="co-vpn-serverconfig-status">
+     <para>
+      启用此选项可将包含统计数据的简短状态更新（<quote>操作状态转储</quote>）写入命名的文件。默认不会启用此选项。
+     </para>
+     <para>
+      所有输出将写入到可通过 <command>journalctl</command> 显示的系统日志中。如果您有多个配置文件（例如，一个在家里使用，一个在工作时使用），我们建议在文件名中包含设备名。这可以避免意外重写输出文件。在本例中，设备名是 <systemitem>tun0</systemitem>（取自 <option>dev</option> 指令）— 请参见<xref linkend="co-vpn-servconfig-dev"/>。
+     </para>
+    </callout>
+    <callout arearefs="co-vpn-serverconfig-log-append">
+     <para>
+      默认情况下，日志消息将写入 syslog。去除井号字符可重写此行为。在这种情况下，所有消息将写入 <filename>/var/log/openvpn-server.log</filename>。不要忘记配置 logrotate 服务。有关更多细节，请参见 <command>man 8 logrotate</command>。
+     </para>
+    </callout>
+   </calloutlist>
+   <para>
+    完成此配置后，可以在 <filename>/var/log/openvpn.log</filename> 下查看 OpenVPN 服务器的日志消息。首次启动此配置后，最后应会显示：
+   </para>
+<screen>... Initialization Sequence Completed</screen>
+   <para>
+    如果未看到此消息，请仔细检查日志，确定其中是否有任何提示指出了配置文件中的错误。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-security-vpn-config-clients">
+   <title>配置 VPN 客户端</title>
+   <para>
+    将 <filename>/usr/share/doc/packages/openvpn/sample-config-files/client.conf</filename> 复制到 <filename>/etc/openvpn/</filename> 中以作为配置文件的基础。然后根据需要对其进行自定义。
+   </para>
+   <example>
+    <title>VPN 客户端配置文件</title>
+<screen># /etc/openvpn/client.conf
+client <co xml:id="co-vpn-clientconf-client"/>
+dev tun <co xml:id="co-vpn-clientconf-dev"/>
+proto udp <co xml:id="co-vpn-clientconf-proto"/>
+remote <replaceable>IP_OR_HOST_NAME</replaceable> 1194 <co xml:id="co-vpn-clientconf-remote"/>
+resolv-retry infinite
+nobind
+
+remote-cert-tls server <co xml:id="co-vpn-clientconf-remote-cert-tls"/>
+
+# Privileges <co xml:id="co-vpn-clientconf-privileges"/>
+user nobody
+group nobody
+
+# Try to preserve some state across restarts.
+persist-key
+persist-tun
+
+# Security <co xml:id="co-vpn-clientconf-security"/>
+pkcs12 client1.p12
+
+comp-lzo <co xml:id="co-vpn-clientconf-compr"/></screen>
+    <calloutlist>
+     <callout arearefs="co-vpn-clientconf-client">
+      <para>
+       指定此计算机是客户端。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-dev">
+      <para>
+       网络设备。客户端和服务器必须使用相同的设备。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-proto">
+      <para>
+       协议。使用与服务器上相同的设置。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-remote-cert-tls">
+      <para>
+       这是客户端的一个安全选项，确保客户端连接到的主机是指定的服务器。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-remote">
+      <para>
+       请将占位符 <replaceable>IP_OR_HOST_NAME</replaceable> 替换为 VPN 服务器的相应主机名或 IP 地址。主机名后面提供了服务器端口。您可以设置指向不同 VPN 服务器的多行 <literal>remote</literal> 项。此设置可用来在不同 VPN 服务器之间进行负载平衡。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-privileges">
+      <para>
+       出于安全原因，请以降级的特权运行 OpenVPN 守护程序。为此，请指定应使用组和用户 <systemitem>nobody</systemitem>。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-security">
+      <para>
+       包含客户端文件。出于安全原因，请为每个客户端单独使用一对文件。
+      </para>
+     </callout>
+     <callout arearefs="co-vpn-clientconf-compr">
+      <para>
+       开启压缩。请仅在服务器上也启用了压缩时，才使用此参数。
+      </para>
+     </callout>
+    </calloutlist>
+   </example>
+  </sect2>
+ </sect1>
+
+ 
+
+ 
+
+ <sect1 xml:id="sec-security-vpn-moreinfo">
+  <title>更多信息</title>
+
+  <para os="sled;osuse">
+   有关使用 NetworkManager 设置 VPN 连接的详细信息，请参见<xref linkend="sec-nm-vpn"/>。
+  </para>
+
+  <para>
+   有关 VPN 的一般详细信息，请参见：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <link xlink:href="https://openvpn.net"/>：OpenVPN 主页
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>man</command> <option>openvpn</option>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>/usr/share/doc/packages/openvpn/sample-config-files/</filename>：不同方案的示例配置文件。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>/usr/src/linux/Documentation/networking/tuntap.txt</filename>，用于安装 <systemitem class="resource">kernel-source</systemitem> 软件包。
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

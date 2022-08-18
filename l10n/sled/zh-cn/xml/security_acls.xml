@@ -1,1 +1,561 @@
-../../../../xml/security_acls.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="security_acls.xml" version="5.0" xml:id="cha-security-acls">
+ <title>Linux 中的访问控制列表</title>
+ <info>
+      <abstract>
+        <para>
+    可以将 POSIX ACL（访问控制列表）作为文件系统对象的传统权限概念的扩展来使用。相较于采用传统权限概念，利用 ACL 可以更灵活地定义权限。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+
+ <para>
+  <emphasis>POSIX ACL</emphasis> 这一术语表明它是一种真正的 POSIX（<emphasis>可移植操作系统接口</emphasis>）标准。由于多种原因，相应的标准草案 POSIX 1003.1e 和 POSIX 1003.2c 已被撤消。但是，在属于 Unix 系列的许多系统上使用的 ACL 都基于这两个草案，并且本章中介绍的文件系统 ACL 的实施也遵照这两个标准。
+ </para>
+ <sect1 xml:id="sec-security-acls-traditional">
+  <title>传统文件权限</title>
+  <para>
+   <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 中包含的所有文件的权限都是精心选择的。在安装其他软件或文件期间，请在设置权限时格外小心。请始终在 <command>ls</command> 命令中使用 <option>-l</option> 选项，以立即检测出任何不正确的文件权限。错误的文件属性不仅意味着文件可能被更改或删除，修改的文件可能会由 <systemitem class="username">root</systemitem> 执行，或者攻击者可能会通过修改配置文件来劫持服务。这会显著增加受到攻击的风险。
+  </para>
+  <para>
+   <phrase role="productname"><phrase os="sled">SUSE® Linux Enterprise Desktop</phrase></phrase> 系统包含 <filename>permissions</filename>、<filename>permissions.easy</filename>、<filename>permissions.secure</filename> 和 <filename>permissions.paranoid</filename> 文件，它们全部位于 <filename>/etc</filename> 目录中。这些文件用于定义特殊权限，例如全局可写目录或针对文件的 setuser ID 位。设置了 setuser ID 位的程序不会使用启动它的用户的权限运行，而是使用文件拥有者（通常是 <systemitem class="username">root</systemitem>）的权限运行。管理员可以使用 <filename>/etc/permissions.local</filename> 文件添加自己的设置。
+  </para>
+  <para>
+   要定义提供的其中一个配置文件，请在 YaST 的<guimenu>安全和用户</guimenu>部分选择<guimenu>本地安全</guimenu>。要了解该主题的详细信息，请阅读 <filename>/etc/permissions</filename> 中的注释，或查阅 <command>man chmod</command>。
+  </para>
+  <para>
+   可在 GNU Coreutils 信息页“节点<emphasis>文件权限</emphasis>”(<command>info coreutils &quot;File permissions&quot;</command>) 中找到有关传统文件权限的详细信息。更多高级功能有 setuid、setgid 和粘滞位。
+  </para>
+
+  <sect2 xml:id="sec-security-acls-traditional-setuid">
+   <title>setuid 位</title>
+   <para>
+    在某些情况下，访问权限可能过于严格。因此，Linux 另有一些设置，允许为执行特定操作临时更改当前用户和组标识。例如，<command>passwd</command> 程序通常要求拥有根权限才能访问 <filename>/etc/passwd</filename>。此文件包含一些重要信息，如用户主目录及用户和组 ID。因此，普通用户将无法更改 <filename>passwd</filename>，因为授予所有用户直接访问此文件的权限太过危险。此问题的一种可行解决方法是使用 <emphasis>setuid</emphasis> 机制。setuid（设置的用户 ID）是一个特殊文件属性，它指示系统执行相应标记在特定用户 ID 下的程序。以 <command>passwd</command> 命令为例：
+   </para>
+<screen>-rwsr-xr-x  1 root shadow 80036 2004-10-02 11:08 /usr/bin/passwd</screen>
+   <para>
+    您可以看见 <literal>s</literal>，它表示为用户许可设置了 setuid 位。通过设置 setuid 位，启动 <command>passwd</command> 命令的所有用户都以 <systemitem class="username">root</systemitem> 身份执行该命令。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-security-acls-traditional-setgid">
+   <title>setgid 位</title>
+   <para>
+    setuid 位适用于用户。而对组而言也有一个等价的属性：<emphasis>setgid</emphasis> 位。设置了此位的程序基于保存该程序的组 ID 运行，而不论是哪个用户启动了该程序。因此，在设置了 setgid 位的目录中，所有新建文件和子目录都被指派到该目录所属的组。请考虑下面的示例目录：
+   </para>
+<screen>drwxrws--- 2 tux archive 48 Nov 19 17:12  backup</screen>
+   <para>
+    您可以看见 <literal>s</literal>，它表示为组许可设置了 setgid 位。目录的拥有者和 <systemitem class="groupname">archive</systemitem> 组的成员可以访问此目录。不是该组成员的用户会<quote>映射</quote>到各自的组中。所有写入文件的有效组 ID 为 <systemitem class="groupname">archive</systemitem>。例如，使用组 ID <systemitem class="groupname">archive</systemitem> 运行的备份程序即便没有 root 特权也能访问此目录。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-security-acls-traditional-sticky">
+   <title>粘性位</title>
+   <para>
+    另外还可以设置<emphasis>粘滞位</emphasis>。属于可执行程序的粘滞位和属于目录的粘滞位在作用上有所不同。如果属于某个程序，以这种方式标记的文件将被挂载 RAM，而不必在每次使用时从硬盘读取。由于目前硬盘的速度已经足够快，此属性已经很少使用。如果为目录指派了此位，则可以防止用户删除彼此的文件。典型示例如 <filename>/tmp</filename> 目录和 <filename>/var/tmp</filename> 目录：
+   </para>
+<screen>drwxrwxrwt 2 root root 1160 2002-11-19 17:15 /tmp</screen>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-security-acls-intro">
+  <title>ACL 的优势</title>
+
+  <para>
+   传统情况下，会为 Linux 系统上的每个文件对象定义三组权限。这三组权限包括用于每种类型用户（即文件拥有者、组和其它用户这三种用户）的读 (<literal>r</literal>)、写 (<literal>w</literal>) 和执行 (<literal>x</literal>) 权限。此外，还可以设置<emphasis>设置用户 ID</emphasis>、<emphasis>设置组 ID</emphasis> 和<emphasis>粘滞</emphasis>位。这种简缩概念完全适用于大多数实际情况。但对于较复杂的方案或高级应用程序，以前系统管理员需要采用多种变通方案来避开传统权限概念的限制。
+  </para>
+
+  <para>
+   可以将 ACL 作为传统文件权限概念的扩展来使用。它们可用于向单个用户或组指派权限，即使这些权限并不与原始拥有者或所属组相对应。访问控制列表是 Linux 内核的一项功能，目前受 Ext2、Ext3、Ext4、JFS 和 XFS 的支持。通过使用 ACL，无需在应用程序级别实施复杂的权限模型就可以实现复杂的方案。
+  </para>
+
+  <para>
+   如果您想用 Linux 服务器代替 Windows 服务器，则 ACL 的优势尤为明显。一些已连接的工作站即使在迁移后也仍可继续在 Windows 下运行。Linux 系统利用 Samba 向 Windows 客户端提供文件和打印服务。有了 Samba 支持访问控制列表，则既可以在 Linux 服务器上配置用户权限，也可以在具有图形用户界面的 Windows（仅限 Windows NT 和更高版本）中配置用户权限。利用 <command>winbindd</command>（Samba 套件的一部分），甚至可以向仅存在于 Windows 域中而在 Linux 服务器中没有任何帐户的用户指派权限。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-security-acls-defs">
+  <title>定义</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>用户类别</term>
+    <listitem>
+     <para>
+      传统的 POSIX 许可权限概念使用三<emphasis>类</emphasis>用户在文件系统中指派权限：拥有者、拥有的组和其他用户。可以为每个用户类别设置三个权限位，用于分配读 (<literal>r</literal>)、写 (<literal>w</literal>) 和执行 (<literal>x</literal>) 权限。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ACL</term>
+    <listitem>
+     <para>
+      所有种类的文件系统对象（文件和目录）的用户和组访问权限均通过 ACL 来确定。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>默认 ACL</term>
+    <listitem>
+     <para>
+      默认 ACL 只能应用于目录。它们确定文件系统对象在创建时从其父目录继承的权限。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ACL 项</term>
+    <listitem>
+     <para>
+      每个 ACL 都包含一组 ACL 项。ACL 项中包含一个类型、一个此项所关联的用户或组的限定符和一组权限。对于某些项类型，未定义组或用户的限定符。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-security-acls-handle">
+  <title>处理 ACL</title>
+
+  <para>
+   <xref linkend="tab-entrytype"/>总结了 ACL 项 6 种可能出现的类型，每种类型都定义了一个用户或一组用户的权限。<emphasis>拥有者</emphasis>项定义了拥有该文件或目录的用户的权限。<emphasis>所属组</emphasis>项定义了文件所属组的权限。超级用户可以使用 <command>chown</command> 或 <command>chgrp</command> 更改拥有者或所属组，而在这种情况下，拥有者和所属组项表示新的拥有者和所属组。每个<emphasis>已命名用户</emphasis>项定义了在该项的限定符字段中指定的用户的权限。每个<emphasis>已命名组</emphasis>项定义了在该项的限定符字段中指定的组的权限。只有已命名用户和已命名组项具有非空的限定符字段。<emphasis>其他</emphasis>项定义了所有其他用户的权限。
+  </para>
+
+  <para>
+   通过定义这些项中的有效权限和要屏蔽的权限，<emphasis>掩码</emphasis>项进一步限制了已命名用户、已命名组和所属组项授予的权限。如果权限同时存在于上述项之一和掩码中，它们就是有效的。仅包含在掩码或实际项中的权限是无效的，表示未授予这些权限。拥有者和所属组项中定义的所有权限始终有效。<xref linkend="tab-mask"/>中的示例说明了这种机制。
+  </para>
+
+  <para>
+   有两种基本的 ACL 类：一种是<emphasis>最小</emphasis> ACL，仅包含用于类型拥有者、所属组和其他的项，对应于文件和目录的传统权限位。另一种是<emphasis>扩展</emphasis> ACL，它比前一种要复杂得多。它必须包含一个掩码项，并可能包含若干已命名用户和已命名组类型的项。
+  </para>
+
+  <table xml:id="tab-entrytype">
+   <title>ACL 项类型</title>
+   <tgroup cols="2">
+    <thead>
+     <row>
+      <entry>
+       <para>
+        类型
+       </para>
+      </entry>
+      <entry>
+       <para>
+        文本形式
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        拥有者
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>user::rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        已命名用户
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>user:name:rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        所属组
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>group::rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        已命名组
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>group:name:rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        掩码
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>mask::rwx</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        其他
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>other::rwx</literal>
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <table xml:id="tab-mask">
+   <title>屏蔽访问权限</title>
+   <tgroup cols="3">
+    <thead>
+     <row>
+      <entry>
+       <para>
+        项类型
+       </para>
+      </entry>
+      <entry>
+       <para>
+        文本形式
+       </para>
+      </entry>
+      <entry>
+       <para>
+        许可权限
+       </para>
+      </entry>
+     </row>
+    </thead>
+    <tbody>
+     <row>
+      <entry>
+       <para>
+        已命名用户
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>user:geeko:r-x</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>r-x</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para>
+        掩码
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>mask::rw-</literal>
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>rw-</literal>
+       </para>
+      </entry>
+     </row>
+     <row>
+      <entry>
+       <para/>
+      </entry>
+      <entry>
+       <para>
+        有效权限：
+       </para>
+      </entry>
+      <entry>
+       <para>
+        <literal>r--</literal>
+       </para>
+      </entry>
+     </row>
+    </tbody>
+   </tgroup>
+  </table>
+
+  <sect2 xml:id="sec-security-acls-handle-fmbits">
+   <title>ACL 项和文件模式权限位</title>
+   <para>
+    <xref linkend="fig-acls-map-mini"/>和<xref linkend="fig-acls-map-ext"/>说明了最小 ACL 和扩展 ACL 这两种情况。这些图分为三块 — 左边一块显示 ACL 项的类型规范，中间一块显示一个示例 ACL，右边一块显示对应于传统权限概念的各个权限位（例如，如 <command>ls</command>
+    <option>-l</option> 所显示）。在这两种情况下，<emphasis>拥有者</emphasis>权限均被映射到 ACL 拥有者项。<emphasis>其他类别</emphasis>权限也被映射到各自的 ACL 项。但是，<emphasis>组类别</emphasis>权限的映射在这两种情况中是不同的。
+   </para>
+   <figure xml:id="fig-acls-map-mini">
+    <title>最小 ACL：与权限位相比的 ACL 项</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="acls_map_mini.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="acls_map_mini.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <para>
+    对于最小 ACL（没有屏蔽），组类别许可权限被映射到 ACL 的所属组项。<xref linkend="fig-acls-map-mini"/>中显示了这一点。对于扩展 ACL（具有屏蔽），组类别许可权限被映射到屏蔽项。<xref linkend="fig-acls-map-ext"/>中显示了这一点。
+   </para>
+   <figure xml:id="fig-acls-map-ext">
+    <title>扩展 ACL：与权限位相比的 ACL 项</title>
+    <mediaobject>
+     <imageobject role="fo">
+      <imagedata fileref="acls_map_ext.png" width="75%" format="PNG"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="acls_map_ext.png" width="75%" format="PNG"/>
+     </imageobject>
+    </mediaobject>
+   </figure>
+   <remark>Oops. We need to change the example users in the pngs! -rwalter</remark>
+   <para>
+    不管应用程序是否具有 ACL 支持，这种映射方式都可以确保应用程序的流畅交互。通过权限位方式分配的访问权限表示通过 ACL 所进行的所有其他<quote>微调</quote>的上限。对权限位的更改将由 ACL 反映出来，反之亦然。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-security-acls-handle-accacl">
+   <title>具有 ACL 的目录</title>
+   <para>
+    命令行上显示 <command>getfacl</command> 和 <command>setfacl</command> 的情况下，您可以访问 ACL。以下示例演示了这些命令的用法。
+   </para>
+   <para>
+    在创建目录之前，使用 <command>umask</command> 命令来定义每次创建文件对象时应屏蔽哪些访问权限。命令 <command>umask</command>
+    <option>027</option> 会设置以下默认权限：为拥有者授予全部权限 (<literal>0</literal>)、拒绝组的写入访问权限 (<literal>2</literal>)，以及不为其他用户提供权限 (<literal>7</literal>)。<command>umask</command> 实际上会屏蔽相应的许可权限位或将它们关闭。有关详细信息，请参见<xref linkend="sec-sec-prot-general-umask"/>或 <command>umask</command> 手册页。
+   </para>
+   <para>
+    <command>mkdir mydir</command> 创建具有由 <filename>umask</filename> 设置的默认权限的 <command>mydir</command> 目录。使用 <command>ls </command> <option>-dl mydir</option> 来检查是否已正确分配所有权限。该示例的输入为：
+   </para>
+<screen>drwxr-x--- ... tux project3 ... mydir</screen>
+   <para>
+    使用 <command>getfacl </command> <option>mydir</option>，检查 ACL 的初始状态。这样会得出如下信息：
+   </para>
+<screen># file: mydir
+# owner: tux
+# group: project3
+user::rwx
+group::r-x
+other::---</screen>
+   <para>
+    输出的前三行显示了目录的名称、拥有者和所属组。随后三行包含三个 ACL 项，即拥有者、所属组和其他。事实上，对于最小 ACL，<command>getfacl</command> 命令不会生成您使用 <command>ls</command> 所不能获得的任何信息。
+   </para>
+   <para>
+    使用以下命令修改 ACL，为附加用户 <literal>geeko</literal> 和附加组 <literal>mascots</literal> 指派读、写和执行权限：
+   </para>
+
+<screen><prompt role="root"># </prompt>setfacl -m user:geeko:rwx,group:mascots:rwx mydir</screen>
+   <para>
+    选项 <option>-m</option> 提示 <command>setfacl</command> 修改现有的 ACL。以下参数指示要修改的 ACL 项（各项之间用逗号隔开）。最后部分指定了应该对其应用这些修改的目录的名称。使用 <command>getfacl</command> 命令来查看所生成的 ACL。
+   </para>
+<screen># file: mydir
+# owner: tux
+# group: project3
+user::rwx
+user:geeko:rwx
+group::r-x
+group:mascots:rwx
+mask::rwx
+other::---</screen>
+   <para>
+    除了为用户 <literal>geeko</literal> 和组 <literal>mascots</literal> 创建的项外，还生成了一个掩码项。此掩码项是自动设置的，因此所有权限都是有效的。<command>setfacl</command> 自动使现有掩码项适应修改的设置，除非您使用 <literal>-n</literal> 停用此功能。该掩码项定义组类别中所有项的最大有效访问权限。其中包括已命名用户、已命名组和所属组。由 <command>ls</command> <option>-dl mydir</option> 显示的组类别权限位现在与 <literal>mask</literal> 项相对应。
+   </para>
+<screen>drwxrwx---+ ... tux project3 ... mydir</screen>
+   <para>
+    输出的第一栏包含一个附加的 <literal>+</literal>，表明此项存在一个<emphasis>扩展</emphasis> ACL。
+   </para>
+   <para>
+    根据 <command>ls</command> 命令的输出，掩码项的权限包含写访问权限。传统情况下，这样的权限位意味着所属组（这里是 <literal>project3</literal>）也具有对 <filename>mydir</filename> 目录的写访问权限。
+   </para>
+   <para>
+    但是，所属组的有效访问权限对应于为所属组和屏蔽定义的许可权限的重叠部分 — 在我们的示例中是 <literal>r-x</literal>（参见<xref linkend="tab-mask"/>）。对本例中的所属组的有效权限而言，即使是在添加了 ACL 项之后，也未发生任何改变。
+   </para>
+   <para>
+    用 <command>setfacl</command> 或 <command>chmod</command> 编辑掩码项。例如，使用 <command>chmod</command>
+    <option>g-w mydir</option>。<command>ls</command> <option>-dl mydir</option> 即会显示：
+   </para>
+<screen>drwxr-x---+ ... tux project3 ... mydir</screen>
+   <para>
+    <command>getfacl </command> <option>mydir</option> 提供以下输出：
+   </para>
+<screen># file: mydir
+# owner: tux
+# group: project3
+user::rwx
+user:geeko:rwx          # effective: r-x
+group::r-x
+group:mascots:rwx       # effective: r-x
+mask::r-x
+other::---</screen>
+   <para>
+    执行 <command>chmod</command> 将写入权限从组类别位中去除后，通过 <command>ls</command> 的输出就完全能够看出掩码位一定已相应更改：写入权限再次仅限 <filename>mydir</filename> 的拥有者拥有。<command>getfacl</command> 的输出证实了这一点。这个输出包含了对有效权限位与原始权限不对应的所有项的注释，因为已根据掩码项对它们进行了过滤。可以随时用 <command>chmod g+w mydir</command> 来恢复原始权限。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-security-acls-handle-defacl">
+   <title>具有默认 ACL 的目录</title>
+   <para>
+    目录可以具有默认 ACL，这是一种特殊的 ACL，它定义的是此目录下的对象在创建时继承的访问权限。默认 ACL 影响子目录和文件。
+   </para>
+   <sect3 xml:id="sec-security-acls-handle-defacl-eff">
+    <title>默认 ACL 的效果</title>
+    <para>
+     将目录的默认 ACL 的权限传递到文件和子目录时，有两种方式：
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       子目录会继承父目录的默认 ACL 作为其默认 ACL 和 ACL。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       文件会继承该默认 ACL 作为其 ACL。
+      </para>
+     </listitem>
+    </itemizedlist>
+    <para>
+     创建文件系统对象的所有系统调用都使用 <literal>mode</literal> 参数，该参数定义新创建的文件系统对象的访问权限。如果父目录没有默认 ACL，则从 <literal>mode</literal> 参数传递的权限中去除 <literal>umask</literal> 定义的权限位，同时将结果分配到新对象。如果父目录存在默认 ACL，则分配到新对象的权限位对应于 <literal>mode</literal> 参数的权限和默认 ACL 中定义的权限的重叠部分。这种情况下忽略了 <literal>umask</literal>。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-security-acls-handle-defacl-prac">
+    <title>默认 ACL 的应用</title>
+    <para>
+     以下三个示例说明了目录和默认 ACL 的主要操作：
+    </para>
+    <orderedlist spacing="normal">
+     <listitem>
+      <para>
+       将默认 ACL 添加到现有目录 <filename>mydir</filename>，语句为：
+      </para>
+<screen><prompt>&gt; </prompt>setfacl -d -m group:mascots:r-x mydir</screen>
+      <para>
+       <command>setfacl</command> 命令中的选项 <literal>-d</literal> 提示 <command>setfacl</command> 在默认 ACL 中执行以下修改（选项 <literal>-m</literal>）。
+      </para>
+      <para>
+       仔细查看此命令的结果：
+      </para>
+<screen><prompt>&gt; </prompt>getfacl mydir
+
+# file: mydir
+# owner: tux
+# group: project3
+user::rwx
+user:geeko:rwx
+group::r-x
+group:mascots:rwx
+mask::rwx
+other::---
+default:user::rwx
+default:group::r-x
+default:group:mascots:r-x
+default:mask::r-x
+default:other::---</screen>
+      <para>
+       <command>getfacl</command> 会返回 ACL 和默认 ACL。默认 ACL 由以 <literal>default</literal> 开头的所有行组成。虽然您只是对 <literal>mascots</literal> 组的一个项执行了 <command>setfacl</command> 命令来创建默认 ACL，但为了创建有效的默认 ACL，<command>setfacl</command> 自动复制了 ACL 中的所有其他项。默认 ACL 对访问权限没有直接效果。它们只在创建文件系统对象时起作用。这些新对象只从其父目录的默认 ACL 中继承权限。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       在下一个示例中，我们将使用 <command>mkdir</command> 在 <filename>mydir</filename> 中创建一个子目录，它将继承默认 ACL。
+      </para>
+<screen><prompt>&gt; </prompt>mkdir mydir/mysubdir
+
+getfacl mydir/mysubdir
+
+# file: mydir/mysubdir
+# owner: tux
+# group: project3
+user::rwx
+group::r-x
+group:mascots:r-x
+mask::r-x
+other::---
+default:user::rwx
+default:group::r-x
+default:group:mascots:r-x
+default:mask::r-x
+default:other::---</screen>
+      <para>
+       根据预期，新建的子目录 <filename>mysubdir</filename> 具有父目录的默认 ACL 的权限。<filename>mysubdir</filename> 的 ACL 准确反映了 <filename>mydir</filename> 的默认 ACL。该目录将向其从属对象传递的默认 ACL 也是相同的。
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       使用 <command>touch</command> 在 <filename>mydir</filename> 目录中创建一个文件，例如 <command>touch</command> <option>mydir/myfile</option>。<command>ls</command> <option>-l mydir/myfile</option> 即会显示：
+      </para>
+<screen>-rw-r-----+ ... tux project3 ... mydir/myfile</screen>
+      <para>
+       <command>getfacl</command>
+       <option>mydir/myfile</option> 的输出是：
+      </para>
+<screen># file: mydir/myfile
+# owner: tux
+# group: project3
+user::rw-
+group::r-x          # effective:r--
+group:mascots:r-x   # effective:r--
+mask::r--
+other::---</screen>
+      <para>
+       当创建新文件时，<command>touch</command> 使用值为 <literal>0666</literal> 的 <literal>mode</literal>，这意味所创建的新文件具有用于所有用户类别的读和写权限，前提是 <command>umask</command> 或默认 ACL 中不存在任何其他限制（请参见<xref linkend="sec-security-acls-handle-defacl-eff"/>）。实际上，这意味着 <literal>mode</literal> 值中不包含的所有访问权限均将从各自的 ACL 项中去除。虽然没有从组类别的 ACL 项中去除任何权限，但仍修改了掩码项来屏蔽不在 <literal>mode</literal> 中设置的权限。
+      </para>
+      <para>
+       这种方式确保应用程序（如编译器）与 ACL 的交互平稳流畅。您可以创建具有有限访问权限的文件，然后将其标记为可执行文件。<command>mask</command> 机制确保适当的用户和组可以在需要时执行它们。
+      </para>
+     </listitem>
+    </orderedlist>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-security-acls-handle-alg">
+   <title>ACL 检查算法</title>
+   <para>
+    在为任何进程或应用程序授予访问受 ACL 保护的文件系统对象的权限之前，将应用检查算法。作为基本规则，按照以下序列检查 ACL 项：拥有者、命名用户、所属组或命名组以及其他组。访问将根据最适合进程的项进行处理。权限不能累加。
+   </para>
+   <para>
+    如果某个进程属于多个组并且潜在适合多个组项，情况会更为复杂。这时将从具有所需权限的合适项中随机选择一个。它与是哪些项触发了最终结果<quote>已授权访问</quote>无关。同样，如果没有任何适当组项包含所需的权限，则随机选择的项将触发最终结果<quote>访问被拒绝</quote>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-security-acls-future">
+  <title>应用程序中的 ACL 支持</title>
+
+  <para>
+   ACL 可用于实施非常复杂的权限方案以满足目前应用程序的要求。可以用一种智能方式将传统权限概念和 ACL 结合在一起。像 Samba 和 Nautilus 一样，基本的文件命令（<command>cp</command>、<command>mv</command>、<command>ls</command> 等）也支持 ACL。
+  </para>
+
+  <para>
+   Vi/Vim 和 emacs 都完全支持 ACL，它们会保留针对写入文件（包括备份）的权限。遗憾的是，许多编辑器和文件管理器仍缺少 ACL 支持。当用编辑器修改文件时，文件的 ACL 有时会被保留，有时则会丢失，这取决于所使用编辑器的备份方式。如果编辑器向原始文件写入更改，则会保留 ACL。如果编辑器将已更新的内容保存到一个新文件，然后将此文件重命名为旧文件名，则 ACL 可能会丢失，除非编辑器支持 ACL。除了 <command>star</command> 存档程序外，当前没有任何其他备份应用程序会保留 ACL。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-security-acls-info">
+  <title>更多信息</title>
+
+  <para>
+   有关 ACL 的详细信息，请参见 <command>getfacl(1)</command>、<command>acl(5)</command> 和 <command>setfacl(1)</command> 的手册页。
+  </para>
+ </sect1>
+</chapter>

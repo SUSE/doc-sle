@@ -1,1 +1,883 @@
-../../../../xml/tuning_systemtap.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="tuning_systemtap.xml" version="5.0" xml:id="cha-tuning-systemtap">
+
+ <title>SystemTap — 过滤和分析系统数据</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    
+
+ <para>
+  SystemTap 提供命令行界面和脚本语言用于细致检查运行中 Linux 系统（特别是内核）的活动。SystemTap 脚本是以 SystemTap 脚本语言编写的，随后编译为 C 代码内核模块并插入到内核中。可将脚本设计为提取、过滤和汇总数据，以便对复杂的性能问题或功能问题进行诊断。SystemTap 提供的信息类似于 <command>netstat</command>、<command>ps</command>、<command>top</command> 和 <command>iostat</command> 等工具的输出。但是，它为收集的信息提供了更多过滤和分析选项。
+ </para>
+
+
+ <sect1 xml:id="sec-tuning-systemtap-concept">
+  <title>概念概述</title>
+
+  <para>
+   每当您运行 SystemTap 脚本时，都会启动一个 SystemTap 会话。允许运行该脚本之前，要在其上完成几个操作。然后，该脚本将编译为内核模块并予以装载。如果以前执行过该脚本并且没有任何系统组件发生更改（例如，不同的编译器或内核版本、库路径或脚本内容），SystemTap 不会再次编译该脚本。而是使用 SystemTap 缓存 (<filename>~/.systemtap</filename>) 中储存的 <filename>*.c</filename> 和 <filename>*.ko</filename> 数据。
+  </para>
+  <para>
+   当 tap 完成运行时，将卸载模块。有关示例，请参见<xref linkend="sec-tuning-systemtap-setup"/>中的测试运行和相关说明。
+
+  </para>
+
+  <sect2 xml:id="sec-tuning-systemtap-concept-scripts">
+   <title>SystemTap 脚本</title>
+   <para>
+    SystemTap 的用法基于 SystemTap 脚本 (<filename>*.stp</filename>)。这些脚本会告知 SystemTap 要收集哪类信息，以及收集信息后要执行哪项操作。脚本是以类似于 AWK 和 C 的 SystemTap 脚本语言编写的。有关语言定义，请参见 <link xlink:href="https://sourceware.org/systemtap/langref/"/>。<link xlink:href="http://www.sourceware.org/systemtap/examples/"/> 中提供了大量有用示例脚本。
+   </para>
+   <para>
+    SystemTap 脚本背后的基本构想是命名<literal>事件</literal>并为其提供<literal>处理程序</literal>。当 SystemTap 运行脚本时，它会监视特定的事件。发生某个事件时，Linux 内核会将处理程序作为子例程运行，然后继续。因此，事件充当了运行处理程序的触发器。处理程序可以记录指定的数据，并以特定的方式列显数据。
+   </para>
+   <para>
+    SystemTap 语言仅使用少量几种数据（整数、字符串，以及这些类型的关联数组）和完整控制结构（块、条件、循环、函数）。它包含轻量标点符号（分号为可选项），且不需要详细的声明（系统会自动推断并检查类型）。
+   </para>
+   <para>
+    有关 SystemTap 脚本及其语法的详细信息，请参见<xref linkend="sec-tuning-systemtap-syntax"/>，以及 <systemitem class="resource">systemtap-docs</systemitem> 软件包中提供的 <command>stapprobes</command> 和 <command>stapfuncs</command> 手册页。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-systemtap-concept-tapsets">
+   <title>Tapset</title>
+   <para>
+    <remark>sknorr, 2014-08-21: "tapsets are a library" sounds wrong... to
+     me, it would make more sense if there was a "library of tapsets," i.e. a
+     collection of systemtap scripts.</remark>
+    Tapset 是可在 SystemTap 脚本中使用的预先编写的探测和函数库。当用户运行某个 SystemTap 脚本时，SystemTap 会根据 tapset 库检查该脚本的探测事件和处理程序。然后，SystemTap 会先装载相应的探测和函数，然后再将脚本转换为 C。与 SystemTap 脚本本身类似，tapset 使用文件扩展名 <filename>*.stp</filename>。
+
+   </para>
+   <para>
+    但是，与 SystemTap 脚本不同的是，tapset 不可直接执行。它们构成了可供其他脚本提取定义的库。因此，tapset 库是一个抽象层，旨在方便用户定义事件和函数。Tapset 为用户可能想要作为事件指定的函数提供别名。了解正确的别名通常比记住特定的内核函数（随内核版本而异）更容易。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-systemtap-concept-cmd">
+   <title>命令和特权</title>
+   <para>
+    与 SystemTap 关联的主要命令包括 <command>stap</command> 和 <command>staprun</command>。要执行这些命令，您需要拥有 <systemitem class="username">root</systemitem> 特权，或者必须是 <systemitem class="groupname">stapdev</systemitem> 或 <systemitem class="groupname">stapusr</systemitem> 组的成员。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><command>stap</command>
+     </term>
+     <listitem>
+      <para>
+       SystemTap 前端。运行 SystemTap 脚本（通过文件或标准输入）。此命令会将该脚本转换为 C 代码，并将生成的内核模块装载到正在运行的 Linux 内核中。然后执行请求的系统跟踪或探测函数。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>staprun</command>
+     </term>
+     <listitem>
+      <para>
+       SystemTap 后端。装载和卸载由 SystemTap 前端生成的内核模块。
+
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    如需每个命令的选项列表，请使用 <option>--help</option>。有关细节，请参见 <command>stap</command> 和 <command>staprun</command> 手册页。
+   </para>
+
+
+<para>
+ 
+    为了避免单纯出于让用户能够使用 SystemTap 的目的而向其授予 <systemitem class="username">root</systemitem> 访问权限，请使用以下 SystemTap 组之一。<phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上默认未提供这些组，但您可以创建组，并相应地修改访问权限。另外，如果您的环境允许存在这种安全影响，还可调整 <command>staprun</command> 命令的权限。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><systemitem class="groupname">stapdev</systemitem>
+     </term>
+     <listitem>
+      <para>
+       此组的成员可以使用 <command>stap</command> 运行 SystemTap 脚本，或使用 <command>staprun</command> 运行 SystemTap 工具模块。由于运行中的 <command>stap</command> 涉及到将脚本编译为内核模块并将其装载到内核，此组的成员仍拥有有效的 <systemitem class="username">root</systemitem> 访问权限。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><systemitem class="groupname">stapusr</systemitem>
+     </term>
+     <listitem>
+      <para>
+       此组的成员只能使用 <command>staprun</command> 运行 SystemTap 工具模块。此外，他们只能从 <filename>/lib/modules/<replaceable>KERNEL_VERSION</replaceable>/systemtap/</filename> 运行这些模块。此目录必须由 <systemitem class="username">root</systemitem> 拥有，且仅供 <systemitem class="username">root</systemitem> 用户写入。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-systemtap-concept-dir">
+   <title>重要文件和目录</title>
+   <para>
+    以下列表提供了 SystemTap 主要文件和目录的概述。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><filename>/lib/modules/<replaceable>KERNEL_VERSION</replaceable>/systemtap/</filename>
+     </term>
+     <listitem>
+      <para>
+       保存 SystemTap 工具模块。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/usr/share/systemtap/tapset/</filename>
+     </term>
+     <listitem>
+      <para>
+       保存标准的 tapset 库。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/usr/share/doc/packages/systemtap/examples</filename>
+     </term>
+     <listitem>
+      <para>
+       保存用于各种目的的多个示例 SystemTap 脚本。仅当已安装 <systemitem class="resource">systemtap-docs</systemitem> 软件包时才可用。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>~/.systemtap/cache</filename>
+     </term>
+     <listitem>
+      <para>
+       缓存的 SystemTap 文件的数据目录。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/tmp/stap*</filename>
+     </term>
+     <listitem>
+      <para>
+       SystemTap 文件的临时目录，包含已转换的 C 代码和内核对象。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+
+
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-tuning-systemtap-setup">
+  <title>安装和设置</title>
+
+  <para>
+
+
+   由于 SystemTap 需要内核相关信息，必须安装一些额外的内核相关软件包。对于您要使用 SystemTap 探测的每个内核，需要安装下面一组软件包。这组软件包应该与内核版本和风格（在下面的概述中以 <literal>*</literal> 指示）完全匹配。
+  </para>
+
+  <important>
+   <title>包含调试信息的软件包的软件源</title>
+   <para>
+    如果您为系统订阅了联机更新，便可以在 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 的相关 <literal>*-Debuginfo-Updates</literal> 联机安装软件源库中找到<quote>debuginfo</quote>软件包。使用 YaST 启用该软件源。
+   </para>
+  </important>
+
+
+
+
+
+
+
+
+
+  <para>
+
+   对于经典 SystemTap 设置，请安装以下软件包（使用 YaST 或 <command>zypper</command>）。
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     <systemitem class="resource">systemtap</systemitem>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="resource">systemtap-server</systemitem>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="resource">systemtap-docs</systemitem> (可选)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="resource">kernel-*-base</systemitem>
+    </para>
+   </listitem>
+
+   <listitem>
+    <para>
+     <systemitem class="resource">kernel-*-debuginfo</systemitem>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="resource">kernel-*-devel</systemitem>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="resource">kernel-source-*</systemitem>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <systemitem class="resource">gcc</systemitem>
+    </para>
+   </listitem>
+  </itemizedlist>
+
+
+
+  <para>
+   要访问手册页和用于各种目的的有用示例 SystemTap 脚本集合，请额外安装 <systemitem class="resource">systemtap-docs</systemitem> 软件包。
+  </para>
+
+  <para>
+   要检查是否在计算机上正确安装了所有软件包以及是否已可使用 SystemTap，请以 <systemitem class="username">root</systemitem> 身份执行以下命令。
+  </para>
+
+<screen><prompt role="root"># </prompt>stap -v -e 'probe vfs.read {printf("read performed\n"); exit()}'</screen>
+
+  <para>
+   此命令通过运行一个脚本并返回输出，来探测当前使用的内核。如果输出类似于以下内容，则表示 SystemTap 已成功部署并可供使用：
+  </para>
+
+<screen><?dbsuse-fo font-size="0.71em"?>
+Pass <co xml:id="co-tuning-stap-pass1"/>: parsed user script and 59 library script(s) in 80usr/0sys/214real ms.
+Pass <co xml:id="co-tuning-stap-pass2"/>: analyzed script: 1 probe(s), 11 function(s), 2 embed(s), 1 global(s) in
+ 140usr/20sys/412real ms.
+Pass <co xml:id="co-tuning-stap-pass3"/>: translated to C into
+ "/tmp/stapDwEk76/stap_1856e21ea1c246da85ad8c66b4338349_4970.c" in 160usr/0sys/408real ms.
+Pass <co xml:id="co-tuning-stap-pass4"/>: compiled C into "stap_1856e21ea1c246da85ad8c66b4338349_4970.ko" in
+ 2030usr/360sys/10182real ms.
+Pass <co xml:id="co-tuning-stap-pass5"/>: starting run.
+ read performed
+Pass <xref linkend="co-tuning-stap-pass5"/>: run completed in 10usr/20sys/257real ms. </screen>
+
+  <calloutlist>
+   <callout arearefs="co-tuning-stap-pass1">
+    <para>
+     根据任何所用 tapset 的 <filename>/usr/share/systemtap/tapset/</filename> 中的现有 tapset 库检查脚本。Tapset 是由脚本组成的库，库中包含可在 SystemTap 脚本中使用的预先编写的探测和函数。
+    </para>
+   </callout>
+   <callout arearefs="co-tuning-stap-pass2">
+    <para>
+     检查脚本的各个组成部分。
+    </para>
+   </callout>
+   <callout arearefs="co-tuning-stap-pass3">
+    <para>
+     将脚本转换为 C。运行系统 C 编译器以基于脚本创建内核模块。生成的 C 代码 (<filename>*.c</filename>) 和内核模块 (<filename>*.ko</filename>) 都储存在 SystemTap 缓存 <filename>~/.systemtap</filename> 中。
+    </para>
+   </callout>
+   <callout arearefs="co-tuning-stap-pass4">
+    <para>
+     在脚本中通过挂接到内核来装载模块并启用所有探测（事件和处理程序）。探测的事件是虚拟文件系统 (VFS) 读取操作。由于该事件可在任何处理器上发生，因此执行了有效的处理程序（列显文本 <literal>read performed</literal>），并且正常关闭了该程序处理（未出现任何错误）。
+    </para>
+   </callout>
+   <callout arearefs="co-tuning-stap-pass5">
+    <para>
+     终止 SystemTap 会话后，已禁用探测并卸载内核模块。
+    </para>
+   </callout>
+  </calloutlist>
+
+  <para>
+   如果在测试期间出现了任何错误消息，请检查输出以获取有关缺少哪些软件包的提示，并确保正确安装这些软件包。另外，可能还需要重引导并装载相应的内核。
+   <remark>jw 2010-09-23, while I am at it: I have two useful smoke tests,
+     to verify if an installation is working, see
+     http://docserv.suse.de/HOWTO/systemtap
+     If you install systemtap on an older system, the debuginfo and devel
+     packages are likely to be newer than your installed kernel. Finding the
+     correct versions for a given kernel might be challenging. I usually
+     circumvent this by upgrading the kernel.  </remark>
+  </para>
+
+
+
+
+ </sect1>
+ <sect1 xml:id="sec-tuning-systemtap-syntax">
+  <title>脚本语法</title>
+
+  <para>
+   SystemTap 脚本包含以下两个组成部分：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><xref linkend="sec-tuning-systemtap-syntax-events" xrefstyle="select:title"/>
+    </term>
+    <listitem>
+     <para>
+      为要执行的关联处理程序上的内核事件命名。事件的示例包括进入或退出特定的函数、计时器即将失效，或者启动或终止会话。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><xref linkend="sec-tuning-systemtap-syntax-handlers" xrefstyle="select:title"/>
+    </term>
+    <listitem>
+     <para>
+      用于指定每当发生特定事件时要执行操作的脚本语言语句系列。通常包括从事件环境提取数据、将数据储存到内部变量，或列显结果。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   事件及其相应的处理程序统称为<literal>探测</literal>。SystemTap 事件也称为<literal>探测点</literal>。探测的处理程序也称为<literal>探测主体</literal>。
+  </para>
+
+  <para>
+   您可以在 SystemTap 脚本中的任意位置插入各种样式的注释：使用 <literal>#</literal>、<literal>/* */</literal> 或 <literal>//</literal> 作为标记。
+  </para>
+
+  <sect2 xml:id="sec-tuning-systemtap-syntax-probe">
+   <title>探测格式</title>
+   <para>
+    一个 SystemTap 脚本可以包含多个探测。必须采用以下格式编写探测：
+   </para>
+<screen>probe <replaceable>EVENT</replaceable> {<replaceable>STATEMENTS</replaceable>}</screen>
+   <para>
+    每个探测有一个对应的语句块。此语句块必须括在 <literal>{ }</literal> 中，并包含要针对每个事件执行的语句。
+   </para>
+   <example xml:id="ex-tuning-stap-simple">
+    <title>简单 SystemTap 脚本</title>
+    <para>
+     以下示例演示了一个简单的 SystemTap 脚本。
+    </para>
+<screen>probe<co xml:id="co-tuning-stap-probe"/> begin<co xml:id="co-tuning-stap-event-begin"/>
+{<co xml:id="co-tuning-stap-handler-start"/>
+   printf<co xml:id="co-tuning-stap-handler-function-printf"/> ("hello world\n")<co xml:id="co-tuning-stap-handler-string"/>
+   exit ()<co xml:id="co-tuning-stap-handler-function-exit"/>
+}<co xml:id="co-tuning-stap-handler-end"/></screen>
+    <calloutlist>
+     <callout arearefs="co-tuning-stap-probe">
+      <para>
+       探测开始。
+      </para>
+     </callout>
+     <callout arearefs="co-tuning-stap-event-begin">
+      <para>
+       事件 <literal>begin</literal>（SystemTap 会话开始）。
+      </para>
+     </callout>
+     <callout arearefs="co-tuning-stap-handler-start">
+      <para>
+       处理程序定义开始，以 <literal>{</literal> 指示。
+      </para>
+     </callout>
+     <callout arearefs="co-tuning-stap-handler-function-printf">
+      <para>
+       处理程序中定义的第一个函数：<literal>printf</literal> 函数。
+      </para>
+     </callout>
+     <callout arearefs="co-tuning-stap-handler-string">
+      <para>
+       <literal>printf</literal> 函数列显的字符串，后跟换行符 (<literal>/n</literal>)。
+      </para>
+     </callout>
+     <callout arearefs="co-tuning-stap-handler-function-exit">
+      <para>
+       处理程序中定义的第二个函数：<literal>exit()</literal> 函数。请注意，SystemTap 脚本将一直运行到执行 <literal>exit()</literal> 函数为止。如果您想要提前停止脚本的执行，请按 <keycombo> <keycap function="control"/> <keycap>C</keycap>
+       </keycombo> 手动停止。
+      </para>
+     </callout>
+     <callout arearefs="co-tuning-stap-handler-end">
+      <para>
+       处理程序定义结束，以 <literal>}</literal> 指示。
+      </para>
+     </callout>
+    </calloutlist>
+    <para>
+     事件 <literal>begin</literal>
+     <xref linkend="co-tuning-stap-event-begin" xrefstyle="select:label nopage"/>（SystemTap 会话开始）触发了括在 <literal>{ }</literal> 中的处理程序。此示例中，该处理程序是 <literal>printf</literal> 函数 <xref linkend="co-tuning-stap-handler-function-printf" xrefstyle="select:label nopage"/>。在本例中，该函数会列显 <literal>hello world</literal> 后跟换行符 <xref linkend="co-tuning-stap-handler-string" xrefstyle="select:label nopage"/>。然后脚本退出。
+    </para>
+   </example>
+   <para>
+    如果您的语句块包含多个语句，SystemTap 将按顺序执行这些语句 — 您无需在多个语句之间插入特殊分隔符或终止符。还可以将一个语句块嵌套在另一个语句块中。一般情况下，SystemTap 脚本中的语句块使用的语法和语义与 C 编程语言中使用的相同。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-systemtap-syntax-events">
+   <title>SystemTap 事件（探测点）</title>
+   <para>
+    SystemTap 支持多个内置事件。
+   </para>
+   <para>
+    一般事件语法是带点符号序列。这可将事件名称空间分成不同的部分。可以使用类似于函数调用的语法，通过字符串或数字文本将每个组成部分标识符参数化。组成部分可以包含 <literal>*</literal> 字符以扩展到其他匹配的探测点。探测点后可以跟 <literal>? </literal> 字符，指示该探测点是可选的，并且在它无法扩展时不能出错。
+    <remark>tonyj 2010-05-8: Maybe an example? There are lots of them in
+     syscalls.stp tapset (/usr/share/ systemptap/tapset/syscalls.stp). - taroth
+     2010-05-10: for next revision, no time left now</remark>
+    或者，探测点后可跟 <literal>! </literal> 字符，指示该探测点既是可选的，也是充足的。
+   </para>
+   <para>
+    SystemTap 支持每个探测有多个事件 — 需以逗号 (<literal>,</literal>) 分隔这些事件。如果在一个探测中指定了多个事件，当发生任何指定事件时，SystemTap 将执行处理程序。
+   </para>
+   <para>
+    一般而言，事件可划归为以下类别：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      同步事件：当任一进程在内核代码中的特定位置执行指令时发生。它为其他事件提供了一个参照点（指令地址），从中可以获得更多环境数据。
+     </para>
+     <para>
+      同步事件的示例为 <literal>vfs.<replaceable>FILE_OPERATION</replaceable></literal>：虚拟文件系统 (VFS) 的 <replaceable>FILE_OPERATION</replaceable> 事件项。例如，在<xref linkend="sec-tuning-systemtap-setup"/>中，<literal>read</literal> 就是用于 VFS 的 <replaceable>FILE_OPERATION</replaceable> 事件。
+
+
+
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      异步事件：不与代码中的特定指令或位置相关联。此探测点系列主要包含计数器、计时器和类似构造。
+     </para>
+     <para>
+      异步事件的示例包括：<literal>begin</literal>（SystemTap 会话开始） — 运行 SystemTap 脚本时；<literal>end</literal>（SystemTap 会话结束）或计时器事件。计时器事件指定要定期执行的处理程序，例如 <literal>example timer.s(<replaceable>SECONDS</replaceable>)</literal> 或 <literal>timer.ms(<replaceable>MILLISECONDS</replaceable>)</literal>。
+     </para>
+     <para>
+      与其他收集信息的探测一起使用时，计时器事件可让您列显定期更新，了解这些信息在一段时间内的变化。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <example xml:id="ex-tuning-stap-async">
+    <title>包含计时器事件的探测</title>
+    <para>
+     例如，以下探测每隔 4 秒列显文本 <quote>hello world</quote>：
+    </para>
+<screen>probe timer.s(4)
+{
+   printf("hello world\n")
+}</screen>
+   </example>
+   <para>
+    有关支持的事件的详细信息，请参见 <command>stapprobes</command> 手册页。该手册页的“<citetitle>See Also</citetitle>”（另请参见）一节还包含了其他手册页的链接，其中讨论了特定子系统和组件的支持事件。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-systemtap-syntax-handlers">
+   <title>SystemTap 处理程序（探测主体）</title>
+   <para>
+    每个 SystemTap 事件附带一个对应的处理程序，该处理程序是为该事件定义的，包含一个语句块。
+   </para>
+   <sect3 xml:id="sec-tuning-systemtap-syntax-handlers-functions">
+    <title>函数</title>
+    <para>
+     如果您需要在多个探测中使用相同的语句集，可将这些语句放到一个函数中，以方便重复使用。函数是由关键字 <literal>function</literal> 后跟名称定义的。函数接受任意数量的字符串或数字参数（以值的形式指定），可返回单个字符串或数字。
+    </para>
+<screen>function <replaceable>FUNCTION_NAME</replaceable>(<replaceable>ARGUMENTS</replaceable>) {<replaceable>STATEMENTS</replaceable>}
+probe <replaceable>EVENT</replaceable> {<replaceable>FUNCTION_NAME</replaceable>(<replaceable>ARGUMENTS</replaceable>)}</screen>
+    <para>
+     执行 <replaceable>EVENT</replaceable> 的探测时，将执行 <replaceable>FUNCTION_NAME</replaceable> 中的语句。<replaceable>ARGUMENTS</replaceable> 是传入函数的可选值。
+    </para>
+    <para>
+     可在脚本中的任意位置定义函数。函数可以接受任意
+    </para>
+    <para>
+     <xref linkend="ex-tuning-stap-simple"/>中已介绍了一个经常需要用到的函数：<literal>printf</literal> 函数，用于列显带格式的数据。使用 <literal>printf</literal> 函数时，您可以使用格式字符串指定要列显参数的方式。格式字符串括在引号中，可以包含进一步的格式说明符（以 <literal>%</literal> 字符引入）。
+    </para>
+    <para>
+     要使用哪些格式字符串取决于您的参数列表。格式字符串可以包含多个格式说明符 — 每个说明符与相应的参数相匹配。可使用逗号分隔多个参数。
+    </para>
+    <example xml:id="ex-tuning-stap-printf-formatspec">
+     <title>带格式说明符的 <literal>printf</literal> 函数</title>
+<screen>printf ("<co xml:id="co-tuning-stap-formatstring-start"/>%s<co xml:id="co-tuning-stap-string-spec"/>(%d<co xml:id="co-tuning-stap-int-spec"/>) open\n<co xml:id="co-tuning-stap-formatstring-end"/>", execname(), pid())</screen>
+     <calloutlist>
+      <callout arearefs="co-tuning-stap-formatstring-start">
+       <para>
+        格式字符串的开头，以 <literal>&quot;</literal> 指示。
+       </para>
+      </callout>
+      <callout arearefs="co-tuning-stap-string-spec">
+       <para>
+        字符串格式说明符。
+       </para>
+      </callout>
+      <callout arearefs="co-tuning-stap-int-spec">
+       <para>
+        整数格式说明符。
+       </para>
+      </callout>
+      <callout arearefs="co-tuning-stap-formatstring-end">
+       <para>
+        格式字符串的末尾，以 <literal>&quot;</literal> 指示。
+       </para>
+      </callout>
+     </calloutlist>
+    </example>
+    <para>
+     上述示例以字符串形式列显当前可执行文件名 (<literal>execname()</literal>)，并以整数（括在方括号中）形式列显进程 ID (<literal>pid()</literal>)。然后，依次列显一个空格、单词 <literal>open</literal> 和一个换行符，如下所示：
+    </para>
+<screen>[...]
+vmware-guestd(2206) open
+hald(2360) open
+[...]
+   </screen>
+    <para>
+     除了<xref linkend="ex-tuning-stap-printf-formatspec"/>中使用的两个函数 <literal>execname()</literal> 和 <literal>pid()</literal> 以外，还可将其他各种函数用作 <literal>printf</literal> 参数。
+    </para>
+    <para>
+     最常用的 SystemTap 函数如下：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>tid()</term>
+      <listitem>
+       <para>
+        当前线程的 ID。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>pid()</term>
+      <listitem>
+       <para>
+        当前线程的进程 ID。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>uid()</term>
+      <listitem>
+       <para>
+        当前用户的 ID。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>cpu()</term>
+      <listitem>
+       <para>
+        当前 CPU 编号。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>execname()</term>
+      <listitem>
+       <para>
+        当前进程的名称。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>gettimeofday_s()</term>
+      <listitem>
+       <para>
+        自 Unix 纪元（1970 年 1 月 1 日）起经过的秒数。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>ctime()</term>
+      <listitem>
+       <para>
+        将时间转换为字符串。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>pp()</term>
+      <listitem>
+       <para>
+        用于描述当前正在处理的探测点的字符串。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term>thread_indent()</term>
+      <listitem>
+       <para>
+        用于组织列显结果的有用函数。它会（在内部）储存每个线程 (<literal>tid()</literal>) 的缩进计数器。该函数接受一个参数，即缩进增量，用于指示要在线程的缩进计数器中添加或去除多少个空格。它会返回一个字符串，其中包含一些泛型跟踪数据，以及相应的缩进空格数。返回的泛型数据包括时戳（自线程初始缩进以来的微秒数）、进程名称和线程 ID 本身。这样您便可以识别调用了哪些函数、谁调用了这些函数，以及花费了多长时间。
+       </para>
+       <para>
+        调用入口和出口通常不会彼此紧靠（否则很容易匹配）。在第一个调用入口及其出口之间，通常还创建了其他调用入口和出口。缩进计数器可帮助您将某个入口与其对应的出口进行匹配，因为它会在<emphasis>不是</emphasis>上一个函数调用出口的下一个函数调用缩进。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <para>
+     有关支持的 SystemTap 函数的详细信息，请参见 <command>stapfuncs</command> 手册页。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-tuning-systemtap-syntax-handlers-others">
+    <title>其他基本构造</title>
+    <para>
+     除函数外，您还可以在 SystemTap 处理程序中使用其他常见构造，包括变量、条件语句（例如 <literal>if</literal>/<literal>else</literal>、<literal>while</literal> 循环、<literal>for</literal> 循环）、数组或命令行参数。
+    </para>
+    <sect4 xml:id="sec-tuning-systemtap-syntax-handlers-others-variables">
+     <title>变量</title>
+     <para>
+      可在脚本中的任意位置定义变量。要定义变量，只需选择一个名称，并通过函数或表达式为其赋值：
+     </para>
+<screen>foo = gettimeofday( )</screen>
+     <para>
+      然后便可以在表达式中使用该变量。SystemTap 根据变量的赋值类型自动推断每个标识符的类型（字符串或数字）。任何不一致性都将报告为错误。在上述示例中，<literal>foo</literal> 将自动分类为数字，可通过 <literal>printf()</literal> 并结合使用整数格式说明符 (<literal>%d</literal>) 进行列显。
+     </para>
+     <para>
+      但默认情况下，变量位于使用它们的探测的本地：将于每次调用处理程序时，初始化、使用并处置这些变量。要在两个探测之间共享变量，请在脚本中的任意位置将其声明为全局变量。为此，请在探测的外部使用 <literal>global</literal> 关键字：
+     </para>
+     <example>
+      <title>使用全局变量</title>
+<screen>global count_jiffies, count_ms
+probe timer.jiffies(100) { count_jiffies ++ }
+probe timer.ms(100) { count_ms ++ }
+probe timer.ms(12345)
+{
+  hz=(1000*count_jiffies) / count_ms
+  printf ("jiffies:ms ratio %d:%d =&gt; CONFIG_HZ=%d\n",
+    count_jiffies, count_ms, hz)
+  exit ()
+  }</screen>
+      <para>
+       此示例脚本使用用于统计滴答次数和毫秒数然后进行相应计算的计时器来计算内核的 CONFIG_HZ 设置。（滴答是指一次系统计时器中断的持续时间。它不是一个绝对时间间隔单位，因为其持续时间取决于特定硬件平台的时钟中断频率）。通过 <literal>global</literal> 语句还可以在探测 <literal>timer.ms(12345)</literal> 中使用变量 <literal>count_jiffies</literal> 和 <literal>count_ms</literal>。指定 <literal>++</literal> 时，变量值将会加 <literal>1</literal>。
+      </para>
+     </example>
+    </sect4>
+    <sect4 xml:id="sec-tuning-systemtap-syntax-handlers-others-conditional">
+     <title>条件语句</title>
+     <para>
+      可以在 SystemTap 脚本中使用多种条件语句。下面是最常用的条件语句：
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>if/else 语句</term>
+       <listitem>
+        <para>
+         这些语句使用以下格式表达：
+        </para>
+<screen>if (<replaceable>CONDITION</replaceable>)<co xml:id="co-tuning-systemtap-cond-if"/><replaceable>STATEMENT1</replaceable><co xml:id="co-tuning-systemtap-cond-if-statement1"/>
+else<co xml:id="co-tuning-systemtap-cond-else"/><replaceable>STATEMENT2</replaceable><co xml:id="co-tuning-systemtap-cond-if-statement2"/></screen>
+        <para>
+         <literal>if</literal> 语句将整数值表达式与零进行比较。如果条件表达式 <xref linkend="co-tuning-systemtap-cond-if" xrefstyle="select:label nopage"/> 不为零，则执行第一个语句 <xref linkend="co-tuning-systemtap-cond-if-statement1" xrefstyle="select:label nopage"/>。如果条件表达式为零，则执行第二个语句 <xref linkend="co-tuning-systemtap-cond-if-statement2" xrefstyle="select:label nopage"/>。else 子句（<xref linkend="co-tuning-systemtap-cond-else" xrefstyle="select:label nopage"/> 和 <xref linkend="co-tuning-systemtap-cond-if-statement2" xrefstyle="select:label nopage"/>）是可选的。<xref linkend="co-tuning-systemtap-cond-if-statement1" xrefstyle="select:label nopage"/> 和 <xref linkend="co-tuning-systemtap-cond-if-statement2" xrefstyle="select:label nopage"/> 也可以是语句块。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>While 循环</term>
+       <listitem>
+        <para>
+         这些语句使用以下格式表达：
+        </para>
+<screen>while (<replaceable>CONDITION</replaceable>)<co xml:id="co-tuning-systemtap-cond-while"/><replaceable>STATEMENT</replaceable><co xml:id="co-tuning-systemtap-cond-while-statement"/></screen>
+        <para>
+         只要 <literal>condition</literal> 不为零，就执行语句 <xref linkend="co-tuning-systemtap-cond-while-statement" xrefstyle="select:label nopage"/>。<xref linkend="co-tuning-systemtap-cond-while-statement" xrefstyle="select:label nopage"/> 也可以是语句块。它必须更改某个值，因此 <literal>condition</literal> 最终为零。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>For 循环</term>
+       <listitem>
+        <para>
+         这些语句是 <literal>while</literal> 循环的快捷方式，使用以下格式表达：
+        </para>
+<screen>for (<replaceable>INITIALIZATION</replaceable><co xml:id="co-tuning-systemtap-cond-for-init"/>; <replaceable>CONDITIONAL</replaceable><co xml:id="co-tuning-systemtap-cond-for-cond"/>; <replaceable>INCREMENT</replaceable><co xml:id="co-tuning-systemtap-cond-for-increment"/>) statement</screen>
+        <para>
+         <xref linkend="co-tuning-systemtap-cond-for-init" xrefstyle="select:label nopage"/> 中指定的表达式用于初始化循环迭代数的计数器，在开始执行循环之前执行。循环执行将持续到循环条件 <xref linkend="co-tuning-systemtap-cond-for-cond" xrefstyle="select:label nopage"/> 为 false。（在每个循环迭代的开头检查此表达式）。<xref linkend="co-tuning-systemtap-cond-for-increment" xrefstyle="select:label nopage"/> 中指定的表达式用于递增循环计数器。它在每个循环迭代的末尾执行。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>条件运算符</term>
+       <listitem>
+        <para>
+         可在条件语句中使用以下运算符：
+        </para>
+        <formalpara>
+         <title>==:</title>
+         <para>
+          等于
+         </para>
+        </formalpara>
+        <formalpara>
+         <title>! =:</title>
+         <para>
+          不等于
+         </para>
+        </formalpara>
+        <formalpara>
+         <title>&gt;=:</title>
+         <para>
+          大于等于
+         </para>
+        </formalpara>
+        <formalpara>
+         <title>&lt;=:</title>
+         <para>
+          小于等于
+         </para>
+        </formalpara>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </sect4>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-tuning-systemtap-example">
+  <title>示例脚本</title>
+
+  <para>
+   如果您已安装 <systemitem class="resource">systemtap-docs</systemitem> 软件包，可以在 <filename>/usr/share/doc/packages/systemtap/examples</filename> 中找到多个有用的 SystemTap 示例脚本。
+  </para>
+
+  <para>
+   本节详细介绍了一个相当简单的示例脚本：<filename>/usr/share/doc/packages/systemtap/examples/network/tcp_connections.stp</filename>。
+  </para>
+
+  <example>
+   <title>使用 <literal>tcp_connections.stp</literal> 监视传入的 TCP 连接</title>
+<screen>#! /usr/bin/env stap
+
+probe begin {
+  printf("%6s %16s %6s %6s %16s\n",
+         "UID", "CMD", "PID", "PORT", "IP_SOURCE")
+}
+
+probe kernel.function("tcp_accept").return?,
+      kernel.function("inet_csk_accept").return? {
+  sock = $return
+  if (sock != 0)
+    printf("%6d %16s %6d %6d %16s\n", uid(), execname(), pid(),
+           inet_get_local_port(sock), inet_get_ip_source(sock))
+}</screen>
+  </example>
+
+  <para>
+   此 SystemTap 脚本监视传入的 TCP 连接，并帮助您实时识别未经授权或不需要的网络访问请求。它会显示计算机接受的每个新传入 TCP 连接的以下信息：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     用户 ID (<literal>UID</literal>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     接受连接的命令 (<literal>CMD</literal>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     命令的进程 ID (<literal>PID</literal>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     连接使用的端口 (<literal>PORT</literal>)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     TCP 连接的来源 IP 地址 (<literal>IP_SOUCE</literal>)
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <para>
+   要运行该脚本，请执行
+  </para>
+
+<screen>stap /usr/share/doc/packages/systemtap/examples/network/tcp_connections.stp</screen>
+
+  <para>
+   并遵循屏幕上的输出操作。要手动停止脚本，请按 <keycombo> <keycap function="control"/> <keycap>C</keycap> </keycombo>。
+  </para>
+ </sect1>
+
+ <sect1 xml:id="sec-tuning-systemtap-userspace">
+  <title>用户空间探测</title>
+
+  <para>
+   <remark>taroth 2013-12-05: this will need adjustment for SLE 12 where user-space probes
+   will use uprobes/uretprobes instead (which are in mainline) - according to tonyj everything
+   except itrace is supposed to work</remark>
+   为帮助调试用户空间应用程序（如同 DTrace 可执行的操作那样），<phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 支持使用 SystemTap 进行用户空间探测：可在任何用户空间应用程序中插入自定义探测点。因此，SystemTap 可让您使用内核空间和用户空间探测来调试整个系统的行为。
+  </para>
+
+  <para>
+   要获取所需的 utrace 基础结构和 uprobes 内核模块进行用户空间探测，除了<xref linkend="sec-tuning-systemtap-setup"/>中所列的软件包外，还需要安装 <systemitem class="resource">kernel-trace</systemitem> 软件包。
+  </para>
+
+  <para>
+   <command>utrace</command> 实施一个用于控制用户空间任务的框架。它提供了可由各种跟踪<quote>引擎</quote>使用的接口，该接口作为可装载内核模块实施。引擎会注册特定事件的回调函数，然后挂接到它们想要跟踪的任何线程。由于回调是从内核中的<quote>安全</quote>位置发出的，因此使得函数拥有很大的自由度可以执行各种处理。可以通过 utrace 监视各种事件，例如，进入和退出系统调用、fork()、正在向任务发送信号，等等。<link xlink:href="https://sourceware.org/systemtap/wiki/utrace"/> 上提供了有关 utrace 基础结构的更多细节。
+  </para>
+
+  <para>
+   SystemTap 支持探测进入用户空间进程中的函数及从其返回、探测用户空间代码中的预定义标记，以及监视用户进程事件。
+  </para>
+
+  <para>
+   要检查当前运行的内核是否提供所需的 utrace 支持，请使用以下命令：
+  </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> grep CONFIG_UTRACE /boot/config-`uname -r`</screen>
+
+  <para>
+   有关用户空间探测的更多细节，请参见 <link xlink:href="https://sourceware.org/systemtap/SystemTap_Beginners_Guide/userspace-probing.html"/>。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-tuning-systemtap-more">
+  <title>更多信息</title>
+
+  <para>
+   本章仅提供了简短的 SystemTap 概述。有关 SystemTap 的详细信息，请参考以下链接：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><link xlink:href="https://sourceware.org/systemtap/"/>
+    </term>
+    <listitem>
+     <para>
+      SystemTap 项目主页。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><link xlink:href="https://sourceware.org/systemtap/wiki/"/>
+    </term>
+    <listitem>
+     <para>
+      囊括了有关 SystemTap 的大量有用信息，从详细的用户和开发人员文档，到评论以及与其他工具的比较，或者常见问题和提示。另外还包含 SystemTap 脚本集合、示例和使用案例，并列出了有关 SystemTap 的最近研讨和论文。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><link xlink:href="https://sourceware.org/systemtap/documentation.html"/>
+    </term>
+    <listitem>
+     <para>
+      以 PDF 和 HTML 格式提供了 <citetitle>SystemTap 教程</citetitle>、《<citetitle>SystemTap Beginner&apos;s Guide</citetitle>》（SystemTap 新手指南）、《<citetitle>Tapset Developer&apos;s Guide</citetitle>》（Tapset 开发人员指南）和《<citetitle>SystemTap Language Reference</citetitle>》（SystemTap 语言参考）。另外还列出了相关的手册页。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   您还可以在所安装系统中的 <filename>/usr/share/doc/packages/systemtap</filename> 下找到 SystemTap 语言参考和 SystemTap 教程。<filename>example</filename> 子目录中提供了 SystemTap 示例脚本。
+  </para>
+
+
+ </sect1>
+</chapter>

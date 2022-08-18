@@ -1,1 +1,486 @@
-../../../../xml/tuning_memory.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="tuning_memory.xml" version="5.0" xml:id="cha-tuning-memory">
+
+ <title>微调内存管理子系统</title>
+ <info>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <para>
+  要了解和微调内核的内存管理行为，请务必首先大致了解其工作原理及与其他子系统的协作方式。
+ </para>
+ <para>
+  <remark>sknorr, 2014-08-21: Using VM for "virtual memory manager" is really
+   dangerous - everyone knows that VM means "virtual machine" and half of
+   the people reading this chapter might skip this prargraph and be completely
+   confused. At least use VMM or shorten "memory management subsystem" to
+   "memory subsystem", the latter of which I think should be short enough.
+  </remark>
+  内存管理子系统也称为虚拟内存管理器，下文称之为 <quote>VM</quote>。VM 的作用是管理整个内核以及用户程序的物理内存 (RAM) 分配。它还负责为用户进程提供虚拟内存环境（使用 Linux 扩展通过 POSIX API 进行管理）。最后，当出现内存不足时，VM 负责通过清理缓存或换出<quote>匿名</quote>内存来释放 RAM。
+ </para>
+ <para>
+  检查和微调 VM 时要了解的最重要事项是如何管理 VM 的缓存。VM 缓存的基本目标是最大程度地减少交换和文件系统操作（包括网络文件系统）生成的 I/O 开销。此目标通过完全避免 I/O 或以更好的模式提交 I/O 来实现。
+ </para>
+ <para>
+  这些缓存将按需要使用并填满可用内存。缓存和匿名内存可用的内存越多，缓存和交换的运行效率就越高。但是，如果遇到内存不足的情况，将会清理缓存或换出内存。
+ </para>
+ <para>
+  对于特定的工作负载而言，为改善性能而要做的第一件事就是增大内存并降低必须清理或交换内存的频率。第二件事是通过更改内核参数来改变缓存的管理方式。
+ </para>
+ <para>
+  最后，还应检查并微调工作负载本身。如果允许应用程序运行更多进程或线程，且每个进程在其各自的文件系统区域中运行，则 VM 缓存的效率可能会下降。内存开销也随之升高。如果应用程序可为自身分配缓冲区或缓存，则缓存越大意味着 VM 缓存的可用内存越少。但是，更多的进程和线程可能意味着有更大的机会以重叠和管道形式执行 I/O，因此可以更好地利用多个核心。需要进行试验才能获得最佳效果。
+ </para>
+ <sect1 xml:id="cha-tuning-memory-usage">
+  <title>内存用量</title>
+
+  <para>
+   一般而言，内存分配可分为<quote>固定</quote>（也称为<quote>不可回收</quote>）、<quote>可回收</quote>或<quote>可交换</quote>。
+  </para>
+
+  <sect2 xml:id="cha-tuning-memory-usage-anonymous">
+   <title>匿名内存</title>
+   <para>
+    匿名内存往往是程序堆和堆栈内存（例如 <literal>&gt;malloc()</literal>）。匿名内存是可回收的，诸如 <literal>mlock</literal> 或没有可用的交换空间等特殊情况除外。匿名内存必须先写入交换区，然后才能回收。由于分配和访问模式的原因，交换 I/O（包括换入和换出页）的效率往往比页缓存 I/O 的效率低。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-usage-pagecache">
+   <title>页缓存</title>
+   <para>
+    文件数据的缓存。从磁盘或网络读取文件时，内容将储存在页缓存中。如果内容在页缓存中是最新的，则不需要进行任何磁盘或网络访问。tmpfs 和共享内存段将计入到页缓存中。
+   </para>
+   <para>
+    写入文件时，新数据会先储存在页缓存中，然后再写回到磁盘或网络（使其成为写回缓存）。当某一页包含尚未写回的新数据时，该页称为<quote>未写入</quote>页。不属于未写入页的其他页为<quote>空白</quote>页。当出现内存不足时，可以回收空白的页缓存页，只需将其释放即可。未写入页必须先变为空白页，然后才能回收。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-usage-buffercache">
+   <title>缓冲区缓存</title>
+   <para>
+    这是适用于块设备（例如 /dev/sda）的一种页缓存。文件系统在访问其磁盘上的元数据结构（例如 inode 表、分配位图等）时，通常会使用缓冲区缓存。可以像回收页缓存一样回收缓冲区缓存。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-usage-bufferheads">
+   <title>缓冲区头</title>
+   <para>
+    缓冲区头是一种小型辅助结构，往往是在访问页缓存时分配的。如果页缓存页或缓冲区缓存页是空白的，则通常可以轻松回收。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-usage-writeback">
+   <title>写回</title>
+   <para>
+    当应用程序在文件中写入数据时，页缓存会变为未写入，而缓冲区缓存可能也会变为未写入。当未写入内存量达到指定的页数量（以字节为单位）(<emphasis>vm.dirty_background_bytes</emphasis>)、或者当未写入内存量与总内存之比达到特定比率 (<emphasis>vm.dirty_background_ratio</emphasis>)，或者当页处于未写入状态超过指定时间 (<emphasis>vm.dirty_expire_centisecs</emphasis>) 时，内核将从含有最先变为未写入页的文件开始完成页写回。后台字节数和比率是互斥的，设置其中一个会重写另一个。刷新程序线程在后台执行写回，允许应用程序继续运行。如果 I/O 跟不上应用程序将页缓存变为未写入的进度，并且未写入数据达到关键设置（<emphasis>vm.dirty_bytes</emphasis> 或 <emphasis>vm.dirty_ratio</emphasis>），则将开始限制应用程序，以防止未写入数据超过此阈值。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-usage-readahead">
+   <title>预读</title>
+   <para>
+    VM 会监视文件访问模式并可能尝试执行预读。预读会在尚未请求页前预先将其从文件系统读取到页缓存中。使用此功能可以使得提交的 I/O 请求更少但更大（从而提高效率）。并可使 I/O 以管道形式执行（即在运行应用程序的同时执行 I/O）。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-usage-vfs">
+   <title>VFS 缓存</title>
+   <para/>
+   <sect3 xml:id="cha-tuning-memory-usage-vfs-inode">
+    <title>Inode 缓存</title>
+    <para>
+     这是每个文件系统 inode 结构的内存内缓存。包含文件大小、权限和所有权以及指向文件数据的指针等属性。
+    </para>
+   </sect3>
+   <sect3 xml:id="cha-tuning-memory-usage-vfs-dir-entry">
+    <title>目录项缓存</title>
+    <para>
+     这是系统中目录项的内存内缓存。包含名称（文件名）、文件引用的 inode，以及子项。遍历目录结构及按名称访问文件时会使用此缓存。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="cha-tuning-memory-optimize">
+  <title>减少内存用量</title>
+
+  <para/>
+
+  <sect2 xml:id="cha-tuning-memory-optimize-malloc">
+   <title>减少 malloc（匿名）用量</title>
+   <para>
+    与旧版本相比，<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 上运行的应用程序可分配更多内存。这是因为 <systemitem class="resource">glibc</systemitem> 在分配用户空间内存时会更改其默认行为。有关这些参数的说明，请参见 <link xlink:href="http://www.gnu.org/s/libc/manual/html_node/Malloc-Tunable-Parameters.html"/>。
+   </para>
+   <para>
+    要恢复与旧版本类似的行为，应将 M_MMAP_THRESHOLD 设置为 128*1024。为此，可以从应用程序调用 mallopt()，或者在运行应用程序之前设置 MALLOC_MMAP_THRESHOLD 环境变量。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-optimize-overhead">
+   <title>减少内核内存开销</title>
+   <para>
+    在内存不足期间，系统会自动清理可回收的内核内存（上述缓存）。其他大部分内核内存无法轻松缩减，而是为内核提供一个工作负载属性。
+   </para>
+   <para>
+    降低用户空间工作负载的要求会减少内核内存使用量（减少进程、减少打开的文件和套接字，等等）
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-optimize-cgoups">
+   <title>内存控制器（内存 cgroup）</title>
+   <para>
+    如果不需要内存 cgroup 功能，可以通过在内核命令行上传递 cgroup_disable=memory 将其关闭，这可以稍微减少内核的内存消耗。还可以略微改善性能，这是因为当内存 cgroup 可用时，即使未配置任何内存 cgroup，也会产生少量的统计开销。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="cha-tuning-memory-vm">
+  <title>虚拟内存管理器 (VM) 可调参数</title>
+
+  <para>
+   微调 VM 时应知悉，某些更改需要一定时间才会影响工作负载以及完全见效。如果工作负载在一天中都有变化，则其行为在不同的时间会有很大的不同。在某些条件下可提高吞吐量的更改，在其他条件下可能反而会降低吞吐量。
+  </para>
+
+  <sect2 xml:id="cha-tuning-memory-vm-reclaim">
+   <title>回收比率</title>
+   <variablelist>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/swappiness</filename>
+     </term>
+     <listitem>
+      <para>
+       此项控制用于定义内核换出匿名内存的主动程度（相对于页缓存和其他缓存）。增加此值会增加交换量。默认值为 <literal>60</literal>。
+      </para>
+      <para>
+       交换 I/O 的效率往往比其他 I/O 要低得多。但是，访问某些页缓存页的频率却比不常用匿名内存要高得多。应针对此点进行适当的平衡。
+      </para>
+      <para>
+       如果在性能下降期间观察到有交换活动，或许应考虑减小此参数。如果出现大量的 I/O 活动并且系统中的页缓存量相当小，或者正在运行大型休眠应用程序，增加此值可能会改善性能。
+      </para>
+      <para>
+       请注意，换出的数据越多，系统在必要情况下重新换入数据所需的时间就越长。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/vfs_cache_pressure</filename>
+     </term>
+     <listitem>
+      <para>
+       此变量用于控制内核回收用于缓存 VFS 缓存的内存的趋势（相对于页缓存和交换）。增加此值会提高回收 VFS 缓存的速率。
+      </para>
+      <para>
+       想知道何时应对此值进行更改比较困难，只能通过试验来判断。<command>slabtop</command> 命令（<systemitem class="resource">procps</systemitem> 软件包的一部分）显示内核所使用的排名靠前的内存对象。vfs 缓存是“dentry”和“*_inode_cache”对象。如果这些对象消耗的内存量相对于页缓存而言很大，或许应尝试增加压力。此外，还可能有助于减少交换。默认值为 <literal>100</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/min_free_kbytes</filename>
+     </term>
+     <listitem>
+      <para>
+       此参数用于控制保留可供包括<quote>原子</quote>分配在内的特殊预留（无法等待回收）使用的内存量。除非仔细微调了系统的内存用量，否则通常不应降低此参数（通常用于嵌入式应用程序而不是服务器应用程序）。如果日志中频繁出现<quote>页分配失败</quote>消息和堆栈跟踪，可以持续增加 min_free_kbytes，直到错误消失。如果这些消息很少出现，则无需担心。默认值取决于 RAM 量。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/watermark_scale_factor</filename></term>
+     <listitem>
+      <para>
+      总体而言，可用内存分为高、低、最小水平。如果达到低水平，则 <command>kswapd</command> 会唤醒以在后台回收内存。在可用内存达到高水平之前，它会一直处于唤醒状态。当达到低水平时，应用程序将会停滞并回收内存。
+      </para>
+      <para>
+      <literal>watermark_scale_factor</literal> 定义在唤醒 kswapd 之前节点/系统中剩余的内存量，以及在 kswapd 转回休眠状态之前需要释放多少内存。单位为万分之几。默认值 10 表示水平间的差距是节点/系统中可用内存的 0.1%。最大值为 1000，或内存的 10%。
+      </para>
+      <para>
+      更改此参数可能会对经常停滞在直接回收状态的工作负载（由 <filename>/proc/vmstat</filename> 中的 <literal>allocstall</literal> 判断）有益。同样，如果 <command>kswapd</command> 提前休眠（由 <literal>kswapd_low_wmark_hit_quickly</literal> 判断），可能表示为了避免停滞而保留可用的页数太小。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-vm-writeback">
+   <title>写回参数</title>
+   <para>
+    从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 10 开始，写回行为的一项重要更改是，基于文件的 mmap() 内存发生修改后会立即被视为未写入内存（可进行写回）。而在以前，仅当此内存已取消映射后执行 msync() 系统调用时或处于高内存压力下，才可进行写回。
+   </para>
+   <para>
+    某些应用程序并不希望对 mmap 修改执行此类写回行为并可能使性能下降。增加写回比率和次数可以改善这类性能下降。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/dirty_background_ratio</filename>
+     </term>
+     <listitem>
+      <para>
+       这是总可用内存量与可回收内存量之间的百分比。当未写入页缓存量超过此百分比时，写回线程将开始写回未写入内存。默认值为 <literal>10</literal> (%)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/dirty_background_bytes</filename>
+     </term>
+     <listitem>
+      <para>
+       此参数包含后台内核刷新程序线程开始写回时所达到的未写入内存量。<filename>dirty_background_bytes</filename> 是 <filename>dirty_background_ratio</filename> 的对等参数。如果设置其中的一个，则另一个会被自动读作 <literal>0</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/dirty_ratio</filename>
+     </term>
+     <listitem>
+      <para>
+       与 <filename>dirty_background_ratio</filename> 类似的百分比值。如果超过此值，想要写入页缓存的应用程序将被阻止，并等待内核后台刷新程序线程减少未写入内存量。默认值为 <literal>20</literal> (%)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/dirty_bytes</filename>
+     </term>
+     <listitem>
+      <para>
+       此文件控制的可调参数与 <filename>dirty_ratio</filename> 相同，只不过其值为以字节为单位的未写入内存量，而不是可回收内存的百分比。由于 <filename>dirty_ratio</filename> 和 <filename>dirty_bytes</filename> 控制相同的可调参数，如果设置其中的一个，则另一个会被自动读作 <literal>0</literal>。<filename>dirty_bytes</filename> 允许的最小值为两页（以字节为单位）；任何低于此限制的值都将被忽略，并将保留旧配置。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><filename>/proc/sys/vm/dirty_expire_centisecs</filename>
+     </term>
+     <listitem>
+      <para>
+       内存内保持未写入状态超过此间隔的数据在下一次唤醒刷新程序线程时会被写出。失效时间根据文件 inode 的修改时间计算。因此，超过该间隔时，同一文件中的多个未写入页将被全部写入。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    <filename>dirty_background_ratio</filename> 和 <filename>dirty_ratio</filename> 共同决定了页缓存写回行为。如果增加这些值，会有更多未写入内存在系统中保留更长时间。系统中允许的未写入内存越多，通过避免写回 I/O 和提交更佳的 I/O 模式来提高吞吐量的机会就越大。但是，如果允许更多的未写入内存，当需要回收内存时可能会增加延迟，或者当需要写回到磁盘时，可能需考虑数据完整性点（<quote>同步点</quote>）。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-vm-writetiming" os="sles;sled">
+   <title>SUSE Linux Enterprise 12 与 SUSE Linux Enterprise 11 之间的 I/O 写入时间差异</title>
+   <para>
+    系统必须限制系统内存中包含的需要写入磁盘的基于文件数据百分比。这可以确保系统始终能够分配所需的数据结构来完成 I/O。可以处于未写入状态并需要随时写入的最大内存量由 <literal>vm.dirty_ratio</literal> (<filename>/proc/sys/vm/dirty_ratio</filename>) 控制。默认值为：
+   </para>
+<screen>SLE-11-SP3:     vm.dirty_ratio = 40
+SLE-12:         vm.dirty_ratio = 20</screen>
+   <para>
+    在 SUSE Linux Enterprise 12 中使用较低比率的主要优点是，在内存较低的情况下可以更快地完成页回收和分配，因为快速发现和丢弃旧空白页的概率较高。次要优点是，如果系统上的所有数据必须同步，则默认情况下，在 SUSE Linux Enterprise 12 上完成操作所需的时间比在 SUSE Linux Enterprise 11 SP3 上更少。大多数工作负载察觉不到此变化，因为应用程序会使用 <literal>fsync()</literal> 同步数据，或者数据变为未写入的速度还不够快，未达到限制。
+   </para>
+   <para>
+    但还是存在一些例外情况。如果您的应用程序受此影响，则在写入期间它会出现意外停滞。要证实应用程序是否受到未写入数据比率限制的影响，请监视 <literal>/proc/<replaceable>PID_OF_APPLICATION</replaceable>/stack</literal>，观察应用程序是否在 <literal>balance_dirty_pages_ratelimited</literal> 上花费大量时间。如果观察到这种情况，而且这导致了问题，请将 <literal>vm.dirty_ratio</literal> 值增加到 40 以恢复 SUSE Linux Enterprise 11 SP3 行为。
+   </para>
+   <para>
+    请务必注意，无论设置为何，总体 I/O 吞吐量都是相同的。唯一的区别仅在于 I/O 排入队列的时间。
+   </para>
+   <para>
+    下列示例使用 <command>dd</command> 以异步方式将 30% 的内存写入磁盘，此操作刚好受到 <literal>vm.dirty_ratio</literal> 中更改的影响：
+   </para>
+<screen><prompt role="root"># </prompt>MEMTOTAL_MBYTES=`free -m | grep Mem: | awk '{print $2}'`
+<prompt role="root"># </prompt>sysctl vm.dirty_ratio=40
+<prompt role="root"># </prompt>dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100))
+2507145216 bytes (2.5 GB) copied, 8.00153 s, 313 MB/s
+<prompt role="root"># </prompt>sysctl vm.dirty_ratio=20
+dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100))
+2507145216 bytes (2.5 GB) copied, 10.1593 s, 247 MB/s</screen>
+   <para>
+    请注意，该参数会影响完成命令所需的时间，以及设备的外显写入速度。如果设置 <literal>dirty_ratio=40</literal>，内核会缓存更多数据并在后台写入磁盘。请务必注意，在这两种情况下，I/O 的速度是相同的。下面演示了在退出之前 <command>dd</command> 同步数据时的结果：
+   </para>
+<screen><prompt role="root"># </prompt>sysctl vm.dirty_ratio=40
+<prompt role="root"># </prompt>dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100)) conv=fdatasync
+2507145216 bytes (2.5 GB) copied, 21.0663 s, 119 MB/s
+<prompt role="root"># </prompt>sysctl vm.dirty_ratio=20
+<prompt role="root"># </prompt>dd if=/dev/zero of=zerofile ibs=1048576 count=$((MEMTOTAL_MBYTES*30/100)) conv=fdatasync
+2507145216 bytes (2.5 GB) copied, 21.7286 s, 115 MB/s</screen>
+   <para>
+    请注意，<literal>dirty_ratio</literal> 在此处几乎不会造成任何影响，且在命令的自然变化范围内。因此，<literal>dirty_ratio</literal> 不会直接影响 I/O 性能，但它可能会影响在未同步的情况下以异步方式写入数据的工作负载的外显性能。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-vm-readahead">
+   <title>预读参数</title>
+   <variablelist>
+    <varlistentry>
+     <term><filename>/sys/block/<replaceable>&lt;bdev&gt;</replaceable>/queue/read_ahead_kb</filename>
+     </term>
+     <listitem>
+      <para>
+       如果有一个或多个进程按顺序读取某个文件，内核会提前读取一些数据，以减少进程等待数据可用的时间。提前读取的实际数据量是根据 I/O 看上去的“有序”程度动态计算的。此参数用于设置内核预读单个文件的最大数据量。如果您发现从文件进行大量有序读取的速度不够快，可以尝试增加此值。增幅太大可能导致预读震荡（用于预读的页缓存在可用之前被回收）或性能下降（因为存在大量的无用 I/O）。默认值为 <literal>512</literal> (KB)。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="cha-tuning-memory-vm-thp">
+   <title>透明大页参数</title>
+    <para>
+     利用透明大页 (THP)，可以通过进程按需动态分配大页，或者通过 <command>khugepaged</command> 内核线程将分配推迟到以后进行。此方法不同于使用 <literal>hugetlbfs</literal> 手动管理大页的分配和使用。THP 对于采用连续内存访问模式的工作负载很有用。在运行采用连续内存访问模式的合成工作负载时，能够发现页错误减少了 1000 倍。
+   </para>
+   <para>
+     在某些情况下可能不需要 THP。由于内存用量过大，采用稀疏内存访问模式的工作负载不适合使用 THP。例如，出错时可能要使用 2 MB 内存而不是 4 KB 来处理每个错误，最终导致提前回收页。<phrase os="sles;sled">在低于 SUSE Linux Enterprise 12 SP2 的版本上，尝试分配 THP 时应用程序可能会长时间处于停滞状态，因此会频繁出现禁用 THP 建议。对于 SUSE Linux Enterprise 12 SP3 和更高版本应重新评估此类建议。</phrase>
+   </para>
+   <para>
+     可以通过 <option>transparent_hugepage=</option> 内核参数或 sysfs 配置 THP 的行为。例如，可以通过添加内核参数 <option>transparent_hugepage=never</option>，重构建 grub2 配置，然后重引导来禁用 THP。使用以下命令校验是否已禁用 THP：
+
+    </para>
+    <screen><prompt role="root"># </prompt>cat /sys/kernel/mm/transparent_hugepage/enabled
+always madvise [never]</screen>
+     <para>
+      如果已禁用，值 <literal>never</literal> 会显示在方括号中，如以上示例中所示。如果指定值 <literal>always</literal>，将始终在出错时尝试并使用 THP，但如果分配失败，则会遵从 <command>khugepaged</command>。如果指定值 <literal>madvise</literal>，则只会为应用程序显式指定的地址空间分配 THP。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><filename>/sys/kernel/mm/transparent_hugepage/defrag</filename>
+       </term>
+       <listitem>
+        <para>
+         此参数用于控制分配 THP 时应用程序所承担的工作量。在支持 THP 的 <phrase os="sles;sled">SUSE Linux Enterprise 12 SP1 和更低</phrase>版本中，<literal>always</literal> 是默认值。如果 THP 不可用，应用程序会尝试对内存进行碎片整理。如果内存已碎片化并且 THP 不可用，应用程序中有可能会发生大量停滞现象。
+        </para>
+        <para>
+         值 <literal>madvise</literal> 表示仅当应用程序显式请求时，THP 分配请求才会进行碎片整理。这是 <phrase os="sles;sled">SUSE Linux Enterprise 12 SP2</phrase> 和更高版本的默认值。
+        </para>
+        <para>
+         <literal>defer</literal> 仅适用于 <phrase os="sles;sled">SUSE Linux Enterprise 12 SP2</phrase> 和更高版本。如果 THP 不可用，应用程序将回退为使用小页。它会唤醒 <command>kswapd</command> 和 <command>kcompactd</command> 内核线程以在后台对内存进行碎片整理，并将由 <command>khugepaged</command> 稍后再分配 THP。
+       </para>
+       <para>
+         如果 THP 不可用，但不会执行任何其他操作，最后一个选项 <literal>never</literal> 将使用小页。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+  </sect2>
+  <sect2 xml:id="cha-tuning-memory-vm-khugepaged">
+   <title>khugepaged 参数</title>
+   <para>
+    当 <literal>transparent_hugepage</literal> 设置为 <literal>always</literal> 或 <literal>madvise</literal> 时，khugepaged 会自动启动；当其设置为 <literal>never</literal> 时，khugepaged 会自动关闭。通常，khugepaged 以较低的频率运行，但可以微调行为。
+   </para>
+   <variablelist>
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/defrag</filename> </term>
+      <listitem>
+       <para>
+        0 值会禁用 <command>khugepaged</command>，虽然在出错时仍可使用 THP。对于受益于 THP，但无法容忍在 <command>khugepaged</command> 尝试更新应用程序内存用量时发生的停滞现象的延迟敏感型应用程序而言，禁用 khugepaged 可能十分重要。
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/pages_to_scan</filename></term>
+      <listitem>
+      <para>
+        此参数用于控制 <command>khugepaged</command> 在单轮中扫描的页数。扫描将会识别可重新分配为 THP 的小页。增加此值可更快地在后台分配 THP，但代价是 CPU 用量升高。
+       </para>
+      </listitem>
+    </varlistentry>
+
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/scan_sleep_millisecs</filename></term>
+      <listitem>
+      <para>
+       完成每轮后，<command>khugepaged</command> 将按此参数指定的短暂间隔休眠一段时间，以限制 CPU 用量。减小此值可更快地在后台分配 THP，但代价是 CPU 用量升高。指定 0 值将强制继续扫描。
+       </para>
+      </listitem>
+     </varlistentry>
+
+     <varlistentry>
+      <term><filename>/sys/kernel/mm/transparent_hugepage/khugepaged/alloc_sleep_millisecs</filename>
+      </term>
+      <listitem>
+       <para>
+         此参数用于控制当 <command>khugepaged</command> 无法在后台分配 TPH 时要休眠多久，以等待 <command>kswapd</command> 和 <command>kcompactd</command> 采取措施。
+       </para>
+      </listitem>
+    </varlistentry>
+   </variablelist>
+
+   <para>
+     <command>khugepaged</command> 的其余参数极少用于性能微调，但在 <filename>/usr/src/linux/Documentation/vm/transhuge.txt</filename> 中仍全面介绍了这些参数
+   </para>
+  </sect2>
+  <sect2 xml:id="cha-tuning-memory-vm-more">
+   <title>其他 VM 参数</title>
+   <para>
+    有关 VM 可调参数的完整列表，请参见 <filename>/usr/src/linux/Documentation/sysctl/vm.txt</filename>（安装 <systemitem class="resource">kernel-source</systemitem> 软件包后会提供此文件）。
+   </para>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="cha-tuning-memory-monitoring">
+  <title>监视 VM 行为</title>
+
+  <para>
+   一些可帮助监视 VM 行为的简单工具：
+  </para>
+
+  <orderedlist spacing="normal">
+   <listitem>
+    <para>
+     vmstat：此工具提供有关 VM 正在执行操作的概述。有关详细信息，请参见<xref linkend="sec-util-multi-vmstat"/>。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <filename>/proc/meminfo</filename>：此文件提供内存使用位置的明细。有关详细信息，请参见<xref linkend="sec-util-memory-meminfo"/>。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <command>slabtop</command>：此工具提供有关内核 slab 内存用量的详细信息。buffer_head、dentry、inode_cache、ext3_inode_cache 等是主要缓存。软件包 <systemitem class="resource">procps</systemitem> 中提供了此命令。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+    <filename>/proc/vmstat</filename>：此文件提供内部 VM 行为的明细。所包含信息为实施特定，不一定始终提供。某些信息会复制到 <filename>/proc/meminfo</filename> 中，其他信息可由实用程序以友好方式呈现。为实现最大效用，需要监视此文件一段时间，以观察变化比率。很难从其他源派生的最重要信息片段如下：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><literal>pgscan_kswapd_*、pgsteal_kswapd_*</literal></term>
+      <listitem>
+       <para>
+        这些片段分别报告自启动系统以来 <command>kswapd</command> 扫描并回收的页数。这些值的比率可解释为回收效率，低效率意味着系统正在奋力回收内存，并可能出现震荡。通常不必关注此处的轻量型活动。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>pgscan_direct_*、pgsteal_direct_*</literal></term>
+      <listitem>
+        <para>
+         这些片段分别报告应用程序直接扫描并回收的页数。此数字与 <literal>allocstall</literal> 计数器的增加相关联。此数字比 <command>kswapd</command> 活动更重要，因为这些事件指示进程处于停滞状态。此处的重量型活动结合 <command>kswapd</command> 以及较高的 <literal>pgpgin</literal>、<literal>pgpout</literal> 比率和/或较高的 <literal>pswapin</literal> 或 <literal>pswpout</literal> 比率，表示系统正在经历严重的震荡。
+        </para>
+        <para>
+         可以使用跟踪点来获取详细信息。
+        </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>thp_fault_alloc、thp_fault_fallback</literal></term>
+      <listitem>
+       <para>
+        这些计数器对应于应用程序直接分配的 THP 数目，以及 THP 不可用的次数和使用小页的次数。一般而言，除非应用程序对 TLB 压力非常敏感，否则较高的回退率是无害的。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>thp_collapse_alloc、thp_collapse_alloc_failed</literal></term>
+      <listitem>
+       <para>
+        这些计数器对应于 <command>khugepaged</command> 分配的 THP 数目，以及 THP 不可用的次数和使用小页的次数。较高的回退率意味着系统已碎片化，即使应用程序的内存用量允许 THP，也不会使用 THP。对 TLB 压力比较敏感的应用程序而言，这会成为一个问题。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><literal>compact_*_scanned、compact_stall、compact_fail、compact_success</literal></term> <listitem>
+       <para>
+        启用 THP 并且系统已碎片化时，这些计数器可能会增加。当应用程序在分配 THP 期间发生停滞时，会增加 <literal>compact_stall</literal>。剩余的计数器将计入扫描的页数，以及成功或失败的碎片整理事件数。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </listitem>
+  </orderedlist>
+ </sect1>
+</chapter>

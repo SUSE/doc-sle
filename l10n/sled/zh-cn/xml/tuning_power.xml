@@ -1,1 +1,531 @@
-../../../../xml/tuning_power.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="tuning_power.xml" version="5.0" xml:id="cha-tuning-power">
+
+
+ <title>电源管理</title>
+ <info>
+      <abstract>
+        <para>
+    电源管理旨在减少能源和散热系统的运行成本，同时使系统性能始终保持在符合当前要求的水平。因此，电源管理始终涉及在系统的实际性能需求与节能选项之间进行平衡。可在系统的不同级别实施和使用电源管理。高级配置和电源接口 (ACPI) 中已经定义了设备电源管理功能及其操作系统接口的一组规范。由于在服务器环境中的节能主要在处理器级别实现，因此本章将介绍一些主要概念，并将重点放在用于分析和影响相关参数的一些工具上。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+
+ <sect1 xml:id="sec-tuning-power-cpu">
+  <title>CPU 级别的电源管理</title>
+
+  <para>
+   在 CPU 级别，可以通过多种方式控制电源的使用。例如，通过使用空闲电源状态（C 状态）、更改 CPU 频率（P 状态）和限制 CPU（T 状态）进行控制。下列章节提供了每种方法的简短介绍及其对节能的重要性。在 <link xlink:href="https://uefi.org/sites/default/files/resources/ACPI_Spec_6_4_Jan22.pdf"/> 上可以找到详细规范。
+  </para>
+
+  <sect2 xml:id="sec-tuning-power-cpu-cstates">
+   <title>C 状态（处理器运行状态）</title>
+   <para>
+    现代处理器有称为 <literal>C-state</literal> 的若干节能模式。它们反映了空闲处理器关闭不使用的组件以实现节能的能力。
+   </para>
+   <para>
+    当某个处理器处于 <literal>C0</literal> 状态时，表示它正在执行指令。在任何其他 C 状态下运行的处理器都处于空闲状态。C 后面的数字越大，CPU 休眠模式越深：将关闭更多的组件，以节省电源。深度休眠状态可以节省大量能源。缺点是会造成延迟。即，CPU 需要花费更长时间恢复到 <literal>C0</literal>。根据工作负载（唤醒线程，触发 CPU 的使用，然后再次短时间进入休眠状态）和硬件（例如网络设备的中断活动），禁用最深度休眠状态能够显著提升总体性能。有关操作细节，请参见<xref linkend="sec-tuning-power-tools-cpupower-idle-info"/>。
+   </para>
+   <para>
+    某些状态还包括一些具有不同节能延迟级别的子模式。支持哪些 C 状态和子模式取决于相应的处理器。但是，<literal>C1</literal> 始终可用。
+   </para>
+   <para>
+    <xref linkend="tab-tuning-power-cstates"/>概述了最常见的 C 状态。
+   </para>
+   <table xml:id="tab-tuning-power-cstates">
+    <title>C 状态</title>
+    <tgroup cols="2">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         模式
+        </para>
+       </entry>
+       <entry>
+        <para>
+         定义
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         C0
+        </para>
+       </entry>
+       <entry>
+        <para>
+         运行状态。CPU 完全开启。
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         C1
+        </para>
+       </entry>
+       <entry>
+        <para>
+         第一种空闲状态。通过软件停止 CPU 主要内部时钟。总线接口单元和 APIC 保持全速运行。
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         C2
+        </para>
+       </entry>
+       <entry>
+        <para>
+         通过硬件停止 CPU 主要内部时钟。在此状态下，处理器会保留所有软件可见状态，但通过中断唤醒时可能需要更长时间。
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         C3
+        </para>
+       </entry>
+       <entry>
+        <para>
+         停止所有 CPU 内部时钟。处理器不需要保持其缓存的连贯性，但需要维持其他状态。某些处理器的 C3 状态存在差异，不同体现在通过中断将处理器唤醒所需的时间长短。
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </table>
+   <para>
+    为了避免不必要的能耗，建议分别在启用和禁用深度休眠状态的情况下对工作负载进行测试。有关详细信息，请参见<xref linkend="sec-tuning-power-tools-cpupower-idle-info"/>或 <command>cpupower-idle-set(1)</command> 手册页。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-tuning-power-cpu-pstates">
+   <title>P 状态（处理器性能状态）</title>
+   <para>
+    当处理器运行时（处于 C0 状态），它可能处于多个 CPU 性能状态<literal>（P 状态）</literal>的其中之一。C 状态反映空闲状态（除 C0 外全部处于空闲状态），而 <literal>P 状态</literal>则是反映与 CPU 频率和电压相关的运行状态。
+   </para>
+   <para>
+    P 状态数字越大，处理器的运行频率和电压越低。P 状态的数字与特定的处理器相关，在不同类型的实施方式各不相同。但是，<literal>P0</literal> 始终是性能最高的状态（<xref linkend="sec-tuning-cpu-power-turbo"/>中所述的情况除外）。P 状态的数字越大，表示处理器速度越慢，能耗越低。例如，与在 <literal>P1</literal> 状态下运行的处理器相比，处于 <literal>P3</literal> 状态的处理器运行速度更慢，能耗更少。要以任何 P 状态运行，处理器必须处于 <literal>C0</literal> 状态，这意味着它正在工作而不是处于空闲状态。ACPI 规范中还定义了 CPU P 状态，具体请参见 <link xlink:href="http://www.acpi.info/spec.htm"/>。
+   </para>
+   <para>
+    可以单独改变 C 状态和 P 状态。
+   </para>
+  </sect2>
+
+
+  <sect2 xml:id="sec-tuning-cpu-power-turbo">
+   <title>Turbo 功能</title>
+
+   <para>
+    使用 Turbo 功能可以在其他核心处于深度休眠状态时，动态 <literal>overtick</literal> 活动的 CPU 核心。这可以在提高活动线程性能的同时仍符合热设计功耗 (TDP) 的限制。
+   </para>
+   <para>
+    但是，CPU 核心可以使用睿频的条件与特定的体系结构相关。在<xref linkend="sec-tuning-power-tools-cpupower"/>中了解如何评估这些新功能的有效性。
+   </para>
+  </sect2>
+ </sect1>
+
+
+
+
+  <sect1 xml:id="sec-tuning-power-governors">
+   <title>内核中调节器</title>
+  <para> 内核中调节器属于 Linux 内核 CPUfreq 基础结构，可用于在运行时动态调整处理器频率。您可将调节器视为 CPU 的某种预配置电源模式。CPUfreq 调节器使用 P 状态来更改频率和降低能耗。动态调节器可以根据 CPU 用量切换 CPU 频率，以便在不牺牲性能的情况下实现节能。
+  </para>
+   <para>
+    以下调节器可用于 CPUfreq 子系统：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>性能调节器</term>
+     <listitem>
+      <para>
+       将 CPU 频率静态设置为可能的最高频率，以实现最佳性能。因此，节能不是此调节器的重点。
+      </para>
+      <para>另请参见 <xref linkend="sec-tuning-power-options-p-states"/>.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>节能调节器</term>
+     <listitem>
+      <para>
+       将 CPU 频率静态设置为可能的最低频率。这会对性能造成严重影响，因为不管处理器有多忙，系统都不会超过此频率运行。一个重要的例外是 <literal>intel_pstate</literal>，它默认采用<literal>节能</literal>模式。这是硬件特定的决策使然，但在功能上其运行方式与<literal>按需</literal>调节器类似。
+      </para>
+      <para>
+       但是，使用此调节器通常不会产生预期的节能效果，因为往往是在进入 C 状态后处于空闲状态时才能实现最大节能。使用节能调节器时，处理器将以最低的频率运行，因此需要更长的时间才能完成。这意味着，它会运行更长时间，直到系统能够进入空闲 C 状态为止。
+      </para>
+      <para>
+       微调选项：可以调整调节器可用的最小频率范围（例如，使用 <command>cpupower</command> 命令行工具）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>按需调节器</term>
+     <listitem>
+      <para>
+       动态 CPU 频率策略的内核实施：此调节器会监视处理器用量。用量超过特定阈值时，调节器会将频率设置为可用的最高频率。如果用量低于阈值，将使用下一个最低频率。如果系统还是处于利用率低的状态，则再次降低频率，直到设置最低可用频率为止。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <important>
+   <title>驱动程序和内核中调节器</title>
+   <para>并非所有驱动程序都会使用内核中调节器在运行时动态调整电源频率。例如 <literal>intel_pstate</literal> 驱动程序会自我调整电源频率。使用 <command>cpupower frequency-info</command> 命令可以确定系统使用的驱动程序。</para>
+   
+   
+   </important>
+  </sect1>
+
+  
+ <sect1 xml:id="sec-tuning-power-tools-cpupower">
+  <title><systemitem class="resource">cpupower</systemitem> 工具</title>
+   <para><command>cpupower</command> 工具旨在提供给定计算机上支持的<emphasis>所有</emphasis> CPU 电源相关参数的概述，包括睿频（或加速）状态。使用该工具集可以查看和修改内核相关的 CPUfreq 和 cpuidle 系统的设置，以及与频率调整或空闲状态无关的其他设置。集成式监视框架可以访问内核相关的参数和硬件统计。因此，它非常适用于性能评测。另外，它还可帮助您识别睿频状态与空闲状态之间的依赖性。
+   </para>
+   <para> 安装 <systemitem class="resource">cpupower</systemitem> 软件包后，使用 <command>cpupower --help</command> 查看可用的 <command>cpupower</command> 子命令。使用 <command>man cpupower</command> 可访问一般手册页，使用 <command>man cpupower-<replaceable>SUBCOMMAND</replaceable></command> 可访问子命令的手册页。
+   </para>
+
+   <sect2 xml:id="sec-tuning-power-tools-cpupower-freq-info">
+    <title>使用 <command>cpupower</command> 查看当前设置</title>
+    <para>
+     <command>cpupower frequency-info</command> 命令显示内核中使用的 cpufreq 驱动程序的统计。此外，它还会显示 BIOS 中是否支持和启用了睿频（或加速）状态。如果不带任何选项运行，它将显示如下输出：
+    </para>
+    <example>
+     <title><command>cpupower frequency-info</command> 的示例输出</title>
+     <screen><prompt role="root"># </prompt>cpupower frequency-info
+analyzing CPU 0:
+  driver: intel_pstate
+  CPUs which run at the same hardware frequency: 0
+  CPUs which need to have their frequency coordinated by software: 0
+  maximum transition latency: 0.97 ms.
+  hardware limits: 1.20 GHz - 3.80 GHz
+  available cpufreq governors: performance, powersave
+  current policy: frequency should be within 1.20 GHz and 3.80 GHz.
+                  The governor "powersave" may decide which speed to use
+                  within this range.
+  current CPU frequency is 3.40 GHz (asserted by call to hardware).
+  boost state support:
+    Supported: yes
+    Active: yes
+    3500 MHz max turbo 4 active cores
+    3600 MHz max turbo 3 active cores
+    3600 MHz max turbo 2 active cores
+    3800 MHz max turbo 1 active cores</screen>
+    </example>
+    <para>
+     要获取所有 CPU 的当前值，请使用 <command>cpupower -c all frequency-info</command>。
+    </para>
+   </sect2>
+   <sect2 xml:id="sec-tuning-power-tools-cpupower-idle-info">
+    <title>使用 <command>cpupower</command> 查看内核空闲统计</title>
+    <para>
+     <command>idle-info</command> 子命令显示内核中使用的 cpuidle 驱动程序的统计。它可以在使用 cpuidle 内核框架的所有体系结构上运行。
+    </para>
+    <example>
+     <title><command>cpupower idle-info</command> 的示例输出</title>
+     <screen><prompt role="root"># </prompt>cpupower idle-info
+CPUidle driver: intel_idle
+CPUidle governor: menu
+
+Analyzing CPU 0:
+Number of idle states: 6
+Available idle states: POLL C1-SNB C1E-SNB C3-SNB C6-SNB C7-SNB
+POLL:
+Flags/Description: CPUIDLE CORE POLL IDLE
+Latency: 0
+Usage: 163128
+Duration: 17585669
+C1-SNB:
+Flags/Description: MWAIT 0x00
+Latency: 2
+Usage: 16170005
+Duration: 697658910
+C1E-SNB:
+Flags/Description: MWAIT 0x01
+Latency: 10
+Usage: 4421617
+Duration: 757797385
+C3-SNB:
+Flags/Description: MWAIT 0x10
+Latency: 80
+Usage: 2135929
+Duration: 735042875
+C6-SNB:
+Flags/Description: MWAIT 0x20
+Latency: 104
+Usage: 53268
+Duration: 229366052
+C7-SNB:
+Flags/Description: MWAIT 0x30
+Latency: 109
+Usage: 62593595
+Duration: 324631233978</screen>
+    </example>
+    <para>
+     使用 <command>cpupower idle-info</command> 找出支持的处理器空闲状态后，可以使用 <command>cpupower idle-set</command> 命令禁用单个状态。通常，用户希望禁用最深度的休眠状态，例如：
+    </para>
+<screen><prompt role="root"># </prompt>cpupower idle-set -d 5</screen>
+
+    <para>或者，禁用延迟等于或高于 <literal>80</literal> 的所有 CPU：</para>
+    <screen><prompt role="root"># </prompt>cpupower idle-set -D 80</screen>
+
+    
+
+     
+   </sect2>
+   <sect2 xml:id="sec-tuning-power-tools-cpupower-monitor">
+    <title>使用 <command>cpupower</command> 监视内核和硬件统计</title>
+    <para>
+     使用 <command>monitor</command> 子命令可以报告处理器拓扑，以及监视特定时间段内的频率和空闲电源状态统计。默认间隔为 <literal>1</literal> 秒，但可以使用 <option>-i</option> 来更改。工具中实施有独立的处理器休眠状态和频率计数器 — 其中一些可从内核统计中检索，另一些可从硬件寄存器中读取。可用的监视器取决于底层硬件和系统。使用 <command>cpupower monitor -l</command> 可以列出这些监视器。有关各个监视器的说明，请参见 cpupower-monitor 手册页。
+    </para>
+    <para>
+     <command>monitor</command> 子命令可让您执行性能评测。要将特定工作负载的内核统计与硬件统计进行比较，请串联相应的命令，例如：</para>
+
+     <screen><command>cpupower</command> <option>monitor</option> db_test.sh</screen>
+    <example xml:id="ex-cpupower-monitor">
+     <title><command>cpupower monitor</command> 示例输出</title>
+<screen><prompt role="root"># </prompt>cpupower monitor
+|Mperf                   || Idle_Stats
+ <co xml:id="co-cpupower-mon-mperf"/>                         <co xml:id="co-cpupower-mon-idle"/> 
+CPU | C0   | Cx   | Freq || POLL | C1   | C2   | C3
+   0|  3.71| 96.29|  2833||  0.00|  0.00|  0.02| 96.32
+   1| 100.0| -0.00|  2833||  0.00|  0.00|  0.00|  0.00
+   2|  9.06| 90.94|  1983||  0.00|  7.69|  6.98| 76.45
+   3|  7.43| 92.57|  2039||  0.00|  2.60| 12.62| 77.52
+     </screen>
+     <calloutlist>
+      <callout arearefs="co-cpupower-mon-mperf">
+       <para>
+        Mperf 显示 CPU 在一段时间内的平均频率，包括加速频率。此外，它还会显示 CPU 处于活动状态 (<literal>C0</literal>) 或任意休眠状态 (<literal>Cx</literal>) 的时间百分比。由于睿频状态由 BIOS 管理，因此无法获取给定瞬间的频率值。在具备睿频功能的新式处理器上，只能通过 Mperf 监视器找出特定 CPU 的运行频率的信息。
+       </para>
+      </callout>
+      <callout arearefs="co-cpupower-mon-idle">
+       <para>
+        Idle_Stats 显示 cpuidle 内核子系统的统计。每当进入或退出空闲状态，内核都会更新这些值。因此，当测量开始或结束时如果核心处于空闲状态已有一段时间，这些值可能会有点不准确。
+       </para>
+      </callout>
+     </calloutlist>
+     <para>
+      除了上述示例中所述的（一般）监视器以外，还可以使用其他体系结构特定的监视器。有关详细信息，请参见 <command>cpupower-monitor</command> 手册页。
+     </para>
+    </example>
+    <para>
+     通过比较各个监视器的值，可以找到关联性和依赖关系，并评估节能机制对于特定工作负载的效果。在<xref linkend="ex-cpupower-monitor" xrefstyle="select:label"/> 中可以看到，CPU <literal>0</literal> 处于空闲状态（<literal>Cx</literal> 的值接近 100%），但其运行频率却非常高。这是因为，CPU <literal>0</literal> 和 <literal>1</literal> 的频率值相同，这意味着两者之间存在某种依赖关系。
+    </para>
+   </sect2>
+   <sect2 xml:id="sec-tuning-power-tools-cpupower-freq-set">
+    <title>使用 <command>cpupower</command> 修改当前设置</title>
+    <para>
+     您可以 <systemitem class="username">root</systemitem> 身份使用 <command>cpupower frequency-set</command> 命令来修改当前设置。此命令可让您设置供调节器选择的最小或最大 CPU 频率值，或创建新的调节器。您还可以使用 <option>-c</option> 选项指定要修改哪些处理器的设置。如此可以轻松地为所有处理器使用一致的策略，而无需单独调整每个处理器的设置。有关更多细节和可用选项，请参见 <literal>cpupower-frequency-set</literal> 手册页，或运行 <command>cpupower frequency-set</command>
+     <option>--help</option>。
+    </para>
+   </sect2>
+  </sect1>
+
+ <sect1 xml:id="sec-tuning-power-options">
+  <title>特殊微调选项</title>
+
+  <para>
+   下列章节重点介绍一些重要设置。
+  </para>
+
+  <sect2 xml:id="sec-tuning-power-options-p-states">
+   <title>P 状态的微调选项</title>
+   <para>
+    CPUfreq 子系统提供 P 状态的多个微调选项：您可以在不同的调节器之间切换、影响要使用的最小或最大 CPU 频率，或更改单个调节器参数。
+   </para>
+   <para>
+    要在运行时切换到另一个调节器，请将 <option>-g</option> 选项与 <command>cpupower frequency-set</command> 结合使用。例如，运行以下命令（以 <systemitem class="username">root</systemitem> 身份）会激活性能调节器：
+   </para>
+<screen><prompt role="root"># </prompt>cpupower frequency-set -g performance</screen>
+   <para>
+    要设置可供调节器选择的最小或最大 CPU 频率值，请分别使用 <option>-d</option> 或 <option>-u</option> 选项。
+   </para>
+   
+   
+
+   
+  </sect2>
+
+  
+
+  
+ </sect1>
+
+ <sect1 xml:id="sec-tuning-power-trouble">
+  <title>查错</title>
+
+  <variablelist>
+   <varlistentry>
+    <term>是否已启用 BIOS 选项？</term>
+    <listitem>
+     <para>
+      要使用 C 状态或 P 状态，请检查 BIOS 选项：
+     </para>
+     <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+       <para>
+        要使用 C 状态，请确保启用 <literal>CPU C 状态</literal>或类似选项，以便在空闲时实现节能。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        要使用 P 状态和 CPUfreq 调节器，请确保启用<literal>处理器性能状态</literal>选项或类似选项。
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        即使 P 状态和 C 状态可用，也可能存在 CPU 频率由平台固件管理的情况，从而导致性能欠佳。例如，如果已装载 <literal>pcc-cpufreq</literal>，则操作系统只会向固件发出提示，而后者可以随意忽略提示。要解决此问题，可以针对 BIOS 中管理的 CPU 频率，选择“操作系统管理”或类似选项。重引导后，将使用替代的驱动程序，但仍应仔细测量性能影响。
+       </para>
+      </listitem>
+
+     </itemizedlist>
+     <para>
+      升级 CPU 时，请务必同时升级 BIOS。BIOS 需要知道新 CPU 及其频率步进值，以便将此信息传递给操作系统。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>是否有日志文件信息？</term>
+    <listitem>
+     <para>
+      在 <systemitem class="daemon">systemd</systemitem> 日志（请参见<xref linkend="cha-journalctl"/>）中检查有关 CPUfreq 子系统的任何输出。其中只会报告严重错误。
+     </para>
+     <para>
+      如果您怀疑计算机上的 CPUfreq 子系统有问题，还可以启用额外的调试输出。为此，请使用 <command>cpufreq.debug=7</command> 作为引导参数，或以 <systemitem class="username">root</systemitem> 身份执行以下命令：
+     </para>
+<screen><prompt role="root"># </prompt>echo 7 &gt; /sys/module/cpufreq/parameters/debug</screen>
+     <para>
+      这会导致 CPUfreq 在状态转换时将更多信息记录到 <command>dmesg</command>，这些信息有助于进行诊断。但这些附加的内核消息输出可能相当详尽，因此请仅当您确信存在问题时才采用这种做法。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+
+ <sect1 xml:id="sec-tuning-power-more">
+  <title>更多信息</title>
+
+  <para>
+   配备基板管理控制器 (BMC) 的平台可能会提供可通过服务处理器访问的其他电源管理配置选项。这些配置与特定的供应商相关，因此不属于本指南讨论的主题。有关详细信息，请参见供应商提供的手册。
+   
+  </para>
+  <para os="sled">
+   有关 powerTOP 的详细信息，请参见 <link xlink:href="https://01.org/powertop"/>。
+  </para>
+ </sect1>
+
+ <sect1 xml:id="sec-tuning-power-tools-powertop">
+  <title>使用 powerTOP 监视能耗</title>
+  <para>
+   powerTOP 可帮助识别能耗不必要升高的原因。在笔记本电脑上，此工具特别有用，因为尽量减少能耗对笔记本电脑而言更为重要。此工具支持 Intel 和 AMD 处理器。以一般方式安装此工具：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in powertop</command></screen>
+  <para>
+   powerTOP 结合了各种信息来源（程序分析、设备驱动程序、内核选项、将处理器从休眠状态唤醒的中断数目和来源），并提供多种方式用于查看这些信息。您可以在交互模式下启动此工具，它将在 ncurses 会话中运行（请参见<xref linkend="fig-powertop-curses"/>）：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>powertop</command></screen>
+
+  <figure xml:id="fig-powertop-curses">
+   <title>处于交互模式的 powerTOP</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="powertop_ncurses.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="powertop_ncurses.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   powerTOP 支持将报告导出为 HTML 和 CSV。以下示例生成了一个运行 240 秒的报告：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>powertop --iteration=1 --time=240 --html=<replaceable>POWERREPORT.HTML</replaceable></command></screen>
+  <para>
+   对于在一段时间内运行独立报告此工具会很有用。以下示例运行 powerTOP 10 次，每次运行 20 秒，并为每次运行创建独立 HTML 报告：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>powertop --iteration=10 --time=20 --html=<replaceable>POWERREPORT.HTML</replaceable></command></screen>
+  <para>
+   这会创建 10 个带时戳的报告：
+  </para>
+  <screen>powerreport-20200108-104512.html
+powerreport-20200108-104451.html
+powerreport-20200108-104431.html
+[...]</screen>
+  <para>
+   HTML 报告如<xref linkend="fig-powertop-html"/>中所示：
+  </para>
+  <figure xml:id="fig-powertop-html">
+   <title>HTML powerTOP 报告</title>
+   <mediaobject>
+    <imageobject role="fo">
+     <imagedata fileref="powertop_html.png" width="75%" format="PNG"/>
+    </imageobject>
+    <imageobject role="html">
+     <imagedata fileref="powertop_html.png" width="75%" format="PNG"/>
+    </imageobject>
+   </mediaobject>
+  </figure>
+
+  <para>
+   HTML 报告的“微调”选项卡以及交互模式下的“可调参数”选项卡都提供了用于测试各种电源设置的命令。HTML 报告会列显命令，您可将其复制到 root 命令行进行测试，例如 <command>echo &apos;0&apos; &gt; &apos;/proc/sys/kernel/nmi_watchdog&apos;</command>。ncurses 模式提供 <literal>Good</literal> 和 <literal>Bad</literal> 之间的简单切换。选择 <literal>Good</literal> 会运行一个命令来启用节能；选择 <literal>Bad</literal> 则会关闭节能。通过一条命令启用所有 powerTOP 设置：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>powertop --auto-tune</command></screen>
+  <para>
+   重引导后，所有这些更改都不会留存。要进行永久性更改，请使用 <command>sysctl</command>、<command>udev</command> 或 <systemitem class="daemon">systemd</systemitem> 在引导时运行选定的命令。powerTOP 包含 <systemitem class="daemon">systemd</systemitem> 服务文件 <filename>/usr/lib/systemd/system/powertop.service</filename>。以下命令使用 <command>--auto-tune</command> 选项启动 powerTOP：
+  </para>
+  <screen>ExecStart=/usr/sbin/powertop --auto-tune</screen>
+  <para>
+   在启动 <systemitem class="daemon">systemd</systemitem> 服务之前，请仔细测试，以确定它是否能够获得所需的结果。您也许不希望 USB 键盘和鼠标进入节能模式，因为不断唤醒这些设备会很麻烦，另外，您还可能希望其他设备保持现有状态。为了更方便地进行测试和配置编辑，请使用 <command>awk</command> 提取 HTML 报告中的命令：
+  </para>
+  <screen><prompt>&gt; </prompt>awk -F '&lt;/?td ?&gt;' '/tune/ { print $4 }' <replaceable>POWERREPORT.HTML</replaceable></screen>
+  <para>
+   在校准模式下，powerTOP 会设置多个运行，即针对背光、CPU、Wi-Fi、USB 设备和磁盘使用不同的空闲设置，此外，在电池供电时，powerTOP 还可帮助您识别最佳的亮度设置：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>powertop --calibrate</command></screen>
+
+  <para>
+   您可以调用文件来创建工作负载，以提高校验的准确性：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>powertop --calibrate --workload=<replaceable>FILENAME</replaceable> --html=POWERREPORT.HTML</command></screen>
+
+  <para>
+   有关更多信息，请参见：
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     powerTOP 项目页位于：<link xlink:href="https://01.org/powertop"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="sec-util-proc-procinfo-sysctl"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="cha-systemd"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <xref linkend="cha-udev"/>
+    </para>
+   </listitem>
+  </itemizedlist>
+ </sect1>
+</chapter>

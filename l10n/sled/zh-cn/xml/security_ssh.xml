@@ -1,1 +1,1030 @@
-../../../../xml/security_ssh.xml
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="security_ssh.xml" version="5.0" xml:lang="zh-cn" xml:id="cha-ssh">
+
+ <title>使用 OpenSSH 保护网络操作</title>
+ <info>
+  <abstract>
+   <para>
+    OpenSSH 是 SUSE Linux Enterprise Server 随附的 SSH（安全外壳）实现，用于保护远程管理、文件传输和为不安全的协议构建隧道等网络操作。SSH 加密两台主机之间的所有流量（包括身份验证），以防范窃听和连接劫持。本章介绍基本操作以及主机密钥轮换和证书身份验证，这些操作对于管理大型 SSH 部署特别有用。
+   </para>
+  </abstract>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker>
+   </dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+ <sect1 xml:id="sec-ssh-overview">
+  <title>OpenSSH 概览</title>
+  <para>
+   SSH 是为网络中计算机之间的，或者网络中计算机与网络外部的系统之间的通讯提供端到端保护的一种协议。只要您有远程计算机的登录名和正确的身份验证方法，就能打开与任何其他计算机的 SSH 会话。
+  </para>
+  <para>
+   SSH 是一种客户端-服务器协议。任何运行 <systemitem class="daemon">sshd</systemitem> 守护程序的主机都可以接受来自任何其他主机的 SSH 连接。每个运行 <systemitem class="daemon">sshd</systemitem> 的主机都可以有自身的自定义配置，例如限制哪些用户可以进行访问，以及允许哪些身份验证方法。
+  </para>
+  <para>
+   身份验证和加密由加密密钥对提供。每个密钥对包括一个公共密钥和一个私用密钥。公共密钥用于加密，私用密钥用于解密。公共密钥可任意共享，而私用密钥必须受到保护且不可共享。当私用密钥被透露时，任何拥有它的人都可以伪装成原始密钥所有者。
+  </para>
+  <para>
+   SSH 提供很强的身份验证，因为服务器和客户端必须彼此进行身份验证。当客户端首次尝试打开 SSH 会话时，服务器会提供其公共主机密钥。如果客户端已拥有此密钥的副本（储存在客户端计算机上的 <filename>~/.ssh/known_hosts</filename> 中），则客户端知道服务器可信。如果客户端没有相应的主机密钥，则系统会询问它是否应信任服务器：
+  </para>
+  <screen>The authenticity of host '192.168.22.219 (192.168.22.219)'
+   can't be established. ECDSA key fingerprint is
+   SHA256:yXf6pjV26N0fegvEYIt3HgG95s3Q1X6WYRhtHLF99pUo.
+   Are you sure you want to continue connecting (yes/no/[fingerprint])?
+  </screen>
+  <para>
+   用户可以键入 yes、no，或粘贴其主机密钥指纹的副本。
+  </para>
+  <note>
+   <title>匹配主机密钥指纹</title>
+   <para>
+    将主机密钥指纹副本分发给用户可使他们能够校验是否收到了正确的主机密钥。当他们粘贴主机密钥指纹的副本时，<command>ssh</command> 将比较指纹，并在指纹匹配时接受提供的主机密钥。这可以确保匹配精确度高于视觉比较。
+   </para>
+   <para>
+    如果指纹不匹配，用户仍可以键入 <literal>yes</literal> 或者复制消息中的指纹，并完成连接。 
+   </para>
+  </note>
+  <para>
+   <package>openssh</package> 软件包安装服务器、客户端、文件传输命令和一些实用程序。
+  </para>
+  <para>
+   OpenSSH 支持多种不同类型的身份验证：
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>口令身份验证</term>
+    <listitem>
+     <para>
+      使用远程计算机上的任何系统登录名和口令。这是最简单且最灵活的身份验证方法，因为您可以在任何位置的任何计算机上打开 SSH 会话。但它也是最不安全的方法，因为这很容易遭到口令破解和按键记录攻击。
+      </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>公共密钥身份验证</term>
+    <listitem>
+     <para>
+      使用您的个人 SSH 密钥而不是登录名和口令进行身份验证。这种方法不如口令身份验证那么灵活，因为您只能从拥有您的私用身份密钥的计算机打开 SSH 会话。但此方法要强得多，因为它不容易遭到口令破解或按键记录攻击；攻击者必须拥有您的私用密钥并知道其通行口令。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+     <term>无通行口令公共密钥身份验证</term>
+     <listitem>
+      <para>
+       将公共密钥与没有通行口令的私用密钥搭配使用进行身份验证。这对于脚本和 cron 作业等自动化服务很有用。您必须保护私用密钥，因为获取其访问权限的任何人都可以轻松伪装成密钥所有者。
+      </para>
+      <para>
+       可以使用一个有用的工具 Keychain 和相关实用程序来管理受通行口令保护的密钥。Keychain 将通行口令保存在当前会话的内存中，并根据需要应用通行口令。重启动后，必须再次输入通行口令。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>证书身份验证</term>
+     <listitem>
+      <para>
+       OpenSSH 支持证书身份验证，可以简化密钥管理、增强身份验证和实现大规模 SSH 部署。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+
+  <para>
+   客户端将公共主机密钥的副本储存在 <filename>~/.ssh/known_hosts</filename> 中。如果主机的公共密钥已更改，则会拒绝连接并显示严肃的警告：
+  </para>
+  <screen>@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ECDSA key sent by the remote host is
+SHA256:keNu/rJFWmpQu9B0SjIuo8NLjbeDY/x3Tktpl7oDJqo.
+Please contact your system administrator.
+Add correct host key in /home/geeko/.ssh/known_hosts to get rid of this message.
+Offending ECDSA key in /home/geeko/.ssh/known_hosts:210
+You can use following command to remove the offending key:
+ssh-keygen -R 192.168.121.219 -f /home/geeko/.ssh/known_hosts
+ECDSA host key for 192.168.121.219 has changed and you have requested strict
+checking.
+Host key verification failed.</screen>
+  <para>
+   补救措施是使用严肃警告中给出的命令从 <filename>~/.ssh/known_hosts</filename> 中删除有问题的密钥，然后重新连接并接受新的主机密钥。
+   
+  </para>
+ <para>
+  默认情况下，<phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 会安装可提供以下命令的 OpenSSH 软件包：
+ </para>
+
+ <variablelist>
+  <varlistentry>
+   <term><command>ssh</command></term>
+   <listitem>
+    <para>
+     用来与远程主机发起 SSH 连接的客户端命令。
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>scp</command></term>
+   <listitem>
+    <para>
+     从/向远程主机安全复制文件。
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>sftp</command></term>
+   <listitem>
+    <para>
+     在客户端与 SFTP 服务器之间安全传输文件。
+     
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>ssh-add</command></term>
+   <listitem>
+    <para>
+     将私用密钥身份添加到身份验证代理 <command>ssh-agent</command>。
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>ssh-agent</command></term>
+   <listitem>
+    <para>
+     管理用户的私用身份密钥及其通行口令，以进行公共密钥身份验证。<command>ssh-agent</command> 将通行口令保存在内存中并根据需要应用通行口令，这样用户就不必重新键入通行口令进行身份验证。
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>ssh-copy-id</command></term>
+   <listitem>
+    <para>
+     将公共密钥安全地传输到远程主机，以设置公共密钥身份验证。
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>ssh-keyscan</command></term>
+   <listitem>
+    <para>
+     收集一些主机的公共 SSH 主机密钥，以填充 <filename>known_hosts</filename> 文件。
+    </para>
+   </listitem>
+  </varlistentry>
+ </variablelist>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-server-config">
+ <title>服务器强化</title>
+ <para>
+  OpenSSH 随附一个可用的默认服务器配置，但您还可以采取其他措施来保护服务器。
+ </para>
+ <important>
+  <title>保留对远程计算机的访问权限</title>
+  <para>
+   当您对任何 SSH 服务器进行更改时，可以对计算机进行物理访问，或者将活动的根 SSH 会话保持打开状态，直到您测试了更改并且一切正常。然后，如果出现问题，您可以还原或纠正更改。
+  </para>
+ </important>
+ <para>
+  默认服务器配置文件 <filename>/etc/ssh/sshd_config</filename> 包含默认配置，所有默认值已注释掉。可以通过输入您自己的不带注释的配置项目来覆盖任何默认项目，例如，以下示例设置不同的监听端口，并指定多宿主主机上的 IPv4 监听地址：
+ </para>
+ <screen>
+#Port 22
+Port <replaceable>2022</replaceable>
+
+#ListenAddress 0.0.0.0
+ListenAddress <replaceable>192.168.10.100</replaceable></screen>
+
+<important>
+ <title>更新 /etc/services</title>
+ <para>
+  使用非标准监听端口时，请先检查 <filename>/etc/services</filename> 文件中是否存在未使用的端口。选择大于 1024 的任何未使用端口。然后在 <filename>/etc/services</filename> 中记录您正在使用的端口。
+ </para>
+</important>
+
+ <para>
+  最佳实践是禁止 root 登录名。改用非特权用户登录到远程计算机，然后使用 <command>sudo</command> 以 root 身份运行命令。如果您确实想要允许 root 登录名，以下服务器配置示例演示了如何将服务器配置为仅接受 root 用户的公共密钥身份验证（<xref linkend="sec-ssh-public-key-auth"/>）。
+ </para>
+ <para>
+  <filename>/etc/ssh/sshd_config</filename> 的以下设置强化了访问控制：
+ </para>
+ <example xml:id="ex-sshd-conf">
+  <title>sshd.conf 示例</title>
+  <programlisting>
+# Check if the file modes and ownership of the user’s files and
+# home directory are correct before allowing them to login
+StrictModes yes
+
+# If your machine has more than one IP address, define which address or
+# addresses it listens on
+ListenAddress <replaceable>192.168.10.100</replaceable>
+
+# Allow only members of the listed groups to log in
+AllowGroups <replaceable>ldapadmins backupadmins</replaceable>
+
+# Or, deny certain groups. If you use both, DenyGroups is read first
+DenyGroups <replaceable>users</replaceable>
+
+# Allow or deny certain users. If you use both, DenyUsers is read first
+AllowUsers <replaceable>user1 user2@example.com user3</replaceable>
+DenyUsers <replaceable>user4 user5@192.168.10.10</replaceable>
+
+# Allow root logins only with public key authentication
+PermitRootLogin prohibit-password
+
+# Disable password authentication and allow only public key authentication
+# for all users
+PasswordAuthentication no
+
+# Length of time the server waits for a user to log in and complete the
+# connection. The default is 120 seconds:
+LoginGraceTime <replaceable>60</replaceable>
+
+# Limit the number of failed connection attempts. The default is 6
+MaxAuthTries <replaceable>4</replaceable>
+</programlisting>
+</example>
+
+ <para>
+  更改 <filename>/etc/ssh/sshd_config</filename> 后，运行语法检查程序：
+ </para>
+ <screen><prompt>&gt; </prompt><command>sudo</command> <command>sshd -t</command></screen>
+ <para>
+  语法检查程序只会检查语法是否正确，而不会查找配置错误。完成后，重载配置：
+ </para>
+ <screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl reload sshd.server</command></screen>
+ <para>
+  检查服务器关键目录的权限是否正确。
+ </para>
+ <para>
+  <filename>/etc/ssh</filename> 应采用 0755/drwxr-xr-x 模式，由 root:root 拥有。
+ </para>
+ <para>
+  私用密钥应该是 0600/-rw--------，由 root:root 拥有。
+ </para>
+ <para>
+  公共密钥应该是 0644/-rw-r--r--，由 root:root 拥有。
+ </para>
+ <para>
+  可以使用 PAM（可插拔身份验证模块）来限制从子网进行的登录。以下步骤针对特定的用户配置远程登录限制。这些限制将影响所有 OpenSSH 命令，包括 <command>ssh</command>（<xref linkend="sec-ssh-password-auth"/>）、<command>scp</command>（<xref linkend="sec-ssh-copy"/>）和 <command>sftp</command>（<xref linkend="sec-ssh-sftp"/>）。
+  </para>
+  <procedure xml:id="pro-ssh-restrict-logins">
+   <title>配置远程登录限制</title>
+   <para>
+    执行以下步骤来配置用户远程登录限制：
+    </para>
+   <step>
+    <para>
+     编辑文件 <filename>/etc/pam.d/sshd</filename>，在 <literal>auth</literal> 块的末尾追加以下内容：
+    </para>
+    <screen>auth required pam_access.so</screen>
+   </step>
+   <step>
+    <para>
+     编辑文件 <filename>/etc/security/access.conf</filename> 以配置各项限制。在此示例中，用户 <systemitem class="username">root</systemitem> 和 <systemitem class="username">tux</systemitem> 限制为从 192.168.1.0/255.255.255.0 网络登录，而 <systemitem class="username">wilber</systemitem> 用户只能从 192.168.2.0/255.255.255.0 网络内部登录：
+    </para>
+<screen>
++ : root : <replaceable>192.168.1.0</replaceable>/<replaceable>255.255.255.0</replaceable>
++ : tux : <replaceable>192.168.1.0</replaceable>/<replaceable>255.255.255.0</replaceable>
++ : wilber : <replaceable>192.168.2.0</replaceable>/<replaceable>255.255.255.0</replaceable>
+- : ALL : ALL</screen>
+   <para>
+    请留意最后一行，该行拒绝所有其他用户从所有来源进行访问；另外请注意不要将您自己锁定在系统之外。
+   </para>
+   <para>
+    有关更多配置选项，请参见 <filename>/etc/security/access.conf</filename> 中的示例以及 <command>man access.conf</command>。
+   </para>
+   </step>
+  </procedure>
+  <warning>
+   <title>不要使用 pam-config</title>
+   <para>
+    在此处请不要使用 <command>pam-config</command> 实用程序。它仅支持 <systemitem>git pam_access</systemitem> 作为全局模块。以上配置不适合全局使用于所有服务，它可能会完全拒绝访问系统。
+   </para>
+  </warning>
+ </sect1>
+
+<sect1 xml:id="sec-ssh-password-auth">
+  <title>口令身份验证</title>
+  <para>
+   使用口令身份验证时，只需获得远程计算机上用户的登录名和口令，在远程计算机上设置并运行 <systemitem class="daemon">sshd</systemitem> 即可。不需要任何个人 SSH 密钥。在以下示例中，用户 suzanne 打开与主机 sun 的 SSH 会话：
+  </para>
+<screen><prompt>&gt; </prompt><command>ssh suzanne@sun</command>
+</screen>
+  <para>
+   系统将提示 suzanne 输入远程口令。键入 <literal>exit</literal> 并按 <keycap>Enter</keycap> 关闭 SSH 会话。
+  </para>
+  <para>
+   如果两台计算机上的用户名相同，则您可以省略用户名，因为使用 <command>ssh <replaceable>HOST_NAME</replaceable></command> 就足够了。成功完成身份验证后，可以通过命令行执行操作，或使用交互式应用程序（例如文本模式的 YaST）。
+  </para>
+  <para>
+   您还可以使用 <command>ssh <replaceable>USER_NAME HOST COMMAND</replaceable></command> 语法在远程系统上运行非交互式命令（登录，运行命令，然后所有会话通过一条命令关闭）。必须正确地将 <replaceable>COMMAND</replaceable> 括在引号中。可以像在本地外壳中一样串联多个命令：
+  </para>
+
+<screen><prompt>&gt; </prompt><command>ssh suzanne@sun "df -h &amp;&amp; du -sh  /home"</command>
+<prompt>&gt; </prompt><command>ssh suzanne@sun "cat /etc/os-release &amp;&amp; uptime"</command></screen>
+
+
+  </sect1>
+
+   <sect1 xml:id="sec-ssh-authentic-gen-key">
+   <title>管理客户端和主机加密密钥</title>
+   <para>
+     有多种密钥类型可供选择：DSA、RSA、ECDSA、ECDSA-SK、Ed25519 和 Ed25519-SK。DSA 在多年前已弃用，并且在 OpenSSH 7.0 中已禁用，请不要使用它。RSA 是最通用的类型，因为它问世较早，且使用较为广泛。
+   </para>
+   <para>
+     Ed25519 和 ECDSA 更强且更快。Ed25519 被认为是最强的密钥类型。如果您必须为不支持 Ed25519 的早期客户端提供支持，请同时创建 Ed25519 和 RSA 主机密钥。
+   </para>
+   <note>
+     <title>早期的客户端不安全</title>
+     <para>
+       某些早期的 SSH 客户端不支持 ECDSA 和 ED25519。ECDSA 和 ED25519 已在 2014 年随 OpenSSH 6.5 一起发布。使安全服务保持更新非常重要，如果可能的话，请不要允许使用不安全的早期客户端。
+     </para>
+   </note>
+   <para>
+     SSH 密钥有两种用途：使用主机密钥对服务器进行身份验证、对客户端进行身份验证。主机密钥储存在 <filename>/etc/ssh</filename> 中。客户端密钥是用户的个人密钥，储存在 <filename>/home/<replaceable>user</replaceable>/.ssh</filename> 中。安装 OpenSSH 时不会创建 <filename><replaceable>user</replaceable>/.ssh</filename>，因此它必须由用户创建。
+   </para>
+   <para>
+     主机密钥不能有通行口令。
+   </para>
+   <para>
+     在大多数情况下，私用客户端密钥应有强口令。
+   </para>
+   <important>
+    <title>保护 SSH 密钥</title>
+    <para>请务必维护所有密钥、主机和客户端的安全备份。
+    </para>
+   </important>
+
+   <sect2 xml:id="sec-create-ssh-key-client">
+     <title>创建客户端 SSH 密钥对</title>
+      <para>
+       以下过程说明如何创建客户端加密密钥。
+      </para>
+     <procedure xml:id="pro-create-ssh-client-keys">
+     <title>创建默认密钥和自定义密钥</title>
+    <step>
+     <para>
+      要使用默认参数（RSA，3072 位）生成客户端密钥对，请使用不带任何选项的 <command>ssh-keygen</command> 命令。使用强通行口令保护私用密钥：
+     </para>
+     <screen><prompt>&gt; </prompt><command>ssh-keygen</command>
+Generating public/private rsa key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in id_rsa
+Your public key has been saved in id_rsa.pub
+The key fingerprint is:
+SHA256:z0uJIuc7Doy07bFTe1ppZHLVrkD/bWWlBAF/PcHjblU user@host2
+The key's randomart image is:
++---[RSA 3072]----+
+|          ..o... |
+|           o . +E|
+|        . . o +.=|
+|       . o . o o+|
+|  .   . S . . o +|
+| . =  .= * + . = |
+|  o *.o.= * . +  |
+|   ..Bo+.. . .   |
+|    oo==  .      |
++----[SHA256]-----+</screen>
+    </step>
+    <step>
+      <para>
+        创建一个位长度较长的 RSA 密钥对：
+      </para>
+      <screen><prompt>&gt; </prompt><command>ssh-keygen -b 4096</command></screen>
+      <para>
+        OpenSSH RSA 密钥最多可以包含 16,384 位。但是，较长的位长度不一定更符合需求。有关详细信息，请参见 GnuPG 常见问题网页：<link xlink:href="https://www.gnupg.org/faq/gnupg-faq.html#no_default_of_rsa4096"/>。
+      </para>
+    </step>
+    <step>
+      <para>
+      使用自定义名称和注释创建 RSA 密钥对：
+    </para>
+    <screen><prompt>&gt; </prompt><command>ssh-keygen -f <replaceable>backup-server-key -C "infrastructure backup server"</replaceable></command>
+      </screen>
+    </step>
+    <step>
+     <para>
+       使用自定义名称和注释创建 Ed25519 密钥对：
+     </para>
+     <screen><prompt>&gt; </prompt><command>ssh-keygen -t ed25519 -f <replaceable>ldap-server-key -C "Internal LDAP server"</replaceable></command>
+     </screen>
+     <para>
+       Ed25519 密钥固定为 256 位，其加密强度相当于 RSA 4096。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+   <sect2 xml:id="sec-create-ssh-host-keys">
+    <title>创建 SSH 服务器主机密钥</title>
+    <para>
+      主机密钥的管理方式略有不同。主机密钥不能有通行口令，密钥对储存在 <filename>/etc/ssh</filename> 中。在安装 OpenSSH 时，它会自动生成一组主机密钥，如以下示例所示：
+    </para>
+    <screen><prompt>&gt; </prompt><command>ls -l /etc/ssh</command>
+total 608
+-rw------- 1 root root 577834 2021-05-06 04:48 moduli
+-rw-r--r-- 1 root root   2403 2021-05-06 04:48 ssh_config
+-rw-r----- 1 root root   3420 2021-05-06 04:48 sshd_config
+-rw------- 1 root root   1381 2022-02-10 06:55 ssh_host_dsa_key
+-rw-r--r-- 1 root root    604 2022-02-10 06:55 ssh_host_dsa_key.pub
+-rw------- 1 root root    505 2022-02-10 06:55 ssh_host_ecdsa_key
+-rw-r--r-- 1 root root    176 2022-02-10 06:55 ssh_host_ecdsa_key.pub
+-rw------- 1 root root    411 2022-02-10 06:55 ssh_host_ed25519_key
+-rw-r--r-- 1 root root     96 2022-02-10 06:55 ssh_host_ed25519_key.pub
+-rw------- 1 root root   2602 2022-02-10 06:55 ssh_host_rsa_key
+-rw-r--r-- 1 root root    568 2022-02-10 06:55 ssh_host_rsa_key.pub</screen>
+
+    <para>
+      <command>ssh-keygen</command> 有一个特殊选项 <option>-A</option>，该选项用于创建新的主机密钥。这将为不存在主机密钥的每种密钥类型创建新密钥，这些密钥使用默认密钥文件路径，附带空通行口令，为密钥类型使用默认位大小，并附带空注释。以下示例首先删除现有密钥，然后创建一个新集，以此创建一组全新的密钥：
+    </para>
+    <screen><prompt>&gt; </prompt><command>sudo</command> <command>rm /etc/ssh/ssh_host*</command>
+<prompt>&gt; </prompt><command>sudo</command> <command>ssh-keygen -A</command></screen>
+    <para>
+      您可以通过首先仅删除要替换的密钥来替换选定的密钥对，因为 <command>ssh-keygen -A</command> 不会替换现有密钥。
+    </para>
+    <important>
+     <title>不要使用 DSA 密钥</title>
+      <para>
+        <command>ssh-keygen -A</command> 创建 DSA 密钥，不过，因为不安全，这种密钥在多年前已弃用。在 OpenSSH 7.0 中仍会创建这种密钥，但由于未在 <filename>sshd_config</filename> 中列出，这些密钥会被禁用。可以放心删除 DSA 密钥。
+      </para>
+    </important>
+    <para>
+     当您想要轮换主机密钥（请参见<xref linkend="sec-ssh-sshdserver-rotation"/>）时，必须单独创建新密钥，因为它们必须与旧主机密钥同时存在。您的客户端将使用旧密钥进行身份验证，然后接收新密钥列表。新密钥的名称需是唯一的，以免与旧密钥冲突。以下示例创建新的 RSA 和 Ed25519 主机密钥，这些密钥标有创建年份和月份。请记住，新的主机密钥不能有通行口令：
+    </para>
+    <screen><prompt>&gt; </prompt><command>cd /etc/ssh</command>
+<prompt>&gt; </prompt><command>sudo</command> <command>ssh-keygen -b 4096 -f "SSH_HOST_RSA_2022_02"</command>
+<prompt>&gt; </prompt><command>sudo</command> <command>ssh-keygen -t ed25519 -f "SSH_HOST_ED25519_2022_02"</command></screen>
+    <para>
+      您可以随意命名新密钥。
+    </para>
+   </sect2>
+  </sect1>
+
+   <sect1 xml:id="sec-ssh-sshdserver-rotation">
+   <title>轮换主机密钥</title>
+   <para>
+    从版本 6.8 开始，OpenSSH 包含一个支持主机密钥轮换的协议扩展。服务器管理员必须定期停用旧的主机密钥并创建新密钥，例如，在密钥已遭泄露，或者有必要升级到更强密钥的情况下。在 OpenSSH 6.8 之前，如果在客户端计算机上的 <filename>ssh_config</filename> 中将 <literal>StrictHostKeyChecking</literal> 设置为 <literal>yes</literal>，则客户端上会出现警告，指出主机密钥已更改，因此不允许连接。然后，用户必须从其 <filename>known_hosts</filename> 文件中手动删除服务器的公共密钥，重新连接，并手动接受新密钥。任何自动 SSH 连接（例如安排的备份）都会失败。
+   </para>
+   <para>
+     新的主机密钥轮换方案提供了一种在不造成服务中断的情况下分发新密钥的方法。当客户端进行连接时，服务器会向其发送新密钥的列表。下次当用户登录时，系统会询问他们是否愿意接受更改。给用户几天时间进行连接并接收新密钥，然后去除旧密钥。客户端上的 <filename>known_hosts</filename> 文件会自动更新，在更新过程中会添加新密钥并去除旧密钥。
+   </para>
+    <para>
+      设置主机密钥轮换需要在服务器上创建新密钥，并对服务器上的 <filename>/etc/ssh/sshd_config</filename> 和客户端上的 <filename>/etc/ssh/ssh_config</filename> 进行一些更改。
+   </para>
+   <para>
+     首先，创建一个或多个新密钥。以下示例创建一个新的 RSA 密钥和一个新的 Ed25519 密钥，这两个密钥都带有注释。新密钥必须使用唯一的名称。一种有效的惯常做法是用创建日期命名密钥。请记住，主机密钥不能有通行口令：
+   </para>
+   <screen><prompt role="root"># </prompt><command>ssh-keygen -t rsa -f ssh_host_rsa_2022-01 -C "main server"</command>
+Generating public/private rsa key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ssh_host_rsa_2022-01
+Your public key has been saved in ssh_host_rsa_2022-01.pub
+The key fingerprint is:
+SHA256:F1FIF2aqOz7D3mGdsjzHpH/kjUWZehBN3uG7FM4taAQ main server
+The key's randomart image is:
++---[RSA 3072]----+
+|         .Eo*.oo |
+|          .B .o.o|
+|          o . .++|
+|         . o ooo=|
+|        S . o +*.|
+|         o o.oooo|
+|       .o ++oo.= |
+|       .+=o+o + .|
+|       .oo++..   |
++----[SHA256]-----+
+
+<prompt role="root"># </prompt><command>ssh-keygen -t ed25519 -f ssh_host_ed25519_2022-01 -C "main server"</command>
+Generating public/private ed25519 key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ssh_host_ed25519_2022-01
+Your public key has been saved in ssh_host_ed25519_2022-01.pub
+The key fingerprint is:
+SHA256:2p9K0giXv7WsRnLjwjs4hJ8EFcoX1FWR4nQz6fxnjxg main server
+The key's randomart image is:
++--[ED25519 256]--+
+|   .+o ...o+     |
+| . .... o *      |
+|  o..  o = o     |
+|  ..   .. o      |
+|   o. o S  .     |
+|  . oo.*+   E o  |
+|   + ++==..  = o |
+|    = +oo= o. . .|
+|     ..=+o=      |
++----[SHA256]-----+</screen>
+
+   <para>
+     请记录指纹，供用户校验新密钥。
+   </para>
+   <para>
+     将新密钥名称添加到 <filename>/etc/ssh/sshd_config</filename>，并取消注释任何使用中的现有密钥：
+   </para>
+   <screen>## Old keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+
+## New replacement keys
+HostKey /etc/ssh/ssh_host_rsa_2022-01
+HostKey /etc/ssh/ssh_host_ed25519_2022-01</screen>
+
+    <para>
+      保存更改，然后重启动 <systemitem class="daemon">sshd</systemitem>：
+    </para>
+    <screen><prompt role="root"># </prompt><command>systemctl restart sshd.service</command>
+    </screen>
+    <para>
+      客户端上的 <filename>/etc/ssh/ssh_config</filename> 文件必须包含以下设置：
+    </para>
+    <screen>UpdateHostKeys ask
+StrictHostKeyChecking yes</screen>
+    <para>
+      在客户端中通过打开 SSH 会话来测试连接到服务器，以接收新密钥列表。注销，然后重新登录。当您重新登录时，应会看到类似于以下消息的内容：
+    </para>
+    <screen>The server has updated its host keys.
+These changes were verified by the server's existing trusted key.
+Deprecating obsolete hostkey: ED25519
+SHA256:V28d3VpHgjsCoV04RBCZpLo5c0kEslCZDVdIUnCvqPI
+Deprecating obsolete hostkey:
+RSA SHA256:+NR4DVdbsUNsqJPIhISzx+eqD4x/awCCwijZ4a9eP8I
+Accept updated hostkeys? (yes/no):</screen>
+    <para>
+      可以将 <literal>UpdateHostKeys ask</literal> 设置为 <literal>UpdateHostKeys yes</literal> 以自动应用更改，并避免要求用户接受更改，不过，让用户检查更改并比较指纹会更安全。
+    </para>
+    <para>
+      更多信息:
+    </para>
+
+   <itemizedlist>
+    <listitem>
+      <para>
+        <xref linkend="sec-ssh-authentic-gen-key"/>
+      </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+       man 5 ssh_config、man 5 sshd_config
+     </para>
+    </listitem>
+   </itemizedlist>
+ </sect1>
+
+  <sect1 xml:id="sec-ssh-public-key-auth">
+  <title>公共密钥身份验证</title>
+  <para>
+   公共密钥身份验证使用您自己的个人身份密钥而不是用户帐户口令进行身份验证。
+  </para>
+  <para>
+   以下示例演示如何创建新的个人 RSA 密钥对，该密钥对带有注释，使您知道其用途。首先切换到您的 <filename>~/.ssh</filename> 目录（如果该目录不存在，请创建），然后创建新的密钥对。为该密钥对创建一个强通行口令，并将该通行口令写入到安全位置：
+  </para>
+  <screen><prompt>&gt; </prompt><command>cd ~/.ssh</command>
+<prompt>&gt; </prompt><command>ssh-keygen -C <replaceable>"web server1"</replaceable> -f <replaceable>id-web1</replaceable> -t rsa -b <replaceable>4096</replaceable></command></screen>
+  <para>
+   接下来，将新的公共密钥复制到您要访问的计算机。您在此计算机上必须已有一个用户帐户。通过 SSH 访问该计算机：
+  </para>
+  <screen><prompt>&gt; </prompt><command>ssh-copy-id -i <replaceable>id-web1 user@web1</replaceable></command></screen>
+  <para>
+   然后尝试使用新密钥登录：
+  </para>
+  <screen><prompt>&gt; </prompt><command>ssh -i <replaceable>id-web1 user@web1</replaceable></command>
+Enter passphrase for key 'id-web1':
+Last login: Sat Jul 11 11:09:53 2022 from 192.168.10.122
+Have a lot of fun...</screen>
+  <para>
+   系统应会要求您提供私用密钥通行口令，而不是您的用户帐户的口令。
+  </para>
+  <para>
+   要使公共密钥身份验证起作用，应在远程计算机上强制实施这种身份验证方法，并且不要允许口令身份验证（请参见<xref linkend="ex-sshd-conf"/>）。如果您在远程计算机上尚未获得公共密钥身份验证访问权限，则无法使用 <command>ssh-copy-id</command> 复制新的公共密钥，而必须使用其他方式，例如手动将其从 USB 记忆棒复制到远程用户帐户的 <filename>~/.ssh /authorized_keys</filename> 文件。公共密钥采用纯文本格式，因此您可以像复制任何文本一样复制它们。下面是 Ed25519 公共密钥的示例：
+  </para>
+  <screen>ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGtGHg2xn5KF4+OfejO9Bv+m
+   yRt5gc8/VunbTGB6d6+F shared server1</screen>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-passphrase-less-auth">
+  <title>无通行口令公共密钥身份验证</title>
+  <para>
+    这是不使用通行口令的公共密钥身份验证。创建不带通行口令的新密钥，然后像使用受通行口令保护的密钥一样使用新密钥。这对于脚本和 cron 作业等自动化服务很有用。但是，成功窃取私用密钥的任何人都可以轻松伪装为您的身份，因此您需要非常妥善地保护好无通行口令私用密钥。
+  </para>
+  <para>
+   如果不使用无通行口令密钥，您可以改用 Keychain，它能够记住您的私用密钥。您在系统启动时输入通行口令，然后在关机之前，Keychain 会一直记住这些通行口令。
+  </para>
+ </sect1>
+
+ 
+
+  <sect1 xml:id="sec-ssh-programm-x">
+   <title>在远程主机上启动 X11 应用程序</title>
+   <para>
+    您可以在本地计算机上运行安装在远程计算机上的图形应用程序。必须在远程计算机上的 <filename>/etc/ssh/sshd_config</filename> 文件中设置 <literal>X11Forwarding Yes</literal>。然后，当您结合 <option>-X</option> 选项运行 <command>ssh</command> 时，远程计算机上会自动设置 <envar>DISPLAY</envar> 变量，而且所有 X 输出都将通过 SSH 连接导出到本地计算机。此外，未获授权的个人无法拦截远程启动的 X 应用程序。
+   </para>
+   <para>
+    从远程计算机运行一个简单游戏（例如 GNOME Mines）以进行快速测试：
+   </para>
+   <screen><prompt>&gt; </prompt><command>ssh wilber@sun</command>
+Password:
+Last login: Tue May 10 11:29:06 2022 from 192.168.163.13
+Have a lot of fun...
+
+wilber@sun<prompt>&gt; </prompt> <command>gnome-mines</command></screen>
+   <para>
+     远程应用程序应显示在您的本地计算机上，就如同它安装在本地一样。（请注意，网络延迟可能会影响性能。）像平时一样关闭远程应用程序，例如单击“关闭”按钮。这只会关闭该应用程序，而您的 SSH 会话仍保持打开状态。
+   </para>
+
+   <important>
+    <title>X11 转发在 Wayland 上不起作用</title>
+    <para>
+     X11 转发需要 X Windows 系统，这是 SLE 上的默认要求，与 Wayland 显示服务器协议无关。X Windows 系统提供内置网络功能，而 Wayland 则不提供。SLE 不支持 Wayland。
+    </para>
+    <para>
+     使用以下命令来了解您的系统运行的是 X 还是 Wayland：
+    </para>
+    <screen><prompt>&gt; </prompt><command>echo $XDG_SESSION_TYPE</command>
+x11</screen>
+    <para>
+     如果使用的是 Wayland，则该命令的输出如以下示例所示：
+    </para>
+    <screen><prompt>&gt; </prompt><command>echo $XDG_SESSION_TYPE</command>
+wayland</screen>
+    <para>
+     systemd 检查方式是使用 <command>loginctl</command> 进行查询：
+    </para>
+     <screen><prompt>&gt; </prompt><command>loginctl show-session "$XDG_SESSION_ID" -p Type</command>
+Type=x11
+
+<prompt>&gt; </prompt><command>loginctl show-session "$XDG_SESSION_ID" -p Type</command>
+Type=wayland</screen>
+   </important>
+  </sect1>
+
+  
+  <sect1 xml:id="sec-ssh-programm-forwarding">
+   <title>代理转发</title>
+   <para>
+    添加 <option>-A</option> 选项可将 ssh-agent 身份验证机制转移到下一台计算机。这样，您就可以在不同计算机上工作而无需输入口令，但前提是：已将公钥分发给目标主机并在其上正确保存。（请参见<xref linkend="sec-ssh-public-key-auth"/>了解如何将公共密钥复制到其他主机。）
+   </para>
+   <para>
+    <literal>AllowAgentForwarding yes</literal> 是 <filename>/etc/ssh/sshd_config</filename> 中的默认设置。将它更改为 <literal>No</literal> 可以禁用它。
+   </para>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-copy">
+  <title><command>scp</command> — 安全复制</title>
+  <para>
+   <command>scp</command> 可将文件复制到远程计算机或从中复制文件。如果 jupiter 上的用户名不同于 sun 上的用户名，请使用 <option><replaceable>USER_NAME</replaceable>&amp;host</option> 格式指定后者的用户名。如果应将文件复制到其他目录而不是远程用户的主目录，请以 sun:<replaceable>DIRECTORY</replaceable> 形式指定该目录。下列示例显示了如何将文件从本地计算机复制到远程计算机，以及反向复制。
+  </para>
+
+<screen><prompt>&gt; </prompt>scp ~/MyLetter.tex tux@sun:/tmp <co xml:id="co-scp-local-remote"/>
+<prompt>&gt; </prompt>scp tux@sun:/tmp/MyLetter.tex ~ <co xml:id="co-scp-remote-local"/></screen>
+<calloutlist>
+ <callout arearefs="co-scp-local-remote">
+  <para>本地计算机到远程计算机</para>
+</callout>
+ <callout arearefs="co-scp-remote-local">
+  <para>远程计算机到本地计算机</para>
+ </callout>
+</calloutlist>
+  <tip>
+   <title><option>-l</option> 选项</title>
+   <para>
+    在 <command>ssh</command> 命令中，可以使用 <option>-l</option> 选项指定远程用户（替代 <option><replaceable>USER_NAME</replaceable>&amp;host</option> 格式）。在 <command>scp</command> 中，<option>-l</option> 选项用于限制 <command>scp</command> 所使用的带宽。
+   </para>
+  </tip>
+
+  <para>
+   输入正确的口令后，<command>scp</command> 将启动数据传输。它会显示复制的每个文件的进度条和剩余时间。使用 <option>-q</option> 选项可以隐藏所有输出。
+  </para>
+
+  <para>
+   <command>scp 还提供了对整个目录的递归复制功能。</command>命令
+  </para>
+
+<screen><prompt>&gt; </prompt>scp -r src/ sun:backup/</screen>
+
+  <para>
+   会将目录 <filename>src</filename> 的全部内容（包括所有子目录）复制到主机 sun 上的 <filename>~/backup</filename> 目录中。如果此子目录不存在，系统会自动创建该子目录。
+  </para>
+
+  <para>
+   <option>-p</option> 选项告知 <command>scp</command> 不要更改文件的时戳。<option>-C</option> 将对传送数据进行压缩。这可以最大限度地减少要传输的数据量，但同时会增加两台计算机的处理器的负担。
+  </para>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-sftp">
+  <title><command>sftp</command> — 安全文件传输</title>
+
+  <sect2 xml:id="sec-ssh-sftp-using">
+   <title>使用 <command>sftp</command></title>
+  <para>
+   如果您要将多个文件复制到其他位置或从中复制多个文件，使用 <command>sftp</command> 会很方便，它能够替代 <command>scp</command>。它会打开一个外壳，其中包含一组与普通 FTP 外壳类似的命令。在 sftp 提示符处键入 <command>help</command> 可获取可用命令的列表。<command>sftp</command> 手册页中提供了更多细节。
+  </para>
+
+<screen><prompt>&gt; </prompt>sftp sun
+Enter passphrase for key '/home/tux/.ssh/id_rsa':
+Connected to sun.
+sftp&gt; help
+Available commands:
+bye                                Quit sftp
+cd path                            Change remote directory to 'path'
+[...]</screen>
+  </sect2>
+  <sect2 xml:id="sec-ssh-sftp-perms">
+   <title>设置文件上载权限</title>
+   <para>
+    与使用普通的 FTP 服务器一样，用户不仅可以下载，而且可以使用 <command>put</command> 命令将文件上载到运行 SFTP 服务器的远程计算机。默认情况下，向远程主机上载文件时将使用与本地计算机上相同的权限。有两个选项可以自动更改这些权限：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>设置 umask</term>
+     <listitem>
+      <para>
+       umask 充当本地主机上原始文件的权限的过滤器。它还可以撤回权限：
+      </para>
+      <informaltable>
+       <tgroup cols="3">
+        <colspec colnum="1" colname="1" colwidth="33*"/>
+        <colspec colnum="2" colname="2" colwidth="33*"/>
+        <colspec colnum="3" colname="3" colwidth="33*"/>
+        <thead>
+         <row>
+          <entry>
+           <para>
+            原始权限
+           </para>
+          </entry>
+          <entry>
+           <para>
+            umask
+           </para>
+          </entry>
+          <entry>
+           <para>
+            上载的权限
+           </para>
+          </entry>
+         </row>
+        </thead>
+        <tbody>
+         <row>
+          <entry>
+           <para>
+            0666
+           </para>
+          </entry>
+          <entry>
+           <para>
+            0002
+           </para>
+          </entry>
+          <entry>
+           <para>
+            0664
+           </para>
+          </entry>
+         </row>
+         <row>
+          <entry>
+           <para>
+            0600
+           </para>
+          </entry>
+          <entry>
+           <para>
+            0002
+           </para>
+          </entry>
+          <entry>
+           <para>
+            0600
+           </para>
+          </entry>
+         </row>
+         <row>
+          <entry>
+           <para>
+            0775
+           </para>
+          </entry>
+          <entry>
+           <para>
+            0025
+           </para>
+          </entry>
+          <entry>
+           <para>
+            0750
+           </para>
+          </entry>
+         </row>
+        </tbody>
+       </tgroup>
+      </informaltable>
+      <para>
+       要在 SFTP 服务器上应用 umask，请编辑文件 <filename>/etc/ssh/sshd_configuration</filename>。搜索以 <literal>Subsystem sftp</literal> 开头的行，并添加包含所需设置的 <option>-u</option> 参数，例如：
+      </para>
+<screen>Subsystem sftp /usr/lib/ssh/sftp-server -u 0002</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>显式设置权限</term>
+     <listitem>
+      <para>
+       显式设置权限会为通过 SFTP 上载的所有文件设置相同的权限。使用 <option>-u</option> 指定三位数模式，例如 <literal>600</literal>、<literal>644</literal> 或 <literal>755</literal>。如果同时指定 <option>-m</option> 和 <option>-u</option>，将忽略 <literal>-u</literal>。
+      </para>
+      <para>
+       要在 SFTP 服务器上为上载的文件应用显式权限，请编辑文件 <filename>/etc/ssh/sshd_configuration</filename>。搜索以 <literal>Subsystem sftp</literal> 开头的行，并添加包含所需设置的 <option>-m</option> 参数，例如：
+      </para>
+<screen>Subsystem sftp /usr/lib/ssh/sftp-server -m 600</screen>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+ 
+
+
+  <sect2>
+   <title>保护 SSH 密钥</title>
+  <para>
+   建议将储存在 <filename>/etc/ssh/</filename> 中的私钥和公钥备份到安全的外部位置。这样就可以检测密钥修改事件，或者在安装新系统后再次使用旧密钥。
+  </para>
+  </sect2>
+
+  <sect2 xml:id="sec-ssh-authentic-agent">
+   <title>使用 <command>ssh-agent</command></title>
+   <para>
+    执行大量的安全外壳操作时，为每个此类操作键入 SSH 通行口令会很麻烦。因此，SSH 软件包提供了另一个工具 <command>ssh-agent</command>，用于在 X 会话或终端会话期间保留私用密钥。所有其他窗口或程序以 <command>ssh-agent</command> 客户端的形式启动。启动代理时，会设置一组环境变量，<command>ssh</command>、<command>scp</command> 或 <command>sftp</command> 将使用这些变量来查找用于自动登录的代理。有关细节，请参见 <command>ssh-agent</command> 手册页。
+   </para>
+   <para>
+    <command>ssh-agent</command> 启动后，您需要使用 <command>ssh-add</command> 添加自己的密钥。它会提示您输入通行口令。提供一次口令后，您便可在运行中的会话内部使用安全外壳命令，而无需再次进行身份验证。
+   </para>
+   <sect3 xml:id="sec-ssh-authentic-agent-x">
+    <title>在 X 会话中使用 <command>ssh-agent</command></title>
+    <para>
+     在 <phrase role="productname"><phrase os="sled">SUSE Linux Enterprise Desktop</phrase></phrase> 上，<command>ssh-agent</command> 会由 GNOME 显示管理器自动启动。要在 X 会话开始时同时调用 <command>ssh-add</command> 向代理添加您的密钥，请执行以下操作：
+    </para>
+    <procedure>
+     <step>
+      <para>
+       以所需用户的身份登录，并检查文件 <filename>~/.xinitrc</filename> 是否存在。
+      </para>
+     </step>
+     <step>
+      <para>
+       如果不存在，请使用现有模板，或从 <filename>/etc/skel</filename> 复制该文件：
+      </para>
+<screen>if [ -f ~/.xinitrc.template ]; then mv ~/.xinitrc.template ~/.xinitrc; \
+else cp /etc/skel/.xinitrc.template ~/.xinitrc; fi</screen>
+     </step>
+     <step>
+      <para>
+       如果您复制了该模板，请搜索以下几行并将其取消注释。如果 <filename>~/.xinitrc</filename> 已存在，请添加以下几行（不带注释符号）。
+      </para>
+<screen># if test -S "$SSH_AUTH_SOCK" -a -x "$SSH_ASKPASS"; then
+#       ssh-add &lt; /dev/null
+# fi</screen>
+     </step>
+     <step>
+      <para>
+       启动新的 X 会话时，系统会提示您输入 SSH 通行口令。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec-ssh-authentic-agent-terminal">
+    <title>在终端会话中使用 <command>ssh-agent</command></title>
+    <para>
+     在终端会话中，您需要手动启动 <command>ssh-agent</command>，然后调用 <command>ssh-add</command>。可通过两种方式启动代理。下面的第一个示例在现有外壳之上启动新的 Bash 外壳。第二个示例在现有外壳中启动代理，并按需修改环境。
+    </para>
+<screen><prompt>&gt; </prompt>ssh-agent -s /bin/bash
+eval $(ssh-agent)
+    </screen>
+    <para>
+     代理启动后，运行 <command>ssh-add</command> 以向代理提供您的密钥。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-port-forwarding">
+  <title>端口转发</title>
+
+  <para>
+   <command>ssh</command> 还可用于重定向 TCP/IP 连接。此功能也称为 <literal>SSH 隧道</literal>，它通过加密的通道将定向到特定端口的 TCP 连接重定向到另一台计算机。
+  </para>
+
+  <para>
+   使用以下命令可将定向到 jupiter 端口 25 (SMTP) 的所有连接重定向到 sun 上的 SMTP 端口。如果用户所用的 SMTP 服务器不具备 SMTP-AUTH 或 POP-before-SMTP 功能，此命令特别有用。从与网络相连的任意位置都可以将电子邮件传送到<quote>家庭</quote>邮件服务器进行递送。
+  </para>
+
+<screen><prompt role="root"># </prompt>ssh -L 25:sun:25 jupiter</screen>
+
+  <para>
+   同样，使用以下命令可将 jupiter 上的所有 POP3 请求（端口 110）转发到 sun 的 POP3 端口：
+  </para>
+
+<screen><prompt role="root"># </prompt>ssh -L 110:sun:110 jupiter</screen>
+
+  <para>
+   必须以 <systemitem class="username">root</systemitem> 身份执行这两个命令，因为连接指向有特权的本地端口。普通用户通过现有 SSH 连接发送和检索电子邮件。为此，必须将 SMTP 和 POP3 主机设置为 <literal>localhost</literal>。上述每个程序的手册页以及 <filename>/usr/share/doc/packages/openssh</filename> 下的 OpenSSH 软件包文档中提供了更多信息。
+  </para>
+ </sect1>
+
+ <sect1 xml:id="sec-security-ssh-moreinfo">
+  <title>更多信息</title>
+
+  <para/>
+
+  <variablelist>
+   <varlistentry>
+    <term><link xlink:href="https://www.openssh.com"/>
+    </term>
+    <listitem>
+     <para>
+      OpenSSH 主页
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><link xlink:href="https://en.wikibooks.org/wiki/OpenSSH"/>
+    </term>
+    <listitem>
+     <para>
+      OpenSSH Wikibook
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>man sshd</command>
+    </term>
+    <listitem>
+     <para>
+      OpenSSH 守护程序的手册页
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>man ssh_config</command>
+    </term>
+    <listitem>
+     <para>
+      OpenSSH SSH 客户端配置文件的手册页
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>man scp</command>
+    </term>
+    <term><command>man sftp</command>
+    </term>
+    <term><command>man slogin</command>
+    </term>
+    <term><command>man ssh</command>
+    </term>
+    <term><command>man ssh-add</command>
+    </term>
+    <term><command>man ssh-agent</command>
+    </term>
+    <term><command>man ssh-copy-id</command>
+    </term>
+    <term><command>man ssh-keyconvert</command>
+    </term>
+    <term><command>man ssh-keygen</command>
+    </term>
+    <term><command>man ssh-keyscan</command>
+    </term>
+    <listitem>
+     <para>
+      用于安全复制文件（<command>scp</command>、<command>sftp</command>）、用于登录（<command>slogin</command>、<command>ssh</command>）和用于管理密钥的多个二进制文件的手册页。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>
+     <filename>/usr/share/doc/packages/openssh-common/README.SUSE</filename>
+    </term>
+    <term>
+     <filename>/usr/share/doc/packages/openssh-common/README.FIPS</filename>
+    </term>
+    <listitem>
+     <para>
+      特定于 SUSE 软件包的文档；上游相关默认设置的更改、有关 FIPS 模式的说明等。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+</chapter>

@@ -1,1 +1,118 @@
-../../../../xml/security_ldap_active_directory_sync.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="security_ldap_active_directory_sync.xml" version="5.0" xml:id="sec-security-ldap-active-directory-sync">
+ <info>
+  <title>与 Microsoft Active Directory 同步</title>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+  <para>
+    389 Directory Server 支持同步 Microsoft Active Directory 中的某些用户和组内容，使 Linux 客户端能够使用 389 DS 获取其身份信息，而无需像一般情况下那样完成域加入过程。这也使得 389 DS 能够扩展自身的其他功能，并使用这些功能来处理从 Active Directory 同步的数据。
+  </para>
+
+  <sect2 xml:id="sec-security-ldap-synchronization-planning">
+  <title>规划同步拓扑</title>
+  <para>
+    由于同步的工作方式，此过程只涉及一个 389 Directory Server 和 Active Directory 服务器。Active Directory 服务器必须是完整的域控制器，而不是只读域控制器 (RODC)。在已同步的 DC 上不需要全局目录，因为 389 DS 仅复制域中单个林的内容。
+  </para>
+  <para>
+    必须首先选择数据流的方向。有三个选项：从 AD 流向 389 DS、从 389 DS 流向 AD，或双向。
+  </para>
+  <note>
+    <title>不同步口令</title>
+    <para>
+      无法在 389 DS 与 Active Directory 之间同步口令。这种情况将来可能会有改变，到时会支持从 Active Directory 到 389 DS 的口令流。
+    </para>
+    </note>
+    <para>
+      您的拓扑将如下图所示。389 Directory Server 和 Active Directory 拓扑可能不同，但最重要的因素是 389 DS 与 Active Directory 之间只存在单个连接。请务必在 389 DS 和 AD 的灾难恢复与备份计划中考虑到这一点，以确保仅正确恢复这些拓扑之间的单个复制连接。
+    </para>
+    <screen>
+┌────────┐     ┌────────┐         ┌────────┐     ┌────────┐
+│        │     │        │         │        │     │        │
+│ 389-ds │◀───▶│ 389-ds │◀ ─ ─ ─ ▶│   AD   │◀───▶│   AD   │
+│        │     │        │         │        │     │        │
+└────────┘     └────────┘         └────────┘     └────────┘
+    ▲               ▲                  ▲             ▲
+    │               │                  │             │
+    ▼               ▼                  ▼             ▼
+┌────────┐     ┌────────┐         ┌────────┐     ┌────────┐
+│        │     │        │         │        │     │        │
+│ 389-ds │◀───▶│ 389-ds │         │   AD   │◀───▶│   AD   │
+│        │     │        │         │        │     │        │
+└────────┘     └────────┘         └────────┘     └────────┘
+</screen>
+</sect2>
+
+<sect2 xml:id="sec-security-ldap-synchronization-ad-prerequisites">
+  <title>Active Directory 的先决条件</title>
+  <para>
+    需要一个拥有“复制目录更改”权限的安全组。例如，假设您创建了一个名为“Directory Server Sync”的组。可以按照“How to grant the &apos;Replicating Directory Changes&apos; permission for the Microsoft Metadirectory Services ADMA service account”（如何为 Microsoft Metadirectory Services ADMA 服务帐户授予“复制目录更改”权限）(<link xlink:href="https://docs.microsoft.com/en-US/troubleshoot/windows-server/     windows-security/grant-replicating-directory-changes-permission-adma-service"/>) 中的步骤设置此组。
+  </para>
+  <warning>
+    <title>需要强安全性</title>
+    <para>
+      应该将此组的成员安全性视为与域管理员的安全性同等重要。此组的成员能够从 Active Directory 环境中读取敏感内容，因此您应该为这些帐户使用随机生成的强服务帐户口令，并认真审计此组的成员资格。
+    </para>
+  </warning>
+  <para>
+    还应该创建一个服务帐户作为此组的成员。
+  </para>
+  <para>
+    您的 Active Directory 环境必须为 LDAPS 配置证书，以确保 389 DS 与 AD 之间的身份验证是安全的。无法将身份验证和通用安全服务 API/Kerberos (GSSAPI/KRB) 结合使用。
+  </para>
+</sect2>
+
+<sect2 xml:id="sec-security-ldap-synchronization-389ds-prerequisites">
+  <title>389 Directory Server 的先决条件</title>
+  <para>
+    必须事先使用组织单位 (OU) 为 389 Directory Server 配置一个后端数据库，以便将项同步到其中。
+  </para>
+  <para>
+    必须为 389 Directory Server 配置一个复本 ID，使该服务器类似于一个读写复本。（有关设置复制的细节，请参见<xref linkend="sec-security-ldap-replication"/>）。
+  </para>
+</sect2>
+
+<sect2 xml:id="sec-security-ldap-synchronization-agreement">
+  <title>创建从 Active Directory 到 389 Directory Server 的复制协议</title>
+  <para>
+    以下示例命令在 389 Directory Server 上运行，它将创建从 Active Directory 到 389 Directory Server 的复制协议：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt create --suffix <replaceable>dc=example,dc=com</replaceable></command> \
+  <command>--host <replaceable>AD-HOSTNAME</replaceable> --port 636 --conn-protocol LDAPS</command> \
+  --bind-dn <command>"<replaceable>cn=SERVICE-ACCOUNT,cn=USERS,dc=AD,dc=EXAMPLE,dc=COM</replaceable>"</command> \
+  <command>--bind-passwd "<replaceable>PASSWORD</replaceable>" --win-subtree "<replaceable>cn=USERS,dc=AD,dc=EXAMPLE,dc=COM</replaceable>"</command> \
+  <command>--ds-subtree <replaceable>ou=AD,dc=EXAMPLE,dc=COM</replaceable> --one-way-sync fromWindows</command> \
+  <command>--sync-users=on --sync-groups=on --move-action delete</command> \
+  <command>--win-domain <replaceable>AD-DOMAIN</replaceable> adsync_agreement</command></screen>
+
+<para>
+  创建该协议后，必须执行初始重新同步：
+</para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt init --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+
+<para>
+  使用以下命令检查初始化状态：
+</para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt init-status --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+
+<note>
+  <title>某些项不会同步</title>
+  <para>
+    在某些情况下，即使初始化状态报告为成功，某个项也可能不会同步。请检查 <filename>/var/log/dirsrv/slapd-INSTANCE-NAME/errors</filename> 中的 389 DS 日志文件。
+  </para>
+  </note>
+  <para>
+    使用以下命令检查协议状态：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt status --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+  <para>
+    对 Active Directory 或 389 Directory Server 拓扑执行维护时，可以使用以下命令来暂停协议：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt disable --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+  <para>
+    使用以下命令恢复协议：
+  </para>
+  <screen><prompt>&gt; </prompt><command>sudo</command> <command>dsconf <replaceable>INSTANCE-NAME</replaceable> repl-winsync-agmt enable --suffix <replaceable>dc=example,dc=com</replaceable> adsync_agreement</command></screen>
+</sect2>
+</sect1>

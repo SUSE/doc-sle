@@ -1,1 +1,461 @@
-../../../../xml/security_cryptctl.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="security_cryptctl.xml" version="5.0" xml:id="cha-configure-cryptctl">
+ <info>
+  <title>使用 cryptctl 对托管应用程序的储存区加密</title>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+
+   <para>
+    数据库和类似的应用程序常常托管在由第三方工作人员管理的外部服务器上。某些数据中心维护任务需要第三方工作人员直接访问受影响的系统。在此类情况下，为了满足隐私要求，就必须进行磁盘加密。
+   </para>
+   <para>
+    <command>cryptctl</command> 可让您使用 LUKS 加密敏感目录，并提供以下附加功能：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      加密密钥位于中心服务器上，而中心服务器可位于客户本地。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      系统会在计划外重引导后自动重新挂载加密分区。
+     </para>
+    </listitem>
+   </itemizedlist>
+  <para>
+   <command>cryptctl</command> 包括以下组件：
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     客户端是一台包含一个或多个加密分区的计算机，但不永久储存解密这些分区所必需的密钥。例如，客户端可以是云或托管计算机。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     由服务器来保存加密密钥，客户端可以请求这些密钥来解锁加密分区。
+    </para>
+    <para>
+     您也可以设置 <command>cryptctl</command> 服务器，以便在与 KMIP（密钥管理互操作性协议）1.3 兼容的服务器上储存加密密钥。在这种情况下，<command>cryptctl</command> 服务器将不储存客户端的加密密钥，而是依赖与 KMIP 兼容的服务器提供这些密钥。
+    </para>
+   </listitem>
+  </itemizedlist>
+  <warning>
+   <title><command>cryptctl</command> 服务器维护</title>
+   <para>
+    由于 <command>cryptctl</command> 服务器负责管理加密磁盘超时，而且还可以保存加密密钥（具体取决于配置），因此它应该由您自己直接控制，并仅由可信的人员管理。
+   </para>
+   <para>
+    此外，应定期对其进行备份。丢失服务器的数据意味着会失去客户端上加密分区的访问权限。
+   </para>
+  </warning>
+  <para>
+   为了处理加密，<command>cryptctl</command> 将 LUKS 与 aes-xts-256 加密法和 512 位密钥结合使用。可使用 TLS 通过证书校验来传输加密密钥。
+  </para>
+  <figure xml:id="fig-cryptctl-retrieve">
+   <title>使用 <command>cryptctl</command> 检索密钥（不连接 KMIP 服务器的模式）</title>
+   <mediaobject>
+    <imageobject role="html">
+     <imagedata fileref="cryptctl-keyretrieval.png" format="PNG"/>
+    </imageobject>
+    <imageobject role="fo">
+     <imagedata fileref="cryptctl-keyretrieval.svg" width="70%" format="SVG"/>
+    </imageobject>
+    <textobject role="description">
+     <phrase>The client asks the server for the disk decryption key, the server
+     responds</phrase>
+    </textobject>
+   </mediaobject>
+  </figure>
+  <note>
+   <title>安装 <command>cryptctl</command></title>
+   <para>
+    在继续前，请确保您要设置为服务器或客户端的所有计算机上都已安装软件包 <package>cryptctl</package>。
+   </para>
+  </note>
+  <sect1 xml:id="sec-configure-cryptctl-server">
+   <title>设置 <command>cryptctl</command> 服务器</title>
+   <para>
+    在您可以将一台计算机定义为 <command>cryptctl</command> 客户端之前，需将一台计算机设置为 <command>cryptctl</command> 服务器。
+   </para>
+   <para>
+    在开始之前，请选择是否要使用自我签名证书来保护服务器与客户端之间的通讯。如果不使用，请为服务器生成 TLS 证书，并通过证书颁发机构为该证书签名。
+   </para>
+   <para>
+    此外，可以让客户端使用由证书颁发机构签名的证书向服务器进行身份验证。要采取这项额外的安全措施，请务必在开始执行此过程之前准备好 CA 证书。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      以 <systemitem class="username">root</systemitem> 身份运行：
+     </para>
+     <screen><prompt role="root"># </prompt><command>cryptctl init-server</command></screen>
+    </step>
+    <step>
+     <para>
+      回答随后出现的每个提示问题，并在每回答一个问题后按 <keycap function="enter"/>。如果有默认的答案，提示末尾的方括号中会显示此答案。
+     </para>
+     <substeps>
+      <step>
+       <para>
+        创建一个极强的口令并妥善保护它。此口令可用于解锁服务器上注册的所有分区。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定 PEM 编码的 TLS 证书或证书链文件的路径，或者将该字段留空以创建自我签名证书。如果指定了路径，请使用绝对路径。
+       </para>
+      </step>
+      <step>
+       <para>
+        如果您不想使用所显示的默认主机名来标识服务器，请指定主机名。<command>cryptctl</command> 随后将生成包含该主机名的证书。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定 IP 地址，该地址属于您要在其上监听来自客户端的解密请求的网络接口；然后设置端口号（默认端口为 3737）。
+       </para>
+       <para>
+        默认 IP 地址设置 <systemitem class="ipaddress">0.0.0.0</systemitem> 表示 <command>cryptctl</command> 将使用 IPv4 在所有网络接口上监听客户端请求。
+       </para>
+       
+      </step>
+      <step>
+       <para>
+        指定服务器上用于保存客户端解密密钥的目录。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定客户端是否需要使用 TLS 证书向服务器进行身份验证。如果您选择<guimenu>否</guimenu>，则表示客户端仅使用磁盘 UUID 进行身份验证。（不过，在所有情况下，都将使用服务器证书加密通讯。）
+       </para>
+       <para>
+        如果您选择<guimenu>是</guimenu>，请选取一个用于对客户端证书进行签名的 PEM 编码的证书颁发机构。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定是否使用一台与 KMIP 1.3 兼容的服务器（或多台此类服务器）来储存客户端的加密密钥。如果您选择此选项，请提供一台或多台与 KMIP 兼容的服务器的主机名和端口。
+       </para>
+       <para>
+        此外，请提供 KMIP 服务器的用户名、口令、CA 证书，以及 <command>cryptctl</command> 服务器的客户端身份证书。
+       </para>
+       <important>
+        <title>无法轻松重新配置 KMIP 设置</title>
+        <para>
+         以后将无法轻松更改有关使用 KMIP 服务器的设置。要更改此设置，需要从头开始配置 <command>cryptctl</command> 服务器及其客户端。
+        </para>
+       </important>
+      </step>
+      <step>
+       <para>
+        最后，配置一台 SMTP 服务器用于发送加密和解密请求的电子邮件通知，或者将提示留空以跳过电子邮件通知的设置。
+       </para>
+       <note>
+        <title>受口令保护的服务器</title>
+        <para>
+         <command>cryptctl</command> 目前无法使用受身份验证保护的 SMTP 服务器发送电子邮件。如果必须发送电子邮件，请设置本地 SMTP 代理。
+        </para>
+       </note>
+      </step>
+      <step>
+       <para>
+        当系统询问是否要启动 <command>cryptctl</command> 服务器时，请输入 <literal>y</literal>。
+       </para>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      要检查服务 <systemitem class="daemon">cryptctl-server</systemitem> 的状态，请使用：
+     </para>
+     <screen><prompt role="root"># </prompt><command>systemctl status cryptctl-server</command></screen>
+    </step>
+   </procedure>
+   <para>
+    如果以后要重新配置服务器，请执行以下操作之一：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      再次运行 <command>cryptctl init-server</command> 命令。<command>cryptctl</command> 随后会建议将现有设置用作默认设置，因此您只需指定要更改的值。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      直接在配置文件 <filename>/etc/sysconfig/cryptctl-server</filename> 中进行更改。
+     </para>
+     <para>
+      不过，为了避免出现问题，请不要手动更改 <option>AUTH_PASSWORD_HASH</option> 和 <option>AUTH_PASSWORD_SALT</option> 设置。您需要正确计算这些选项的值。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect1>
+  <sect1 xml:id="sec-configure-cryptctl-client">
+   <title>设置 <command>cryptctl</command> 客户端</title>
+   <para>
+    目前仅支持下述 <command>cryptctl</command> 交互式设置方法。
+   </para>
+   <para>
+    确保满足以下先决条件：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      可通过网络使用 <command>cryptctl</command> 服务器。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      存在一个要加密的目录。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      客户端计算机包含一个可用的空分区，该分区足以容纳要加密的目录。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用自我签名证书时，在服务器上生成的证书（<filename>*.crt</filename> 文件）可在客户端本地使用。否则，服务器证书的证书颁发机构必须受客户端的信任。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果您将服务器设置为要求客户端使用客户端证书进行身份验证，请为客户端准备一个由您为服务器选择的 CA 证书签名的 TLS 证书。
+     </para>
+     <remark>
+      FIXME: needs openssl command-line-fu, or maybe xref to
+      doc-sle/sec.apache2.ssl.certificate - though some parts there are
+      somewhat Apache-specific, i.e. confusing here.
+      - sknorr, 2017-09-06
+     </remark>
+    </listitem>
+   </itemizedlist>
+   <procedure>
+    <step>
+     <para>
+      以 <systemitem class="username">root</systemitem> 身份运行：
+     </para>
+     <screen><prompt role="root"># </prompt><command>cryptctl encrypt</command></screen>
+    </step>
+    <step>
+     <para>
+      回答随后出现的每个提示问题，并在每回答一个问题后按 <keycap function="enter"/>。如果有默认的答案，提示末尾的方括号中会显示此答案。
+     </para>
+     <substeps>
+      <step>
+       <para>
+        指定要在 <command>cryptctl</command> 服务器上连接到的主机名和端口。
+       </para>
+      </step>
+      <step>
+       <para>
+        如果您已将服务器配置为要求客户端使用 TLS 证书进行身份验证，请指定客户端的证书和密钥文件。客户端证书必须由设置服务器时选择的证书颁发机构签名。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定服务器证书（<filename>*.crt</filename> 文件）的绝对路径。
+       </para>
+      </step>
+      <step>
+       <para>
+        输入设置服务器时指定的加密口令。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定要加密的目录的路径。指定用于包含目录加密内容的空分区的路径。
+       </para>
+      </step>
+      <step>
+       <para>
+        指定允许同时解密该分区的计算机数目。
+       </para>
+       <para>
+        然后指定在从一个或多个客户端收到最后一个活跃信号之后到允许其他计算机解密分区之前必须经过的超时（以秒为单位）。
+       </para>
+       <para>
+        当计算机意外停止工作然后再重引导时，它需要能够再次解锁其分区。这意味着，此超时应设置为比客户端重引导时长略短的时间。
+       </para>
+       <important>
+        <title>超时时长</title>
+        <para>
+         如果设置的时间太长，计算机首次尝试解密加密分区时将会失败。虽然 <command>cryptctl</command> 之后会继续定期检查加密密钥是否可用，但这会造成一定的延迟。
+        </para>
+        <para>
+         如果超时设置得太短，包含加密分区副本的计算机首先解锁该分区的可能性将会提高。
+        </para>
+       </important>
+      </step>
+     </substeps>
+    </step>
+    <step>
+     <para>
+      要开始加密，请输入 <literal>yes</literal>。
+     </para>
+     <para>
+      <command>cryptctl</command> 现在会将指定目录加密到先前为空的分区中，然后挂载这个新加密的分区。文件系统类型将与原始的未加密文件系统的类型相同。
+     </para>
+     <para>
+      在创建加密分区之前，<command>cryptctl</command> 会将原始目录的未加密内容移至带有 <literal>cryptctl-moved-</literal> 前缀的位置。
+     </para>
+    </step>
+    <step>
+     <para>
+      要检查是否确实正确挂载了该目录，请使用：
+     </para>
+     <screen>
+<prompt>&gt; </prompt><command>lsblk -o NAME,MOUNTPOINT,UUID</command>
+NAME                        MOUNTPOINT          UUID
+[...]
+sdc
+└─sdc1                                          <replaceable>PARTITION_UUID</replaceable>
+  └─cryptctl-unlocked-sdc1  /secret-partition   <replaceable>UNLOCKED_UUID</replaceable>
+      </screen>
+     <para>
+      <command>cryptctl</command> 通过加密分区的 UUID 来识别该分区。在上一示例中，其为 <literal>sdc1</literal> 旁边显示的 UUID。
+     </para>
+     <para>
+      在服务器上，您可以使用 <command>cryptctl</command> 来检查目录是否已解密。
+     </para>
+     <screen><prompt role="root"># </prompt><command>cryptctl list-keys</command></screen>
+     <para>
+      如果分区已成功解密，您将看到如下所示的输出：
+     </para>
+     <screen>
+2019/06/06 15:50:00 ReloadDB: successfully loaded database of 1 records
+Total: 1 records (date and time are in zone EDT)
+Used By     When                 UUID  Max.Users  Num.Users  Mount Point
+<replaceable>IP_ADDRESS</replaceable>  2019-06-06 15:00:50  <replaceable>UUID</replaceable>  1          1          /secret-partition</screen>
+     <para>
+      如果分区未成功解密，您将看到如下所示的输出：
+     </para>
+     <screen>2019/06/06 15:50:00 ReloadDB: successfully loaded database of 1 records
+Total: 1 records (date and time are in zone EDT)
+Used By      When                 UUID  Max.Users  Num.Users  Mount Point
+             2019-06-06 15:00:50  <replaceable>UUID</replaceable>  1          1          /secret-partition</screen>
+     <para>在空的 <literal>Used by</literal> 列中可以看到差异。</para>
+     <para>
+      校验显示的 UUID 是否属于先前加密的分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      确认加密分区可正常工作后，从客户端中删除未加密内容。例如，使用 <command>rm</command>。为了提高安全性，请在删除文件内容之前将其重写（例如，使用 <command>shred -u</command>）。
+     </para>
+     <important>
+      <title><command>shred</command> 不保证完全擦除该数据</title>
+      <para>
+       使用 <command>shred</command> 不能保证完全去除所有数据，具体取决于储存媒体的类型。具体而言，SSD 通常采用耗损均衡策略，这使得 <command>shred</command> 的效率不高。
+      </para>
+     </important>
+    </step>
+   </procedure>
+   <para>
+    从客户端到服务器的连接配置储存在 <filename>/etc/sysconfig/cryptctl-client</filename> 中，可以手动编辑。
+   </para>
+   <para>
+    服务器将客户端分区的加密密钥储存在 <filename>/var/lib/cryptctl/keydb/<replaceable>PARTITION_UUID</replaceable></filename> 中。
+   </para>
+  </sect1>
+
+  <sect1 xml:id="sec-cryptctl-luks-fstab">
+   <title>为 LUKS 卷配置 /etc/fstab</title>
+   <para>
+    为使用 LUKS 加密的新文件系统配置挂载点时，YaST 默认将使用 <filename>/etc/fstab</filename> 中已加密设备的名称。（例如，<filename>/dev/mapper/cr_sda1</filename>。）使用设备名称而不是 UUID 或卷标能够更稳健地操作 systemd 生成器和其他相关工具。
+   </para>
+   <para>
+    可以选择使用安装程序中的专家分区程序或通过 AutoYaST 调整每个设备的默认行为。
+   </para>
+   <para>
+    这种更改不会影响升级，也不影响已在 <filename>/etc/fstab</filename> 中定义了挂载点的任何其他方案。只有新建的挂载点会受影响（例如，在安装新系统期间，或者在运行中的系统上创建新分区期间）。
+   </para>
+   </sect1>
+
+  <sect1 xml:id="sec-configure-cryptctl-status">
+   <title>使用服务器端命令检查分区解锁状态</title>
+   <para>
+    当 <command>cryptctl</command> 客户端处于活动状态时，它每 10 秒会向 <command>cryptctl</command> 服务器发送一次<quote>检测信号</quote>。如果在设置客户端期间配置的超时时长内服务器未收到来自客户端的检测信号，服务器将认为客户端已脱机。然后，服务器将允许另一个客户端与其连接（或允许同一客户端在重引导后重新连接）。
+   </para>
+   <para>
+    要查看所有密钥的使用状态，请使用：
+   </para>
+   <screen>
+<prompt role="root"># </prompt><command>cryptctl list-keys</command>
+   </screen>
+   <para>
+    <literal>Num.Users</literal> 下的信息显示该密钥当前是否已使用。要查看单个密钥的更多细节，请使用：
+   </para>
+   <screen>
+<prompt role="root"># </prompt><command>cryptctl show-key <replaceable>UUID</replaceable></command>
+   </screen>
+   <para>
+    此命令将显示有关挂载点、挂载选项、用法选项、上次检索密钥的时间，以及来自客户端的最后三个检测信号的信息。
+   </para>
+   <para>
+    此外，您可以使用 <command>journalctl</command> 来查找检索密钥时的日志。
+   </para>
+  </sect1>
+  <sect1 xml:id="sec-configure-cryptctl-unlock">
+   <title>手动解锁加密分区</title>
+   <para>
+    可通过两种方法手动解锁分区，这两种方法都在客户端上运行：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <formalpara>
+      <title>联机解锁</title>
+      <para>
+       联机解锁允许规避超时或用户限制。当客户端与服务器之间已建立网络连接，但客户端（目前）无法自动解锁分区时，可以使用此方法。此方法将解锁计算机上的所有加密分区。
+      </para>
+     </formalpara>
+     <para>
+      要使用此方法，请运行 <command>cryptctl online-unlock</command>。准备好输入在设置服务器时指定的口令。
+     </para>
+    </listitem>
+    <listitem>
+     <formalpara>
+      <title>脱机解锁</title>
+      <para>
+       当客户端无法或者不得联机与其服务器通讯时，可以使用此方法。服务器中的加密密钥必须仍然可用。此方法只能在万不得已的情况下才使用，每次只能解锁一个分区。
+      </para>
+     </formalpara>
+     <para>
+      要使用此方法，请运行 <command>cryptctl offline-unlock</command>。服务器的必备分区 (<filename>/var/lib/cryptctl/keydb/<replaceable>PARTITION_UUID</replaceable></filename>) 的密钥文件需在客户端上可用。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect1>
+  <sect1 xml:id="sec-configure-cryptctl-lock">
+   <title>维护停机过程</title>
+   <para>
+    为确保在维护停机期间不能解密分区，请关闭客户端并禁用 <command>cryptctl</command> 服务器。您可以通过以下方式来实现此目的：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      停止服务 <systemitem class="daemon">cryptctl-server</systemitem>：
+     </para>
+     <screen>
+<prompt role="root"># </prompt><command>systemctl stop cryptctl-server</command>
+     </screen>
+    </listitem>
+    <listitem>
+     <para>
+      断开 <command>cryptctl</command> 服务器的网络连接。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect1>
+ <sect1 xml:id="sec-configure-cryptctl-more">
+  <title>更多信息</title>
+  <para>
+   有关详细信息，另请参见项目主页 <link xlink:href="https://github.com/SUSE/cryptctl/"/>。
+  </para>
+ </sect1>
+ </chapter>

@@ -1,1 +1,1034 @@
-../../../../xml/libvirt_connect.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="libvirt_connect.xml" version="5.0" xml:id="cha-libvirt-connect">
+ <title>连接和授权</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker>
+   </dm:bugtracker>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  如果您要管理多个 VM 主机服务器，而每个服务器又托管了多个 VM Guest，那么管理工作很快就会变得困难起来。<systemitem class="library">libvirt</systemitem> 的一个优势是，它能够一次连接到多个 VM 主机服务器，提供单个接口用于管理所有 VM Guest 以及连接其图形控制台。
+ </para>
+ <para>
+  为确保只有授权用户能够建立连接，<systemitem class="library">libvirt</systemitem> 提供了多种可与不同授权机制（套接字、PolKit、SASL 和 Kerberos）结合使用的连接类型（通过 TLS、SSH、Unix 套接字和 TCP）。
+ </para>
+ <sect1 xml:id="sec-libvirt-connect-auth">
+  <title>身份验证</title>
+
+  <para>
+   有权管理 VM Guest 和访问其图形控制台的用户应该限定在明确定义的人员范围内。为实现此目标，可在 VM 主机服务器上使用以下身份验证方法：
+  </para>
+
+  <itemizedlist mark="bullet" spacing="normal">
+   <listitem>
+    <para>
+     使用权限和组所有权对 Unix 套接字进行访问控制。此方法仅适用于 <systemitem class="daemon">libvirtd</systemitem> 连接。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     使用 PolKit 对 Unix 套接字进行访问控制。此方法仅适用于本地 <systemitem class="daemon">libvirtd</systemitem> 连接。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     使用 SASL（简单身份验证和安全层）进行用户名和口令身份验证。此方法适用于 <systemitem class="daemon">libvirtd</systemitem> 和 VNC 连接。使用 SASL 不需要在服务器上拥有实际的用户帐户，因为 SASL 使用自己的数据库来储存用户名和口令。通过 SASL 进行身份验证的连接会加密。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     Kerberos 身份验证。此方法仅适用于 <systemitem class="daemon">libvirtd</systemitem> 连接，本手册不予介绍。有关详细信息，请参考 <link xlink:href="https://libvirt.org/auth.html#ACL_server_kerberos"/>。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     单口令身份验证。此方法仅适用于 VNC 连接。
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <important>
+   <title><systemitem class="daemon">libvirtd</systemitem> 和 VNC 的身份验证需要分开配置</title>
+   <para>
+    对 VM Guest 管理功能的访问（通过 <systemitem class="daemon">libvirtd</systemitem>）以及对其图形控制台的访问始终需要分开配置。限制对管理工具的访问时，这些限制<emphasis>不会</emphasis>自动应用到 VNC 连接。
+   </para>
+  </important>
+
+  <para>
+   通过 TLS/SSL 连接远程访问 VM Guest 时，可以通过仅允许特定的组拥有证书密钥文件的读取权限，在每个客户端上间接控制访问。有关详细信息，请参见<xref linkend="sec-libvirt-connect-remote-tls-security"/>。
+  </para>
+
+  <sect2 xml:id="sec-libvirt-connect-auth-libvirt">
+   <title><systemitem class="daemon">libvirtd</systemitem> authentication</title>
+   <para>
+    <systemitem class="daemon">libvirtd</systemitem> 身份验证在 <filename>/etc/libvirt/libvirtd.conf</filename> 中配置。此处进行的配置将应用到所有 <systemitem class="library">libvirt</systemitem> 工具，例如虚拟机管理器或 <command>virsh</command>。
+   </para>
+   <para>
+    <systemitem class="library">libvirt</systemitem> 提供了两个套接字：一个只读套接字用于监视目的，一个读写套接字用于管理操作。可以单独配置对这两个套接字的访问。默认情况下，这两个套接字由 <literal>root.root</literal> 拥有。默认仅向用户 <systemitem class="username">root</systemitem> 授予对读写套接字的访问权限 (<literal>0700</literal>)，而对于只读套接字，访问权限则完全开放 (<literal>0777</literal>)。
+   </para>
+   <para>
+    在以下说明中，您将了解如何配置对读写套接字的访问权限。这些说明同样也适用于只读套接字。所有配置步骤均需在 VM 主机服务器上执行。
+   </para>
+   <note>
+    <title><phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上的默认身份验证设置</title>
+    <para>
+     <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上的默认身份验证方法是对 Unix 套接字进行访问控制。只有用户 <systemitem class="username">root</systemitem> 能够进行身份验证。在 VM 主机服务器上以非 root 用户身份访问 <systemitem class="library">libvirt</systemitem> 工具时，需要通过 PolKit 提供一次 <systemitem class="username">root</systemitem> 口令。然后，系统将向您授予对当前和将来会话的访问权限。
+    </para>
+    <para>
+     或者，您可以配置 <systemitem class="library">libvirt</systemitem>，以允许非特权用户进行<quote>system</quote>访问。有关详细信息，请参见 <xref linkend="sec-libvirt-connect-connecting-dac"/>。
+    </para>
+   </note>
+   <variablelist>
+    <title>建议的身份验证方法</title>
+    <varlistentry>
+     <term>本地连接</term>
+     <listitem>
+      <simplelist>
+       <member><xref linkend="sec-libvirt-connect-auth-libvirt-pk"/>
+       </member>
+       <member><xref linkend="sec-libvirt-connect-auth-libvirt-traditional"/>
+       </member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>基于 SSH 的远程隧道</term>
+     <listitem>
+      <simplelist>
+       <member><xref linkend="sec-libvirt-connect-auth-libvirt-traditional"/>
+       </member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>远程 TLS/SSL 连接</term>
+     <listitem>
+      <simplelist>
+       <member><xref linkend="sec-libvirt-connect-auth-libvirt-sasl"/>
+       </member>
+       <member>无（通过限制对证书的访问在客户端控制访问权限）</member>
+      </simplelist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <sect3 xml:id="sec-libvirt-connect-auth-libvirt-traditional">
+    <title>使用权限和组所有权对 Unix 套接字进行访问控制</title>
+    <para>
+     要为非 <systemitem class="username">root</systemitem> 帐户授予访问权限，请配置特定的组（在下面的示例中为 <systemitem class="groupname">libvirt</systemitem>）拥有且可访问的套接字。此身份验证方法可用于本地和远程 SSH 连接。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       创建应该拥有套接字的组（如果不存在）：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> groupadd libvirt</screen>
+      <important>
+       <title>组需要存在</title>
+       <para>
+        在重启动 <systemitem class="daemon">libvirtd</systemitem> 之前，该组必须存在。否则，重启动将会失败。
+       </para>
+      </important>
+     </step>
+     <step>
+      <para>
+       将所需用户添加到该组：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> usermod --append --groups libvirt tux</screen>
+     </step>
+     <step>
+      <para>
+       按如下所示在 <filename>/etc/libvirt/libvirtd.conf</filename> 中更改配置：
+      </para>
+<screen>unix_sock_group = "libvirt"<co xml:id="co-libvirt-connect-ssh-group"/>
+unix_sock_rw_perms = "0770"<co xml:id="co-libvirt-connect-ssh-perms"/>
+auth_unix_rw = "none"<co xml:id="co-libvirt-connect-ssh-enable"/></screen>
+      <calloutlist>
+       <callout arearefs="co-libvirt-connect-ssh-group">
+        <para>
+         组所有权将设置给组 <literal>libvirt</literal>。
+        </para>
+       </callout>
+       <callout arearefs="co-libvirt-connect-ssh-perms">
+        <para>
+         设置对套接字的访问权限 (<literal>srwxrwx---</literal>)。
+        </para>
+       </callout>
+       <callout arearefs="co-libvirt-connect-ssh-enable">
+        <para>
+         禁用其他身份验证方法（PolKit 或 SASL）。访问仅通过套接字权限来控制。
+        </para>
+       </callout>
+      </calloutlist>
+     </step>
+     <step>
+      <para>
+       重启动 <systemitem class="daemon">libvirtd</systemitem>:
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl start libvirtd</screen>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-auth-libvirt-pk">
+    <title>使用 PolKit 对 Unix 套接字进行访问控制</title>
+    <para>
+     对于 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 上的非远程连接，使用 PolKit 对 Unix 套接字进行访问控制是默认的身份验证方法。因此，无需对 <systemitem class="library">libvirt</systemitem> 配置进行更改。启用 PolKit 授权后，对上述两个套接字的权限将默认为 <literal>0777</literal>，每个尝试访问套接字的应用程序将需要通过 PolKit 进行身份验证。
+    </para>
+    <important>
+     <title>仅对本地连接进行 PolKit 身份验证</title>
+     <para>
+      只能对 VM 主机服务器本身上的本地连接进行 PolKit 身份验证，因为 PolKit 不会处理远程身份验证。
+
+     </para>
+    </important>
+    <para>
+     有关访问 <systemitem class="library">libvirt</systemitem> 套接字的策略有两个：
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+     <listitem>
+      <para>
+       <emphasis>org.libvirt.unix.monitor</emphasis>：访问只读套接字
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <emphasis>org.libvirt.unix.manage</emphasis>：访问读写套接字
+      </para>
+     </listitem>
+    </itemizedlist>
+    <para>
+     默认情况下，有关访问读写套接字的策略是使用 <systemitem class="username">root</systemitem> 口令进行一次身份验证，并授予对当前和将来的会话的特权。
+    </para>
+    <para>
+     要向用户授予无需提供 <systemitem class="username">root</systemitem> 口令即可访问套接字的权限，您需要在 <filename>/etc/polkit-1/rules.d</filename> 中创建一条规则。创建包含以下内容的 <filename>/etc/polkit-1/rules.d/10-grant-libvirt</filename> 文件，以向组 <systemitem class="groupname">libvirt</systemitem> 的所有成员授予对读写套接字的访问权限。
+    </para>
+<screen>polkit.addRule(function(action, subject) {
+  if (action.id == "org.libvirt.unix.manage" &amp;&amp; subject.isInGroup("libvirt")) {
+    return polkit.Result.YES;
+  }
+});</screen>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-auth-libvirt-sasl">
+    <title>使用 SASL 进行用户名和口令身份验证</title>
+    <para>
+     SASL 提供用户名和口令身份验证以及数据加密（默认为 digest-md5）。由于 SASL 会维护自己的用户数据库，VM 主机服务器上无需存在用户。TCP 连接需要 SASL，并且在 TLS/SSL 连接上也需要 SASL。
+    </para>
+    <important>
+     <title>普通 TCP 以及提供 digest-md5 加密的 SASL</title>
+     <para>
+      在未通过其他方式加密的 TCP 连接上使用 digest-md5 加密并不会为生产环境提供充足的安全性。建议仅在测试环境中使用这种加密。
+     </para>
+    </important>
+    <tip>
+     <title>在 TLS/SSL 上进行 SASL 身份验证</title>
+     <para>
+      通过限制对证书密钥文件的访问，可以在<emphasis>客户端</emphasis>间接控制通过远程 TLS/SSL 连接进行的访问。但在处理大量客户端时，这种方法可能容易很出错。对 TLS 使用 SASL 可以另外在服务器端控制访问，从而提高安全性。
+     </para>
+    </tip>
+    <para>
+     要配置 SASL 身份验证，请执行以下操作：
+    </para>
+    <procedure>
+     <step>
+      <para>
+       按如下所示在 <filename>/etc/libvirt/libvirtd.conf</filename> 中更改配置：
+      </para>
+      <substeps performance="required">
+       <step>
+        <para>
+         要为 TCP 连接启用 SASL，请使用以下配置：
+        </para>
+<screen>auth_tcp = "sasl"</screen>
+       </step>
+       <step>
+        <para>
+         要为 TLS/SSL 连接启用 SASL，请使用以下配置：：
+        </para>
+<screen>auth_tls = "sasl"</screen>
+       </step>
+      </substeps>
+     </step>
+     <step>
+      <para>
+       重启动 <systemitem class="daemon">libvirtd</systemitem>:
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+     </step>
+     <step>
+      <para>
+       libvirt SASL 配置文件位于 <filename>/etc/sasl2/libvirtd.conf</filename>。通常无需更改默认设置。但是，如果在 TLS 上使用 SASL，您可以通过将设置 <literal>mech_list</literal> 参数的行注释掉，来关闭会话加密以避免额外的开销（TLS 连接已加密）。请仅对 TLS/SASL 执行此操作；对于 TCP 连接，此参数必须设置为 digest-md5。
+      </para>
+<screen>#mech_list: digest-md5</screen>
+     </step>
+     <step>
+      <para>
+       默认不会配置任何 SASL 用户，因此无法登录。使用以下命令可管理用户：
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>添加用户 <systemitem class="username">tux</systemitem></term>
+        <listitem>
+<screen>saslpasswd2 -a libvirt tux</screen>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>删除用户 <systemitem class="username">tux</systemitem></term>
+        <listitem>
+<screen>saslpasswd2 -a libvirt -d tux</screen>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>列出现有用户</term>
+        <listitem>
+<screen>sasldblistusers2 -f /etc/libvirt/passwd.db</screen>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </step>
+    </procedure>
+    <tip>
+     <title><command>virsh</command> 和 SASL 身份验证</title>
+     <para>
+      使用 SASL 身份验证时，每次您发出 <command>virsh</command> 命令，都会收到输入用户名和口令的提示。在外壳模式下使用 <command>virsh</command> 可避免出现此提示。
+     </para>
+    </tip>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-connect-auth-vnc">
+   <title>VNC 身份验证</title>
+   <para>
+    由于对 VM Guest 图形控制台的访问不是由 <systemitem class="library">libvirt</systemitem> 控制，而是由特定的超级管理程序控制，因此始终需要另外配置 VNC 身份验证。主配置文件为 <filename>/etc/libvirt/&lt;hypervisor&gt;.conf</filename>。本节介绍的是 QEMU/KVM 超级管理程序，因此目标配置文件为 <filename>/etc/libvirt/qemu.conf</filename>。
+   </para>
+   <note>
+    <title>Xen 的 VNC 身份验证</title>
+    <para>
+     与 KVM 相比，Xen 目前最多只能在每个 VM 上设置口令，除此之外不会提供更复杂的 VNC 身份验证。请参见下面的 <literal>&lt;graphics type=&apos;vnc&apos;...</literal> <systemitem class="library">libvirt</systemitem> 配置选项。
+    </para>
+   </note>
+   <para>
+    可以使用两种身份验证类型：SASL 和单口令身份验证。如果您是使用 SASL 进行 <systemitem class="library">libvirt</systemitem> 身份验证的，我们强烈建议也将它用于 VNC 身份验证 — 这样就可以共享同一数据库。
+   </para>
+   <para>
+    第三种限制对 VM Guest 的访问的方法是在 VNC 服务器上启用 TLS 加密。这要求 VNC 客户端有权访问 x509 客户端证书。通过限制对这些证书的访问，可以在客户端间接控制访问。有关详细信息，请参考 <xref linkend="sec-libvirt-connect-remote-tls-vnc-client"/>。
+   </para>
+   <sect3 xml:id="sec-libvirt-connect-auth-vnc-tls">
+    <title>使用 SASL 进行用户名和口令身份验证</title>
+    <para>
+     SASL 提供用户名和口令身份验证以及数据加密。由于 SASL 会维护自己的用户数据库，VM 主机服务器上无需存在用户。与对 <systemitem class="library">libvirt</systemitem> 使用 SASL 身份验证一样，您可以在 TLS/SSL 连接上使用 SASL。有关配置这些连接的细节，请参见<xref linkend="sec-libvirt-connect-remote-tls-vnc-client"/>。
+    </para>
+    <para>
+     要为 VNC 配置 SASL 身份验证，请执行以下操作：
+    </para>
+    <procedure>
+     <step>
+      <para>
+       创建 SASL 配置文件。建议使用现有的 <systemitem class="library">libvirt</systemitem> 文件。如果您已经为 <systemitem class="library">libvirt</systemitem> 配置 SASL，并打算使用相同的设置（包括同一用户名和口令数据库），则使用简单的链接即可：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> ln -s /etc/sasl2/libvirt.conf /etc/sasl2/qemu.conf</screen>
+      <para>
+       如果您只是为 VNC 设置 SASL，或者打算使用与 <systemitem class="library">libvirt</systemitem> 不同的配置，请复制现有文件以用作模板：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> cp /etc/sasl2/libvirt.conf /etc/sasl2/qemu.conf</screen>
+      <para>
+       然后根据需要编辑该文件。
+      </para>
+     </step>
+     <step>
+      <para>
+       按如下所示在 <filename>/etc/libvirt/qemu.conf</filename> 中更改配置：
+      </para>
+<screen>vnc_listen = "0.0.0.0"
+vnc_sasl = 1
+sasldb_path: /etc/libvirt/qemu_passwd.db</screen>
+      <para>
+       第一个参数使 VNC 监听所有公共接口（而不仅仅是本地主机），第二个参数启用 SASL 身份验证。
+      </para>
+     </step>
+     <step>
+      <para>
+       默认不会配置任何 SASL 用户，因此无法登录。使用以下命令可管理用户：
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>添加用户 <systemitem class="username">tux</systemitem></term>
+        <listitem>
+<screen><prompt>&gt; </prompt>saslpasswd2 -f /etc/libvirt/qemu_passwd.db -a qemu tux</screen>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>删除用户 <systemitem class="username">tux</systemitem></term>
+        <listitem>
+<screen><prompt>&gt; </prompt>saslpasswd2 -f /etc/libvirt/qemu_passwd.db -a qemu -d tux</screen>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>列出现有用户</term>
+        <listitem>
+<screen><prompt>&gt; </prompt>sasldblistusers2 -f /etc/libvirt/qemu_passwd.db</screen>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </step>
+     <step>
+      <para>
+       重启动 <systemitem class="daemon">libvirtd</systemitem>:
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+     </step>
+     <step>
+      <para>
+       重启动在更改配置之前已在运行的所有 VM Guest。未重启动的 VM Guest 将不会对 VNC 连接使用 SASL 身份验证。
+      </para>
+     </step>
+    </procedure>
+    <note>
+     <title>支持的 VNC 查看器</title>
+     <para>
+      目前，虚拟机管理器和 <command>virt-viewer</command> 均支持 SASL 身份验证。这两个查看器还支持 TLS/SSL 连接。
+     </para>
+    </note>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-auth-vnc-pw">
+    <title>单口令身份验证</title>
+    <para>
+     您也可以通过设置 VNC 口令来控制对 VNC 服务器的访问。可以为所有 VM Guest 设置一个全局口令，或者为每个 Guest 设置单独的口令。后一种做法需要编辑 VM Guest 的配置文件。
+    </para>
+    <note>
+     <title>始终设置全局口令</title>
+     <para>
+      如果您要使用单口令身份验证，比较好的做法是设置一个全局口令，即使为每个 VM Guest 设置了口令也是如此。这样，在您忘记设置每个虚拟机的口令时，始终都可以通过一个<quote>回退</quote>口令保护您的虚拟机。仅当未为计算机设置其他口令时，才会使用全局口令。
+     </para>
+    </note>
+    <procedure>
+     <title>设置全局 VNC 口令</title>
+     <step>
+      <para>
+       按如下所示在 <filename>/etc/libvirt/qemu.conf</filename> 中更改配置：
+      </para>
+<screen>vnc_listen = "0.0.0.0"
+vnc_password = "<replaceable>PASSWORD</replaceable>"</screen>
+      <para>
+       第一个参数使 VNC 监听所有公共接口（而不仅仅是本地主机），第二个参数设置口令。口令的最大长度为八个字符。
+      </para>
+     </step>
+     <step>
+      <para>
+       重启动 <systemitem class="daemon">libvirtd</systemitem>:
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+     </step>
+     <step>
+      <para>
+       重启动在更改配置之前已在运行的所有 VM Guest。未重启动的 VM Guest 将不会对 VNC 连接使用口令身份验证。
+      </para>
+     </step>
+    </procedure>
+    <procedure>
+     <title>设置 VM Guest 特定的 VNC 口令</title>
+     <step>
+      <para>
+       按如下所示在 <filename>/etc/libvirt/qemu.conf</filename> 中更改配置，以使 VNC 监听所有公共接口（而不仅仅是本地主机）。
+      </para>
+<screen>vnc_listen = "0.0.0.0"</screen>
+     </step>
+     <step>
+      <para>
+       在编辑器中打开 VM Guest 的 XML 配置文件。请将下面的示例中的 <replaceable>VM_NAME</replaceable> 替换为 VM Guest 的名称。使用的编辑器默认为 <envar>$EDITOR</envar>。如果未设置该变量，则使用 <command>vi</command>。
+      </para>
+<screen><prompt>&gt; </prompt>virsh edit <replaceable>VM_NAME</replaceable></screen>
+     </step>
+     <step>
+      <para>
+       搜索具有 <literal>type=&apos;vnc&apos;</literal> 属性的 <literal>&lt;graphics&gt;</literal> 元素，例如：
+      </para>
+<screen>&lt;graphics type='vnc' port='-1' autoport='yes'/&gt;</screen>
+     </step>
+     <step>
+      <para>
+       添加 <literal>passwd=<replaceable>PASSWORD</replaceable></literal> 属性，然后保存文件并退出编辑器。口令的最大长度为八个字符。
+      </para>
+<screen>&lt;graphics type='vnc' port='-1' autoport='yes' passwd='PASSWORD'/&gt;</screen>
+     </step>
+     <step>
+      <para>
+       重启动 <systemitem class="daemon">libvirtd</systemitem>:
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+     </step>
+     <step>
+      <para>
+       重启动在更改配置之前已在运行的所有 VM Guest。未重启动的 VM Guest 将不会对 VNC 连接使用口令身份验证。
+      </para>
+     </step>
+    </procedure>
+    <warning>
+     <title>VNC 协议的安全性</title>
+     <para>
+      VNC 被认为是不安全的协议。尽管口令是以加密方式发送的，但如果攻击者可以嗅探到已加密的口令和加密密钥，该口令可能就会被利用。因此，建议将 VNC 与 TLS/SSL 结合使用，或通过 SSH 建立隧道。<command>virt-viewer</command>、虚拟机管理器和 Remmina（请参见<xref linkend="vnc-remmina"/>）支持这两种方法。
+     </para>
+    </warning>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-connect-connecting">
+  <title>连接到 VM 主机服务器</title>
+
+  <para>
+   要使用 <systemitem class="library">libvirt</systemitem> 连接到超级管理程序，需要指定统一资源标识符 (URI)。使用 <command>virsh</command> 和 <command>virt-viewer</command> 时需要此 URI（在 VM 主机服务器上以 <systemitem class="username">root</systemitem> 身份操作时例外），而使用虚拟机管理器时，此 URI 为可选项。虽然可以使用连接参数（例如 <command>virt-manager -c qemu:///system</command>）来调用虚拟机管理器，但虚拟机管理器还是提供了一个图形界面用于创建连接 URI。有关详细信息，请参见<xref linkend="sec-libvirt-connect-connecting-vmm"/>。
+  </para>
+
+<screen><replaceable>HYPERVISOR</replaceable><co xml:id="co-libvirt-connect-hyperv"/><replaceable>+PROTOCOL</replaceable><co xml:id="co-libvirt-connect-protocol"/>://<replaceable>USER@REMOTE</replaceable><co xml:id="co-libvirt-connect-remote"/>/<replaceable>CONNECTION_TYPE</replaceable><co xml:id="co-libvirt-connect-type"/></screen>
+
+  <calloutlist>
+   <callout arearefs="co-libvirt-connect-hyperv">
+    <para>
+     指定超级管理程序。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 目前支持以下超级管理程序：<option>test</option>（用于测试的虚设程序）、<option>qemu</option> (KVM) 和 <option>xen</option> (Xen)。此参数是必需的。
+    </para>
+   </callout>
+   <callout arearefs="co-libvirt-connect-protocol">
+    <para>
+     连接到远程主机时，请在此处指定协议。其值可以是：<option>ssh</option>（通过 SSH 隧道连接）、<option>tcp</option>（使用 SASL/Kerberos 身份验证进行 TCP 连接）或 <option>tls</option>（进行 TLS/SSL 加密的连接并通过 x509 证书完成身份验证）。
+    </para>
+   </callout>
+   <callout arearefs="co-libvirt-connect-remote">
+    <para>
+     连接到远程主机时，请指定用户名和远程主机名。如果未指定用户名，将使用调用了该命令的用户名 (<envar>$USER</envar>)。有关详细信息，请参见下文。对于 TLS 连接，需要完全按照 x509 证书指定主机名。
+    </para>
+   </callout>
+   <callout arearefs="co-libvirt-connect-type">
+    <para>
+     连接到 <literal>QEMU/KVM</literal> 超级管理程序时，接受两种连接类型：<option>system</option>（完全访问权限）或 <option>session</option>（受限访问权限）。由于 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 不支持 <option>session</option> 访问权限，因此本文档将重点介绍 <option>system</option> 访问权限。
+    </para>
+   </callout>
+  </calloutlist>
+
+  <variablelist>
+   <title>超级管理程序连接 URI 示例</title>
+   <varlistentry>
+    <term><option>test:///default</option>
+    </term>
+    <listitem>
+     <para>
+      连接到本地虚设超级管理程序。用于测试。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>qemu:///system</option> 或 <option>xen:///system</option>
+    </term>
+    <listitem>
+     <para>
+      连接到本地主机上拥有完全访问权限（system 类型）的 QEMU/Xen 超级管理程序。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>qemu+ssh://tux@mercury.example.com/system</option> 或 <option>xen+ssh://tux@mercury.example.com/system</option>
+    </term>
+    <listitem>
+     <para>
+      连接到远程主机 mercury.example.com 上的 QEMU/Xen 超级管理程序。连接是通过 SSH 隧道建立的。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><option>qemu+tls://saturn.example.com/system</option> 或 <option>xen+tls://saturn.example.com/system</option>
+    </term>
+    <listitem>
+     <para>
+      连接到远程主机 mercury.example.com 上的 QEMU/Xen 超级管理程序。连接是使用 TLS/SSL 建立的。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   有关更多细节和示例，请参见 <link xlink:href="https://libvirt.org/uri.html"/> 上的 <systemitem class="library">libvirt</systemitem> 文档。
+  </para>
+
+  <note>
+   <title>URI 中的用户名</title>
+   <para>
+    使用 Unix 套接字身份验证时，需要指定用户名（无论是使用用户/口令身份验证模式还是 PolKit）。这适用于所有 SSH 连接和本地连接。
+   </para>
+   <para>
+    使用 SASL 身份验证（对于 TCP 或 TLS 连接）时或者不对 TLS 连接执行额外的服务器端身份验证时，无需指定用户名。使用 SASL 时不会评估用户名 — 在任何情况下，系统都会提示您输入 SASL 用户/口令组合。
+   </para>
+  </note>
+
+
+
+  <sect2 xml:id="sec-libvirt-connect-connecting-dac">
+   <title>非特权用户的<quote>系统</quote>访问权限</title>
+   <para>
+    如上文所述，可以使用两种不同的协议来与 QEMU 超级管理程序建立连接：<literal>session</literal> 和 <literal>system</literal>。<quote>session</quote>连接建立时具有与客户端程序相同的特权。此类连接适用于桌面虚拟化，因为它会受到限制（例如，无 USB/PCI 设备指派、无虚拟网络设置，只能对 <systemitem class="daemon">libvirtd</systemitem> 进行受限的远程访问）。
+   </para>
+   <para>
+    适用于服务器虚拟化的<quote>system</quote>连接不存在功能限制，但默认仅可供 <systemitem class="username">root</systemitem> 访问。不过，在将 DAC（自主访问控制）驱动程序添加到 <systemitem class="library">libvirt</systemitem> 后，现在可以向非特权用户授予<quote>system</quote>访问权限。要向用户 <systemitem class="username">tux</systemitem> 授予<quote>system</quote>访问权限，请执行以下操作：
+   </para>
+   <procedure>
+    <title>向普通用户授予<quote>系统</quote>访问权限</title>
+    <step>
+     <para>
+      按照<xref linkend="sec-libvirt-connect-auth-libvirt-traditional"/>中所述通过 Unix 套接字启用访问权限。该示例中向 <systemitem class="groupname">libvirt</systemitem> 组的所有成员都授予了 libvirt 访问权限，并使 <systemitem class="username">tux</systemitem> 成为此组的成员。这样可确保 <systemitem class="username">tux</systemitem> 能够使用 <command>virsh</command> 或虚拟机管理器进行连接。
+     </para>
+    </step>
+    <step>
+     <para>
+      编辑 <filename>/etc/libvirt/qemu.conf</filename> 并按如下所示更改配置：
+     </para>
+<screen>user = "tux"
+group = "libvirt"
+dynamic_ownership = 1</screen>
+     <para>
+      这样可确保 VM Guest 由 <systemitem class="username">tux</systemitem> 启动，并且 <systemitem class="username">tux</systemitem> 能够访问和修改已绑定至 Guest 的资源（例如虚拟磁盘）。
+     </para>
+    </step>
+    <step>
+     <para>
+      使 <systemitem class="username">tux</systemitem> 成为 <systemitem class="groupname">kvm</systemitem> 组的成员：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> usermod --append --groups kvm tux</screen>
+     <para>
+      需要执行此步骤才能授予对 <filename>/dev/kvm</filename> 的访问权限，而要启动 VM Guest 就必须具有此访问权限。
+     </para>
+    </step>
+    <step>
+     <para>
+      重启动 <systemitem class="daemon">libvirtd</systemitem>:
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-connect-connecting-vmm">
+   <title>使用虚拟机管理器管理连接</title>
+   <para>
+    虚拟机管理器对它管理的每个 VM 主机服务器都使用一个<literal>连接</literal>。每个连接都包含相应主机上的所有 VM Guest。默认已配置并已建立与本地主机的连接。
+   </para>
+   <para>
+    配置的所有连接都显示在虚拟机管理器主窗口中。活动连接带有小三角形标记，单击该标记可以收起或展开此连接的 VM Guest 列表。
+   </para>
+   <para>
+    非活动连接以灰色列出，带有<literal>未连接</literal>标记。可以双击或者右键单击这些连接，然后从上下文菜单中选择<guimenu>连接</guimenu>。还可以通过此菜单<guimenu>删除</guimenu>现有连接。
+   </para>
+   <note>
+    <title>编辑现有连接</title>
+    <para>
+     无法编辑现有的连接。要更改连接，请使用所需参数创建新连接，然后删除<quote>旧</quote>连接。
+    </para>
+   </note>
+   <para>
+    要在虚拟机管理器中添加新连接，请执行以下操作：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      选择<menuchoice> <guimenu>文件</guimenu> <guimenu>添加连接</guimenu> </menuchoice>
+     </para>
+    </step>
+    <step>
+     <para>
+      选择主机的<guimenu>超级管理程序</guimenu>（<guimenu>Xen</guimenu> 或 <guimenu>QEMU/KVM</guimenu>）
+     </para>
+    </step>
+    <step performance="optional">
+     <para>
+      要设置远程连接，请选择<guimenu>连接到远程主机</guimenu>。有关更多信息，请参见<xref linkend="sec-libvirt-connect-remote"/>。
+     </para>
+     <para>
+      如果要设置远程连接，请以 <literal><replaceable>USERNAME</replaceable>@<replaceable>REMOTE _HOST</replaceable></literal> 格式指定远程计算机的<guimenu>主机名</guimenu>。
+     </para>
+     <important>
+      <title>指定用户名</title>
+      <para>
+       无需为 TCP 和 TLS 连接指定用户名：使用这些连接时，系统不会评估用户名。但在使用 SSH 连接时，如果您要以非 <systemitem class="username">root</systemitem> 用户身份进行连接，则必须指定用户名。
+      </para>
+     </important>
+    </step>
+    <step>
+     <para>
+      如果您不希望在启动虚拟机管理器时自动启动连接，请停用<guimenu>自动连接</guimenu>。
+     </para>
+    </step>
+    <step>
+     <para>
+      单击<guimenu>连接</guimenu>以完成配置。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-libvirt-connect-remote">
+  <title>配置远程连接</title>
+
+  <para>
+   <systemitem class="library">libvirt</systemitem> 的一大优势是能够从一个中心位置管理不同远程主机上的 VM Guest。本节提供有关如何配置服务器和客户端以允许远程连接的详细说明。
+  </para>
+
+  <sect2 xml:id="sec-libvirt-connect-remote-ssh">
+   <title>基于 SSH 的远程隧道（<literal>qemu+ssh</literal> 或 <literal>xen+ssh</literal>）</title>
+   <para>
+    只需能够接受 SSH 连接，即可在 VM 主机服务器上启用基于 SSH 的远程隧道连接。确保 SSH 守护程序已启动 (<command>systemctl status sshd</command>)，并且已在防火墙中打开服务 <systemitem class="service">SSH</systemitem> 的端口。
+   </para>
+   <para>
+    可以按照<xref linkend="sec-libvirt-connect-auth-libvirt-traditional"/>中所述，使用传统的文件用户/组所有权和权限执行 SSH 连接的用户身份验证。以用户 tux 的身份进行连接（<literal>qemu+ssh://tuxsIVname;/system</literal> 或 <literal>xen+ssh://tuxsIVname;/system</literal>）是开箱即用功能，无需在 <systemitem class="library">libvirt</systemitem> 一端进行额外的配置。
+   </para>
+   <para>
+    通过 SSH 进行连接（<literal>qemu+ssh://<replaceable>USER</replaceable>@<replaceable>SYSTEM</replaceable></literal> 或 <literal>xen+ssh://<replaceable>USER</replaceable>@<replaceable>SYSTEM</replaceable></literal>）时，需要提供 <replaceable>USER</replaceable> 的口令。按照<xref linkend="sec-ssh-public-key-auth"/>中所述将公共密钥复制到 VM 主机服务器上的 <filename>~<replaceable>USER</replaceable>/.ssh/authorized_keys</filename> 可以避免此情况。在发出连接的计算机上使用 ssh-agent 会更方便。有关更多信息，请参见<xref linkend="sec-ssh-authentic-agent"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-libvirt-connect-remote-tls">
+   <title>使用 x509 证书进行远程 TLS/SSL 连接（<literal>qemu+tls</literal> 或 <literal>xen+tls</literal>）</title>
+   <para>
+    与使用 SSH 相比，使用通过 x509 证书实现 TLS/SSL 加密和身份验证的 TCP 连接在设置上要复杂得多，不过此方法的可缩放性也高得多。如果您需要管理多个 VM 主机服务器，而这些服务器的管理员数量各异，请使用此方法。
+   </para>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-concept">
+    <title>基本概念</title>
+    <para>
+     TLS（传输层安全）使用证书来加密两台计算机之间的通讯。发起连接的计算机一律视为<quote>客户端</quote>，使用的是<quote>客户端证书</quote>；接收方计算机一律视为<quote>服务器</quote>，使用的是<quote>服务器证书</quote>。例如，如果您通过一个中心桌面来管理 VM 主机服务器，则此方案适用。
+    </para>
+    <para>
+     如果连接是从两台计算机发起的，则每台计算机都需要有一个客户端证书<emphasis>和</emphasis>一个服务器证书。例如，如果您将 VM Guest 从一台主机迁移到另一台主机，就需要符合这种要求。
+    </para>
+    <para>
+     每个 x509 证书都有一个匹配的私用密钥文件。只有证书与私用密钥文件的组合才能正确标识自身。为确保证书由设想的拥有者颁发，该证书需由称为证书颁发机构 (CA) 的中心证书签名并颁发。客户端证书和服务器证书必须由同一个 CA 颁发。
+    </para>
+    <important>
+     <title>用户身份验证</title>
+     <para>
+      使用远程 TLS/SSL 连接只能确保允许两台计算机进行特定方向的通讯。通过限制对证书的访问，可以在客户端间接地限制只有特定用户可进行访问。有关更多信息，请参见<xref linkend="sec-libvirt-connect-remote-tls-security"/>。
+     </para>
+     <para>
+      <systemitem class="library">libvirt</systemitem> 还支持使用 SASL 在服务器上对用户进行身份验证。有关更多信息，请参见<xref linkend="sec-libvirt-connect-remote-tls-sasl"/>。
+     </para>
+    </important>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-server">
+    <title>配置 VM 主机服务器</title>
+    <para>
+     VM 主机服务器是接收连接的计算机，因此需要安装<emphasis>服务器</emphasis>证书，还需要安装 CA 证书。准备好证书后，可以为 <systemitem class="library">libvirt</systemitem> 开启 TLS 支持。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       创建服务器证书，然后将其连同相应的 CA 证书一并导出。
+      </para>
+     </step>
+     <step>
+      <para>
+       在 VM 主机服务器上创建以下目录：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> mkdir -p /etc/pki/CA/ /etc/pki/libvirt/private/</screen>
+      <para>
+       按如下所示安装证书：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> /etc/pki/CA/cacert.pem
+<prompt>&gt; </prompt><command>sudo</command> /etc/pki/libvirt/servercert.pem
+<prompt>&gt; </prompt><command>sudo</command> /etc/pki/libvirt/private/serverkey.pem</screen>
+      <important>
+       <title>限制对证书的访问</title>
+       <para>
+        确保按照<xref linkend="sec-libvirt-connect-remote-tls-security"/>中所述限制对证书的访问。
+       </para>
+      </important>
+     </step>
+     <step>
+      <para>
+       通过启用相关套接字并重启动 <systemitem class="daemon">libvirtd</systemitem> 来启用 TLS 支持：
+      </para>
+<screen>
+<prompt>&gt; </prompt><command>sudo</command> systemctl stop libvirtd.service
+<prompt>&gt; </prompt><command>sudo</command> systemctl enable --now libvirtd-tls.socket
+<prompt>&gt; </prompt><command>sudo</command> systemctl start libvirtd.service
+</screen>
+     </step>
+     <step>
+      <para>
+       默认情况下，<systemitem class="library">libvirt</systemitem> 使用 TCP 端口 16514 来接受 TLS 安全连接。请在防火墙中打开此端口。
+      </para>
+     </step>
+    </procedure>
+    <important>
+     <title>在启用了 TLS 的情况下重启动 <systemitem class="daemon">libvirtd</systemitem></title>
+     <para>
+      如果您为 <systemitem class="library">libvirt</systemitem> 启用了 TLS，则需要准备好服务器证书，否则重启动 <systemitem class="daemon">libvirtd</systemitem> 会失败。如果您更改了证书，也需要重启动 <systemitem class="daemon">libvirtd</systemitem>。
+     </para>
+    </important>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-client">
+    <title>配置客户端并测试设置</title>
+    <para>
+     客户端是发起连接的计算机，因此需要安装<emphasis>客户端</emphasis>证书，还需要安装 CA 证书。
+    </para>
+    <procedure>
+     <step>
+      <para>
+       创建客户端证书，然后将其连同相应的 CA 证书一并导出。
+      </para>
+     </step>
+     <step>
+      <para>
+       在客户端上创建以下目录：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> mkdir -p /etc/pki/CA/ /etc/pki/libvirt/private/</screen>
+      <para>
+       按如下所示安装证书：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> /etc/pki/CA/cacert.pem
+<prompt>&gt; </prompt><command>sudo</command> /etc/pki/libvirt/clientcert.pem
+<prompt>&gt; </prompt><command>sudo</command> /etc/pki/libvirt/private/clientkey.pem</screen>
+      <important>
+       <title>限制对证书的访问</title>
+       <para>
+        确保按照<xref linkend="sec-libvirt-connect-remote-tls-security"/>中所述限制对证书的访问。
+       </para>
+      </important>
+     </step>
+     <step>
+      <para>
+       发出以下命令测试客户端/服务器设置。请将 <replaceable>mercury.example.com</replaceable> 替换为您的 VM 主机服务器名称。指定在创建服务器证书时所用的完全限定主机名。
+      </para>
+<screen>#QEMU/KVM
+virsh -c qemu+tls://<replaceable>mercury.example.com</replaceable>/system list --all
+
+#Xen
+virsh -c xen+tls://<replaceable>mercury.example.com</replaceable>/system list --all</screen>
+      <para>
+       如果您的设置正确，您将会看到 VM 主机服务器上已在 <systemitem class="library">libvirt</systemitem> 中注册的所有 VM Guest。
+      </para>
+     </step>
+    </procedure>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-vnc">
+    <title>为 TLS/SSL 连接启用 VNC</title>
+    <para>
+     目前只能通过几个工具来支持基于 TLS 的 VNC 通讯。<command>tightvnc</command> 或 <command>tigervnc</command> 等常见 VNC 查看器不支持 TLS/SSL。唯一可替代虚拟机管理器和 <command>virt-viewer</command> 的工具是 <command>remmina</command>（请参见<xref linkend="vnc-remmina"/>）。
+    </para>
+    <sect4 xml:id="sec-libvirt-connect-remote-tls-vnc-server">
+     <title>基于 TLS/SSL 的 VNC：VM 主机服务器配置</title>
+     <para>
+      要通过基于 TLS/SSL 的 VNC 访问图形控制台，需按如下所述配置 VM 主机服务器：
+     </para>
+     <procedure>
+      <step>
+       <para>
+        在防火墙中打开服务 <systemitem class="service">VNC</systemitem> 的端口。
+       </para>
+      </step>
+      <step>
+       <para>
+        创建目录 <filename>/etc/pki/libvirt-vnc</filename>，并按如下所示将证书链接到此目录：
+       </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> mkdir -p /etc/pki/libvirt-vnc &amp;&amp; cd /etc/pki/libvirt-vnc
+<prompt>&gt; </prompt><command>sudo</command> ln -s /etc/pki/CA/cacert.pem ca-cert.pem
+<prompt>&gt; </prompt><command>sudo</command> ln -s /etc/pki/libvirt/servercert.pem server-cert.pem
+<prompt>&gt; </prompt><command>sudo</command> ln -s /etc/pki/libvirt/private/serverkey.pem server-key.pem</screen>
+      </step>
+      <step>
+       <para>
+        编辑 <filename>/etc/libvirt/qemu.conf</filename> 并设置以下参数：
+       </para>
+<screen>vnc_listen = "0.0.0.0"
+        vnc_tls = 1
+        vnc_tls_x509_verify = 1</screen>
+      </step>
+      <step>
+       <para>
+        重启动 <systemitem class="daemon">libvirtd</systemitem>：
+       </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+       <important>
+        <title>需要重启动 VM Guest</title>
+        <para>
+         只有在启动 VM Guest 时才会设置 VNC TLS。因此，需要重启动更改配置前已在运行的所有计算机。
+        </para>
+       </important>
+      </step>
+     </procedure>
+    </sect4>
+    <sect4 xml:id="sec-libvirt-connect-remote-tls-vnc-client">
+     <title>基于 TLS/SSL 的 VNC：客户端配置</title>
+     <para>
+      需要在客户端执行的唯一操作是，将 x509 客户端证书放到可由所选客户端识别的位置。遗憾的是，虚拟机管理器和 <command>virt-viewer</command> 要求将证书放到不同的位置。虚拟机管理器可以从应用到所有用户的系统范围位置或者从每个用户的位置读取数据。在初始化与远程 VNC 会话的连接时，Remmina（请参见<xref linkend="vnc-remmina"/>）会要求提供证书位置。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term><emphasis role="bold">虚拟机管理器 (<command>virt-manager</command>)</emphasis>
+       </term>
+       <listitem>
+        <para>
+         要连接到远程主机，虚拟机管理器需要使用<xref linkend="sec-libvirt-connect-remote-tls-client"/>中所述的设置。要能够通过 VNC 进行连接，还需要将客户端证书放到以下位置：
+        </para>
+        <variablelist>
+         <varlistentry>
+          <term>系统范围的位置</term>
+          <listitem>
+           <simplelist>
+            <member><filename>/etc/pki/CA/cacert.pem</filename>
+            </member>
+            <member><filename>/etc/pki/libvirt-vnc/clientcert.pem</filename>
+            </member>
+            <member><filename>/etc/pki/libvirt-vnc/private/clientkey.pem</filename>
+            </member>
+           </simplelist>
+          </listitem>
+         </varlistentry>
+         <varlistentry>
+          <term>每个用户的位置</term>
+          <listitem>
+           <simplelist>
+            <member><filename>/etc/pki/CA/cacert.pem</filename>
+            </member>
+            <member><filename>~/.pki/libvirt-vnc/clientcert.pem</filename>
+            </member>
+            <member><filename>~/.pki/libvirt-vnc/private/clientkey.pem</filename>
+            </member>
+           </simplelist>
+          </listitem>
+         </varlistentry>
+        </variablelist>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><emphasis role="bold"><command>virt-viewer</command></emphasis>
+       </term>
+       <listitem>
+        <para>
+         <command>virt-viewer</command> 仅接受位于系统范围位置的证书：
+        </para>
+        <simplelist>
+         <member><filename>/etc/pki/CA/cacert.pem</filename>
+         </member>
+         <member><filename>/etc/pki/libvirt-vnc/clientcert.pem</filename>
+         </member>
+         <member><filename>/etc/pki/libvirt-vnc/private/clientkey.pem</filename>
+         </member>
+        </simplelist>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <important>
+      <title>限制对证书的访问</title>
+      <para>
+       确保按照<xref linkend="sec-libvirt-connect-remote-tls-security"/>中所述限制对证书的访问。
+      </para>
+     </important>
+    </sect4>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-security">
+    <title>限制访问（安全考虑因素）</title>
+    <para>
+     每个 x509 证书由两个部分构成：公共证书和私用密钥。只有使用了这两个部分，客户端才能通过身份验证。因此，对客户端证书及其私用密钥拥有读取访问权限的任何用户都可以访问您的 VM 主机服务器。另一方面，具有完整服务器证书的任意计算机都可以假装是 VM 主机服务器。这种情况也许不是您希望发生的，因此至少需要尽可能地限制对私用密钥文件的访问。要控制对密钥文件的访问，最简单的方法就是使用访问权限。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term><emphasis role="bold">服务器证书</emphasis>
+      </term>
+      <listitem>
+       <para>
+        服务器证书需可由 QEMU 进程读取。在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> QEMU 上，通过 <systemitem class="library">libvirt</systemitem> 工具启动的进程由 <systemitem class="username">root</systemitem> 拥有，因此只要 <systemitem class="username">root</systemitem> 能够读取证书便已足够：
+       </para>
+<screen><prompt>&gt; </prompt>chmod 700 /etc/pki/libvirt/private/
+<prompt>&gt; </prompt>chmod 600 /etc/pki/libvirt/private/serverkey.pem</screen>
+       <para>
+        如果您在 <filename>/etc/libvirt/qemu.conf</filename> 中更改了 QEMU 进程的所有权，则也需要调整密钥文件的所有权。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><emphasis role="bold">系统范围的客户端证书</emphasis>
+      </term>
+      <listitem>
+       <para>
+        要控制对可在系统范围使用的密钥文件的访问，请限制只有特定的组具有读取访问权限，这样只有该组的成员可以读取密钥文件。下面的示例创建了一个 <systemitem class="groupname">libvirt</systemitem> 组，并将 <filename>clientkey.pem</filename> 文件及其父目录的组所有权设置为 <systemitem class="groupname">libvirt</systemitem>。之后，限制只有拥有者和组具有访问权限。最后，将用户 <systemitem class="username">tux</systemitem> 添加到 <systemitem class="groupname">libvirt</systemitem> 组，如此该用户便可以访问密钥文件。
+       </para>
+<screen>CERTPATH="/etc/pki/libvirt/"
+# create group libvirt
+groupadd libvirt
+# change ownership to user root and group libvirt
+chown root.libvirt $CERTPATH/private $CERTPATH/clientkey.pem
+# restrict permissions
+chmod 750 $CERTPATH/private
+chmod 640 $CERTPATH/private/clientkey.pem
+# add user tux to group libvirt
+usermod --append --groups libvirt tux</screen>
+      </listitem>
+     </varlistentry>
+     <varlistentry>
+      <term><emphasis role="bold">每个用户的证书</emphasis>
+      </term>
+      <listitem>
+       <para>
+        需要将用于通过 VNC 访问 VM Guest 图形控制台的用户特定客户端证书放在用户主目录下的 <filename>~/.pki</filename> 中。与 SSH 不同，使用这些证书的 VNC 查看器不会检查私用密钥文件的访问权限（举例而言）。因此，用户需自行负责确保密钥文件不可由其他人读取。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+    <sect4 xml:id="sec-libvirt-connect-remote-tls-server-restrict">
+     <title>限制从服务器端的访问</title>
+     <para>
+      默认情况下，具有相应客户端证书的每个客户端都可以连接到接受 TLS 连接的 VM 主机服务器。因此，可以按照<xref linkend="sec-libvirt-connect-auth-libvirt-sasl"/>中所述通过 SASL 来实施额外的服务器端身份验证。
+     </para>
+     <para>
+      还可以通过 DN（判别名）白名单来限制访问，这样只有其证书与白名单中的某个 DN 匹配的客户端才能建立连接。
+     </para>
+     <para>
+      将允许的 DN 列表添加到 <filename>/etc/libvirt/libvirtd.conf</filename> 中的 <literal>tls_allowed_dn_list</literal>。此列表可以包含通配符。请不要指定空列表，因为这会导致拒绝所有连接。
+     </para>
+<screen>tls_allowed_dn_list = [
+   "C=US,L=Provo,O=SUSE Linux Products GmbH,OU=*,CN=venus.example.com,EMAIL=*",
+   "C=DE,L=Nuremberg,O=SUSE Linux Products GmbH,OU=Documentation,CN=*"]</screen>
+     <para>
+      使用以下命令获取证书的判别名：
+     </para>
+<screen><prompt>&gt; </prompt>certtool -i --infile /etc/pki/libvirt/clientcert.pem | grep "Subject:"</screen>
+     <para>
+      更改配置后重启动 <systemitem class="daemon">libvirtd</systemitem>：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart libvirtd</screen>
+    </sect4>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-sasl">
+    <title>对 TLS 套接字使用 SASL 进行集中式用户身份验证</title>
+
+    <para>
+     通过 TLS 无法进行直接的用户身份验证 — 只能按照<xref linkend="sec-libvirt-connect-remote-tls-security"/>中所述，通过证书读取权限在每个客户端上间接处理这种身份验证。但是，如果您需要采用基于服务器的集中式用户身份验证，<systemitem class="library">libvirt</systemitem> 还允许在 TLS 上使用 SASL（简单身份验证和安全层）实现直接的用户身份验证。有关配置细节，请参见<xref linkend="sec-libvirt-connect-auth-libvirt-sasl"/>。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-libvirt-connect-remote-tls-troubleshoot">
+    <title>查错</title>
+    <para/>
+    <sect4 xml:id="sec-libvirt-connect-remote-tls-troubleshoot-no-connect">
+     <title>虚拟机管理器/<command>virsh</command> 无法连接到服务器</title>
+     <para>
+      按给定的顺序完成以下检查：
+     </para>
+     <simplelist>
+      <member>这是防火墙的问题吗（需要在服务器上打开 TCP 端口 16514）？</member>
+      <member>启动虚拟机管理器/<command>virsh</command> 的用户是否可以读取客户端证书（证书和密钥）？
+      </member>
+      <member>是否在连接中指定了与服务器证书中相同的完全限定主机名？</member>
+      <member>是否在服务器上启用了 TLS (<literal>listen_tls = 1</literal>)？</member>
+      <member>是否在服务器上重启动了 <systemitem class="daemon">libvirtd</systemitem>？</member>
+     </simplelist>
+    </sect4>
+    <sect4 xml:id="sec-libvirt-connect-remote-tls-troubleshoot-vnc">
+     <title>VNC 连接失败</title>
+     <para>
+      确保您可以使用虚拟机管理器连接到远程服务器。如果可以连接，请检查是否在启用了 TLS 支持的情况下启动了服务器上的虚拟机。下面的示例中的虚拟机名称为 <literal>sles</literal>。
+     </para>
+<screen><prompt>&gt; </prompt>ps ax | grep qemu | grep "\-name sles" | awk -F" -vnc " '{ print FS $2 }'</screen>
+     <para>
+      如果输出不是以类似于下面的字符串开头，则表示虚拟机启动时未启用 TLS 支持，必须将虚拟机重启动。
+     </para>
+<screen> -vnc 0.0.0.0:0,tls,x509verify=/etc/pki/libvirt</screen>
+    </sect4>
+   </sect3>
+  </sect2>
+ </sect1>
+</chapter>
