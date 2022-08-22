@@ -1,1 +1,410 @@
-../../../../xml/storage_nvmeof.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_nvmeof.xml" version="5.0" xml:id="cha-nvmeof" xml:lang="zh-tw">
+ <title>NVMe over Fabric</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+  <abstract>
+   <para>
+    本章介紹如何設定 NVMe over Fabric 主機和目標。
+   </para>
+  </abstract>
+ </info>
+ <sect1 xml:id="sec-nvmeof-overview">
+  <title>綜覽</title>
+
+  <para>
+   <emphasis>NVM Express</emphasis> (<emphasis>NVMe</emphasis>) 是有關存取非揮發性儲存 (通常是 SSD 磁碟) 的介面標準。與 SATA 相比，NVMe 支援的速度要高得多，並且延遲更低。
+  </para>
+
+  <para>
+   <emphasis>NVMe over Fabric</emphasis> 是用於透過不同網路結構存取 NVMe 儲存的一種架構。這些網路結構有 <emphasis>RDMA</emphasis>、<emphasis>TCP</emphasis> 或<emphasis>基於光纖通道的 NVMe</emphasis> (<emphasis>FC-NVMe</emphasis>) 等。NVMe over Fabric 的作用類似於 iSCSI。為提高容錯能力，NVMe over Fabric 內建了多重路徑支援。NVMe over Fabric 多重路徑不是以傳統 DM 多重路徑為基礎。
+  </para>
+
+  <para>
+   <emphasis>NVMe 主機</emphasis>是連接到 NVMe 目標的機器。<emphasis>NVMe 目標</emphasis>是共用其 NVMe 區塊裝置的機器。
+  </para>
+
+  <para>
+   SUSE Linux Enterprise Server <phrase role="productnumber"><phrase os="sles;sled">15 SP4</phrase></phrase> 支援 NVMe。提供了可用於 NVMe 區塊儲存及 NVMe over Fabric 目標和主機的核心模組。
+  </para>
+
+  <para>
+   若要查看您的硬體是否有任何特殊考量，請參閱<xref linkend="sec-nvmeof-hardware"/>。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-nvmeof-host-configuration">
+  <title>設定 NVMe over Fabric 主機</title>
+
+  <para>
+   若要使用 NVMe over Fabric，必須在目標上使用支援的網路方法。支援的方法包括基於光纖通道的 NVMe、TCP 和 RDMA。以下小節介紹如何將主機連接到 NVMe 目標。
+  </para>
+
+  <sect2 xml:id="sec-nvmeof-host-configuration-cli">
+   <title>安裝指令行用戶端</title>
+   <para>
+    若要使用 NVMe over Fabric，需要安裝 <command>nvme</command> 指令行工具。請使用 <command>zypper</command> 安裝該工具：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in nvme-cli</command></screen>
+   <para>
+    使用 <command>nvme --help</command> 可列出所有可用的子指令。我們提供了 <command>nvme</command> 子指令的 man 頁面。執行 <command>man nvme-<replaceable>SUBCOMMAND</replaceable></command> 可參閱相關的 man 頁面。例如，若要檢視 <option>discover</option> 子指令的 man 頁面，請執行 <command>man nvme-discover</command>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-host-configuration-target-discovery">
+   <title>探查 NVMe over Fabric 目標</title>
+   <para>
+    若要列出 NVMe over Fabric 目標上的可用 NVMe 子系統，您需有探查控制器位址和服務 ID。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>nvme discover -t <replaceable>TRANSPORT</replaceable> -a <replaceable>DISCOVERY_CONTROLLER_ADDRESS</replaceable> -s <replaceable>SERVICE_ID</replaceable></command></screen>
+   <para>
+    以基礎傳輸媒體 (<option>loop</option>、<option>rdma</option>、<option>tcp</option> 或 <option>fc</option>) 取代 <replaceable>TRANSPORT</replaceable>。以探查控制器的位址取代 <replaceable>DISCOVERY_CONTROLLER_ADDRESS</replaceable>。對於 RDMA 和 TCP，此位址應是 IPv4 位址。以傳輸服務 ID 取代 <replaceable>SERVICE_ID</replaceable>。如果服務基於 IP (例如 RDMA 或 TCP)，則服務 ID 指定連接埠號碼。對於光纖通道，不需要提供服務 ID。
+   </para>
+   <para>
+    NVMe 主機只會看到它們有權連接的子系統。
+   </para>
+   <para>
+    範例:
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> nvme discover -t tcp -a 10.0.0.3 -s 4420</screen>
+   <para>
+    如需更多詳細資料，請參閱 <command>man nvme-discover</command>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-host-configuration-connect-target">
+   <title>連接 NVMe over Fabric 目標</title>
+   <para>
+    識別 NVMe 子系統後，可以使用 <command>nvme connect</command> 指令來連接它。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>nvme connect -t <replaceable>transport</replaceable> -a <replaceable>DISCOVERY_CONTROLLER_ADDRESS</replaceable> -s <replaceable>SERVICE_ID</replaceable> -n <replaceable>SUBSYSTEM_NQN</replaceable></command></screen>
+   <para>
+    以基礎傳輸媒體 (<option>loop</option>、<option>rdma</option>、<option>tcp</option> 或 <option>fc</option>) 取代 <replaceable>TRANSPORT</replaceable>。以探查控制器的位址取代 <replaceable>DISCOVERY_CONTROLLER_ADDRESS</replaceable>。對於 RDMA 和 TCP，此位址應是 IPv4 位址。以傳輸服務 ID 取代 <replaceable>SERVICE_ID</replaceable>。如果服務基於 IP (例如 RDMA 或 TCP)，則此 ID 指定連接埠號碼。以探查指令找到的所需子系統的 NVMe 合格名稱取代 <replaceable>SUBSYSTEM_NQN</replaceable>。<emphasis>NQN</emphasis> 是 <emphasis>NVMe 合格名稱</emphasis> (NVMe Qualified Name) 的縮寫。NQN 必須是唯一的。
+   </para>
+   <para>
+    範例:
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>nvme connect -t tcp -a 10.0.0.3 -s 4420 -n nqn.2014-08.com.example:nvme:nvm-subsystem-sn-d78432</command></screen>
+   <para>
+    或者，使用 <command>nvme connect-all</command> 連接探查到的所有名稱空間。如需進階用法，請參閱 <command>man nvme-connect</command> 和 <command>man nvme-connect-all</command>。
+   </para>
+   <para>
+    如果發生路徑遺失，NVMe 子系統會嘗試重新連接一段時間，該時間由 <command>nvme connect</command> 指令的 <literal>ctrl-loss-tmo</literal> 選項定義。在這段時間 (預設值為 600s) 過後，將移除該路徑並通知區塊層 (檔案系統) 的上層。依預設，隨後會以唯讀模式掛接檔案系統，這種行為通常不符合預期。因此，建議設定 <literal>ctrl-loss-tmo</literal> 選項，使 NVMe 子系統無限制地持續嘗試重新連接。為此，請執行以下指令：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> nvme connect --ctrl-loss-tmo=-1</screen>
+   <para>
+    若要使 NVMe over Fabric 子系統在開機時可用，請在主機上建立一個 <filename>/etc/nvme/discovery.conf</filename> 檔案，並在其中包含傳遞給 <command>discover</command> 指令的參數 (參閱<xref linkend="sec-nvmeof-host-configuration-target-discovery"/>)。例如，如果您如下所示使用 <command>discover</command> 指令：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> nvme discover -t tcp -a 10.0.0.3 -s 4420</screen>
+   <para>
+    請將 <command>discover</command> 指令的參數新增至 <filename>/etc/nvme/discovery.conf</filename> 檔案中：
+   </para>
+<screen>echo "-t tcp -a 10.0.0.3 -s 4420" | sudo tee -a /etc/nvme/discovery.conf</screen>
+   <para>
+    然後啟用 <guimenu>nvmf-autoconnect</guimenu> 服務：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl enable nvmf-autoconnect.service</screen>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-host-configuration-multipathing">
+   <title>多重路徑</title>
+   <para>
+    預設會啟用 NVMe 原生多重路徑。如果在控制器身分設定中設定了 <option>CMIC</option> 選項，則 NVMe 堆疊預設會將 NVMe 磁碟機識別為多重路徑裝置。
+   </para>
+   <para>
+    若要管理多重路徑，您可以使用以下指令：
+   </para>
+   <variablelist>
+    <title>管理多重路徑</title>
+    <varlistentry>
+     <term><command>nvme list-subsys</command></term>
+     <listitem>
+      <para>
+       列印多重路徑裝置的配置。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><command>multipath -ll</command></term>
+     <listitem>
+      <para>
+       指令   有相容模式，可顯示 NVMe 多重路徑裝置。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term><option>nvme-core.multipath=N</option></term>
+     <listitem>
+      <para>
+       當做為開機參數新增該選項時，將停用 NVMe 原生多重路徑。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <note>
+    <title>在多重路徑設定中使用 <command>iostat</command></title>
+    <para>
+     <command>iostat</command> 指令可能不會顯示 <command>nvme list-subsys</command> 列出的所有控制器。依預設，<command>iostat</command> 會過濾掉所有沒有 I/O 的區塊裝置。若要使 <command>iostat</command> 顯示<emphasis>所有</emphasis>裝置，請使用：
+    </para>
+    <screen>iostat -p ALL</screen>
+   </note>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-nvmeof-target-configuration">
+  <title>設定 NVMe over Fabric 目標</title>
+
+  <sect2 xml:id="sec-nvmeof-target-configuration-cli">
+   <title>安裝指令行用戶端</title>
+   <para>
+    若要設定 NVMe over Fabric 目標，需要安裝 <command>nvmetcli</command> 指令行工具。請使用 <command>zypper</command> 安裝該工具：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper in nvmetcli</command></screen>
+   <para>
+    <link xlink:href="http://git.infradead.org/users/hch/nvmetcli.git/blob_plain/HEAD:/Documentation/nvmetcli.txt"/> 上提供了 <command>nvmetcli</command> 的最新文件。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-target-configuration-steps">
+   <title>組態步驟</title>
+   <para>
+    下面的程序舉例說明如何設定 NVMe over Fabric 目標。
+   </para>
+   <para>
+    組態儲存在樹狀結構中。使用 <command>cd</command> 指令可進行導覽。使用 <command>ls</command> 可列出物件。您可以使用 <command>create</command> 建立新物件。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      啟動 <command>nvmetcli</command> 互動式外圍程序：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>nvmetcli</command></screen>
+    </step>
+    <step>
+     <para>
+      建立新連接埠：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd ports</command>
+<prompt>(nvmetcli)&gt; </prompt><command>create 1</command>
+<prompt>(nvmetcli)&gt; </prompt><command>ls 1/</command>
+o- 1
+  o- referrals
+  o- subsystems</screen>
+    </step>
+    <step>
+     <para>
+      建立 NVMe 子系統：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd /subsystems</command>
+<prompt>(nvmetcli)&gt; </prompt><command>create nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82</command>
+<prompt>(nvmetcli)&gt; </prompt><command>cd nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82/</command>
+<prompt>(nvmetcli)&gt; </prompt><command>ls</command>
+o- nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82
+  o- allowed_hosts
+  o- namespaces</screen>
+    </step>
+    <step>
+     <para>
+      建立新的名稱空間，並在其中設定 NVMe 裝置：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd namespaces</command>
+<prompt>(nvmetcli)&gt; </prompt><command>create 1</command>
+<prompt>(nvmetcli)&gt; </prompt><command>cd 1</command>
+<prompt>(nvmetcli)&gt; </prompt><command>set device path=/dev/nvme0n1</command>
+Parameter path is now '/dev/nvme0n1'.</screen>
+    </step>
+    <step>
+     <para>
+      啟用先前建立的名稱空間：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd ..</command>
+<prompt>(nvmetcli)&gt; </prompt><command>enable</command>
+The Namespace has been enabled.</screen>
+    </step>
+    <step>
+     <para>
+      顯示建立的名稱空間：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd ..</command>
+<prompt>(nvmetcli)&gt; </prompt><command>ls</command>
+o- nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82
+  o- allowed_hosts
+  o- namespaces
+    o- 1</screen>
+    </step>
+    <step>
+     <para>
+      允許所有主機使用該子系統。只有在安全環境中才可這樣做。
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>set attr allow_any_host=1</command>
+Parameter allow_any_host is now '1'.</screen>
+     <para>
+      或者，可以只允許特定的主機建立連接：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82/allowed_hosts/</command>
+<prompt>(nvmetcli)&gt; </prompt><command>create hostnqn</command></screen>
+    </step>
+    <step>
+     <para>
+      列出建立的所有物件：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd /</command>
+<prompt>(nvmetcli)&gt; </prompt><command>ls</command>
+o- /
+  o- hosts
+  o- ports
+  | o- 1
+  |   o- referrals
+  |   o- subsystems
+  o- subsystems
+    o- nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82
+      o- allowed_hosts
+      o- namespaces
+        o- 1</screen>
+    </step>
+    <step>
+     <para>
+      使目標可透過 TCP 使用。為 RDMA 使用 <literal>trtype=rdma</literal>：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd ports/1/</command>
+<prompt>(nvmetcli)&gt; </prompt><command>set addr adrfam=ipv4 trtype=tcp traddr=10.0.0.3 trsvcid=4420</command>
+Parameter trtype is now 'tcp'.
+Parameter adrfam is now 'ipv4'.
+Parameter trsvcid is now '4420'.
+Parameter traddr is now '10.0.0.3'.</screen>
+     <para>
+      或者，使目標可透過光纖通道使用：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd ports/1/</command>
+<prompt>(nvmetcli)&gt; </prompt><command>set addr adrfam=fc trtype=fc traddr=nn-0x1000000044001123:pn-0x2000000055001123 trsvcid=none</command></screen>
+    </step>
+    <step>
+     <para>
+      將子系統連結至該連接埠：
+     </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>cd /ports/1/subsystems</command>
+<prompt>(nvmetcli)&gt; </prompt><command>create nqn.2014-08.org.nvmexpress:NVMf:uuid:c36f2c23-354d-416c-95de-f2b8ec353a82</command>      
+      </screen>
+     <para>
+      現在，可以使用 <command>dmesg</command> 驗證該連接埠是否已啟用：
+     </para>
+<screen><prompt role="root"># </prompt>dmesg
+        ...
+[  257.872084] nvmet_tcp: enabling port 1 (10.0.0.3:4420)
+      </screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-target-configuration-backup-configuration">
+   <title>備份和還原目標組態</title>
+   <para>
+    可使用以下指令在 JSON 檔案中儲存目標組態：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>nvmetcli</command>
+<prompt>(nvmetcli)&gt; </prompt><command>saveconfig nvme-target-backup.json</command></screen>
+   <para>
+    若要還原組態，請使用：
+   </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>restore nvme-target-backup.json</command></screen>
+   <para>
+    您還可以抹除目前組態：
+   </para>
+<screen><prompt>(nvmetcli)&gt; </prompt><command>clear</command></screen>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-nvmeof-hardware">
+  <title>特殊硬體組態</title>
+
+  <sect2 xml:id="sec-nvmeof-hardware-overview">
+   <title>綜覽</title>
+   <para>
+    某些硬體需要特殊的組態才能正常運作。請瀏覽以下章節的標題，確定您是否使用了所提到的任何裝置或廠商。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-hardware-broadcom">
+   <title>Broadcom</title>
+   <para>
+    如果您在使用 <emphasis>Broadcom Emulex LightPulse Fibre Channel SCSI</emphasis> 驅動程式，請在 <literal>lpfc</literal> 模組的目標和主機中新增核心組態參數：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>echo "options lpfc lpfc_enable_fc4_type=3" &gt; /etc/modprobe.d/lpfc.conf</command></screen>
+   <para>
+    確定 Broadcom 介面卡韌體的版本至少為 11.4.204.33。另請確定已安裝最新版本的 <package>nvme-cli</package>、<package>nvmetcli</package> 和核心。
+   </para>
+   <para>
+    若要啟用光纖通道連接埠做為 NVMe 目標，需要額外設定一個模組參數：<option>lpfc_enable_nvmet=<replaceable> COMMA_SEPARATED_WWPNS</replaceable></option>。請輸入帶有前置 <literal>0x</literal> 的 WWPN，例如 <option>lpfc_enable_nvmet=0x2000000055001122,0x2000000055003344</option>。系統只會為目標模式設定列出的 WWPN。可將光纖通道連接埠設定為目標<emphasis>或</emphasis>啟動器。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-nvmeof-hardware-marvell">
+   <title>Marvell</title>
+   <para>
+    QLE269x 和 QLE27xx 介面卡上都支援 FC-NVMe。Marvell® QLogic® QLA2xxx 光纖通道驅動程式中預設會啟用 FC-NVMe 支援。
+   </para>
+   <para>
+    若要確認是否已啟用 NVMe，請執行以下指令：
+   </para>
+<screen><prompt>&gt; </prompt>cat /sys/module/qla2xxx/parameters/ql2xnvmeenable</screen>
+   <para>
+    如果顯示 <literal>1</literal>，則表示 NVMe 已啟用，顯示 <literal>0</literal> 表示 NVMe 已停用。
+   </para>
+   <para>
+    然後，檢查以下指令的輸出，確定 Marvell 介面卡韌體的版本不早於 8.08.204：
+   </para>
+<screen><prompt>&gt; </prompt>cat /sys/class/scsi_host/host0/fw_version</screen>
+   <para>
+    最後，確定已安裝適用於 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的最新版 <package>nvme-cli</package>、<package>QConvergeConsoleCLI</package> 和核心。例如，您可以執行
+   </para>
+<screen><prompt role="root"># </prompt>zypper lu &amp;&amp; zypper pchk</screen>
+   <para>
+    來檢查更新和修補程式。
+   </para>
+   <para>
+    如需安裝的更多詳細資料，請參閱下列 Marvell 使用者指南中的 FC-NVMe 部分：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      <link xlink:href="http://driverdownloads.qlogic.com/QLogicDriverDownloads_UI/ShowEula.aspx?resourceid=32769&amp;docid=96728&amp;ProductCategory=39&amp;Product=1259&amp;Os=126"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="http://driverdownloads.qlogic.com/QLogicDriverDownloads_UI/ShowEula.aspx?resourceid=32761&amp;docid=96726&amp;ProductCategory=39&amp;Product=1261&amp;Os=126"/>
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-nvmeof-more-information">
+  <title>更多資訊</title>
+
+  <para>
+   如需 <command>nvme</command> 指令功能的更多詳細資料，請參閱 <command>nvme nvme-help</command>。
+  </para>
+
+  <para>
+   以下連結提供了 NVMe 和 NVMe over Fabric 的簡介：
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     <link xlink:href="http://nvmexpress.org/"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="http://www.nvmexpress.org/wp-content/uploads/NVMe_Over_Fabrics.pdf"/>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://storpool.com/blog/demystifying-what-is-nvmeof"/>
+    </para>
+   </listitem>   
+  </itemizedlist>
+ </sect1>
+</chapter>
