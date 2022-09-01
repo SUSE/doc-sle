@@ -241,8 +241,8 @@ vfio                   32768  6 vfio_mdev,nvidia_vgpu_vfio,vfio_iommu_type1
      </para>
 <screen>cd /sys/bus/pci/devices/00000000\:31\:00.0/mdev_supported_types</screen>
      <para>
-      For Ampere GPU cards, you need to enable SR-IOV first.
-      <!-- 2021-09-21 tbazant, this refers to 'out-of-place' comment below -->
+      For Ampere GPU cards, the directory will be created automatically for each virtual function
+      after SR-IOV is enabled.
      </para>
     </step>
    </procedure>
@@ -465,19 +465,19 @@ lrwxrwxrwx 1 root root           0 Sep 21 11:58 virtfn9 -> ../0000:b1:01.5
      </important>
 <screen>
 &prompt.user;cd /sys/bus/pci/devices/0000:b1:00.0/virtfn1/mdev_supported_types
-&prompt.user;for i in *; do echo "" $(cat $i/name) available: $(cat $i/avail*); done
-GRID A100-4C available: 0
-GRID A100-5C available: 0
-GRID A100-8C available: 0
-GRID A100-10C available: 1
-GRID A100-20C available: 0
-GRID A100-40C available: 0
-GRID A100-1-5C available: 0
-GRID A100-2-10C available: 0
-GRID A100-3-20C available: 0
-GRID A100-4-20C available: 0
-GRID A100-7-40C available: 0
-GRID A100-1-5CME available: 0
+&prompt.user;for i in *; do echo "$i" $(cat $i/name) available: $(cat $i/avail*); done
+nvidia-468 GRID A100-4C available: 0
+nvidia-469 GRID A100-5C available: 0
+nvidia-470 GRID A100-8C available: 0
+nvidia-471 GRID A100-10C available: 1
+nvidia-472 GRID A100-20C available: 0
+nvidia-473 GRID A100-40C available: 0
+nvidia-474 GRID A100-1-5C available: 0
+nvidia-475 GRID A100-2-10C available: 0
+nvidia-476 GRID A100-3-20C available: 0
+nvidia-477 GRID A100-4-20C available: 0
+nvidia-478 GRID A100-7-40C available: 0
+nvidia-479 GRID A100-1-5CME available: 0
 &prompt.user;uuidgen
 f715f63c-0d00-4007-9c5a-b07b0c6c05de
 &prompt.sudo;echo "f715f63c-0d00-4007-9c5a-b07b0c6c05de" > nvidia-471/create
@@ -547,6 +547,11 @@ vGPU ID                           : 3251634265
 
   <sect2 xml:id="configure-nvidia-vgpu-passthrough-mig-backed">
    <title>Creating a MIG-backed vGPU</title>
+   <important>
+    <para>
+     SR-IOV is required to be enabled if you want to create vGPUs and assign them to guest VMs.
+    </para>
+   </important>
    <procedure>
     <step>
      <para>
@@ -591,7 +596,8 @@ All done.
     </step>
     <step>
      <para>
-      Create a GPU instance specifying '5' as a GPU profile instance ID:
+      Create a GPU instance specifying '5' as a GPU profile instance ID and optionally create a
+      Compute Instance on it, either on the host server or within the guest:
      </para>
 <screen>
 &prompt.sudo;nvidia-smi mig -cgi 5
@@ -642,12 +648,11 @@ Tue Sep 21 11:19:36 2021
     <step>
      <para>
       Use the MIG instance. You can use the instance directly with the
-      UUID&mdash;for example, assign it to a &vmguest; or to a container/CUDA
-      process.
+      UUID&mdash;for example, assign it to a container or CUDA process.
      </para>
      <para>
-      You can also create a vGPU on top of it. The procedure is the same as for
-      the vGPU with SR-IOV support. Refer to
+      You can also create a vGPU on top of it and assign it to a VM guest. The
+      procedure is the same as for the vGPU with SR-IOV support. Refer to
       <xref linkend="configure-nvidia-vgpu-passthrough-with-sriov"/>.
      </para>
 <screen>
@@ -812,39 +817,81 @@ GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-ee14e29d-dd5b-2e8e-eeaf-9d3debd10788)
     </para>
    </step>
    <step>
-    <para>
-     Update the following options:
-    </para>
-    <variablelist>
-     <varlistentry>
-      <term>ServerAddress</term>
-      <listitem>
-       <para>
-        Add your license server IP address.
-       </para>
-      </listitem>
-     </varlistentry>
-     <varlistentry>
-      <term>ServerPort</term>
-      <listitem>
-       <para>
-        Use the default "7070" or port configured during the server setup.
-       </para>
-      </listitem>
-     </varlistentry>
-     <varlistentry>
-      <term>FeatureType</term>
-      <listitem>
-       <para>
-        For GPU passthrough, set <option>FeatureType</option> to
-        <literal>4</literal> for compute and <literal>2</literal> for graphic
-        purpose. For virtual GPU case, whatever vGPU type is created via
-        <command>mdev</command> determines the feature set that is enabled in
-        &vmguest;.
-       </para>
-      </listitem>
-     </varlistentry>
-    </variablelist>
+    <substeps>
+     <step>
+      <para>
+       For licenses that are served from the &nvidia; License System,
+       update the following options:
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>FeatureType</term>
+        <listitem>
+         <para>
+          For GPU passthrough, set <option>FeatureType</option> to
+          <literal>4</literal> for computing and <literal>2</literal> for graphic
+          purposes. In case of a virtual GPU, whatever vGPU type is created via
+          <command>mdev</command> determines the feature set that is enabled in
+          &vmguest;.
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>ClientConfigTokenPath</term>
+        <listitem>
+         <para>
+          Optional: If you want to store the client configuration token in a
+          custom location, add the <option>ClientConfigTokenPath</option> 
+          configuration parameter on a new line as
+          <option>ClientConfigTokenPath="<replaceable>PATH_TO_TOKEN</replaceable>"</option>.
+          By default, the client searches for the client configuration token in
+          the <filename>/etc/nvidia/ClientConfigToken/</filename> directory.
+         </para>
+         <para>
+          Copy the client configuration token to the directory in which you
+          want to store it.
+         </para>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </step>
+     <step>
+      <para>
+       For licenses that are served from the legacy &nvidia; vGPU software license server,
+       update the following options:
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>ServerAddress</term>
+        <listitem>
+         <para>
+          Add your license server IP address.
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>ServerPort</term>
+        <listitem>
+         <para>
+          Use the default "7070" or the port configured during the server setup.
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>FeatureType</term>
+        <listitem>
+         <para>
+          For GPU passthrough, set <option>FeatureType</option> to
+          <literal>4</literal> for computing and <literal>2</literal> for graphic
+          purposes. In case of a virtual GPU, whatever vGPU type is created via
+          <command>mdev</command> determines the feature set that is enabled in
+          &vmguest;.
+         </para>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </step>
+    </substeps>
    </step>
    <step>
     <para>
