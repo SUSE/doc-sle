@@ -22,7 +22,7 @@
     between two hosts, including authentication, to protect against
     eavesdropping and connection hijacking. This chapter covers basic
     operations, plus host key rotation and certificate authentication, which
-    are especially useful for managing larger SSH deployments.
+    are useful for managing larger SSH deployments.
    </para>
   </abstract>
   <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
@@ -85,13 +85,13 @@
     accurate match than a visual comparison.
    </para>
    <para>
-    You can't rely on all users to use correct verification methods. If the
+    You can't rely on users to use correct verification methods. If the
     fingerprints do not match, the user can still type
     <literal>yes</literal>, or copy the fingerprint in the message, and
-    complete the connection. <!-- A stronger alternative is to use
+    complete the connection. A stronger alternative is to use
     certificate authentication, which provides a global authentication
     mechansism, and does not require perfect behavior from users
-    (see TODO)-->
+    (see <xref linkend="sec-ssh-certificate-auth"/>).
    </para>
   </note>
    <para>
@@ -864,17 +864,17 @@ Have a lot of fun...</screen>
    users authenticate to each other with digitally-signed encryption
    certificates instead of encryption keys. Certificate authentication
    provides central management for server and user certificates,
-   eliminating the need to copy user public keys to multiple hosts. It also
-   eliminates relying on users to verify host keys, or to maintain their
-   <filename>known_hosts</filename> files.
+   eliminating the need to manually copy user public keys to multiple hosts.
+   It increases security by giving more control to administrators, and less
+   to users.
   </para>
   <para>
    Certificates consist of a public encryption key, a user-defined identity
    string, zero or more user names or host names, and other options.
-   Certificates are signed by a Certificate Authority (CA) signing key.
-   Users and hosts trust the CA key, and verify its signature on a
-   certificate, rather than trusting individual user and
-   host encryption keys.
+   User and host public keys are signed by a Certificate Authority (CA)
+   private signing key to create an encryption certificate. Users and hosts
+   trust the public CA key, rather than trusting individual user and host
+   public encryption keys.
   </para>
   <para>
    Traditional OpenSSH public key authentication requires copying user
@@ -883,8 +883,20 @@ Have a lot of fun...</screen>
    users to verify new SSH server host keys before accepting them (stored
    in <filename>~/.ssh/known_hosts</filename>). This is
    error-prone and complicated to manage. Another disadvantage is OpenSSH
-   keys never expire. When you want to revoke a particular public key, you
-   have to find and remove all of its copies.
+   keys never expire. When you need to revoke a particular public key, you
+   have to find and remove all of its copies on your network.
+  </para>
+  <para>
+   Automating the whole process (for example, with Ansible) is virtually a
+   necessity. Large organizations, such as Meta
+   (see <link xlink:href="https://engineering.fb.com/2016/09/12/security/scalable-and-secure-access-with-ssh/"/>),
+   automate the process completely, so they can revoke and replace
+   certificates, and even certificate authorities, as often as they want
+   without disrupting operations.
+  </para>
+  <para>
+   A prerequisite is the ability to open SSH sessions to all hosts on your
+   network, and perform tasks like editing configuration files and restarting <systemitem class="daemon">sshd</systemitem>.
   </para>
   <para>
    Setting up an OpenSSH certificate authority involves the following steps:
@@ -898,21 +910,23 @@ Have a lot of fun...</screen>
   </listitem>
   <listitem>
   <para>
-   Receive and sign host public keys, then return the new host certificates
-   to their respective hosts. Host certificates go in
+   Receive and sign host public keys, then distribute the new host
+   certificates to their respective hosts. Host certificates go in
    <filename>/etc/ssh</filename>, just like host keys.
   </para>
   </listitem>
   <listitem>
   <para>
-   Receive and sign user keys, then return the new user certificates to
-   their owners.
+   Receive and sign user public keys, then distribute the new user
+   certificates to their owners. User certificates go in
+   <filename>~/.ssh</filename>, just like user keys.
   </para>
   </listitem>
   <listitem>
    <para>
-    Add a clause to each user's <filename>~/.ssh/known_hosts</filename> that
-    directs SSH to trust your certificate authority.
+     Edit configuration files on servers and users' machines, and stop and
+     start <systemitem class="daemon">sshd</systemitem> on hosts as
+     necessary.
    </para>
   </listitem>
   <listitem>
@@ -926,17 +940,16 @@ Have a lot of fun...</screen>
  </itemizedlist>
    <para>
     Users and server admins create and protect their own OpenSSH keys. It is
-    safe to freely share public keys, because that is what they are for. It
-    is safe to transfer the new certificates by insecure methods, such as
-    email, because they require their private keys to validate.
-    You should keep copies of all the public keys you receive, in case you
-    need to re-issue certificates. (See
+    safe to freely share public keys. It is safe to transfer the new
+    certificates by insecure methods, such as email, because they require
+    their private keys to validate. You should keep copies of all the public
+    keys you receive, in case you need to re-issue certificates. (See
     <xref linkend="sec-ssh-certificate-create-signing-keys"/> to learn about
     keeping your CA organized.)
    </para>
    <para>
    Note that SSH certificates follow the OpenPGP standard, rather than
-   SSL/TLS, and that the certificate format is OpenPGP, not X509.
+   SSL/TLS, and that the certificate format is OpenPGP, not X.509.
   </para>
 
  <sect2 xml:id="sec-ssh-certificate-create-signing-keys">
@@ -964,10 +977,10 @@ Have a lot of fun...</screen>
     certificates to manage, it can be helpful to create your
     CAs for hosts and clients on separate machines. If you prefer
     using a single machine, give each CA its own directory.
-    The examples in this section use <filename>/ca-ssh-host</filename>
-    and <filename>/ca-ssh-client</filename>. Copies of user's and host's
-    original public keys are kept in subdirectories, and each user
-    and host get their own folders.
+    The examples in this section use <filename>/ca-ssh-hosts</filename>
+    and <filename>/ca-ssh-users</filename>. Keep copies of users' and host's
+    public keys in their own subdirectories, for easier tracking and
+    avoiding key name collisions.
    </para>
    <important>
     <title>RSA signing keys deprecated</title>
@@ -1004,27 +1017,55 @@ The key's randomart image is:
 </screen>
 
   <screen>&prompt.sudo;<command>ssh-keygen -t ed25519 -f <replaceable>/ca-ssh-users/ca-user-sign-key -C "signing key for user certificates"</replaceable></command>
-
+Generating public/private ed25519 key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ca-user-sign-key
+Your public key has been saved in ca-user-sign-key.pub
+The key fingerprint is:
+SHA256:taYj8tTnjkzgfHRvQ6HTj8a37PY6rwv96V1x+GHRjIk signing key for user certificates
+The key's randomart image is:
++--[ED25519 256]--+
+|                 |
+|             . +.|
+|          . E o.o|
+|         . + . ..|
+|      . S * o .+.|
+|     o + + = +..+|
+|    . = * . O + o|
+|     + = = o =oo+|
+|      . o.o  oOX=|
++----[SHA256]-----+
  </screen>
  <para>
-  Add the full path to the user signing key to
-  <filename>/etc/ssh/sshd_config</filename>:
+  Copy your public user signing key (be sure you are copying the PUBLIC
+  key) to <filename>/etc/ssh</filename> on all hosts running SSH servers.
+  Then enter the full path of the public user signing key to
+  <filename>/etc/ssh/sshd_config</filename> on the hosts:
  </para>
- <screen>TrustedUserCAKeys /ca-ssh-user/ca-user-sign-key.pub</screen>
-<para>
-   The following example signs the CA server's public host key to create the
-   CA server's own host certificate:
+ <screen>TrustedUserCAKeys <replaceable>/etc/ssh/ca-user-sign-key.pub</replaceable>
+</screen>
+ <para>
+  Then restart <systemitem class="daemon">sshd</systemitem>.
+ </para>
+</sect2>
+
+ <sect2 xml:id="sec-ssh-certificate-create-host-certs">
+  <title>Creating host certificates</title>
+  <para>
+   The following example signs a host public key to create a host
+   certificate for a database server:
   </para>
-  <screen>&prompt.sudo;<command>ssh-keygen -s <replaceable>/ca-ssh-host/ca-host-sign-key</replaceable></command> \
-   <command>-n <replaceable>&wsII;,&wsIIname;</replaceable> -I <replaceable>"ca-server host cert"</replaceable></command> \
+  <screen>&prompt.sudo;<command>ssh-keygen -s <replaceable>/ca-ssh-hosts/ca-host-sign-key</replaceable></command> \
+   <command>-n <replaceable>&wsII;,&wsIIname;</replaceable> -I <replaceable>"db-server host cert"</replaceable></command> \
    <command>-h -V +4w <replaceable>/etc/ssh/ssh_host_ed25519_key.pub</replaceable></command>
 Enter passphrase:
 Signed host key /etc/ssh/ssh_host_ed25519_key-cert.pub: id
-"ca-server host cert" serial 0 for root,venus,venus.example.com
+"db-server host cert" serial 0 for venus,venus.example.com
 valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
     </screen>
       <para>
-       If you have more than one host key on a server, sign all of them.
+       If there is more than one host key on a server, sign all of them.
       </para>
     <itemizedlist>
      <listitem>
@@ -1034,10 +1075,9 @@ valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
      </listitem>
      <listitem>
       <para>
-       <option>-n</option> is your list of principals. By default,
-       certificates are valid for all users and hosts. Principals are a
-       comma-delimited list of user or host names, limiting SSH access to
-       connection requests from the specified users or hosts.
+       <option>-n</option> is your list of principals. For host
+       certificates, the principals are the machine's host name
+       and fully-qualified domain name.
       </para>
      </listitem>
      <listitem>
@@ -1055,8 +1095,7 @@ valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
     <listitem>
      <para>
       <option>-V</option> sets the expiration date for the certificate. In
-      the example, the certificate expires in four weeks. Short expirations
-      are useful for testing, in case you forget to delete them. (See
+      the example, the certificate expires in four weeks. (See
       the "-V validity_interval" section of
       <command>man 1 ssh-keygen</command> for allowed time formats.)
      </para>
@@ -1068,10 +1107,11 @@ valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
    <screen>&prompt.user;<command>ssh-keygen -Lf /etc/ssh/ssh_host_ed25519_key-cert.pub</command>
  /etc/ssh/ssh_host_ed25519_key-cert.pub:
         Type: ssh-ed25519-cert-v01@openssh.com host certificate
-        Public key: ED25519-CERT SHA256:/U7C+qABXYyuvueUuhFKzzVINq3d7IULRLwBstvVC+Q
-        Signing CA: RSA SHA256:uwAbTRaQ9hHaIsxUmILxcpERvR6bFPJ6
-         (using rsa-sha2-512)
-        Key ID: "ca-server host cert"
+        Public key: ED25519-CERT SHA256:/
+         U7C+qABXYyuvueUuhFKzzVINq3d7IULRLwBstvVC+Q
+        Signing CA: ED25519 SHA256:
+         STuQ7HgDrPcEa7ybNIW0n6kPbj28X5HN8GgwllBbAt0 (using ssh-ed25519)
+        Key ID: "db-server host cert"
         Serial: 0
         Valid: from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
         Principals:
@@ -1082,7 +1122,7 @@ valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
     </screen>
    <para>
     Add the new host certificate to
-    <filename>/etc/ssh/sshd_config</filename> on the server, to make it
+    <filename>/etc/ssh/sshd_config</filename> on its server, to make it
     available to clients:
    </para>
    <screen>HostCertificate <replaceable>/etc/ssh/ssh_host_ed25519_key-cert.pub</replaceable></screen>
@@ -1103,20 +1143,17 @@ valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
   <sect2 xml:id="sec-ssh-certificate-test-client">
    <title>User configuration</title>
    <para>
-    Ideally, you could replace the entire contents of your users'
-    <filename>known_hosts</filename> files with a directive to your CA
-    signing key. However, there may be hosts that are not managed by
-    your CA in this file that the user needs to connect to. Cleaning up
-    unwanted entries from <filename>known_hosts</filename> is a chore that
-    nobody like to do. However you decide to manage this, the following
-    example shows how to configure the CA for single domain. The example
-    domain is named with a wildcard, allowing users to access all servers
-    in the domain. This entry must be on a single unbroken line:
+    The following example shows the client configuration for your CA for a
+    single domain. The example domain is named with a wildcard, which
+    permits users to access all servers in the domain. This entry must be on
+    a single unbroken line in your users'
+    <filename>~/.ssh/known_hosts</filename> files:
    </para>
-   <screen>@cert-authority &wsIIname; ssh-ed25519
+   <screen>@cert-authority *.example.com ssh-ed25519
  AAAAC3NzaC1lZDI1NTE5AAAAIH1pF6DN4BdsfUKWuyiGt/leCvuZ/fPu
- YxY7+4V68Fz0 signing key for host certificates</screen>
+ YxY7+4V68Fz0 db-server host cert</screen>
     <para>
+
     </para>
   </sect2>
  </sect1>
