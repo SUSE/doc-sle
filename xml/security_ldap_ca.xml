@@ -1,101 +1,89 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE sect1
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
     %entities;
 ]>
 
-<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="sec-security-ldap-server-ca">
- <title>Managing TLS certificates</title>
+<sect1 xmlns="http://docbook.org/ns/docbook"
+       xmlns:xi="http://www.w3.org/2001/XInclude"
+       xmlns:xlink="http://www.w3.org/1999/xlink"
+       version="5.0"
+       xml:id="sec-security-ldap-server-ca">
+ <info>
+  <title>Importing TLS server certificates and keys</title>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
  <para>
-   In this section you will learn how to create and manage TLS certificates 
-   for secure encrypted communications with your &ds389; server.
+  You can manage your CA certificates and keys for &ds389; with the following
+  command line tools: <command>certutil</command>, <command>openssl</command>, and
+  <command>pk12util</command>.
  </para>
  <para>
-   You may use the traditional utilities for managing your 
-   certificates, such as <command>pk12util</command> (provided by the
-   <package>mozilla-nss-tools</package> package), and 
-   <command>openssl</command> (provided by the 
-   <package>openssl</package> package). However, &ds389a; comes with its
-   own utility for managing certificates, <command>dsctl</command>.
-   <command>dsctl</command> streamlines and simplifies
-   creating and managing your LDAP server certificates.
- </para>
- <para>
-   When you create a new &ds389a; instance, <command>dscreate</command>
-   creates a certificate authority and self-signed server certificates.
-   Find these in
-   <filename>/etc/dirsrv/slapd-<replaceable>INSTANCE-NAME</replaceable>/</filename>.
-   You should see the following files:
- </para>
- <variablelist>
-   <varlistentry>
-     <term><filename>Server-Cert.crt</filename></term>
-   <listitem>
-     <para>
-       The LDAP instance's public key.
-     </para>
-   </listitem>
- </varlistentry>
- <varlistentry>
-   <term><filename>Server-Cert.csr</filename></term>
-   <listitem>
-     <para>
-       The instance's certificate signing request.
-     </para>
-   </listitem>
- </varlistentry>
- <varlistentry>
-   <term><filename>ca.crt</filename></term>
-   <listitem>
-     <para>
-       The instance's certificate authority.       
-     </para>
-   </listitem>
- </varlistentry>
-  <varlistentry> 
-  <term><filename>pin.txt</filename></term>
-   <listitem>
-     <para>
-       The password that the administrator uses to manage the NSS database.
-       This password is not used by &ds389a;.
-     </para>
-   </listitem>
- </varlistentry>
- <varlistentry> 
-  <term><filename>cert9.db, key4.db</filename></term>
-   <listitem>
-     <para>
-       These are the NSS databases that store the instance's certificates
-       and keys.
-     </para>
-   </listitem>
- </varlistentry>
-</variablelist>
-
-<sect2 xml:id="sec-security-ldap-query-ca">
-   <title>Querying installed certificates</title>
+  For testing purposes, you can use the self-signed certificate that
+  <command>dscreate</command> creates when you create a new &ds389a;
+  instance. Find the certificate at
+  <filename>/etc/dirsrv/slapd-<replaceable>INSTANCE-NAME</replaceable>/ca.crt</filename>.
+  </para>
+  <para>
+    For production environments, it is a best practice to use a third-party
+    certificate authority, such as Let's Encrypt, CAcert.org, SSL.com, or
+    whatever CA you choose. Request a server certificate, a client
+    certificate, and a root certificate.
+  </para>
+ <procedure>
+  <para>
+  Before you can import an existing private key and certificate into the NSS
+  database, you need to create a bundle of the private key and the server
+  certificate. This results in a <filename>*.p12</filename>
+  file.
+  </para>
+  <important>
+  <title><filename>*.p12</filename> file and friendly name</title>
+  <para>
+   When creating the PKCS12 bundle, you must encode <literal>Server-Cert</literal>
+   as the friendly name in the <filename>*.p12</filename> file.
+   Otherwise the TLS connection will fail, because the &ds389; searches for
+   this exact string.
+  </para>
+  <para>
+    The friendly name cannot be changed after you
+    import the <filename>*.p12</filename> file into the NSS
+    database.
+  </para>
+ </important>
+ <step>
+  <para>
+   Use the following command to create the PKCS12 bundle with the required friendly name:
+  </para>
+<screen>&prompt.sudo;<command>openssl pkcs12 -export -in <replaceable>SERVER.crt</replaceable></command> \
+<command>-inkey <replaceable>SERVER.key</replaceable></command> \
+<command>-out <replaceable>SERVER.p12</replaceable> -name Server-Cert</command></screen>
+  <para>
+   Replace <replaceable>SERVER.crt</replaceable> with the server certificate
+   and <replaceable>SERVER.key</replaceable> with the private key to be bundled.
+   Use <option>-out</option> to specify the name of the <filename>*.p12</filename>
+   file. Use <option>-name</option> to set the friendly name, which must be
+   <literal>Server-Cert</literal>.
+  </para>
+ </step>
+ <step>
    <para>
-     Use the <command>dsctl</command> command to query your existing TLS 
-     certificates. Display your server certificate:
+     Before you can import the file into the NSS database, you need to
+     obtain its password. The password is stored in the
+     <filename>pwdfile.txt</filename> file in the
+     <filename>/etc/dirsrv/slapd-<replaceable>INSTANCE-NAME/</replaceable></filename> directory.
    </para>
-   <screen>&prompt.sudo;<command>dsctl 389-test3 tls show-server-cert</command>
- Certificate:
-    Data:
-        Version: 3 (0x2)
-        Serial Number:
-            00:b6:f6:08:91
-        Signature Algorithm: PKCS #1 SHA-256 With RSA Encryption
-        Issuer: "CN=ssca.389ds.example.com,O=testing,L=389ds,ST=Queensland,C=
-            AU"
-        Validity:
-            Not Before: Wed Dec 30 15:36:15 2020
-            Not After : Fri Dec 30 15:36:15 2022
-        Subject: "CN=localhost,givenName=c23c7a30-dd79-4256-9c7b-5fb77c6de0eb
-            ,O=testing,L=389ds,ST=Queensland,C=AU"
-        Subject Public Key Info:
-        [...]</screen>
-     </sect2>    
-     </sect1>  
-
- 
+ </step>
+ <step>
+  <para>
+   Now import the <replaceable>SERVER.p12</replaceable> file
+   into your &ds389a; NSS database:
+  </para>
+  <screen>&prompt.sudo;<command>dsctl <replaceable>INSTANCE_NAME</replaceable> tls remove-cert Self-Signed-CA   pk12util -i <replaceable>SERVER.p12</replaceable></command> \
+<command>-d /etc/dirsrv/slapd-<replaceable>INSTANCE-NAME</replaceable>/cert9.db</command></screen>
+ </step>
+ </procedure>
+ </sect1>

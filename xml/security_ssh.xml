@@ -1,128 +1,1466 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE chapter
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
     %entities;
 ]>
 
-<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha-ssh">
- <title>SSH: secure network operations</title>
+<chapter xmlns="http://docbook.org/ns/docbook"
+         xmlns:xi="http://www.w3.org/2001/XInclude"
+         xmlns:xlink="http://www.w3.org/1999/xlink"
+         version="5.0"
+         xml:lang="en"
+         xml:id="cha-ssh">
+
+ <title>Securing network operations with OpenSSH</title>
  <info>
   <abstract>
    <para>
-    In networked environments, it is often necessary to access hosts from a
-    remote location. If a user sends login and password strings for
-    authentication purposes as plain text, they could be intercepted and
-    misused to gain access to that user account. This would open all the user's files to an attacker
-    and the illegal account could be used to obtain administrator or
-    <systemitem class="username">root</systemitem> access, or to penetrate
-    other systems. In the past, remote connections were established with
-    <command>telnet</command>, <command>rsh</command> or
-    <command>rlogin</command>, which offered no guards against eavesdropping
-    in the form of encryption or other security mechanisms. There are other
-    unprotected communication channels, like the traditional FTP protocol
-    and some remote copying programs like <command>rcp</command>.
+    OpenSSH is the SSH (secure shell) implementation that ships with &sls;,
+    for securing network operations such as remote administration, file
+    transfers, and tunneling insecure protocols. SSH encrypts all traffic
+    between two hosts, including authentication, to protect against
+    eavesdropping and connection hijacking. This chapter covers basic
+    operations, plus host key rotation and certificate authentication, which
+    are useful for managing larger SSH deployments.
    </para>
   </abstract>
   <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
    <dm:bugtracker>
    </dm:bugtracker>
+   <dm:translation>yes</dm:translation>
   </dm:docmanager>
  </info>
- <para>
-  The SSH suite provides the necessary protection by encrypting the
-  authentication strings (usually a login name and a password) and all the
-  other data exchanged between the hosts. With SSH, the data flow could
-  still be recorded by a third party, but the contents are encrypted and
-  cannot be reverted to plain text unless the encryption key is known. So
-  SSH enables secure communication over insecure networks, such as the
-  Internet. The SSH implementation coming with &productname; is OpenSSH.
- </para>
- <para>
-  &productname; installs the OpenSSH package by default providing the
-  commands <command>ssh</command>, <command>scp</command>, and
-  <command>sftp</command>. In the default configuration, remote access of a
-  &productname; system is only possible with the OpenSSH utilities, and
-  only if the <systemitem class="daemon">sshd</systemitem> is running and
-  the firewall permits access.
- </para>
- <para>
-  SSH on &productname; uses cryptographic hardware acceleration
-  if available. As a result, the transfer of large quantities of data
-  through an SSH connection is considerably faster than without
-  cryptographic hardware. As an additional benefit, the CPU will see a
-  significant reduction in load.
- </para>
- <sect1 xml:id="sec-ssh-programm">
-  <title><command>ssh</command>&mdash;secure shell</title>
 
+ <sect1 xml:id="sec-ssh-overview">
+  <title>OpenSSH overview</title>
   <para>
-   With <command>ssh</command> it is possible to log in to remote
-   systems and to work interactively. To log in to the host
-   <literal>&exampleserver;</literal> as user &exampleuser; enter one of
-   the following commands:
+   SSH is a network protocol that provides end-to-end protection for
+   communications between the computers on your network, or between
+   computers on your network and systems outside your network. You may
+   open an SSH session to any other computer, as long as you have a login
+   and the correct authentication methods for the remote computer.
   </para>
-
-<screen>&prompt.user;ssh &exampleuser_plain;@&exampleserver;
-&prompt.user;ssh -l &exampleuser_plain; &exampleserver;</screen>
-
   <para>
-   If the user name is the same on both machines, you can omit it. Using
-   <command>ssh &exampleserver;</command> is sufficient. The remote host
-   prompts for the remote user's password. After a successful
-   authentication, you can work on the remote command line or use
-   interactive applications, such as &yast; in text mode.
+   SSH is a client-server protocol. Any host running the
+   <systemitem class="daemon">sshd</systemitem>
+   daemon can accept SSH connections from any other host. Every host running
+   <systemitem class="daemon">sshd</systemitem> can have their own
+   custom configurations, such as limiting who can have access, and which
+   authentication methods are allowed.
   </para>
-
-  <para>
-   Furthermore, <command>ssh</command> offers the possibility to run
-   non-interactive commands on remote systems using <command>ssh</command>
-   <replaceable>HOST</replaceable> <replaceable>COMMAND</replaceable>.
-   <replaceable>COMMAND</replaceable> needs to be properly quoted. Multiple
-   commands can be concatenated as on a local shell.
-  </para>
-
-<screen>&prompt.user;ssh root@&exampleserver; "dmesg -T | tail -n 25"
-&prompt.user;ssh root@&exampleserver; "cat /etc/issue &amp;&amp; uptime"</screen>
-
-  <sect2 xml:id="sec-ssh-programm-x">
-   <title>Starting X applications on a remote host</title>
    <para>
-    SSH also simplifies the use of remote X applications. If you run
-    <command>ssh</command> with the <option>-X</option> option, the
-    <envar>DISPLAY</envar> variable is automatically set on the remote
-    machine and all X output is exported to the local machine over the
-    existing SSH connection. At the same time, X applications started
-    remotely cannot be intercepted by unauthorized individuals.
+   Authentication and encryption are provided by encryption key pairs. Each
+   key pair has a public key and a private key. Public keys encrypt, and
+   private keys decrypt. Public keys are meant to be freely shared, while
+   private keys must be protected and not shared. When a private key is
+   compromised, anyone who has possession of it can masquerade as the
+   original key owner.
+  </para>
+  <para>
+   SSH provides very strong protection, because the server and client
+   must both authenticate to each other. When a client first attempts to
+   open an SSH session, the server presents its public host key. If the
+   client already possesses a copy of this key (stored in
+   <filename>~/.ssh/known_hosts</filename> on the client machine), the
+   client knows to trust the server. If the client does not have the
+   appropriate host key, it is asked whether it should trust the server:
+  </para>
+  <screen>The authenticity of host '192.168.22.219 (192.168.22.219)'
+   can't be established. ECDSA key fingerprint is
+   SHA256:yXf6pjV26N0fegvEYIt3HgG95s3Q1X6WYRhtHLF99pUo.
+   Are you sure you want to continue connecting (yes/no/[fingerprint])?
+  </screen>
+  <para>
+   The user can type yes, no, or paste their copy of the host key
+   fingerprint for comparison.
+  </para>
+  <note>
+   <title>Matching host key fingerprints</title>
+   <para>
+    Distributing copies of your host key fingerprints to your users
+    enables them to verify that they are receiving the correct host
+    keys. When they paste their copy of a host key fingerprint,
+    <command>ssh</command> compares the fingerprints, and accepts the
+    offered host key when the fingerprints match. This ensures a more
+    accurate match than a visual comparison.
+   </para>
+   <para>
+    You can't rely on users to use correct verification methods. If the
+    fingerprints do not match, the user can still type
+    <literal>yes</literal>, or copy the fingerprint in the message, and
+    complete the connection. A stronger alternative is to use
+    certificate authentication, which provides a global authentication
+    mechansism, and does not require perfect behavior from users
+    (see <xref linkend="sec-ssh-certificate-auth"/>).
+   </para>
+  </note>
+   <para>
+   If the public keys of a host have changed, the connection is denied with
+   a scary warning:
+  </para>
+  <screen>@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ECDSA key sent by the remote host is
+SHA256:keNu/rJFWmpQu9B0SjIuo8NLjbeDY/x3Tktpl7oDJqo.
+Please contact your system administrator.
+Add correct host key in /home/geeko/.ssh/known_hosts to get rid of this message.
+Offending ECDSA key in /home/geeko/.ssh/known_hosts:210
+You can use following command to remove the offending key:
+ssh-keygen -R 192.168.121.219 -f /home/geeko/.ssh/known_hosts
+ECDSA host key for 192.168.121.219 has changed and you have requested strict
+checking.
+Host key verification failed.</screen>
+  <para>
+   The remedy is to delete the offending key from
+   <filename>~/.ssh/known_hosts</filename> with the command given
+   in the scary warning, then re-connect and accept the new host key.
+   <!-- see TODO and TODO for key management methods that do not require
+   users to verify or accept new host keys -->
+  </para>
+  <para>
+   The <package>openssh</package> package installs the server, client,
+   file transfer commands, and some utilities.
+  </para>
+  <para>
+   OpenSSH supports several different types of authentication:
+  </para>
+  <variablelist>
+   <varlistentry>
+    <term>Password authentication</term>
+    <listitem>
+     <para>
+      Uses any system login and password on the remote machine. This is the
+      simplest and most flexible authentication because you can open an SSH
+      session from anywhere, on any machine. It is also the least secure,
+      because it is vulnerable to password-cracking and keystroke logging.
+      </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>Public key authentication</term>
+    <listitem>
+     <para>
+      Authenticates with your personal SSH keys, rather than a login and
+      password. This is less flexible than password authentication,
+      because you can open SSH sessions only from a machine that holds
+      your private identity key. It is much stronger because it is not
+      vulnerable to password cracking or keystroke logging; an attacker must
+      possess your private key and know its passphrase.
+     </para>
+     <para>
+       See <xref linkend="sec-ssh-gnome-keyring"/> to learn how to use
+       <command>gnome-keyring</command> for automated public key
+       authentication in GNOME sessions.
+      </para>
+      <para>
+       See <xref linkend="sec-ssh-authentic-agent"/> to learn how to use
+       <literal>ssh-agent</literal> for automated public key
+       authentication in console sessions.
+      </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+     <term>Passphrase-less public key authentication</term>
+     <listitem>
+      <para>
+       Public key authentication, paired with private identity keys that do
+       not have passphrases. This is useful for automated services, like
+       scripts and cron jobs. You must protect private keys, because anyone
+       who gains access to them can easily masquerade as the key owner.
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>Certificate authentication</term>
+     <listitem>
+      <para>
+       OpenSSH supports certification authentication, for easier key
+       management, stronger authentication, and large-scale SSH deployments.
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+
+ <para>
+  &productname; installs the OpenSSH package by default, providing the
+  following commands:
+ </para>
+
+ <variablelist>
+  <varlistentry>
+   <term><command>ssh</command></term>
+   <listitem>
+    <para>
+     The client command for initiating an SSH connection to a remote host.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>scp</command></term>
+   <listitem>
+    <para>
+     Secure file copy from or to a remote host.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>sftp</command></term>
+   <listitem>
+    <para>
+     Secure file transfer between a client and an SFTP server.
+     (Note that the SFTP protocol (SSH FTP) is not related to FTPS or
+     FTPES (FTP over SSL/TLS), but was written independently.)
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>ssh-add</command></term>
+   <listitem>
+    <para>
+     Add private key identities to the authentication agent,
+     <literal>ssh-agent</literal>.
+    </para>
+   </listitem>
+  </varlistentry>
+<varlistentry>
+   <term><command>ssh-agent</command></term>
+   <listitem>
+    <para>
+     Manages a user's private identity keys and their passphrases, for
+     public key authentication. <literal>ssh-agent</literal> holds the
+     passphrases in memory and applies them as needed, so that users do not
+     have to re-type their passphrases to authenticate.
+    </para>
+   </listitem>
+  </varlistentry>
+  <varlistentry>
+   <term><command>ssh-copy-id</command></term>
+   <listitem>
+    <para>
+     Securely transfer a public key to a remote host, to set up
+     public key authentication.
+    </para>
+   </listitem>
+  </varlistentry>
+ </variablelist>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-server-config">
+ <title>Server hardening</title>
+ <para>
+  OpenSSH ships with a usable default server configuration, but there are
+  additional steps you can take to secure your server.
+ </para>
+ <important>
+  <title>Maintaining access to a remote SSH server</title>
+  <para>
+   When you make changes to any SSH server, either have physical
+   access to the machine, or keep an active root SSH session open until
+   you have tested your changes, and everything works correctly. Then you can revert or correct your changes if something goes wrong.
+  </para>
+ </important>
+ <para>
+  The default server configuration file, <filename>/etc/ssh/sshd_config</filename>,
+  contains the default configuration, and all the defaults are commented
+  out. Override any default item by entering your own configuration item,
+  uncommented, like the following example that sets a different listening
+  port, and specifies the listening IPv4 address on a multi-homed host:
+ </para>
+ <screen>
+#Port 22
+Port <replaceable>2022</replaceable>
+
+#ListenAddress 0.0.0.0
+ListenAddress <replaceable>192.168.10.100</replaceable></screen>
+
+<important>
+ <title>Update /etc/services</title>
+ <para>
+  When you use non-standard listening ports, first check the
+  <filename>/etc/services</filename> file for unused ports.
+  Select any unused port above 1024. Then document the ports you are using
+  in <filename>/etc/services</filename>.
+ </para>
+</important>
+
+ <para>
+  It is a best practice to disallow root logins. Instead, log into the
+  remote machine as an unprivileged user, then use <command>sudo</command>
+  to run commands as root. If you really want to allow root logins, the
+  following server configuration example shows how to configure the server
+  to accept only public-key authentication
+  (<xref linkend="sec-ssh-public-key-auth"/>) for the root user with the
+  <literal>PermitRootLogin prohibit-password</literal> and
+  <literal>PasswordAuthentication</literal> options.
+ </para>
+ <para>
+  The following settings for <filename>/etc/ssh/sshd_config</filename>
+  strengthen access controls:
+ </para>
+ <example xml:id="ex-sshd-conf">
+  <title>Example sshd.conf</title>
+  <programlisting>
+# Check if the file modes and ownership of the user’s files and
+# home directory are correct before allowing them to login
+StrictModes yes
+
+# If your machine has more than one IP address, define which address or
+# addresses it listens on
+ListenAddress <replaceable>192.168.10.100</replaceable>
+
+# Allow only members of the listed groups to log in
+AllowGroups <replaceable>ldapadmins backupadmins</replaceable>
+
+# Or, deny certain groups. If you use both, DenyGroups is read first
+DenyGroups <replaceable>users</replaceable>
+
+# Allow or deny certain users. If you use both, DenyUsers is read first
+AllowUsers <replaceable>user1 user2@example.com user3</replaceable>
+DenyUsers <replaceable>user4 user5@192.168.10.10</replaceable>
+
+# Allow root logins only with public key authentication
+PermitRootLogin prohibit-password
+
+# Disable password authentication and allow only public key authentication
+# for all users
+PasswordAuthentication no
+
+# Length of time the server waits for a user to log in and complete the
+# connection. The default is 120 seconds:
+LoginGraceTime <replaceable>60</replaceable>
+
+# Limit the number of failed connection attempts. The default is 6
+MaxAuthTries <replaceable>4</replaceable>
+</programlisting>
+</example>
+
+ <para>
+  After changing <filename>/etc/ssh/sshd_config</filename>, run the syntax
+  checker:
+ </para>
+ <screen>&prompt.sudo;<command>sshd -t</command></screen>
+ <para>
+  The syntax checker only checks for correct syntax, and does not find
+  configuration errors. When you are finished, reload the configuration:
+ </para>
+ <screen>&prompt.sudo;<command>systemctl reload sshd.server</command></screen>
+ <para>
+  Check the server's key directories for correct permissions.
+ </para>
+ <para>
+  <filename>/etc/ssh</filename> should be mode 0755/drwxr-xr-x, owned by
+  root:root.
+ </para>
+ <para>
+  Private keys should be 0600/-rw-------, owned by root:root.
+ </para>
+ <para>
+  Public keys should be 0644/-rw-r--r--, owned by root:root.
+ </para>
+
+ <!-- not sure if this should be included, it seems redundant with
+ sshd_config. cjs 27 June 2022 -->
+ <!--
+ <para>
+  You may restrict logins from subnets with PAM (Pluggable Authentication
+  Modules). The following steps configure remote login restrictions for
+  certain users. These restrictions affect all OpenSSH commands,
+  including <command>ssh</command>
+  (<xref linkend="sec-ssh-password-auth"/>),
+  <command>scp</command> (<xref linkend="sec-ssh-copy"/>), and
+  <command>sftp</command> (<xref linkend="sec-ssh-sftp"/>).
+  </para>
+  <procedure xml:id="pro-ssh-restrict-logins">
+   <title>Configuring remote login restrictions</title>
+   <para>
+    Perform the following steps to configure user remote login restrictions:
+    </para>
+   <step>
+    <para>
+     Edit the file <filename>/etc/pam.d/sshd</filename> and append the
+     following at the end of the <literal>auth</literal> block:
+    </para>
+    <screen>auth required pam_access.so</screen>
+   </step>
+   <step>
+    <para>
+     Edit the file <filename>/etc/security/access.conf</filename> to
+     configure individual restrictions. In this example the users &rootuser;
+     and &exampleuser; are restricted to the &exampledomain1ip;.0/&subnetmask;
+     network, while the &exampleuserII; user can only login from within the
+     &exampledomain2ip;.0/&subnetmask; network:
+    </para>
+<screen>
++ : root : <replaceable>&exampledomain1ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
++ : &exampleuser_plain; : <replaceable>&exampledomain1ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
++ : &exampleuserII_plain; : <replaceable>&exampledomain2ip;.0</replaceable>/<replaceable>&subnetmask;</replaceable>
+- : ALL : ALL</screen>
+   <para>
+    Do not forget the last line which denies access for all other users from
+    all sources, and be careful not to lock yourself out of the system.
+   </para>
+   <para>
+    For more configuration options, refer to the examples in
+    <filename>/etc/security/access.conf</filename>, and to
+    <command>man access.conf</command>.
+   </para>
+   </step>
+  </procedure>
+  <warning>
+   <title>Do not use pam-config</title>
+   <para>
+    Do not use the <command>pam-config</command> utility here. It only
+    supports <systemitem>git pam_access</systemitem> as a global module. The
+    configuration above is not suitable to be used globally for all services
+    and can completely deny access to the system.
+   </para>
+ </warning>-->
+ </sect1>
+
+<sect1 xml:id="sec-ssh-password-auth">
+  <title>Password authentication</title>
+  <para>
+   With password authentication, all you need is the login and password of
+   a user on the remote machine, and
+   <systemitem class="daemon">sshd</systemitem> set up and running on the
+   remote machine. You do not need any personal SSH keys. In the following
+   example, user &exampleuserIII_plain; opens an SSH session to the host
+   &exampleserver;:
+  </para>
+<screen>&prompt.user;<command>ssh &exampleuserIII_plain;@&exampleserver;</command>
+</screen>
+  <para>
+   &exampleuserIII_plain; will be prompted to enter the remote password.
+   Type <literal>exit</literal> and press <keycap>Enter</keycap> to close an
+   SSH session.
+  </para>
+  <para>
+   If the user name is the same on both machines, you can omit it, and then
+   using <command>ssh <replaceable>HOST_NAME</replaceable></command> is
+   sufficient. After a successful authentication, you can work on the
+   command line or use interactive applications, such as &yast; in text
+   mode.
+  </para>
+  <para>
+   You may also run non-interactive commands (log in, run the command, then
+   the session closes all in one command) on remote systems using the
+   <command>ssh <replaceable>USER_NAME HOST COMMAND</replaceable></command>
+   syntax.
+   <replaceable>COMMAND</replaceable> must be properly quoted. Multiple
+   commands can be concatenated as on a local shell:
+  </para>
+
+<screen>&prompt.user;<command>ssh &exampleuserIII_plain;@&exampleserver; "df -h &amp;&amp; du -sh  /home"</command>
+&prompt.user;<command>ssh &exampleuserIII_plain;@&exampleserver; "sudo nano /etc/ssh/sshd_config"</command></screen>
+
+  <para>
+   When you run <command>sudo</command> on the remote machine, you will be
+   prompted for the <command>sudo</command> password.
+  </para>
+  </sect1>
+
+   <sect1 xml:id="sec-ssh-authentic-gen-key">
+   <title>Managing user and host encryption keys</title>
+   <para>
+     There are several key types to choose from: DSA, RSA, ECDSA, ECDSA-SK,
+     Ed25519, and Ed25519-SK. DSA was deprecated several years ago, and was
+     disabled in OpenSSH 7.0 and should not be used. RSA is the most
+     universal as it is older, and more widely used. (As of OpenSSH
+     8.2, RSA is deprecated for host keys. Use ECDSA or Ed25519 for host
+     keys.)
+   </para>
+   <para>
+     Ed25519 and ECDSA are stronger and faster. Ed25519 is
+     considered to be the strongest. If you must support older clients
+     that do not support Ed25519 or ECDSA, create host keys in all three
+     formats.
+   </para>
+   <note>
+     <title>Older clients are unsafe</title>
+     <para>
+       Some older SSH clients do not support ECDSA and ED25519. ECDSA and
+       ED25519 were released with OpenSSH 6.5 in 2014. It is
+       important to keep security services updated, and, if possible,
+       to not allow unsafe old clients.
+     </para>
+   </note>
+   <para>
+     SSH keys serve two purposes: authenticating servers to clients, and
+     authenticating clients to servers (see
+     <xref linkend="sec-ssh-public-key-auth"/>). Server host keys are stored
+     in <filename>/etc/ssh</filename>. Users' personal keys are stored in
+     <filename>/home/<replaceable>user</replaceable>/.ssh</filename>.
+    </para>
+    <para>
+     <filename>/home/<replaceable>user</replaceable>/.ssh</filename> is
+     created when the user creates a new SSH key.
+   </para>
+   <para>
+     Host keys must not have passphrases.
+   </para>
+   <para>
+     In most cases, private user keys should have strong passphrases.
+   </para>
+
+   <sect2 xml:id="sec-create-ssh-key-client">
+     <title>Creating user SSH key pairs</title>
+      <para>
+       The following procedure shows how to create user OpenSSH encryption
+       keys.
+      </para>
+     <procedure xml:id="pro-create-ssh-client-keys">
+     <title>Creating default and customized keys</title>
+    <step>
+     <para>
+      To generate a user key pair with the default parameters (RSA, 3072
+      bits), use the <command>ssh-keygen</command> command with no options.
+      Protect your private key with a strong passphrase:
+     </para>
+     <screen>&prompt.user;<command>ssh-keygen</command>
+Generating public/private rsa key pair.
+Enter file in which to save the key (/home/tux/.ssh/id_rsa):
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in id_rsa
+Your public key has been saved in id_rsa.pub
+The key fingerprint is:
+SHA256:z0uJIuc7Doy07bFTe1ppZHLVrkD/bWWlBAF/PcHjblU user@host2
+The key's randomart image is:
++---[RSA 3072]----+
+|          ..o... |
+|           o . +E|
+|        . . o +.=|
+|       . o . o o+|
+|  .   . S . . o +|
+| . =  .= * + . = |
+|  o *.o.= * . +  |
+|   ..Bo+.. . .   |
+|    oo==  .      |
++----[SHA256]-----+</screen>
+    </step>
+    <step>
+      <para>
+        Create an RSA key pair with a longer bit length:
+      </para>
+      <screen>&prompt.user;<command>ssh-keygen -b 4096</command></screen>
+      <para>
+        OpenSSH RSA keys can be a maximum of 16,384 bits. However, longer bit
+        lengths are not necessarily more desirable. See the GnuPG FAQ for
+        more information, <link xlink:href="https://www.gnupg.org/faq/gnupg-faq.html#no_default_of_rsa4096"/>.
+      </para>
+    </step>
+    <step>
+      <para>
+       You may create as many user keys as you want, for accessing
+       different servers. Each key pair must have a unique name, and  optionally, a comment. These help you remember what each
+       key pair is for. Create an RSA key pair with a custom name and a
+       comment:
+    </para>
+    <screen>&prompt.user;<command>ssh-keygen -f <replaceable>backup-server-key -C "infrastructure backup server"</replaceable></command>
+      </screen>
+    </step>
+    <step>
+     <para>
+       Create an Ed25519 key pair with a custom name and a comment:
+     </para>
+     <screen>&prompt.user;<command>ssh-keygen -t ed25519 -f <replaceable>ldap-server-key -C "Internal LDAP server"</replaceable></command>
+     </screen>
+     <para>
+       Ed25519 keys are fixed at 256 bits, which is equivalent in
+       cryptographic strength to RSA 4096.
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+   <sect2 xml:id="sec-create-ssh-host-keys">
+    <title>Creating SSH server host keys</title>
+    <para>
+      Host keys are managed a little differently. A host key must not
+      have a passphrase, and the key pairs are stored in
+      <filename>/etc/ssh</filename>.
+      OpenSSH automatically generates a set of host keys when it is
+      installed, like the following example:
+    </para>
+    <screen>&prompt.user;<command>ls -l /etc/ssh</command>
+total 608
+-rw------- 1 root root 577834 2021-05-06 04:48 moduli
+-rw-r--r-- 1 root root   2403 2021-05-06 04:48 ssh_config
+-rw-r----- 1 root root   3420 2021-05-06 04:48 sshd_config
+-rw------- 1 root root   1381 2022-02-10 06:55 ssh_host_dsa_key
+-rw-r--r-- 1 root root    604 2022-02-10 06:55 ssh_host_dsa_key.pub
+-rw------- 1 root root    505 2022-02-10 06:55 ssh_host_ecdsa_key
+-rw-r--r-- 1 root root    176 2022-02-10 06:55 ssh_host_ecdsa_key.pub
+-rw------- 1 root root    411 2022-02-10 06:55 ssh_host_ed25519_key
+-rw-r--r-- 1 root root     96 2022-02-10 06:55 ssh_host_ed25519_key.pub
+-rw------- 1 root root   2602 2022-02-10 06:55 ssh_host_rsa_key
+-rw-r--r-- 1 root root    568 2022-02-10 06:55 ssh_host_rsa_key.pub</screen>
+
+    <para>
+      <command>ssh-keygen</command> has a special option, <option>-A</option>,
+      for creating new host keys. This creates new keys for each of the key
+      types for which host keys do not exist, with the default key file
+      path, an empty passphrase, default bit size for the key type, and an
+      empty comment. The following example creates a complete new
+      set of host keys by first deleting the existing keys, then creating a
+      new set:
+    </para>
+    <screen>&prompt.sudo;<command>rm /etc/ssh/ssh_host*</command>
+&prompt.sudo;<command>ssh-keygen -A</command></screen>
+    <para>
+      You can replace selected key pairs by first deleting only the
+      keys you want to replace, because <command>ssh-keygen -A</command>
+      does not replace existing keys.
+    </para>
+    <important>
+     <title>Do not use DSA keys</title>
+      <para>
+        <command>ssh-keygen -A</command> creates DSA keys, even though
+        they have been deprecated as unsafe for several years. In OpenSSH
+        7.0 they are still created, but disabled by not being listed in
+        <filename>sshd_config</filename>. You may safely delete DSA keys.
+      </para>
+    </important>
+    <para>
+     When you want to rotate host keys
+     (see <xref linkend="sec-ssh-sshdserver-rotation"/>), you must create
+     the new keys individually, because they must exist at the same time as
+     your old host keys. Your users will authenticate with the old keys,
+     and then receive the list of new keys. They need unique names,
+     to not conflict with the old keys. The following example creates new
+     RSA and Ed25519 host keys, labeled with the year and month they were
+     created. Remember, the new host keys must not have passphrases:
+    </para>
+    <screen>&prompt.user;<command>cd /etc/ssh</command>
+&prompt.sudo;<command>ssh-keygen -b 4096 -f "<replaceable>SSH_HOST_RSA_2022_02</replaceable>"</command>
+&prompt.sudo;<command>ssh-keygen -t ed25519 -f "<replaceable>SSH_HOST_ED25519_2022_02</replaceable>"</command></screen>
+    <para>
+      You may name your new keys whatever you want.
+    </para>
+   </sect2>
+  </sect1>
+
+   <sect1 xml:id="sec-ssh-sshdserver-rotation">
+   <title>Rotating host keys</title>
+   <para>
+    As of version 6.8, OpenSSH includes a protocol extension that
+    supports host key rotation. SSH server admins must periodically
+    retire old host keys and create new keys, for example if a key has been
+    compromised, or it is time to upgrade to stronger keys. Before OpenSSH
+    6.8, if <literal>StrictHostKeyChecking</literal>
+    was set to <literal>yes</literal> in <filename>ssh_config</filename>
+    on user machines, users would see a warning that the host key had
+    changed, and were not allowed to connect. Then the users would have to
+    manually delete the server's public key from their
+    <filename>known_hosts</filename> file, reconnect, and manually accept the
+    new key. Any automated SSH connections, such as scheduled backups, would
+    fail.
+   </para>
+   <para>
+     The new host key rotation scheme provides a method to distribute new
+     keys without service interruptions. When clients connect, the server
+     sends them a list of new keys. Then the next time they log in they are
+     asked if they wish to accept the changes. Give users a few days to
+     connect and receive the new keys, and then you can remove the old keys.
+     The users' <filename>known_hosts</filename> files are automatically
+     updated, with new keys added and the old keys removed.
+   </para>
+    <para>
+      Setting up host key rotations requires creating new keys on the server,
+      some changes to <filename>/etc/ssh/sshd_config</filename> on the
+      server, and to <filename>/etc/ssh/ssh_config</filename> on the clients.
+   </para>
+   <para>
+     First, create your new key or keys. The following example creates a new
+     RSA key and a new Ed25519 key, with unique names and comments. A useful
+     convention is to name them with the creation date. Remember, a host key
+     must not have a passphrase:
+   </para>
+   <screen>&prompt.root;<command>ssh-keygen -t rsa -f ssh_host_rsa_2022-01 -C "main server"</command>
+Generating public/private rsa key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ssh_host_rsa_2022-01
+Your public key has been saved in ssh_host_rsa_2022-01.pub
+The key fingerprint is:
+SHA256:F1FIF2aqOz7D3mGdsjzHpH/kjUWZehBN3uG7FM4taAQ main server
+The key's randomart image is:
++---[RSA 3072]----+
+|         .Eo*.oo |
+|          .B .o.o|
+|          o . .++|
+|         . o ooo=|
+|        S . o +*.|
+|         o o.oooo|
+|       .o ++oo.= |
+|       .+=o+o + .|
+|       .oo++..   |
++----[SHA256]-----+
+
+&prompt.root;<command>ssh-keygen -t ed25519 -f ssh_host_ed25519_2022-01 -C "main server"</command>
+Generating public/private ed25519 key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ssh_host_ed25519_2022-01
+Your public key has been saved in ssh_host_ed25519_2022-01.pub
+The key fingerprint is:
+SHA256:2p9K0giXv7WsRnLjwjs4hJ8EFcoX1FWR4nQz6fxnjxg main server
+The key's randomart image is:
++--[ED25519 256]--+
+|   .+o ...o+     |
+| . .... o *      |
+|  o..  o = o     |
+|  ..   .. o      |
+|   o. o S  .     |
+|  . oo.*+   E o  |
+|   + ++==..  = o |
+|    = +oo= o. . .|
+|     ..=+o=      |
++----[SHA256]-----+</screen>
+
+   <para>
+     Record the fingerprints, for users to verify the new keys.
+   </para>
+   <para>
+     Add the new key names to <filename>/etc/ssh/sshd_config</filename>, and
+     uncomment any existing keys that are in use:
+   </para>
+   <screen>## Old keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+
+## New replacement keys
+HostKey /etc/ssh/ssh_host_rsa_2022-01
+HostKey /etc/ssh/ssh_host_ed25519_2022-01</screen>
+
+    <para>
+      Save your changes, then restart <systemitem class="daemon">sshd</systemitem>:
+    </para>
+    <screen>&prompt.root;<command>systemctl restart sshd.service</command>
+    </screen>
+    <para>
+      The <filename>/etc/ssh/ssh_config</filename> file on user machines must
+      include the following settings:
+    </para>
+    <screen>UpdateHostKeys ask
+StrictHostKeyChecking yes</screen>
+    <para>
+      Test connecting from a client by opening an SSH session to the server
+      to receive the new keys list. Log out, then log back in. When you log
+      back in you should see something like the following message:
+    </para>
+    <screen>The server has updated its host keys.
+These changes were verified by the server's existing trusted key.
+Deprecating obsolete hostkey: ED25519
+SHA256:V28d3VpHgjsCoV04RBCZpLo5c0kEslCZDVdIUnCvqPI
+Deprecating obsolete hostkey:
+RSA SHA256:+NR4DVdbsUNsqJPIhISzx+eqD4x/awCCwijZ4a9eP8I
+Accept updated hostkeys? (yes/no):yes</screen>
+    <para>
+      You may set <literal>UpdateHostKeys ask</literal> to
+      <literal>UpdateHostKeys yes</literal> to apply the changes
+      automatically, and avoid asking users to approve the changes.
+    </para>
+    <para>
+      For more information:
+    </para>
+
+   <itemizedlist>
+    <listitem>
+      <para>
+        <xref linkend="sec-ssh-authentic-gen-key"/>
+      </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+       man 5 ssh_config, man 5 sshd_config
+     </para>
+    </listitem>
+   </itemizedlist>
+ </sect1>
+
+  <sect1 xml:id="sec-ssh-public-key-auth">
+  <title>Public key authentication</title>
+  <para>
+   Public key authentication uses your own personal identity key to
+   authenticate, rather than a user account password.
+  </para>
+  <para>
+   The following example shows how to create a new personal
+   RSA key pair with a comment, so you know what it is for. First change to
+   your <filename>~/.ssh</filename> directory (or create it if it does not
+   exist), then create the new key pair. Give it a strong passphrase, and
+   write the passphrase in a safe place:
+  </para>
+  <screen>&prompt.user;<command>cd ~/.ssh</command>
+&prompt.user;<command>ssh-keygen -C <replaceable>"web server1"</replaceable> -f <replaceable>id-web1</replaceable> -t rsa -b <replaceable>4096</replaceable></command>
+</screen>
+  <para>
+   Next, copy your new public key to the machine you want access to. You
+   must already have a user account on this machine, and SSH access to
+   copy it over the network:
+  </para>
+  <screen>&prompt.user;<command>ssh-copy-id -i <replaceable>id-web1 user@web1</replaceable></command></screen>
+  <para>
+   Then try logging in with your new key:
+  </para>
+  <screen>&prompt.user;<command>ssh -i <replaceable>id-web1 user@web1</replaceable></command>
+Enter passphrase for key 'id-web1':
+Last login: Sat Jul 11 11:09:53 2022 from 192.168.10.122
+Have a lot of fun...</screen>
+  <para>
+   You should be asked for your private key passphrase, and not the
+   password for your user account.
+  </para>
+  <para>
+   To be effective, public key authentication should be enforced on
+   the remote machine, and password authentication not allowed (see
+   <xref linkend="ex-sshd-conf"/>). If you do not have public key
+   authentication access on the remote machine already, you cannot copy your
+   new public key with <command>ssh-copy-id</command>, and must use other
+   means, such as manually copying it from a USB stick to the
+   <filename>~/.ssh/authorized_keys</filename> file of the remote
+   user account.
+  </para>
+ </sect1>
+
+  <sect1 xml:id="sec-ssh-passphrase-less-auth">
+  <title>Passphrase-less public key authentication</title>
+  <para>
+    This is public key authentication without a passphrase. Create
+    your new private identity keys without a passphrase, and then use them
+    the same way as passphrase-protected keys. This is useful for automated
+    services, such as scripts and cron jobs. However, anyone who succeeds in
+    stealing the private key can easily masquerade as you, so you need to be
+    very protective of a passphrase-less private key.
+  </para>
+  <para>
+   An alternative to using keys without passphrases is
+   <literal>gnome-keyring</literal>, which
+   remembers and applies your private keys and passphrases for you.
+   <literal>gnome-keyring</literal> is for GNOME desktop sessions
+   (<xref linkend="sec-ssh-gnome-keyring"/>).
+  </para>
+  <para>
+   For console sessions, use <literal>ssh-agent</literal>
+   (<xref linkend="sec-ssh-authentic-agent"/>).
+  </para>
+ </sect1>
+
+  <sect1 xml:id="sec-ssh-certificate-auth">
+  <title>OpenSSH certificate authentication</title>
+  <para>
+   OpenSSH introduced certificate authentication in OpenSSH 5.4.
+   Certificate authentication is similar to public key authentication,
+   except hosts and users authenticate to each other with digitally-signed
+   encryption certificates instead of encryption keys. Certificate
+   authentication provides central management for server and user
+   certificates, eliminating the need to manually copy user public keys to
+   multiple hosts. It increases security by giving more control to
+   administrators, and less to users.
+  </para>
+  <para>
+   Certificates consist of a public encryption key, a user-defined identity
+   string, zero or more user names or host names, and other options.
+   User and host public keys are signed by a Certificate Authority (CA)
+   private signing key to create an encryption certificate. Users and hosts
+   trust the public CA key, rather than trusting individual user and host
+   public encryption keys.
+  </para>
+  <para>
+   Traditional OpenSSH public key authentication requires copying user
+   public keys to every SSH server they need access to (to the appropriate
+   <filename>~/.ssh/authorized_keys</filename> files), and relying on
+   users to verify new SSH server host keys before accepting them (stored
+   in <filename>~/.ssh/known_hosts</filename>). This is
+   error-prone and complicated to manage. Another disadvantage is OpenSSH
+   keys never expire. When you need to revoke a particular public key, you
+   have to find and remove all of its copies on your network.
+  </para>
+  <para>
+   Automating the whole process (for example, with Ansible) is virtually a
+   necessity. Large organizations, such as Meta
+   (see <link xlink:href="https://engineering.fb.com/2016/09/12/security/scalable-and-secure-access-with-ssh/"/>),
+   automate the process completely, so they can revoke and replace
+   certificates, and even certificate authorities, as often as they want
+   without disrupting operations.
+  </para>
+  <para>
+   A prerequisite is the ability to open SSH sessions to all hosts on your
+   network, and perform tasks like editing configuration files and restarting <systemitem class="daemon">sshd</systemitem>.
+  </para>
+  <para>
+   Setting up an OpenSSH certificate authority involves the following steps:
+  </para>
+ <itemizedlist>
+  <listitem>
+  <para>
+   Set up a secure trusted server to host your certificate authority,
+   for signing host and user keys. Create a new key pair for signing
+   keys. The private key signs user and host keys, and the public key is
+   copied to all users who are allowed access to the server.
+  </para>
+  </listitem>
+  <listitem>
+  <para>
+   Receive and sign host public keys, then distribute the new host
+   certificates to their respective hosts. Host certificates go in
+   <filename>/etc/ssh</filename>, just like host keys.
+  </para>
+  </listitem>
+  <listitem>
+  <para>
+   Receive and sign user public keys, then distribute the new user
+   certificates to their owners. User certificates go in
+   <filename>~/.ssh</filename>, just like user keys.
+  </para>
+  </listitem>
+  <listitem>
+   <para>
+     Edit configuration files on servers and users' machines, and stop and
+     start <systemitem class="daemon">sshd</systemitem> on hosts as
+     necessary.
+   </para>
+  </listitem>
+  <listitem>
+  <para>
+   Revoke certificates as needed, for example when you suspect a certificate
+   has been compromised, a user has left your organization, or a server has
+   been retired. Revoking a certificate is considerably simpler than finding
+   and removing all relevant public key copies.
+  </para>
+  </listitem>
+ </itemizedlist>
+   <para>
+    Users and server admins create and protect their own OpenSSH keys. It is
+    safe to freely share public keys. It is safe to transfer the new
+    certificates by insecure methods, such as email, because they require
+    their private keys to validate.
+   </para>
+   <para>
+   Note that SSH certificates follow the OpenPGP standard, rather than
+   SSL/TLS, and that the certificate format is OpenPGP, not X.509.
+  </para>
+
+ <sect2 xml:id="sec-ssh-certificate-create-signing-keys">
+  <title>Setting up a new certificate authority</title>
+  <para>
+   This section describes how to set up a new certificate
+   authority (CA). Give careful consideration to organizing
+   your CA, to keep it manageable and efficient.
+  </para>
+  <important>
+   <title>Protect your certificate authority</title>
+   <para>
+    It is extremely important to protect the machine that hosts
+    your certificate authority. Your CA is literally the key to
+    your entire network. Anyone who gains access to your CA can
+    create their own certificates and freely access your network
+    resources, or even compromise your servers and the CA itself.
+    A common practice is to use a dedicated machine that is started only
+    when you need to sign keys.
+   </para>
+  </important>
+   <para>
+    It is a best practice to create one signing key for servers,
+    and another signing key for clients. If you have a large number of
+    certificates to manage, it can be helpful to create your
+    CAs for hosts and clients on separate machines. If you prefer
+    using a single machine, give each CA its own directory.
+    The examples in this section use <filename>/ca-ssh-hosts</filename>
+    and <filename>/ca-ssh-users</filename>. The example machine is
+    <replaceable>ca.example.com</replaceable>.
+   </para>
+   <para>
+    If your security policy requires
+    keeping copies of users' and host's public keys, store them in their own
+    subdirectories, for easier tracking and avoiding key name collisions.
+   </para>
+   <important>
+    <title>RSA signing keys deprecated</title>
+    <para>
+     OpenSSH 8.2, released February 2020, deprecates RSA signing keys.
+     Use Ed25519 or ECDSA.
+    </para>
+   </important>
+   <para>
+    The following examples create two signing keys, one for signing
+    host keys, and one for user keys. Give them strong passphrases:
+  </para>
+  <screen>&prompt.sudo;<command>ssh-keygen -t ed25519 -f <replaceable>/ca-ssh-hosts/ca-host-sign-key -C "signing key for host certificates"</replaceable></command>
+Generating public/private ed25519 key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ca-host-sign-key
+Your public key has been saved in ca-host-sign-key.pub
+The key fingerprint is:
+SHA256:STuQ7HgDrPcEa7ybNIW0n6kPbj28X5HN8GgwllBbAt0
+ signing key for host certificates
+The key's randomart image is:
++--[ED25519 256]--+
+|      o+o..      |
+|   . . o.=E      |
+|    = + B .      |
+|   + O + = B     |
+|  . O * S = +    |
+|   o B + o .     |
+|    =o=   .      |
+|   o.*+  .       |
+|   .=.o+.        |
++----[SHA256]-----+
+</screen>
+
+  <screen>&prompt.sudo;<command>ssh-keygen -t ed25519 -f <replaceable>/ca-ssh-users/ca-user-sign-key -C "signing key for user certificates"</replaceable></command>
+Generating public/private ed25519 key pair.
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in ca-user-sign-key
+Your public key has been saved in ca-user-sign-key.pub
+The key fingerprint is:
+SHA256:taYj8tTnjkzgfHRvQ6HTj8a37PY6rwv96V1x+GHRjIk signing key for user certificates
+The key's randomart image is:
++--[ED25519 256]--+
+|                 |
+|             . +.|
+|          . E o.o|
+|         . + . ..|
+|      . S * o .+.|
+|     o + + = +..+|
+|    . = * . O + o|
+|     + = = o =oo+|
+|      . o.o  oOX=|
++----[SHA256]-----+
+ </screen>
+ <para>
+  Copy your public user signing key (be sure you are copying the PUBLIC
+  key) to <filename>/etc/ssh</filename> on all hosts running SSH servers.
+  Then enter the full path of the public user signing key to
+  <filename>/etc/ssh/sshd_config</filename> on the hosts:
+ </para>
+ <screen>TrustedUserCAKeys <replaceable>/etc/ssh/ca-user-sign-key.pub</replaceable>
+</screen>
+ <para>
+  Then restart <systemitem class="daemon">sshd</systemitem>.
+ </para>
+</sect2>
+
+ <sect2 xml:id="sec-ssh-certificate-create-host-certs">
+  <title>Creating host certificates</title>
+  <para>
+   The following example signs a host public key to create a host
+   certificate for a database server:
+  </para>
+  <screen>&prompt.sudo;<command>ssh-keygen -s <replaceable>/ca-ssh-hosts/ca-host-sign-key</replaceable></command> \
+   <command>-n <replaceable>&wsII;,&wsIIname;</replaceable> -I <replaceable>"db-server host cert"</replaceable></command> \
+   <command>-h -V +4w <replaceable>/etc/ssh/ssh_host_ed25519_key.pub</replaceable></command>
+Enter passphrase:
+Signed host key /etc/ssh/ssh_host_ed25519_key-cert.pub: id
+"db-server host cert" serial 0 for venus,venus.example.com
+valid from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
+    </screen>
+      <para>
+       If there is more than one host key on a server, sign all of them.
+      </para>
+    <itemizedlist>
+     <listitem>
+      <para>
+       <option>-s</option> is your private signing key.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <option>-n</option> is your list of principals. For host
+       certificates, the principals are the machine's host name
+       and fully-qualified domain name.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <option>-I</option> is the identity string. This is any
+       comment or description you want. The string is logged, to help you
+       quickly find relevant log entries.
+      </para>
+     </listitem>
+     <listitem>
+      <para>
+       <option>-h</option> creates a host certificate.
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <option>-V</option> sets the expiration date for the certificate. In
+      the example, the certificate expires in four weeks. (See
+      the "-V validity_interval" section of
+      <command>man 1 ssh-keygen</command> for allowed time formats.)
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    Verify that your new certificate is built the way you want:
+   </para>
+   <screen>&prompt.user;<command>ssh-keygen -Lf /etc/ssh/ssh_host_ed25519_key-cert.pub</command>
+ /etc/ssh/ssh_host_ed25519_key-cert.pub:
+        Type: ssh-ed25519-cert-v01@openssh.com host certificate
+        Public key: ED25519-CERT SHA256:/
+         U7C+qABXYyuvueUuhFKzzVINq3d7IULRLwBstvVC+Q
+        Signing CA: ED25519 SHA256:
+         STuQ7HgDrPcEa7ybNIW0n6kPbj28X5HN8GgwllBbAt0 (using ssh-ed25519)
+        Key ID: "db-server host cert"
+        Serial: 0
+        Valid: from 2022-08-08T14:20:00 to 2022-09-05T15:21:19
+        Principals:
+                venus
+                venus.example.com
+        Critical Options: (none)
+        Extensions: (none)
+    </screen>
+   <para>
+    Add the full path of the new host certificate to
+    <filename>/etc/ssh/sshd_config</filename>, to make it
+    available to clients:
+   </para>
+   <screen>HostCertificate <replaceable>/etc/ssh/ssh_host_ed25519_key-cert.pub</replaceable></screen>
+   <para>
+    Restart <systemitem class="daemon">sshd</systemitem> to load your
+    changes:
+   </para>
+   <screen>&prompt.sudo;<command>systemctl restart sshd.service</command></screen>
+   <para>
+    See
+    <xref linkend="sec-ssh-certificate-user-config"/> to learn how to
+    configure clients to accept host certificates.
    </para>
   </sect2>
 
-  <sect2 xml:id="sec-ssh-programm-forwarding">
+  <sect2 xml:id="sec-ssh-certificate-user-config">
+   <title>CA configuration for users</title>
+   <para>
+    The following example shows how to configure clients to trust your CA
+    rather than individual keys. The example grants access to a single
+    server. This entry must be on a single unbroken  line in your users'
+    <filename>~/.ssh/known_hosts</filename> files. Move the original
+    <filename>~/.ssh/known_hosts</filename> file, and create a new
+    file that contains only the CA configuration. Or, create a global
+    configuration in <filename>/etc/ssh/ssh_known_hosts</filename>, which
+    has the advantage of being un-editable by unprivileged users:
+   </para>
+   <screen>@cert-authority db,db.example.com ssh-ed25519
+ AAAAC3NzaC1lZDI1NTE5AAAAIH1pF6DN4BdsfUKWuyiGt/leCvuZ/fPu
+ YxY7+4V68Fz0 signing key for user certificates
+   </screen>
+    <para>
+     List each server the user is allowed to access in a comma-delimited
+     list, for example
+     <literal><replaceable>&wsII;,&wsIIname;,&wsIII;,&wsIIIname;</replaceable></literal>. You may also
+     grant access to all servers in domains with wildcards, for example
+     <literal>*.example.com,*.example2.com</literal>.
+    </para>
+    <para>
+     Try connecting to the server. You should be prompted for the password
+     of the remote account, without being prompted to verify the host
+     certificate.
+    </para>
+  </sect2>
+
+  <sect2 xml:id="sec-ssh-certificate-user-certs">
+   <title>Creating user certificates</title>
+   <para>
+    Sign the user's public key:
+   </para>
+   <screen>&prompt.sudo;<command>ssh-keygen <replaceable>/ca-ssh-hosts/ca-user-sign-key -I "suzanne's cert" -n &exampleuserIII_plain; -V +52w user-key.pub</replaceable></command>
+ Signed user key .ssh/ed25519key-cert.pub: id "suzanne's cert" serial 0
+ for suzanne valid from 2022-09-14T12:57:00 to 2023-09-13T12:58:21
+</screen>
+   <para>
+    The principal on user certificates is always the username. Store the
+    user's certificate in <filename>~/.ssh</filename> on the user's machine.
+   </para>
+   <para>
+    User certificates replace the <filename>~/.ssh/authorized_keys</filename> files. Remove this file from a user account on the remote
+    machine, then try opening an SSH session to that account. You should be
+    able to log  in without being prompted for a password. (Remember, the
+    server should have a
+    <literal>TrustedUserCAKeys /etc/ssh/<replaceable>ca-user-sign-key.pub</replaceable></literal>
+    line in its
+    <filename>/etc/ssh/sshd_config</filename> file, so that the server
+    knows to trust your certificate authority.)
+   </para>
+   <para>
+    Additionally, look for <literal>Accepted publickey for
+     <replaceable>&exampleuserIII_plain;</replaceable></literal> messages in
+    your log files.
+    </para>
+  </sect2>
+
+  <sect2 xml:id="sec-ssh-certificate-revoke-host-keys">
+   <title>Revoking host keys</title>
+   <para>
+    When you need to revoke a certificate because a server has been
+    compromised or retired, add the certificate's corresponding
+    public key to a file on every client, for example
+    <filename>/etc/ssh/revoked-host-key</filename>:
+   </para>
+   <screen>ssh-ed25519-cert-v01@openssh.com
+    AAAAIHNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAAIK6hyvFAhFI+0hkKehF/
+    506fD1VdcW29ykfFJn1CPK9lAAAAIAawaXbbEFiQOAe5LGclrCHSLWbEeUauK5+CAuhTJyz0
+    AAAAAAAAAAAAAAACAAAAE2RiLXNlcnZlciBob3N0IGNlcnQAAAAeAAAABXZlbnVzAAAAEXZl
+    bnVzLmV4YW1wbGUuY29tAAAAAGMabhQAAAAAYz9YgQAAAAAAAAAAAAAAAAAAADMAAAALc3No
+    LWVkMjU1MTkAAAAgfWkXoM3gF2x9Qpa7KIa3+V4K+5n98+5jFjv7hXrwXPQAAABTAAAAC3Nz
+    aC1lZDI1NTE5AAAAQI+mbJsQjt/9bLiURse8DF3yTa6Yk3HpoE2uf9FW/
+    KeLsw2wPeDv0d6jv49Wgr5T3xHYPf+VPJQW35ntFiHTlQg= root@db
+   </screen>
+   <para>
+    This file must be named in <filename>/etc/ssh/sshd_config</filename>:
+   </para>
+   <screen>RevokedKeys /etc/ssh/revoked_keys</screen>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-gnome-keyring">
+  <title>Automated public key logins with gnome-keyring</title>
+  <para>
+   The <package>gnome-keyring</package> package is installed and enabled
+   by default when the GNOME desktop environment is installed.
+   <literal>gnome-keyring</literal> is integrated with your
+   system login, automatically unlocking your secrets storage at login.
+   When you change your login password, <literal>gnome-keyring</literal>
+   automatically updates itself with your new password.
+  </para>
+  <para>
+   <literal>gnome-keyring</literal> automatically loads all key pairs in
+   <filename>~/.ssh</filename>, for each pair that has a
+   <filename>*.pub</filename> file. You may manually load other keys with
+   the <command>ssh-add</command> command, for example:
+  </para>
+  <screen>&prompt.user;<command>ssh-add <replaceable>~/.otherkeys/my_key</replaceable></command>
+   </screen>
+  <para>
+   List all loaded keys:
+  </para>
+  <screen>&prompt.user;<command>ssh-add -L</command></screen>
+  <para>
+   When you start up your system and then open an SSH session, you will be
+   prompted for your private key passphrase.
+  </para>
+   <para>
+    <literal>gnome-keyring</literal> will remember the passphrase for the rest of your
+    session. You will not have to re-enter the passphrase until after a system
+    restart.
+   </para>
+ </sect1>
+
+  <sect1 xml:id="sec-ssh-authentic-agent">
+   <title>Automated public key logins with ssh-agent</title>
+   <para>
+    The <package>openssh</package> package
+    provides the <command>ssh-agent</command> utility, which retains your
+    private keys and passphrases, and automatically applies your passphrases
+    for you during the current session.
+   </para>
+   <para>
+    Configure <command>ssh-agent</command> to start automatically and load
+    your keys by entering the following lines in your
+    <filename>~./profile</filename> file:
+   </para>
+   <screen>eval "$(ssh-agent)"
+ssh-add</screen>
+   <para>
+    The first line starts <command>ssh-agent</command>, and the second line
+    loads all the keys in your <filename>~/.ssh</filename> folder.
+    When you open an SSH session that requires public key authentication,
+    you will be prompted for the passphrase. After the passphrase has been
+    provided once, you will not have to enter it again, until after you
+    restart your system.
+   </para>
+   <para>
+    You may configure <filename>~./profile</filename> to load only
+    specific keys, like the following example that loads
+    <filename>id_rsa</filename> and <filename>id_ed25519</filename>:
+   </para>
+   <screen>&prompt.user;ssh-add <replaceable>id_rsa id_ed25519</replaceable></screen>
+
+   <sect2 xml:id="sec-ssh-authentic-agent-x">
+    <title>Using <command>ssh-agent</command> in an X session</title>
+    <para>
+     On &productname;, <command>ssh-agent</command> is automatically
+     started by the &gnome; display manager. To also invoke
+     <command>ssh-add</command> to add your keys to the agent at the
+     beginning of an X session, do the following:
+    </para>
+    <procedure>
+     <step>
+      <para>
+       Log in as the desired user and check whether the file
+       <filename>~/.xinitrc</filename> exists.
+      </para>
+     </step>
+     <step>
+      <para>
+       If it does not exist, use an existing template or copy it from
+       <filename>/etc/skel</filename>:
+      </para>
+<screen>if [ -f ~/.xinitrc.template ]; then mv ~/.xinitrc.template ~/.xinitrc; \
+else cp /etc/skel/.xinitrc.template ~/.xinitrc; fi</screen>
+     </step>
+     <step>
+      <para>
+       If you have copied the template, search for the following lines and
+       uncomment them. If <filename>~/.xinitrc</filename> already existed,
+       add the following lines (without comment signs).
+      </para>
+<screen># if test -S "$SSH_AUTH_SOCK" -a -x "$SSH_ASKPASS"; then
+#       ssh-add &lt; /dev/null
+# fi</screen>
+     </step>
+     <step>
+      <para>
+       When starting a new X session, you will be prompted for your SSH
+       passphrase.
+      </para>
+     </step>
+    </procedure>
+   </sect2>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-change-passphrase">
+  <title>Changing an SSH private key passphrase</title>
+  <para>
+   You may change or remove the passphrase from a private key with
+   <command>ssh-keygen</command>:
+  </para>
+  <screen>&prompt.user;<command>ssh-keygen -pf ~/.ssh/<replaceable>server1</replaceable></command>
+Enter old passphrase:
+Key has comment 'shared videos server1'
+Enter new passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved with the new passphrase.</screen>
+ </sect1>
+
+ <sect1 xml:id="sec-ssh-get-key-fingerprint">
+  <title>Retrieving a key fingerprint</title>
+  <para>
+   Use the <command>ssh-keygen</command> to display the public key
+   fingerprint. The following example prints the SHA256 hash for a
+   ED25519 key:
+  </para>
+  <screen>&prompt.user;<command>ssh-keygen -lf <replaceable>ldap-server</replaceable></command>
+256 SHA256:W45lbmj24ZoASbrqW0q9+NhF04muvfKZ+FkRa2cCiqo comment (ED25519)</screen>
+  <para>
+   Add the <command>-v</command> flag to display the ASCII art
+   representation of the key:
+  </para>
+  <screen>&prompt.user;<command>ssh-keygen -lvf <replaceable>ldap-server</replaceable></command>
+256 SHA256:W45lbmj24ZoASbrqW0q9+NhF04muvfKZ+FkRa2cCiqo comment (ED25519)
++--[ED25519 256]--+
+|                 |
+|                 |
+|    .. .         |
+|  .o..+ +        |
+| ...o+ BSo+      |
+|. ..o.o =X       |
+|...o o..* =      |
+|o.*.* =+ = .     |
+|E*o*+O. o.o      |
++----[SHA256]-----+</screen>
+</sect1>
+
+  <sect1 xml:id="sec-ssh-programm-x">
+   <title>Starting X11 applications on a remote host</title>
+   <para>
+    You can run graphical applications that are installed on a
+    remote machine on your local computer.
+    <literal>X11Forwarding Yes</literal> must be set in the
+    <filename>/etc/ssh/sshd_config</filename> file on the remote machine.
+    Then, when you run <command>ssh</command> with the <option>-X</option>
+    option, the <envar>DISPLAY</envar> variable is automatically set on the
+    remote machine, and all X output is exported to the local machine over
+    the SSH connection. At the same time, X applications started remotely
+    cannot be intercepted by unauthorized users.
+   </para>
+   <para>
+    A quick test is to run a simple game from the remote machine, such as
+    GNOME Mines:
+   </para>
+   <screen>&prompt.user;<command>ssh &exampleuserII_plain;@&exampleserver;</command>
+Password:
+Last login: Tue May 10 11:29:06 2022 from 192.168.163.13
+Have a lot of fun...
+
+&exampleuserII_plain;@&exampleserver;&prompt.user; <command>gnome-mines</command></screen>
+   <para>
+     The remote application should appear on your local machine just as
+     though it were installed locally. (Note that network lag will affect
+     performance.) Close the remote application in the usual way, such as
+     clicking the close button. This closes only the application, and your
+     SSH session remains open.
+   </para>
+
+   <important>
+    <title>X11 forwarding does not work on Wayland</title>
+    <para>
+     X11 forwarding requires the X Windows System, which is the default on
+     &slea;, and not the Wayland display server protocol. The X Windows
+     System has built-in networking, while Wayland does not. Wayland is not
+     supported on &slea;.
+    </para>
+    <para>
+     Use the following command to learn if your system runs X or Wayland:
+    </para>
+    <screen>&prompt.user;<command>echo $XDG_SESSION_TYPE</command>
+x11</screen>
+    <para>
+     If Wayland is in use, it looks like the following example:
+    </para>
+    <screen>&prompt.user;<command>echo $XDG_SESSION_TYPE</command>
+wayland</screen>
+    <para>
+     The systemd way is to query with <command>loginctl</command>:
+    </para>
+     <screen>&prompt.user;<command>loginctl show-session "$XDG_SESSION_ID" -p Type</command>
+Type=x11
+
+&prompt.user;<command>loginctl show-session "$XDG_SESSION_ID" -p Type</command>
+Type=wayland</screen>
+   </important>
+  </sect1>
+
+  <!-- this section needs improving and expanding -->
+  <sect1 xml:id="sec-ssh-programm-forwarding">
    <title>Agent forwarding</title>
    <para>
     By adding the <option>-A</option> option, the ssh-agent authentication
     mechanism is carried over to the next machine. This way, you can work
     from different machines without having to enter a password, but only if
     you have distributed your public key to the destination hosts and
-    properly saved it there. Refer to
-    <xref linkend="sec-ssh-authentic-key-copy"/> for details.
+    properly saved it there. (Refer to
+    <xref linkend="sec-ssh-public-key-auth"/> to learn how
+    to copy your public keys to other hosts.)
    </para>
    <para>
-    This mechanism is deactivated in the default settings, but can be
-    permanently activated at any time in the system-wide configuration file
-    <filename>/etc/ssh/sshd_config</filename> by setting
-    <literal>AllowAgentForwarding yes</literal>.
+    <literal>AllowAgentForwarding yes</literal> is the default in
+    <filename>/etc/ssh/sshd_config</filename>. Change it to
+    <literal>No</literal> to disable it.
    </para>
-  </sect2>
  </sect1>
+
  <sect1 xml:id="sec-ssh-copy">
   <title><command>scp</command>&mdash;secure copy</title>
-
   <para>
    <command>scp</command> copies files to or from a remote machine.  If
    the user name on &wsI; is different than the user name on
    &exampleserver;, specify the latter using the
-   <option><replaceable>USER_NAME</replaceable>@host</option> format. If
+   <option><replaceable>USER_NAME</replaceable>&amp;host</option> format. If
    the file should be copied into a directory other than the remote
    user's home directory, specify it as
    &exampleserver;:<replaceable>DIRECTORY</replaceable>. The following
@@ -146,7 +1484,7 @@
     With the <command>ssh</command> command, the option
     <option>-l</option> can be used to specify a remote user (as an
     alternative to the
-    <option><replaceable>USER_NAME</replaceable>@host</option>
+    <option><replaceable>USER_NAME</replaceable>&amp;host</option>
     format). With <command>scp</command> the option <option>-l</option>
     is used to limit the bandwidth consumed by <command>scp</command>.
    </para>
@@ -180,6 +1518,7 @@
    heavier burden on the processors of both machines.
   </para>
  </sect1>
+
  <sect1 xml:id="sec-ssh-sftp">
   <title><command>sftp</command>&mdash;secure file transfer</title>
 
@@ -206,12 +1545,12 @@ cd path                            Change remote directory to 'path'
   <sect2 xml:id="sec-ssh-sftp-perms">
    <title>Setting permissions for file uploads</title>
    <para>
-    As with a regular FTP server, a user cannot only download,
-        but also upload files to a remote machine running an SFTP server
-        by using the <command>put</command> command. By default the
-        files will be uploaded to the remote host with the same
-        permissions as on the local host. There are two options to
-        automatically alter these permissions:
+    As with a regular FTP server, a user can download and upload files to a
+    remote machine running an SFTP server
+    by using the <command>put</command> command. By default the
+    files will be uploaded to the remote host with the same
+    permissions as on the local host. There are two options to
+    automatically alter these permissions:
    </para>
    <variablelist>
     <varlistentry>
@@ -221,8 +1560,7 @@ cd path                            Change remote directory to 'path'
        A umask works as a filter against the permissions of the original
        file on the local host. It can only withdraw permissions:
       </para>
-      <table>
-       <title/>
+      <informaltable>
        <tgroup cols="3">
         <colspec colnum="1" colname="1" colwidth="33*"/>
         <colspec colnum="2" colname="2" colwidth="33*"/>
@@ -300,7 +1638,7 @@ cd path                            Change remote directory to 'path'
          </row>
         </tbody>
        </tgroup>
-      </table>
+      </informaltable>
       <para>
        To apply a umask on an SFTP server, edit the file
        <filename>/etc/ssh/sshd_configuration</filename>. Search for the line
@@ -332,60 +1670,6 @@ cd path                            Change remote directory to 'path'
      </listitem>
     </varlistentry>
    </variablelist>
-  </sect2>
- </sect1>
- <sect1 xml:id="sec-ssh-sshdserver">
-  <title>The SSH daemon (<systemitem class="daemon">sshd</systemitem>)</title>
-
-  <para>
-   To work with the SSH client programs <command>ssh</command> and
-   <command>scp</command>, a server (the SSH daemon) must be running in the
-   background, listening for connections on <literal>TCP/IP port
-   22</literal>. The daemon generates three key pairs when starting for the
-   first time. Each key pair consists of a private and a public key.
-   Therefore, this procedure is called public key-based. To
-   guarantee the security of the communication via SSH, access to the
-   private key files must be restricted to the system administrator. The
-   file permissions are set accordingly by the default installation. The
-   private keys are only required locally by the SSH daemon and must not be
-   given to anyone else. The public key components (recognizable by the name
-   extension <filename>.pub</filename>) are sent to the client requesting
-   the connection. They are readable for all users.
-  </para>
-
-  <para>
-   A connection is initiated by the SSH client. The waiting SSH daemon and
-   the requesting SSH client exchange identification data to compare the
-   protocol and software versions, and to prevent connections through the
-   wrong port. Because a child process of the original SSH daemon replies to
-   the request, several SSH connections can be made simultaneously.
-  </para>
-
-  <para>
-   For the communication between SSH server and SSH client, OpenSSH supports
-   versions&nbsp;1 and 2 of the SSH protocol. Version&nbsp;2 of the
-   SSH protocol is used by default. Override this to use version&nbsp;1
-   of protocol with the <option>-1</option> option.
-  </para>
-
-  <para>
-   When using version&nbsp;1 of SSH, the server sends its public host key
-   and a server key, which is regenerated by the SSH daemon every hour. Both
-   allow the SSH client to encrypt a freely chosen session key, which is
-   sent to the SSH server. The SSH client also tells the server which
-   encryption method (cipher) to use. Version&nbsp;2 of the SSH protocol
-   does not require a server key. Both sides use an algorithm according to
-   Diffie-Hellman to exchange their keys.
-  </para>
-
-  <para>
-   The private host and server keys are absolutely required to decrypt the
-   session key and cannot be derived from the public parts. Only the
-   contacted SSH daemon can decrypt the session key using its private keys.
-   This initial connection phase can be watched closely by turning on
-   verbose debugging using the <option>-v</option> option of the SSH client.
-  </para>
-
 
   <tip>
    <title>Viewing the SSH daemon log file</title>
@@ -394,317 +1678,12 @@ cd path                            Change remote directory to 'path'
     class="daemon">sshd</systemitem> use the following command:
    </para>
    <screen>&prompt.sudo;journalctl -u sshd</screen>
-  </tip>
-
-
-  <sect2>
-   <title>Maintaining SSH keys</title>
-  <para>
-   It is recommended to back up the private and public keys stored in
-   <filename>/etc/ssh/</filename> in a secure, external location. In this
-   way, key modifications can be detected or the old ones can be used again
-   after having installed a new system.
-  </para>
-
-  <tip>
-   <title>Existing SSH host keys</title>
-   <para>
-    If you install &productname; on a machine with existing Linux
-    installations, the installation routine automatically imports the SSH
-    host key with the most recent access time from an existing installation.
-   </para>
-  </tip>
-
-  <para>
-   When establishing a secure connection with a remote host for the first
-   time, the client stores all public host keys in
-   <filename>~/.ssh/known_hosts</filename>. This prevents any
-   man-in-the-middle attacks&mdash;attempts by foreign SSH servers to use
-   spoofed names and IP addresses. Such attacks are detected either by a
-   host key that is not included in <filename>~/.ssh/known_hosts</filename>,
-   or by the server's inability to decrypt the session key in the absence of
-   an appropriate private counterpart.
-  </para>
-
-  <para>
-   If the public keys of a host have changed (that needs to be verified
-   before connecting to such a server), the offending keys can be
-   removed with <command>ssh-keygen -r
-   <replaceable>HOSTNAME</replaceable></command>.
-  </para>
-  </sect2>
-  <sect2 xml:id="sec-ssh-sshdserver-rotating">
-   <title>Rotating host keys</title>
-   <para>
-    As of version 6.8, OpenSSH comes with a protocol extension that
-    supports host key rotation.  It makes sense to replace keys, if you
-    are still using weak keys such as 1024-bit RSA keys.  It is strongly
-    recommended to replace such a key and go for 2048-bit DSA keys or
-    something even better.  The client will then use the
-    <quote>best</quote> host key.
-   </para>
-   <tip>
-    <title>Restarting sshd</title>
-    <para>
-     After installing new host keys on the server, restart sshd.
-    </para>
    </tip>
-   <para>
-    This protocol extension can
-    inform a client of all the new host keys on the server, if the user
-    initiates a connection with <command>ssh</command>.  Then, the
-    software on the client updates
-    <filename>~/.ssh/known_hosts</filename>, and the user is not
-    required to accept new keys of previously known and trusted hosts
-    manually.  The local <filename>known_hosts</filename> file will
-    contain all the host keys of the remote hosts, in addition to the
-    one that authenticated the host during this session.
-   </para>
-   <para>
-    Once the administrator of the server knows that all the clients have
-    fetched the new keys, they can remove the old keys. The protocol
-    extension ensures that the obsolete keys will be removed from the
-    client's configuration, too. The key removal occurs while initiating
-    an <command>ssh</command> session.
-   </para>
-   <para>
-    For more information, see:
-   </para>
-   <itemizedlist>
-    <listitem>
-     <para>
-      <link xlink:href="http://blog.djm.net.au/2015/02/key-rotation-in-openssh-68.html"/>
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      <link xlink:href="http://heise.de/-2540907"/>
-      (<quote xml:lang="de">Endlich neue Schlüssel für SSH-Server,</quote> German only)
-     </para>
-    </listitem>
-   </itemizedlist>
   </sect2>
  </sect1>
 
- <!-- ================================================================ -->
-
-<sect1 xml:id="sec-ssh-authentic">
-  <title>SSH authentication mechanisms</title>
-
-  <para>
-   In its simplest form, authentication is done by entering the user's
-   password just as if logging in locally. However, having to memorize
-   passwords of several users on remote machines is inefficient. What is
-   more, these passwords may change. On the other hand&mdash;when
-   granting &rootuser; access&mdash;an administrator needs to be able
-   to quickly revoke such a permission without having to change the
-   &rootuser; password.
-  </para>
-
-  <para>
-   To accomplish a login that does not require to enter the remote
-   user's password, SSH uses another key pair, which needs to be generated
-   by the user. It consists of a public (<filename>id_rsa.pub</filename> or
-   <filename>id_dsa.pub</filename>) and a private key
-   (<filename>id_rsa</filename> or <filename>id_dsa</filename>).
-  </para>
-
-  <para>
-   To be able to log in without having to specify the remote user's
-   password, the public key of the <quote>SSH user</quote> must be
-   in <filename>~/.ssh/authorized_keys</filename>. This approach also
-   ensures that the remote user has got full control: adding the key
-   requires the remote user's password and removing the key revokes the
-   permission to log in from remote.
-  </para>
-
-  <para>
-   For maximum security such a key should be protected by a passphrase which
-   needs to be entered every time you use <command>ssh</command>,
-   <command>scp</command>, or <command>sftp</command>. Contrary to the
-   simple authentication, this passphrase is independent from the remote
-   user and therefore always the same.
-  </para>
-
-  <para>
-   An alternative to the key-based authentication described above, SSH also
-   offers a host-based authentication. With host-based authentication, users
-   on a trusted host can log in to another host on which this feature is
-   enabled using the same user name. &productname; is set up for using
-   key-based authentication, covering setting up host-based authentication
-   on &productname; is beyond the scope of this manual.
-  </para>
-
-  <note>
-<!-- fix for bug #398647 -->
-   <title>File permissions for host-based authentication</title>
-   <para>
-    If the host-based authentication is to be used, the file
-    <filename>/usr/lib/ssh/ssh-keysign</filename> should
-    have the setuid bit set, which is not the default setting in
-    &productname;. In such case, set the file permissions manually. You
-    should use <filename>/etc/permissions.local</filename> for this purpose,
-    to make sure that the setuid bit is preserved after security updates of
-    <package>openssh</package>.
-   </para>
-  </note>
-
-  <sect2 xml:id="sec-ssh-authentic-gen-key">
-   <title>Generating an SSH key</title>
-   <procedure>
-    <step>
-     <para>
-      To generate a key with default parameters (RSA, 2048 bits), enter the
-      command <command>ssh-keygen</command>.
-     </para>
-    </step>
-    <step>
-     <para>
-      Accept the default location to store the key
-      (<filename>~/.ssh/id_rsa</filename>) by pressing
-      <keycap function="enter"/> (strongly recommended) or enter an
-      alternative location.
-     </para>
-    </step>
-    <step>
-     <para>
-      Enter a passphrase consisting of 10 to 30 characters. The same rules
-      as for creating safe passwords apply. It is strongly advised to
-      refrain from specifying no passphrase.
-     </para>
-    </step>
-   </procedure>
-   <para>
-    You should make absolutely sure that the private key is not accessible
-    by anyone other than yourself (always set its permissions to
-    <literal>0600</literal>). The private key must never fall into the hands
-    of another person.
-   </para>
-   <para>
-    To change the password of an existing key pair, use the command
-    <command>ssh-keygen -p</command>.
-   </para>
-  </sect2>
-
-  <sect2 xml:id="sec-ssh-authentic-key-copy">
-   <title>Copying an SSH key</title>
-   <para>
-    To copy a public SSH key to <filename>~/.ssh/authorized_keys</filename>
-    of a user on a remote machine, use the command
-    <command>ssh-copy-id</command>. To copy your personal key
-    stored under <filename>~/.ssh/id_rsa.pub</filename> you may use the
-    short form. To copy DSA keys or keys of other users, you need
-    to specify the path:
-   </para>
-  <screen>&prompt.user;<prompt>~/.ssh/id_rsa.pub</prompt>
-ssh-copy-id -i &exampleuser_plain;@&exampleserver;
-
-&prompt.user;<prompt>~/.ssh/id_dsa.pub</prompt>
-ssh-copy-id -i ~/.ssh/id_dsa.pub  &exampleuser_plain;@&exampleserver;
-
-&prompt.user;<prompt>~notme/.ssh/id_rsa.pub</prompt>
-ssh-copy-id -i ~notme/.ssh/id_rsa.pub  &exampleuser_plain;@&exampleserver;</screen>
-   <para>
-    To successfully copy the key, you need to enter the remote
-    user's password. To remove an existing key, manually edit
-    <filename>~/.ssh/authorized_keys</filename>.
-   </para>
-  </sect2>
-
-  <sect2 xml:id="sec-ssh-authentic-agent">
-   <title>Using the <command>ssh-agent</command></title>
-   <para>
-    When doing lots of secure shell operations it is cumbersome to type the
-    SSH passphrase for each such operation. Therefore, the SSH package
-    provides another tool, <command>ssh-agent</command>, which retains the
-    private keys for the duration of an X or terminal session. All other
-    windows or programs are started as clients to the
-    <command>ssh-agent</command>. By starting the agent, a set of
-    environment variables is set, which will be used by
-    <command>ssh</command>, <command>scp</command>, or
-    <command>sftp</command> to locate the agent for automatic login. See
-    the <command>ssh-agent</command> man page for details.
-   </para>
-   <para>
-    After the <command>ssh-agent</command> is started, you need to add your
-    keys by using <command>ssh-add</command>. It will prompt for the
-    passphrase. After the password has been provided once, you can use the
-    secure shell commands within the running session without having to
-    authenticate again.
-   </para>
-   <sect3 xml:id="sec-ssh-authentic-agent-x">
-    <title>Using <command>ssh-agent</command> in an X session</title>
-    <para>
-     On &productname;, the <command>ssh-agent</command> is automatically
-     started by the &gnome; display manager. To also invoke
-     <command>ssh-add</command> to add your keys to the agent at the
-     beginning of an X session, do the following:
-    </para>
-    <procedure>
-     <step>
-      <para>
-       Log in as the desired user and check whether the file
-       <filename>~/.xinitrc</filename> exists.
-      </para>
-     </step>
-     <step>
-      <para>
-       If it does not exist, use an existing template or copy it from
-       <filename>/etc/skel</filename>:
-      </para>
-<screen>if [ -f ~/.xinitrc.template ]; then mv ~/.xinitrc.template ~/.xinitrc; \
-else cp /etc/skel/.xinitrc.template ~/.xinitrc; fi</screen>
-     </step>
-     <step>
-      <para>
-       If you have copied the template, search for the following lines and
-       uncomment them. If <filename>~/.xinitrc</filename> already existed,
-       add the following lines (without comment signs).
-      </para>
-<screen># if test -S "$SSH_AUTH_SOCK" -a -x "$SSH_ASKPASS"; then
-#       ssh-add &lt; /dev/null
-# fi</screen>
-     </step>
-     <step>
-      <para>
-       When starting a new X session, you will be prompted for your SSH
-       passphrase.
-      </para>
-     </step>
-    </procedure>
-   </sect3>
-   <sect3 xml:id="sec-ssh-authentic-agent-terminal">
-    <title>Using <command>ssh-agent</command> in a terminal session</title>
-    <para>
-     In a terminal session you need to manually start the
-     <command>ssh-agent</command> and then call <command>ssh-add</command>
-     afterward. There are two ways to start the agent. The first example
-     given below starts a new Bash shell on top of your existing shell. The
-     second example starts the agent in the existing shell and modifies the
-     environment as needed.
-    </para>
-<screen>&prompt.user;ssh-agent -s /bin/bash
-eval $(ssh-agent)
-    </screen>
-    <para>
-     After the agent has been started, run <command>ssh-add</command> to
-     provide the agent with your keys.
-    </para>
-   </sect3>
-  </sect2>
-
-<!-- fs 2012-10-02:
-
-     Not sure what to do with this...
-
-    <sect2 id="sec-ssh-authentic-host-based">
-   <title>Host-based authentication</title>
-   <para></para>
-  </sect2>
--->
- </sect1>
  <sect1 xml:id="sec-ssh-port-forwarding">
-  <title>Port forwarding</title>
+  <title>Port forwarding (SSH tunneling)</title>
 
   <para>
    <command>ssh</command> can also be used to redirect TCP/IP connections.
@@ -740,49 +1719,6 @@ eval $(ssh-agent)
    each of the programs described above and in the OpenSSH package
    documentation under
    <filename>/usr/share/doc/packages/openssh</filename>.
-  </para>
- </sect1>
-
- <sect1 xml:id="sec-ssh-publickey">
-  <title>Adding and removing public keys on an installed system</title>
-  <para>
-   In some environments, it is convenient or necessary to log in over SSH.
-   As such, the user needs to provide a public SSH key. To add or remove
-   an SSH key, proceed as follows:
-  </para>
-  <procedure>
-   <step>
-    <para>Open &yast;.</para>
-   </step>
-   <step>
-    <para>
-      Under <guimenu>Security and Users</guimenu>, open the
-     <guimenu>User and Group Management</guimenu> module.
-    </para>
-   </step>
-   <step>
-    <para>
-     Select the user you want to change and press <guimenu>Edit</guimenu>.
-    </para>
-   </step>
-   <step>
-    <para>
-     Switch to the <guimenu>SSH Public Key</guimenu> tab.
-    </para>
-   </step>
-   <step>
-    <para>
-     Add or remove your public key(s). If you add a public SSH key, look
-     for the file extension <filename class="extension">.pub</filename>.
-    </para>
-   </step>
-   <step>
-    <para>Confirm with <guimenu>Ok</guimenu>.</para>
-   </step>
-  </procedure>
-
-  <para>
-   Your public SSH key is saved in <filename>~/.ssh/authorized_keys</filename>.
   </para>
  </sect1>
 
@@ -833,21 +1769,13 @@ eval $(ssh-agent)
     </term>
     <term><command>man sftp</command>
     </term>
-    <term><command>man slogin</command>
-    </term>
     <term><command>man ssh</command>
     </term>
     <term><command>man ssh-add</command>
     </term>
-    <term><command>man ssh-agent</command>
-    </term>
     <term><command>man ssh-copy-id</command>
     </term>
-    <term><command>man ssh-keyconvert</command>
-    </term>
     <term><command>man ssh-keygen</command>
-    </term>
-    <term><command>man ssh-keyscan</command>
     </term>
     <listitem>
      <para>
@@ -867,8 +1795,8 @@ eval $(ssh-agent)
     </term>
     <listitem>
      <para>
-      &suse; package specific documentation; changes in defaults with respect to
-      upstream, notes on FIPS mode etc.
+      &suse; package specific documentation; changes in defaults with
+      respect to upstream, notes on FIPS mode etc.
      </para>
     </listitem>
    </varlistentry>

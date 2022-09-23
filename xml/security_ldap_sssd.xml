@@ -1,57 +1,163 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE sect1
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
     %entities;
 ]>
 
-<sect1 xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="sec-security-ldap-server-sssd">
-  <title>Setting up SSSD</title>
+<sect1 xmlns="http://docbook.org/ns/docbook"
+       xmlns:xi="http://www.w3.org/2001/XInclude"
+       xmlns:xlink="http://www.w3.org/1999/xlink"
+       version="5.0"
+       xml:id="sec-security-ldap-server-sssd">
+ <info>
+  <title>Using SSSD to manage LDAP authentication</title>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
   <para>
-   SSSD (System Security Services Daemon) is a daemon that communicates with
-   remote identity providers and allows <literal>pam</literal> and
-   <literal>nsswitch</literal> to consume that data. SSSD can have multiple
-   back-ends, cache users and groups, and provides features such as SSH key
-   distributions.
+    The System Security Services Daemon (SSSD) manages authentication,
+    identification, and access controls for remote users. This section
+    describes how to use SSSD to manage authentication and identification
+    for your &ds389;.
+  </para>
+  <para>
+    SSSD mediates between your LDAP server and clients. It supports several
+    provider back-ends, such as LDAP, Active Directory, and
+    Kerberos. SSSD supports services, including SSH, PAM, NSS, and sudo.
+    SSSD provides performance benefits and resilience through caching user
+    IDs and credentials. Caching reduces the number of requests to your
+    &ds389a; server, and provides authentication and identity services
+    when the back-ends are unavailable.
+  </para>
+  <para>
+    If the Name Services Caching Daemon (ncsd) is running on your network,
+    you should disable or remove it. ncsd caches only the common name
+    service  requests, such as passwd, group, hosts, service, and netgroup,
+    and will conflict with SSSD.
+  </para>
+  <para>
+    Your LDAP server is the provider, and your SSSD instance is the client
+    of the provider. You may install SSSD on your &ds389a; server, but
+    installing it on a separate machine provides some resilience in case the
+    &ds389a; server becomes unavailable. Use the following procedure to
+    install and configure an SSSD client. The example &ds389a; instance name
+    is <replaceable>LDAP1</replaceable>:
   </para>
   <procedure>
-   <step>
-     <para>On a separate server, install the <systemitem>sssd</systemitem> and <systemitem>sssd-ldap</systemitem> packages:
-     </para>
+    <step>
+      <para>
+    Install the <systemitem>sssd</systemitem> and <systemitem>sssd-ldap</systemitem> packages:
+   </para>
     <screen>&prompt.sudo;<command>zypper in sssd sssd-ldap</command></screen>
-   </step>
-   <step>
+  </step>
+  <step>
     <para>
-     Disable and stop the <systemitem class="daemon">nscd</systemitem> daemon
-     because it conflicts with <systemitem class="daemon">sssd</systemitem>:
+    Back up the <filename>/etc/sssd/sssd.conf</filename> file, if it exists:
+  </para>
+  <screen>&prompt.sudo;<command>old /etc/sssd/sssd.conf</command></screen>
+  </step>
+  <step>
+   <para>
+     Create your new SSSD configuration template. The allowed output file
+     names are <literal>sssd.conf</literal> and
+     <literal>ldap.conf</literal>.
+     <literal>display</literal> sends the output to stdout. The following
+     example creates a client configuration in
+     <filename>/etc/sssd/sssd.conf</filename>:
+   </para>
+   <screen>&prompt.sudo;<command>sudo cd /etc/sssd</command>
+&prompt.sudo;<command>dsidm <replaceable>LDAP1</replaceable> client_config sssd.conf</command>
+</screen>
+  </step>
+  <step>
+    <para>
+      Review the output and make any necessary changes to suit your
+      environment. The following <filename>/etc/sssd/sssd.conf</filename>
+      file demonstrates a working example:
     </para>
-    <screen>&prompt.sudo;<command>systemctl disable nscd &amp;&amp; systemctl stop nscd</command></screen>
-   </step>
-   <step>
+    <screen>[sssd]
+services = nss, pam, ssh, sudo
+config_file_version = 2
+domains = default
+
+[nss]
+homedir_substring = <replaceable>/home</replaceable>
+
+[domain/default]
+# If you have large groups (for example, 50+ members),
+# you should set this to True
+ignore_group_members = False
+debug_level=3
+cache_credentials = True
+id_provider = ldap
+auth_provider = ldap
+access_provider = ldap
+chpass_provider = ldap
+
+ldap_schema = rfc2307bis
+ldap_search_base = <replaceable>dc=example,dc=com</replaceable>
+# We strongly recommend ldaps
+ldap_uri = <replaceable>ldaps://ldap.example.com</replaceable>
+ldap_tls_reqcert = demand
+ldap_tls_cacert = /etc/openldap/ldap.crt
+ldap_access_filter = (|(memberof=cn=&lt;login group>,ou=Groups,dc=example,dc=com))
+enumerate = false
+access_provider = ldap
+
+ldap_user_member_of = memberof
+ldap_user_gecos = cn
+ldap_user_uuid = nsUniqueId
+ldap_group_uuid = nsUniqueId
+ldap_account_expire_policy = rhds
+ldap_access_order = filter, expire
+# add these lines to /etc/ssh/sshd_config
+#  AuthorizedKeysCommand /usr/bin/sss_ssh_authorizedkeys
+#  AuthorizedKeysCommandUser nobody
+ldap_user_ssh_public_key = nsSshPublicKey</screen>
+  </step>
+  <step>
     <para>
-     Create the SSSD configuration and restrict the login to the members of a
-     group created for server admins, such as the <systemitem
-     class="groupname">server_admins</systemitem> groups that was set up in 
-     <xref linkend="pro-security-ldap-server-groups"/>:
+      Set file ownership to root, and restrict read-write permissions to root:
     </para>
-    <tip>
-     <para>
-      The <literal>memberOf</literal> plug-in needs to be enabled, so that
-      clients can log in and authorize (see <xref linkend="sec-security-ldap-modules"/>).
-     </para>
-    </tip>
-    <screen>&prompt.sudo;<command>dsidm <replaceable>ldap1</replaceable> client_config sssd.conf <replaceable>server_admins</replaceable></command></screen>
-   </step>
-   <step>
+    <screen>&prompt.sudo;<command>chown root:root /etc/sssd/sssd.conf</command>
+&prompt.sudo;<command>chmod 600 /etc/sssd/sssd.conf</command></screen>
+  </step>
+  <step>
     <para>
-     Review the output and paste (or redirect) it to <filename>/etc/sssd/sssd.conf</filename>.
-     If required, edit the configuration file according to your needs.
+      Edit the
+      <filename>/etc/nsswitch.conf</filename> configuration file on
+      the SSSD server to include the following lines:
     </para>
-   </step>
-   <step>
+    <screen>passwd: compat sss
+group:  compat sss
+shadow: compat sss</screen>
+</step>
+<step>
+  <para>
+    Edit the PAM configuration on the SSSD server, modifying <filename>common-account-pc</filename>,
+    <filename>common-auth-pc</filename>,
+<filename>common-password-pc</filename>, and
+<filename>common-session-pc</filename>. &sle; provides a command to
+modify all of these files at once, <command>pam-config</command>:
+</para>
+<screen>&prompt.sudo;<command>pam-config -a --sss</command></screen>
+  </step>
+  <step>
     <para>
-     To configure the certificates on your client, copy <filename>ca.crt</filename>
-     from the LDAP server to your client, then rehash it:
+      Verify the modified configuration:
+    </para>
+    <screen>&prompt.sudo;<command>pam-config -q --sss</command>
+auth:
+account:
+password:
+session:</screen>
+</step>
+<step>
+    <para>
+      Copy <filename>/etc/dirsrv/slapd-<replaceable>LDAP1/</replaceable>ca.crt</filename>
+      from the &ds389a; server to <filename>/etc/openldap/certs</filename> on your SSSD server, then rehash it:
     </para>
 <screen>&prompt.sudo;<command>c_rehash /etc/openldap/certs</command></screen>
    </step>
@@ -61,15 +167,8 @@
     </para>
     <screen>&prompt.sudo;<command>systemctl enable --now sssd</command></screen>
    </step>
-   <step>
-    <para>
-     To make sure SSSD is part of PAM and NSS, follow the instructions in
-     the sections
-     <citetitle>Configure PAM (&suse;)</citetitle> and
-     <citetitle>Configure NSS (&suse;)</citetitle> at
-     <link xlink:href="https://www.port389.org/docs/389ds/howto/howto-sssd.html"/>.
-    </para>
-   </step>
+  </procedure>
+        <!-- this will go to a separate section cschroder 2021-10-21
    <step>
     <para>
      Your users must have their own SSH key pairs, and SSH access to your SSSD server.
@@ -79,6 +178,16 @@
      does not belong to the group <literal>server_admins</literal>, as
      configured in <xref linkend="pro-security-ldap-server-groups"/>.
     </para>
-   </step>
-  </procedure>
-</sect1>
+      <important>
+     <para>
+      The <literal>memberOf</literal> plug-in needs to be enabled, so that
+      clients can log in and authorize (see <xref linkend="sec-security-ldap-modules"/>).
+     </para>
+    </important>
+
+   </step>-->
+  <para>
+    See <xref linkend="cha-security-auth"/> for information on managing the
+    sssd.service with systemctl.
+  </para>
+  </sect1>

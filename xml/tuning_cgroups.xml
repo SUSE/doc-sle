@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE chapter
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
   %entities;
-  <!-- custom prompt entities for the 'Controlling I/O with Proportional Weight Policy' section --> 
+  <!-- custom prompt entities for the 'Controlling I/O with Proportional Weight Policy' section -->
   <!ENTITY reader1 "reader1:/io-cgroup #">
   <!ENTITY prompt.reader1 "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[reader1] host1:/io-cgroup # </prompt>">
   <!ENTITY prompt.reader2 "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[reader2] host1:/io-cgroup # </prompt>">
@@ -13,298 +13,239 @@
   <!ENTITY prompt.blkio "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[io-controller] host1:/sys/fs/cgroup/blkio/ # </prompt>">
   <!ENTITY prompt.unified "<prompt role='root' xmlns='http://docbook.org/ns/docbook'>[io-controller] host1:/sys/fs/cgroup/unified # </prompt>">
 ]>
-
 <chapter xmlns="http://docbook.org/ns/docbook"
          xmlns:xi="http://www.w3.org/2001/XInclude"
          xmlns:xlink="http://www.w3.org/1999/xlink"
          version="5.0" xml:id="cha-tuning-cgroups">
-
  <title>Kernel control groups</title>
  <info>
   <abstract>
    <para>
-    Kernel Control Groups (<quote>cgroups</quote>) are a kernel feature
-    that allows assigning and limiting hardware and system resources for processes.
+    Kernel Control Groups (<quote>cgroups</quote>) are a kernel feature for
+    assigning and limiting hardware and system resources for processes.
     Processes can also be organized in a hierarchical tree structure.
    </para>
   </abstract>
   <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
-   <dm:bugtracker>
-   </dm:bugtracker>
+   <dm:bugtracker></dm:bugtracker>
+   <dm:translation>yes</dm:translation>
   </dm:docmanager>
  </info>
-
  <sect1 xml:id="sec-tuning-cgroups-overview">
   <title>Overview</title>
+
   <para>
-   Every process is assigned exactly one administrative cgroup. cgroups are ordered
-   in a hierarchical tree structure. You can set resource limitations, such as
-   CPU, memory, disk I/O, or network bandwidth usage, for single processes or for
-   whole branches of the hierarchy tree.
+   Every process is assigned exactly one administrative cgroup. cgroups are
+   ordered in a hierarchical tree structure. You can set resource
+   limitations, such as CPU, memory, disk I/O, or network bandwidth usage,
+   for single processes or for whole branches of the hierarchy tree.
   </para>
+
   <para>
-   On &productname;, &systemd; uses cgroups to organize all
-   processes in groups, which &systemd; calls slices. &systemd; also
-   provides an interface for setting cgroup properties.
+   On &productname;, &systemd; uses cgroups to organize all processes in
+   groups, which &systemd; calls slices. &systemd; also provides an
+   interface for setting cgroup properties.
   </para>
+
   <para>
-   The command <command>systemd-cgls</command> displays the hierarchy
-   tree.
+   The command <command>systemd-cgls</command> displays the hierarchy tree.
   </para>
+
   <para>
-   This chapter is an overview. For more details, refer to the listed
-   references.
+   The kernel cgroup API comes in two variants, v1 and v2. Additionally,
+   there can be multiple cgroup hierarchies exposing different APIs. From
+   the numerous possible combinations, there are two practical choices:
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     hybrid: v2 hierarchy without controllers, and the controllers are on v1
+     hierarchies
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     unified: v2 hierarchy with controllers
+    </para>
+   </listitem>
+  </itemizedlist>
+  <para>
+   The current default mode is hybrid (as of &slea;&nbsp;SP3). This
+   provides backwards compatibility for applications that need it.
+   The following features are available only with the unified v2 hierarchy:
+  </para>
+  <itemizedlist>
+   <listitem>
+    <para>
+     memory controller: reclaim protection (aka memory.low), memory.high,
+     PSI (pressure stall information)
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+    io controller: writeback control, new control policies
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    controller delegation to non-privileged users (rootless containers)
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    freezer support in systemd
+   </para>
+  </listitem>
+  <listitem>
+   <para>
+    simpler handling of the single hierararchy
+   </para>
+  </listitem>
+ </itemizedlist>
+   <para>
+    You may set only one mode.
+  </para>
+   <para>
+   To enable the unified control group hierarchy, append
+   <option>systemd.unified_cgroup_hierarchy=1</option> as a kernel command
+   line parameter to the &grub; boot loader. (Refer to
+   <xref linkend="cha-grub2"/> for more details about configuring &grub;.)
   </para>
  </sect1>
 
  <sect1 xml:id="sec-tuning-cgroups-accounting">
   <title>Resource accounting</title>
+
   <para>
-  The placement of processes into different cgroups can be used to obtain
-  per-cgroup information of certain resource consumption.
+   Organizing processes into different cgroups can be used to obtain per-cgroup
+   resource consumption data.
   </para>
+
   <para>
-  The accounting has relatively small but non-zero overhead, whose impact
-  depends on the workload.
-  Be aware that turning on accounting for one unit will also implicitly turn it
-  on for all units directly contained in the same slice and for all its parent
-  slices and the units directly contained therein.
-  Therefore the accounting cost is not exclusive to the single unit.
+   The accounting has relatively small but non-zero overhead, whose impact
+   depends on the workload. Activating accounting for one unit will also
+   implicitly activate it for all units in the same slice, and for all its
+   parent slices, and the units contained in them.
   </para>
+
   <para>
-  The accounting can be set on a per-unit basis with directives such as
-  <literal>MemoryAccounting=</literal> or globally for all units in
-  <filename>/etc/systemd/system.conf</filename> with the directive
-  <literal>DefaultMemoryAccounting=</literal>.
-  Refer to <literal>systemd.resource-control (5)</literal> for the exhaustive
-  list of possible directives.
+   The accounting can be set on a per-unit basis with directives such as
+   <literal>MemoryAccounting=</literal> or globally for all units in
+   <filename>/etc/systemd/system.conf</filename> with the directive
+   <literal>DefaultMemoryAccounting=</literal>. Refer to <command>man
+   systemd.resource-control</command> for the exhaustive list of possible
+   directives.
   </para>
  </sect1>
-
  <sect1 xml:id="sec-tuning-cgroups-usage">
   <title>Setting resource limits</title>
+
   <note>
-    <title>Implicit resource consumption</title>
-    <para>
-      Be aware that resource consumption implicitly depends on the environment
-      where your workload executes (for example, size of data structures in libraries/kernel,
-      forking behavior of utilities, computational efficiency).
-      Hence it is recommended to (re)calibrate your limits should the environment change.
-    </para>
+   <title>Implicit resource consumption</title>
+   <para>
+    Be aware that resource consumption implicitly depends on the environment
+    where your workload executes (for example, size of data structures in
+    libraries/kernel, forking behavior of utilities, computational efficiency).
+    Hence it is recommended to (re)calibrate your limits should the environment
+    change.
+   </para>
   </note>
+
   <para>
-   Limitations to <literal>cgroups</literal> can be set with the
-   <command>systemctl set-property</command> command. The syntax is:
+   Limitations to cgroups can be set with the <command>systemctl
+   set-property</command> command. The syntax is:
   </para>
-  <screen>&prompt.root;<command>systemctl set-property [--runtime] <replaceable>NAME</replaceable> <replaceable>PROPERTY1</replaceable>=<replaceable>VALUE</replaceable> [<replaceable>PROPERTY2</replaceable>=<replaceable>VALUE</replaceable>]</command></screen>
+
+<screen>&prompt.root;<command>systemctl set-property [--runtime] <replaceable>NAME</replaceable> <replaceable>PROPERTY1</replaceable>=<replaceable>VALUE</replaceable> [<replaceable>PROPERTY2</replaceable>=<replaceable>VALUE</replaceable>]</command></screen>
+
   <para>
-   Optionally, use the <option>--runtime</option> option. With this
-   option, set limits do not persist after the next reboot.
+   The configured value is applied immediately. Optionally, use the
+   <option>--runtime</option> option, so that the new values do not persist
+   after reboot.
   </para>
+
   <para>
-   Replace <replaceable>NAME</replaceable> with a &systemd; service
-   slice, scope, socket, mount, or swap name. Replace properties with
-   one or more of the following:
+   Replace <replaceable>NAME</replaceable> with a &systemd; service, scope, or
+   slice name.
   </para>
-  <variablelist>
-   <varlistentry>
-    <term><literal>CPUQuota=</literal><replaceable>PERCENTAGE</replaceable></term>
-    <listitem>
-     <para>
-      Assigns a CPU time to processes. The value is a percentage
-      followed by a <literal>%</literal> as suffix. This implies
-      <literal>CPUAccounting=yes</literal>.
-     </para>
-     <para>
-      Example:
-     </para>
-     <screen>&prompt.root;<command>systemctl set-property user.slice CPUQuota=50%</command></screen>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>MemoryLow=</literal><replaceable>BYTES</replaceable></term>
-    <listitem>
-     <para>
-      Unused memory from processes below this limit will not be
-      reclaimed for other use. Use suffixes K, M, G or T for
-      <replaceable>BYTES</replaceable>. This implies
-      <literal>MemoryAccounting=yes</literal>.
-     </para>
-     <para>
-      Example:
-     </para>
-     <screen>&prompt.root;<command>systemctl set-property nginx.service MemoryLow=512M</command></screen>
-     <note>
-      <title>Unified control group hierarchy</title>
-      <para>
-       This setting is available only if the unified control group hierarchy is
-       used, and disables <option>MemoryLimit=</option>. To enable the unified
-       control group hierarchy, append
-       <option>systemd.unified_cgroup_hierarchy=1</option> as a kernel command
-       line parameter to the &grub; boot loader. Refer to <xref
-        linkend="cha-grub2"/> for more details about configuring &grub;.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>MemoryHigh=</literal><replaceable>BYTES</replaceable></term>
-    <listitem>
-     <para>
-      If more memory above this limit is used, memory is aggressively
-      taken away from the processes. Use suffixes K, M, G or T for
-      <replaceable>BYTES</replaceable>. This implies
-      <literal>MemoryAccounting=yes</literal>.
-      For example:
-     </para>
-     <screen>&prompt.root;<command>systemctl set-property nginx.service MemoryHigh=2G</command></screen>
-     <note>
-      <title>Unified control group hierarchy</title>
-      <para>
-       This setting is available only if the unified control group hierarchy is
-       used, and disables <option>MemoryLimit=</option>. To enable the unified
-       control group hierarchy, append
-       <option>systemd.unified_cgroup_hierarchy=1</option> as a kernel command
-       line parameter to the &grub; boot loader.
-       For more details about configuring &grub;, see <xref linkend="cha-grub2"/>.
-      </para>
-     </note>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>MemoryMax=</literal><replaceable>BYTES</replaceable></term>
-    <listitem>
-     <para>
-      Sets a maximum limit for used memory. Processes will be killed if
-      they use more memory than allowed. Use suffixes K, M, G or T for
-      <replaceable>BYTES</replaceable>. This implies
-      <literal>MemoryAccounting=yes</literal>.
-     </para>
-     <para>
-      Example:
-     </para>
-     <screen>&prompt.root;<command>systemctl set-property nginx.service MemoryMax=4G</command></screen>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>DeviceAllow=</literal></term>
-    <listitem>
-     <para>
-      Allows read (<literal>r</literal>), write (<literal>w</literal>)
-      and mknod (<literal>m</literal>) access. The command takes a
-      device node specifier and a list of <literal>r</literal>, <literal>w</literal> or
-      <literal>m</literal>, separated by a white space.
-     </para>
-     <para>
-      Example:
-     </para>
-     <screen>&prompt.root;<command>systemctl set-property system.slice DeviceAllow="/dev/sdb1 r"</command></screen>
-    </listitem>
-   </varlistentry>
-   <varlistentry>
-    <term><literal>DevicePolicy=</literal><option>[auto|closed|strict]</option></term>
-    <listitem>
-     <para>
-      When set to <literal>strict</literal>, only access to devices
-      that are listed in <literal>DeviceAllow</literal> is allowed.
-      <literal>closed</literal> additionally allows access to standard
-      pseudo devices including <filename>/dev/null</filename>,
-      <filename>/dev/zero</filename>, <filename>/dev/full</filename>,
-      <filename>/dev/random</filename>, and
-      <filename>/dev/urandom</filename>.
-      <literal>auto</literal> allows access to all devices if no
-      specific rule is defined in <literal>DeviceAllow</literal>.
-      <literal>auto</literal> is the default setting.
-     </para>
-    </listitem>
-   </varlistentry>
-  </variablelist>
+
   <para>
-   For more details and a complete list of properties, see <command>man
+   For a complete list of properties and more details, see <command>man
    systemd.resource-control</command>.
   </para>
  </sect1>
- 
  <sect1 xml:id="sec-tuning-cgroups-tasksmax">
   <title>Preventing fork bombs with <literal>TasksMax</literal></title>
-   <para>
-    &systemd; 228 shipped with a <literal>DefaultTasksMax</literal>
-    limit of 512. This limited the number of processes any system unit
-    can create at one time to 512. Previous versions had no default
-    limit. The goal was to improve security by preventing runaway
-    processes from creating excessive forks, or spawning enough
-    threads to exhaust system resources.
-   </para> 
-   <para>
-    However, it soon became apparent that there is not a single
-    default that applies to all use cases. 512 is not low enough
-    to prevent a runaway process from crashing a system, especially
-    when other resources such as CPU and RAM are not restricted,
-    and not high enough for processes that create a lot of threads,
-    such as databases. In &systemd; 234, the default was changed to 15%,
-    which is 4915 tasks (15% of the kernel limit of 32768;
-    see <command>cat /proc/sys/kernel/pid_max</command>). This default is
-    compiled, and can be changed in configuration files. The compiled
-    defaults are documented in
-    <filename>/etc/systemd/system.conf</filename>. You can edit this file
-    to override the defaults, though there are other methods we will
-    show in the following sections.
-   </para>
 
-   <sect2 xml:id="sec-tasksmax-defaults">
-    <title>Finding the current default <literal>TasksMax</literal> values</title>
-    <para>
-     &productname; ships with two custom configurations that override the
-     upstream defaults for system units and for user slices, and sets them
-     both to <literal>infinity</literal>.
-     <filename>/usr/lib/systemd/system.conf.d/20-suse-defaults.conf</filename>
-     contains these lines:
-    </para>
+  <para>
+   &systemd; supports configuring task count limits both for each individual
+   leaf unit, or aggregated on slices. Upstream &systemd; ships with defaults
+   that limit the number of tasks in each unit (15% of the kernel global limit,
+   run <command>/usr/sbin/sysctl kernel.pid_max</command> to see the total
+   limit). Each user's slice is limited to 33% of the kernel limit. However,
+   this is different for &slea;.
+  </para>
+
+  <sect2 xml:id="sec-tasksmax-defaults">
+   <title>Finding the current default <literal>TasksMax</literal> values</title>
+   <para>
+    It became apparent, in practice, that there is not a single default that
+    applies to all use cases. &productname; ships with two custom
+    configurations that override the upstream defaults for system units and for
+    user slices, and sets them both to <literal>infinity</literal>.
+    <filename>/usr/lib/systemd/system.conf.d/__25-defaults-SLE.conf </filename>
+    contains these lines:
+   </para>
 <screen>
 [Manager]
 DefaultTasksMax=infinity
 </screen>
-    <para>
-     <filename>/usr/lib/systemd/system/user-.slice.d/20-suse-defaults.conf</filename>
-     contains these lines:
-    </para>
+   <para>
+    <filename>/usr/lib/systemd/system/user-.slice.d/25-defaults-SLE.conf
+    </filename> contains these lines:
+   </para>
 <screen>[Slice]
 TasksMax=infinity
 </screen>
-    <para>
-     <literal>infinity</literal> means having no limit. It is not a
-     requirement to change the default, but setting some limits may help to
-     prevent system crashes from runaway processes.
-    </para>
+   <para>
+    Use <command>systemctl</command> to verify the DefaultTasksMax value:
+   </para>
+<screen>&prompt.user;<command>systemctl show --property DefaultTasksMax</command>
+DefaultTasksMax=infinity</screen>
+   <para>
+    <literal>infinity</literal> means having no limit. It is not a requirement
+    to change the default, but setting some limits may help to prevent system
+    crashes from runaway processes.
+   </para>
   </sect2>
 
   <sect2 xml:id="sec-edit-taskmax-default">
    <title>Overriding the <literal>DefaultTasksMax</literal> value</title>
    <para>
-    Change the global <literal>DefaultTasksMax</literal> value by creating
-    a new override file,
+    Change the global <literal>DefaultTasksMax</literal> value by creating a
+    new override file,
     <filename>/etc/systemd/system.conf.d/90-system-tasksmax.conf</filename>,
     and write the following lines to set a new default limit of 256 tasks per
     system unit:
-  </para>
+   </para>
 <screen>
 [Manager]
 DefaultTasksMax=256
 </screen>
-  <para>
-   Load the new setting, then verify that it changed:
-  </para>
-<screen>&prompt.sudo;systemctl daemon-reload
-&prompt.user;systemctl show --property DefaultTasksMax
+   <para>
+    Load the new setting, then verify that it changed:
+   </para>
+<screen>&prompt.sudo;<command>systemctl daemon-reload</command>
+&prompt.user;<command>systemctl show --property DefaultTasksMax</command>
 DefaultTasksMax=256
 </screen>
-  <para>
-   Adjust this default value to suit your needs. You can set higher
-   limits on individual services as needed. This example is for MariaDB.
-   First check the current active value:
-  </para>
+   <para>
+    Adjust this default value to suit your needs. You can set different limits
+    on individual services as needed. This example is for MariaDB. First check
+    the current active value:
+   </para>
 <screen>
-&prompt.user;systemctl status mariadb.service
+&prompt.user;<command>systemctl status mariadb.service</command>
   ● mariadb.service - MariaDB database server
    Loaded: loaded (/usr/lib/systemd/system/mariadb.service; disabled; vendor preset>
    Active: active (running) since Tue 2020-05-26 14:15:03 PDT; 27min ago
@@ -316,23 +257,17 @@ DefaultTasksMax=256
    CGroup: /system.slice/mariadb.service
            └─11845 /usr/sbin/mysqld --defaults-file=/etc/my.cnf --user=mysql
 </screen>
-  <para>
-   The Tasks line shows that MariaDB currently has 30 tasks running, and has
-   an upper limit of the default 256, which is inadequate for a database.
-   The following example demonstrates how to raise MariaDB's limit to 8192.
-   Create a new override file with <command>systemctl edit</command>, and
-   enter the new value:
+   <para>
+    The Tasks line shows that MariaDB currently has 30 tasks running, and has
+    an upper limit of the default 256, which is inadequate for a database. The
+    following example demonstrates how to raise MariaDB's limit to 8192.
    </para>
-<screen>&prompt.sudo;systemctl edit mariadb.service
-
-[Service]
-TasksMax=8192
-
-&prompt.user;systemctl status mariadb.service 
+<screen>&prompt.sudo;<command>systemctl set-property mariadb.service TasksMax=8192</command>
+&prompt.user;<command>systemctl status mariadb.service</command>
 ● mariadb.service - MariaDB database server
    Loaded: loaded (/usr/lib/systemd/system/mariadb.service; disabled; vendor preset: disab>
   Drop-In: /etc/systemd/system/mariadb.service.d
-           └─override.conf
+           └─50-TasksMax.conf
    Active: active (running) since Tue 2020-06-02 17:57:48 PDT; 7min ago
      Docs: man:mysqld(8)
            https://mariadb.com/kb/en/library/systemd/
@@ -345,8 +280,9 @@ TasksMax=8192
            └─3452 /usr/sbin/mysqld --defaults-file=/etc/my.cnf --user=mysql
 </screen>
    <para>
-    <command>systemctl edit</command> creates an override file,
-    <filename>/etc/systemd/system/mariadb.service.d/override.conf</filename>,
+    <command>systemctl set-property</command> applies the new limit and creates
+    a drop-in file for persistence,
+    <filename>/etc/systemd/system/mariadb.service.d/50-TasksMax.conf</filename>,
     that contains only the changes you want to apply to the existing unit file.
     The value does not have to be 8192, but should be whatever limit is
     appropriate for your workloads.
@@ -357,35 +293,38 @@ TasksMax=8192
    <title>Default <literal>TasksMax</literal> limit on users</title>
    <para>
     The default limit on users should be fairly high, because user sessions
-    need more resources.
-    Set your own default for users by creating a new file, for example
-    <filename>/etc/systemd/system/user-.slice.d/user-taskmask.conf</filename>.
+    need more resources. Set your own default for any user by creating a new
+    file, for example
+    <filename>/etc/systemd/system/user-.slice.d/40-user-taskmask.conf</filename>.
     The following example sets a default of 16284:
    </para>
 <screen>
 [Slice]
 TasksMax=16284
 </screen>
+   <note>
+    <title>Numeric prefixes reference</title>
+    <para>
+     See
+     <link xlink:href="https://documentation.suse.com/sles/15-SP3/html/SLES-all/cha-systemd.html#sec-boot-systemd-custom-drop-in"/>
+     to learn what numeric prefixes are expected for drop-in files.
+    </para>
+   </note>
    <para>
     Then reload systemd to load the new value, and verify the change:
    </para>
-<screen>&prompt.sudo;systemctl daemon-reload
-
-&prompt.user;systemctl show --property TasksMax user-.slice
-TasksMax=16284
-
-&prompt.user;systemctl show --property TasksMax user-1000.slice
+<screen>&prompt.sudo;<command>systemctl daemon-reload</command>
+&prompt.user;<command>systemctl show --property TasksMax user-1000.slice</command>
 TasksMax=16284
 </screen>
    <para>
-    How do you know what values to use? This varies according to your workloads,
-    system resources, and other resource configurations. When your 
-    <literal>TasksMax</literal>
-    value is too low, you will see error messages such as
-    <emphasis>Failed to fork (Resources temporarily unavailable)</emphasis>,
-    <emphasis>Can't create thread to handle new connection</emphasis>, and
-    <emphasis>Error: Function call 'fork' failed with error code 11,
-    'Resource temporarily unavailable'</emphasis>.
+    How do you know what values to use? This varies according to your
+    workloads, system resources, and other resource configurations. When your
+    <literal>TasksMax</literal> value is too low, you will see error messages
+    such as <emphasis>Failed to fork (Resources temporarily
+    unavailable)</emphasis>, <emphasis>Can't create thread to handle new
+    connection</emphasis>, and <emphasis>Error: Function call 'fork' failed
+    with error code 11, 'Resource temporarily unavailable'</emphasis>.
    </para>
    <para>
     For more information on configuring system resources in systemd, see
@@ -394,249 +333,220 @@ TasksMax=16284
   </sect2>
  </sect1>
 
- <sect1>
-  <title>Controlling I/O with proportional weight policy</title>
-  <para>
-      This section introduces using the Linux kernel's block I/O controller to 
-      prioritize I/O operations. The cgroup blkio subsystem controls and monitors 
-      access to I/O on block devices. State objects that contain the subsystem 
-      parameters for a cgroup are represented as pseudo-files within the cgroup 
-      virtual file system, also called a pseudo-file system.
-  </para>
-  <para>      
-      The examples in this section show how writing values to some of these 
-      pseudo-files limits access or bandwidth, and reading values from some of 
-      these pseudo-files provides information on I/O operations. Examples are 
-      provided for both cgroup-v1 and cgroup-v2.
-  </para>
-  <para>
-      You need a test directory containing two files for testing performance and 
-      changed settings. A quick way to create test files fully populated
-      with text is using the <command>yes</command> command. The following 
-      example commands create a test directory, and then populate it with two 
-      537 MB text files:
-      </para> 
-  <screen>&prompt.plain-root;mkdir /io-cgroup
-&prompt.plain-root;cd /io-cgroup
-&prompt.plain-root;yes this is a test file | head -c 537MB > file1.txt
-&prompt.plain-root;yes this is a test file | head -c 537MB > file2.txt
-</screen>
-  <para>
-    To run the examples open three command shells. Two shells are for reader 
-    processes, and one shell is for running the steps that control I/O. In the 
-    examples, each command prompt is labeled to indicate if it represents 
-    one of the reader processes, or I/O.
-  </para>
+<!-- BEGIN NEW VERSION -->
+<sect1 xml:id="sec-control-io-cgroups">
+<title>I/O control with cgroups</title>
+<para>
+This section introduces using the Linux kernel's block I/O controller to
+prioritize or throttle I/O operations. This leverages the means provided by
+systemd to configure cgroups, and discusses probable pitfalls when dealing
+with proportional I/O control.
+</para>
 
-  <sect2>
-   <title>Using cgroup-v1</title>
-   <para>
-    The following proportional weight policy files can be used to grant a reader 
-    process a higher priority for I/O operations than other reader processes
-    accessing the same disk. 
-   </para>
+<sect2 xml:id="sec-cgroups-prerequisites">
+<title>Prerequisites</title>
+<para>
+The following subsections describe steps that you must take in advance when
+you design and configure your system, since those aspects cannot be changed
+during runtime.
+</para>
+
+<sect3 xml:id="sec-cgroups-filesystems">
+<title>File system</title>
+<para>
+You should use a cgroup-writeback-aware file system (otherwise writeback charging is not possible).
+The recommended SLES file systems added support in the following upstream
+releases:
+<!-- [2] is https://www.susecon.com/doc/2015/sessions/TUT20066.pdf, slide 7, maybe there's better SLES docs
+cjs: that slide is old! We must find something newer.
+-->
+</para>
    <itemizedlist mark="bullet" spacing="normal">
-    <listitem>
+	   <listitem>
      <para>
-      <filename>blkio.weight</filename> (only available in kernels up to version 4.20
-      with legacy block layer and when using the CFQ I/O scheduler)
-     </para>
-    </listitem>
-    <listitem>
+      Btrfs (v4.3)
+      </para>
+      </listitem>
+	   <listitem>
      <para>
-      <filename>blkio.bfq.weight</filename> (available in kernels starting with
-      version 5.0 with blk-mq and when using the BFQ I/O scheduler)
-     </para>
-    </listitem>
+      Ext4 (v4.3)
+      </para>
+      </listitem>
+	   <listitem>
+     <para>
+      XFS (v5.3)
+      </para>
+      </listitem>
    </itemizedlist>
-   <para>
-    To test this, run a single reader process (in the examples, reading 
-    from an SSD) without controlling its I/O, using 
-    <filename>file2.txt</filename>:
-   </para>
-<screen> 
-&prompt.io-controller;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.io-controller;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 1.33049 s, 404 MB/s
-</screen>
-   <para>
-    Now run a background process reading from the same disk:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5220
-...
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 2.61592 s, 205 MB/s
-</screen>
-   <para>
-    Each process gets half of the throughput for I/O operations.
-    Next, set up two control groups&mdash;one for each
-    process&mdash;verify that BFQ is used, and set a different weight
-    for reader2:
-   </para>
-<screen>
-&prompt.io-controller;cd /sys/fs/cgroup/blkio/
-&prompt.blkio;mkdir reader1
-&prompt.blkio;mkdir reader2
-&prompt.blkio;echo 5220 > reader1/cgroup.procs
-&prompt.blkio;echo 5251 > reader2/cgroup.procs
-&prompt.blkio;cat /sys/block/sda/queue/scheduler
-mq-deadline kyber [bfq] none
-&prompt.blkio;cat reader1/blkio.bfq.weight
-100
-&prompt.blkio;echo 200 > reader2/blkio.bfq.weight
-&prompt.blkio;cat reader2/blkio.bfq.weight
-200
-</screen>
-   <para>
-    With these settings and reader1 in the background, reader2 should
-    have higher throughput than previously:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5220
-...
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 2.06604 s, 260 MB/s
-</screen>
-   <para>
-    The higher proportional weight resulted in higher throughput for reader2.
-    Now double its weight again:
-   </para>
-<screen>
-&prompt.blkio;cat reader1/blkio.bfq.weight
-100
-&prompt.blkio;echo 400 > reader2/blkio.bfq.weight
-&prompt.blkio;cat reader2/blkio.bfq.weight
-400
-</screen>
-   <para>
-    This results in another increase in throughput for reader2:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5220
-...
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5251
-131072+0 records in
-131072+0 records out
-536870912 bytes (537 MB, 512 MiB) copied, 1.69026 s, 318 MB/s
-</screen>
-  </sect2>
-  <sect2>
-   <title>Using cgroup-v2</title>
-   <para>
-    First set up your test environment as shown at the beginning of
-    this chapter.
-   </para>
-   <para>
-    Then make sure that the Block IO controller is not active,
-    as that is for cgroup-v1. To do this, boot with kernel parameter
-    <option>cgroup_no_v1=blkio</option>. Verify that this parameter
-    was used, and that the IO controller (cgroup-v2) is available:
-   </para>
-<screen>
-&prompt.io-controller;cat /proc/cmdline
-BOOT_IMAGE=... cgroup_no_v1=blkio ...
-&prompt.io-controller;cat /sys/fs/cgroup/unified/cgroup.controllers
-io
-</screen>
- <para>
-   Next, enable the IO controller:
-   </para>
-<screen>
-&prompt.io-controller;cd /sys/fs/cgroup/unified/
-&prompt.unified;echo '+io' > cgroup.subtree_control
-&prompt.unified;cat cgroup.subtree_control
-io
-</screen>
 <para>
-    Now run all the test steps, similarly to the steps for cgroup-v1.
-    Note that some of the directories are different. Run a single reader
-    process (in the examples, reading from an SSD) without controlling its
-    I/O, using file2.txt: 
+As of &productname;&nbsp;15&nbsp;SP3, any of the named file systems can be used.
+</para>
+</sect3>
+
+<sect3 xml:id="sec-cgroups-unified-hierarchy">
+<title>Unified cgroup hierarchy</title>
+<para>
+To properly account writeback I/O, it is necessary to have equal I/O
+and memory controller cgroup hierarchies, and to use the cgroup v2 I/O
+controller. Together, this means that one has to use the
+<emphasis>unified</emphasis> cgroup hierarchy. This has to be requested
+explicitly in SLES by passing a kernel command line option,
+<option>systemd.unified_cgroup_hierarchy=1</option>.
+</para>
+</sect3>
+
+<sect3 xml:id="sec-cgroups-block-io-scheduler">
+<title>Block I/O scheduler</title>
+<para>
+The throttling policy is implemented higher in the stack, therefore it
+does not require any additional adjustments.
+The proportional I/O control policies have two different implementations:
+the BFQ controller, and the cost-based model.
+We describe the BFQ controller here. In order to exert its proportional
+implementation for a particular device, we must make sure that BFQ is the
+chosen scheduler. Check the current scheduler:
 </para>
 <screen>
-&prompt.unified;cd -
-&prompt.io-controller;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.io-controller;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5633
-[...]
-</screen>
-   <para>
-    Run a background process reading from the same disk and note your
-    throughput values:
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-5633
-[...]
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-5703
-[...]
+&prompt.user;<command>cat /sys/class/block/<replaceable>sda</replaceable>/queue/scheduler</command>
+mq-deadline kyber bfq [none]
 </screen>
 <para>
-    Each process gets half of the throughput for I/O operations. Set up two control groups&mdash;one for each process&mdash;verify that BFQ is 
-    the active scheduler, and set a different weight for reader2: 
+Switch the scheduler to BFQ:
 </para>
 <screen>
-&prompt.io-controller;cd -
-&prompt.unified;mkdir reader1
-&prompt.unified;mkdir reader2
-&prompt.unified;echo 5633 > reader1/cgroup.procs
-&prompt.unified;echo 5703 > reader2/cgroup.procs
-&prompt.unified;cat /sys/block/sda/queue/scheduler
-mq-deadline kyber [bfq] none
-&prompt.unified;cat reader1/io.bfq.weight
-default 100
-&prompt.unified;echo 200 > reader2/io.bfq.weight
-&prompt.unified;cat reader2/io.bfq.weight
-default 200
-</screen>
-   <para>
-    Test your throughput with the new settings. reader2 should
-    show an increase in throughput.
-   </para>
-<screen>
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1 of=/dev/null bs=4k
-5633
-[...]
-&prompt.reader2;echo $$; dd if=file2 of=/dev/null bs=4k count=131072
-5703
-[...]
+ &prompt.root;<command>echo bfq > /sys/class/block/<replaceable>sda</replaceable>/queue/scheduler</command>
 </screen>
 <para>
-    Try doubling the weight again for reader2, and testing the new setting:
+You must specify the disk device (not a partition). The
+optimal way to set this attribute is a udev rule specific to the device
+(note that &slsa; ships udev rules that already enable BFQ for rotational
+disk drives).
+</para>
+</sect3>
+
+<sect3 xml:id="sec-cgroups-hierarchy">
+<title>Cgroup hierarchy layout</title>
+<para>
+Normally, all tasks reside in the root cgroup and they compete against
+each other. When the tasks are distributed into the cgroup tree the
+competition occurs between sibling cgroups only.
+This applies to the proportional I/O control; the throttling
+hierarchically aggregates throughput of all descendants (see the following
+diagram).
+</para>
+<!-- this is not code but a picture -->
+<screen>
+r
+`-  a      IOWeight=100
+    `- [c] IOWeight=300
+    `-  d  IOWeight=100
+`- [b]     IOWeight=200
+</screen>
+<para>
+I/O is originating only from cgroups c and b. Even though c has a higher
+weight, it will be treated with lower priority because it is level-competing
+with b.
+</para>
+</sect3>
+</sect2>
+
+<sect2 xml:id="sec-cgroups-configure-control-quantities">
+<title>Configuring control quantities</title>
+<para>
+You can apply the values to (long running) services permanently.
 </para>
 <screen>
-&prompt.reader2;echo 400 > reader1/blkio.bfq.weight
-&prompt.reader2;cat reader2/blkio.bfq.weight
-400
-&prompt.reader1;sync; echo 3 > /proc/sys/vm/drop_caches
-&prompt.reader1;echo $$; dd if=file1.txt of=/dev/null bs=4k
-[...]
-&prompt.reader2;echo $$; dd if=file2.txt of=/dev/null bs=4k count=131072
-[...]
+&prompt.sudo;<command>systemctl set-property <replaceable>fast.service</replaceable> IOWeight=<replaceable>400</replaceable></command>
+&prompt.sudo;<command>systemctl set-property <replaceable>slow.service</replaceable> IOWeight=<replaceable>50</replaceable></command>
+&prompt.sudo;<command>systemctl set-property <replaceable>throttled.service</replaceable> IOReadBandwidthMax="<replaceable>/dev/sda 1M</replaceable>"</command>
 </screen>
-  </sect2>
-  </sect1>
-  
+
+<para>
+Alternatively, you can apply I/O control to individual commands, for
+example:
+</para>
+<screen>
+&prompt.sudo;<command>systemd-run --scope -p IOWeight=<replaceable>400</replaceable> <replaceable>high_prioritized_command</replaceable></command>
+&prompt.sudo;<command>systemd-run --scope -p IOWeight=<replaceable>50</replaceable> <replaceable>low_prioritized_command</replaceable></command>
+&prompt.sudo;<command>systemd-run --scope -p IOReadBandwidthMax="<replaceable>/dev/sda 1M</replaceable>" <replaceable>dd if=/dev/sda of=/dev/null bs=1M count=10</replaceable></command>
+</screen>
+</sect2>
+
+<sect2 xml:id="sec-cgroups-control-behavior">
+<title>I/O control behavior and setting expectations</title>
+<para>
+ The following list items describe I/O control behavior, and what you
+ should expect under various conditions.
+</para>
+<itemizedlist>
+<listitem>
+<para>
+I/O control works best for direct I/O operations (bypassing page cache),
+the situations where the actual I/O is decoupled from the caller (typically
+writeback via page cache) may manifest variously. For example, delayed I/O
+control or even no observed I/O control (consider little bursts or competing
+workloads that happen to never "meet", submitting I/O at the same time, and
+saturating the bandwidth). For these reasons, the resulting ratio of
+I/O throughputs does not strictly follow the ratio of configured weights.
+</para>
+</listitem>
+<listitem>
+<para>
+systemd performs scaling of configured weights (to adjust for narrower BFQ
+weight range), hence the resulting throughput ratios also differ.
+</para>
+</listitem>
+<listitem>
+<para>
+The writeback activity depends on the amount of dirty pages, besides the
+global sysctl knobs (<filename>vm.dirty_background_ratio</filename> and
+<filename>vm.dirty_ratio</filename>)). Memory limits of individual cgroups
+come into play when the dirty limits are distributed among cgroups, and
+this in turn may affect I/O intensity of affected cgroups.
+</para>
+</listitem>
+<listitem>
+<para>
+Not all storages are equal. The I/O control happens at the I/O scheduler
+layer, which has ramifications for setups with devices stacked on these
+that do no actual scheduling. Consider device mapper logical volumes
+spanning multiple physical devices, MD RAID, or even Btrfs RAID.
+I/O control over such setups may be challenging.
+</para>
+</listitem>
+<listitem>
+<para>
+There is no separate setting for proportional I/O control of reads and
+writes.
+</para>
+</listitem>
+<listitem>
+<para>
+Proportional I/O control is only one of the policies that can interact with
+each other (but responsible resource design perhaps avoids that).
+</para>
+</listitem>
+<listitem>
+<para>
+The I/O device bandwidth is not the only shared resource on the I/O path.
+Global file system structures are involved, which is relevant
+when I/O control is meant to guarantee certain bandwidth; it will not, and
+it may even lead to priority inversion (prioritized cgroup waiting for a
+transaction of slower cgroup).
+</para>
+</listitem>
+<listitem>
+<para>
+So far, we have been discussing only explicit I/O of file system data, but
+swap-in and swap-out can also be controlled. Although if such a need
+arises, it usually points out to improperly provisioned memory (or memory limits).
+</para>
+</listitem>
+</itemizedlist>
+</sect2>
+</sect1>
+<!-- END NEW VERSION -->
+
  <sect1>
   <title>More information</title>
 
@@ -644,14 +554,21 @@ default 200
    <listitem>
     <para>
      Kernel documentation (package <systemitem>kernel-source</systemitem>):
-     files in <filename>/usr/src/linux/Documentation/admin-guide/cgroup-v1</filename> and file
+     files in
+     <filename>/usr/src/linux/Documentation/admin-guide/cgroup-v1</filename>
+     and file
      <filename>/usr/src/linux/Documentation/admin-guide/cgroup-v2.rst</filename>.
     </para>
    </listitem>
    <listitem>
     <para>
-     <link xlink:href="https://lwn.net/Articles/604609/"/>&mdash;Brown,
-     Neil: Control Groups Series (2014, 7 parts).
+     <command>man systemd.resource-control</command>
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://lwn.net/Articles/604609/"/>&mdash;Brown, Neil:
+     Control Groups Series (2014, 7 parts).
     </para>
    </listitem>
    <listitem>

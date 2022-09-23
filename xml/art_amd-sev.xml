@@ -2,76 +2,89 @@
 <?xml-stylesheet href="urn:x-suse:xslt:profiling:docbook50-profile.xsl"
  type="text/xml"
  title="Profiling step"?>
-
 <!DOCTYPE article
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
   %entities;
 ]>
-
 <article xml:id="article-amd-sev" xml:lang="en" version="5.0"
   xmlns="http://docbook.org/ns/docbook"
   xmlns:xi="http://www.w3.org/2001/XInclude"
   xmlns:xlink="http://www.w3.org/1999/xlink">
- <title>AMD Secure Encrypted Virtualization (AMD-SEV) Guide</title>
- <info>
-  <productname>&productname;</productname>
-  <productnumber>&productnumber;</productnumber>
-  <date><?dbtimestamp format="B d, Y" ?></date>
+ <title>&sle_amd_sev_guide;</title>
+ <info><productname>&productname;</productname>
+  <productnumber>&productnumber;</productnumber><date>
+  <?dbtimestamp format="B d, Y" ?></date>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
   <abstract>
    <para>
     AMD's Secure Encrypted Virtualization (SEV) allows the memory of virtual
-    machines to be encrypted. This is a new feature for Linux's built-in
-    Kernel-based Virtual Machine (&kvm;) hypervisor. The intention is to
-    increase system security, especially when using persistent memory.
+    machines to be encrypted. SEV with Encrypted State (SEV-ES) goes one step
+    further by encrypting the virtual machine's CPU register content. These
+    technologies increase system security and are ideal for multi-tenant
+    environments such as cloud computing. They enable protection from a variety
+    of cross-VM and hypervisor-based attacks. As an example, a hostile VM that
+    has escaped its hypervisor-enforced confines and is able to read arbitrary
+    memory will be unable to steal sensitive data from an SEV or SEV-ES VM.
    </para>
+
    <para>
-    This document aims to provide a basic understanding of how SEV works and how to
-    enable and configure it. It also mentions some limitations and restrictions that
-    the use of SEV causes as compared to non-encrypted virtualization.
+    This document aims to provide a basic understanding of how SEV and SEV-ES
+    work, and how to enable and configure these features. It also mentions some
+    limitations and restrictions that the use of SEV and SEV-ES causes as
+    compared to non-encrypted virtualization.
    </para>
   </abstract>
  </info>
-
  <sect1 xml:id="sec-amd-sev-intro">
- <title>Introducing SEV</title>
- <para>
-  Encryption of computer data stored on disk is a widely-deployed feature.
-  However, data in RAM is stored in the clear. This can leave that data
-  vulnerable to software or hardware probing by intruders into the host system.
-  New persistent-memory technology makes this problem more acute: An
-  NVDIMM (non-volatile memory module) could be physically removed from a system
-  and the data on it will remain intact, like that on a hard disk or SSD.
-  Without encryption, any stored information - such as sensitive data,
-  passwords, or secret keys - could easily be compromised.
- </para>
- <para>
-  AMD's SEV (Secure Encrypted Virtualization) is a technology to protect Linux
-  KVM virtual machines by transparently encrypting the memory of each VM with a
-  unique key. SEV can also calculate a signature of the memory contents, which
-  can be sent to the VM's owner as an attestation that the memory was encrypted
-  correctly by the firmware. SEV is especially relevant to cloud computing
-  environments, where VMs are hosted on remote servers which are not under the
-  control of the VMs' owners. It can reduce the amount of trust VMs need
-  to place in the hypervisor and administrator of their host system.
- </para>
- <para>
-  In &sle; 12 SP4 and above, and a forthcoming maintenance release of &sle; 15,
-  the kernel, QEMU, and <package>libvirt</package> support the creation and
-  management of VMs using SEV.
- </para>
+  <title>Introducing SEV</title>
+
+  <para>
+   Encryption of computer data stored on disk is a widely-deployed feature.
+   However, data in RAM is stored in the clear. This can leave that data
+   vulnerable to software or hardware probing by intruders on the host system,
+   particularly in cloud computing environments where the physical resources
+   are shared by many tenants. Consider a virtual machine of a hostile tenant
+   escaping its sandbox because of a hypervisor bug and searching memory for
+   sensitive data.
+  </para>
+
+  <para>
+   AMD's SEV (Secure Encrypted Virtualization) is a technology to protect Linux
+   KVM virtual machines by transparently encrypting the memory of each VM with
+   a unique key. SEV can also calculate a signature of the memory contents,
+   which can be sent to the VM's owner as an attestation that the memory was
+   encrypted correctly by the firmware. SEV is especially relevant to cloud
+   computing environments, where VMs are hosted on remote servers which are not
+   under the control of the VMs' owners. SEV can reduce the amount of trust VMs
+   need to place in the hypervisor and administrator of their host system.
+  </para>
+
+  <para>
+   When a virtual machine is processing sensitive data, it can be present in
+   CPU registers as well as memory. If the processing is halted, for example,
+   to service an interrupt or share time with other processes, the virtual
+   machine's CPU register contents are saved to hypervisor memory. This memory
+   is readable by the hypervisor even if SEV is enabled. SEV-ES protects
+   against this scenario by encrypting all CPU register contents when the
+   processing of a virtual machine is halted. SEV-ES builds upon SEV to provide
+   an even smaller attack surface for virtual machines running in a
+   multi-tenant environment.
+  </para>
  </sect1>
-
  <!-- sections: -->
-
  <sect1 xml:id="sec-amd-sev-hostreqs">
   <title>VM host requirements</title>
+
   <para>
-   The VM host hardware must support AMD's SEV technology. To detect if the host
-   hardware supports SEV, check that the <tag class="attribute">sev</tag> attribute is
-   in the capabilities of <package>libvirt</package> and that its value
-   is set appropriately:
+   The VM host hardware must support AMD's SEV technology. To detect if the
+   host hardware supports SEV, check that the <tag class="attribute">sev</tag>
+   attribute is in the capabilities of <package>libvirt</package> and that its
+   value is set appropriately:
   </para>
+
 <screen>&lt;domainCapabilities&gt;
    ...
    &lt;features&gt;
@@ -81,46 +94,59 @@
    &lt;/sev&gt;
    &lt;/features&gt;
 &lt;/domainCapabilities&gt;</screen>
+
   <para>
    Additionally, ensure that the <package>kvm_amd</package> kernel module has
    the <parameter>sev</parameter> parameter enabled:
   </para>
-  <screen>/sys/module/kvm_amd/parameters/sev = 1</screen>
- </sect1>
 
+<screen>/sys/module/kvm_amd/parameters/sev = 1</screen>
+ </sect1>
  <sect1 xml:id="sec-amd-sev-vmreqs">
   <title>VM requirements</title>
+
   <para>
    The VM must be the modern <literal>Q35</literal> machine type and must use
-   UEFI firmware.
+   UEFI firmware. &libvirt; can automatically select an appropriate SEV or
+   SEV-ES enabled UEFI firmware, or one can be specified manually. Currently,
+   the only firmware supported are
+   <filename>/usr/share/qemu/ovmf-x86_64-code.bin</filename> and
+   <filename>/usr/share/qemu/ovmf-x86_64-4m-code.bin</filename>. See
+   <xref linkend="sec-vt-installation-ovmf"/> for more details on using UEFI
+   firmware and the auto-selection feature.
   </para>
+
   <note>
    <title>No IDE support in Q35</title>
    <para>
-    The Q35 machine type does not have an IDE controller and does not support IDE disks.
+    The Q35 machine type does not have an IDE controller and does not support
+    IDE disks.
    </para>
   </note>
+
   <para>
-   All <literal>virtio</literal> devices need to be configured with the
-   <tag class="attribute">iommu='on'</tag> attribute in their
-   <tag class="starttag">driver</tag> configuration. In addition, all memory
-   regions used by the VM must be locked for Direct Memory Access (DMA) and to
-   prevent swapping.
+   All <literal>virtio-net</literal> devices need to be configured with the
+   iPXE option ROM disabled. iPXE is currently not compatible with SEV and
+   SEV-ES. In addition, all memory regions used by the VM must be locked for
+   Direct Memory Access (DMA) and to prevent swapping. This includes memory for
+   the VM and any memory regions allocated by &qemu; to support running the VM,
+   such as UEFI pflash for firmware and variable store, video RAM, etc.
   </para>
  </sect1>
  <sect1 xml:id="sec-amd-sev-config">
   <title>VM configuration</title>
+
   <example xml:id="sec-amd-sev-conffile">
    <title>Sample configuration file</title>
    <para>
     As an example, an SEV-encrypted VM configured with 4 GB of memory would
     contain the following XML configuration:
    </para>
-   <screen>&lt;domain type='kvm'&gt;
+<screen>&lt;domain type='kvm'&gt;
     &lt;memory unit='KiB'&gt;4194304&lt;/memory&gt;
     &lt;currentMemory unit='KiB'&gt;4194304&lt;/currentMemory&gt;
     &lt;memoryBacking&gt;
-    &lt;locked/&gt;
+    &lt;locked/&gt; <co xml:id="sec-amd-sev-ex-memlock"/>
     &lt;/memoryBacking&gt;
     &lt;os&gt;
     &lt;type arch='x86_64' machine='pc-q35-2.11'&gt;hvm&lt;/type&gt;
@@ -132,29 +158,31 @@
     &lt;cbitpos&gt;47&lt;/cbitpos&gt; <co xml:id="sec-amd-sev-ex-cbitpos"/>
     &lt;reducedPhysBits&gt;1&lt;/reducedPhysBits&gt; <co xml:id="sec-amd-sev-ex-reducedphysbits"/>
     &lt;policy&gt;0x0033&lt;/policy&gt; <co xml:id="sec-amd-sev-ex-policy"/>
+    &lt;dhCert&gt;AAAABBBB=CCCCCDDDDD&lt;/dhCert&gt; <co xml:id="sec-amd-sev-ex-dhcert"/>
+    &lt;session&gt;AAAABBBB=EEEEEFFFFF&lt;/session&gt; <co xml:id="sec-amd-sev-ex-session"/>
     &lt;/launchSecurity&gt;
     &lt;devices&gt;
-    &lt;disk type='file' device='disk'&gt;
-    &lt;driver iommu='on' name='qemu' type='raw'/&gt;
-    &lt;target dev='vda' bus='virtio'/&gt;
-    &lt;source file='/vmimages/sev-guest-disk.raw'/&gt;
-    &lt;/disk&gt;
-    &lt;rng model='virtio'&gt;
-    &lt;driver iommu='on'/&gt;
-    ...
-    &lt;/rng&gt;
-    &lt;memballoon model='virtio'&gt;
-    &lt;driver iommu='on' /&gt; <co xml:id="sec-amd-sev-ex-iommu"/>
-    ...
-    &lt;/memballoon&gt;
-    &lt;video&gt;
-    &lt;model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/&gt;
-    &lt;/video&gt;
+    &lt;interface type='bridge'&gt;
+    &lt;source bridge='br0'/&gt;
+    &lt;model type='virtio'/&gt;
+    &lt;rom enabled='no'/&gt; <co xml:id="sec-amd-sev-ex-ipxerom"/>
+    &lt;/interface&gt;
     ...
     &lt;/devices&gt;
     ...
     &lt;/domain&gt;</screen>
    <calloutlist>
+    <callout arearefs="sec-amd-sev-ex-memlock">
+     <para>
+      The <tag class="element">memoryBacking</tag> element, along with its
+      child element <tag class="element">locking</tag>, is used to ease memory
+      limit restrictions libvirt places on the VM's cgroup. Otherwise, VM
+      creation would fail when &qemu; attempts to lock the VM's memory regions
+      along with other regions used to support the VM operation. See
+      <link xlink:href="https://libvirt.org/kbase/launch_security_sev.html#memory"/>
+      for more information on VM memory configuration requirements for SEV VMs.
+     </para>
+    </callout>
     <callout arearefs="sec-amd-sev-ex-launchsecurity">
      <para>
       The <tag class="element">launchSecurity type='sev'</tag> element and its
@@ -165,41 +193,60 @@
      <para>
       When memory encryption is enabled, one of the physical address bits (also
       known as the "C-bit") is used to mark if a memory page is protected. The
-      required <tag class="element">cbitpos</tag> element provides the location of
-      the C-bit in a guest page table entry. For example, the value <literal>47</literal>
-      indicates that bit position 47 in a page table entry will determine whether
-      that page is encrypted or not. The C-bit number is read from the host's CPUID
-      and is thus hardware-dependent. The value of <tag class="element">cbitpos</tag> is
-      hypervisor-dependent, and can be obtained through the <tag class="element">sev</tag>
-      element in the capabilities of the domain.
+      required <tag class="element">cbitpos</tag> element provides the location
+      of the C-bit in a guest page table entry. For example, the value
+      <literal>47</literal> indicates that bit position 47 in a page table
+      entry will determine whether that page is encrypted or not. The C-bit
+      number is read from the host's CPUID and is thus hardware-dependent. The
+      value of <tag class="element">cbitpos</tag> is hypervisor-dependent, and
+      can be obtained through the <tag class="element">sev</tag> element in the
+      capabilities of the domain.
      </para>
     </callout>
     <callout arearefs="sec-amd-sev-ex-reducedphysbits">
      <para>
       When memory encryption is enabled, we lose certain bits of the physical
-      address space. The required <tag class="element">reducedPhysBits</tag> element
-      provides this physical address bit reduction. Similarly to <tag class="element">cbitpos</tag>,
-      the value of <tag class="element">reducedPhysBits</tag> is processor-family-dependent
-      and can be obtained through the <tag class="element">sev</tag> element in the
-      domain capabilities.
+      address space. The required <tag class="element">reducedPhysBits</tag>
+      element provides this physical address bit reduction. Similarly to
+      <tag class="element">cbitpos</tag>, the value of
+      <tag class="element">reducedPhysBits</tag> is processor-family-dependent
+      and can be obtained through the <tag class="element">sev</tag> element in
+      the domain capabilities.
      </para>
     </callout>
     <callout arearefs="sec-amd-sev-ex-policy">
      <para>
       The required <tag class="element">policy</tag> element provides the guest
-      policy which must be maintained by the SEV firmware. This policy is enforced
-      by the firmware, and restricts what configuration and operational commands
-      can be performed on the VM by the hypervisor. The guest policy provided when
-      starting the VM is bound to that VM and cannot be changed throughout its
-      lifetime.
+      policy which must be maintained by the SEV firmware. This policy is
+      enforced by the firmware, and restricts what configuration and
+      operational commands can be performed on the VM by the hypervisor. The
+      guest policy provided when starting the VM is bound to that VM and cannot
+      be changed throughout its lifetime.
      </para>
     </callout>
-    <callout arearefs="sec-amd-sev-ex-iommu">
+    <callout arearefs="sec-amd-sev-ex-dhcert">
+     <para>
+      The optional <tag class="element">dhCert</tag> element provides the guest
+      owner's base64-encoded Diffie-Hellman (DH) key. The key is used to
+      negotiate a master secret key between the SEV firmware and guest owner.
+      This master secret key is then used to establish a trusted channel
+      between the SEV firmware and guest owner.
+     </para>
+    </callout>
+    <callout arearefs="sec-amd-sev-ex-session">
+     <para>
+      The optional <tag class="element">session</tag> element provides the
+      guest owner's base64-encoded session blob, as defined in the SEV API
+      specification. See the LAUNCH_START section of the SEV specification for
+      the session-blob format.
+     </para>
+    </callout>
+    <callout arearefs="sec-amd-sev-ex-ipxerom">
      <para>
       In addition to the <tag class="element">launchSecurity</tag> settings,
-      SEV-encrypted VMs must have the <tag class="attribute">iommu='on'</tag> attribute set
-      in each <literal>virtio</literal> device. This attribute is required
-      to enable DMA APIs for the device within QEMU.
+      SEV-encrypted VMs must have the iPXE option ROM disabled on all
+      virtio-net devices. Currently, iPXE is not compatible with SEV-encrypted
+      VMs.
      </para>
     </callout>
    </calloutlist>
@@ -208,6 +255,7 @@
   <para>
    The guest policy is four unsigned bytes with the following definition:
   </para>
+
   <table xml:id="table-guestpolicy">
    <title>Guest policy definitions</title>
    <tgroup cols="2">
@@ -216,17 +264,23 @@
     <thead>
      <row>
       <entry>
-       <para>Bit(s)</para>
+       <para>
+        Bit(s)
+       </para>
       </entry>
       <entry>
-       <para>Definition</para>
+       <para>
+        Definition
+       </para>
       </entry>
      </row>
     </thead>
     <tbody>
      <row>
       <entry>
-       <para>0</para>
+       <para>
+        0
+       </para>
       </entry>
       <entry>
        <para>
@@ -236,7 +290,9 @@
      </row>
      <row>
       <entry>
-       <para>1</para>
+       <para>
+        1
+       </para>
       </entry>
       <entry>
        <para>
@@ -246,7 +302,9 @@
      </row>
      <row>
       <entry>
-       <para>2</para>
+       <para>
+        2
+       </para>
       </entry>
       <entry>
        <para>
@@ -256,7 +314,9 @@
      </row>
      <row>
       <entry>
-       <para>3</para>
+       <para>
+        3
+       </para>
       </entry>
       <entry>
        <para>
@@ -266,7 +326,9 @@
      </row>
      <row>
       <entry>
-       <para>4</para>
+       <para>
+        4
+       </para>
       </entry>
       <entry>
        <para>
@@ -277,7 +339,9 @@
      </row>
      <row>
       <entry>
-       <para>5</para>
+       <para>
+        5
+       </para>
       </entry>
       <entry>
        <para>
@@ -288,7 +352,9 @@
      </row>
      <row>
       <entry>
-       <para>6-15</para>
+       <para>
+        6-15
+       </para>
       </entry>
       <entry>
        <para>
@@ -298,7 +364,9 @@
      </row>
      <row>
       <entry>
-       <para>16-32 </para>
+       <para>
+        16-32
+       </para>
       </entry>
       <entry>
        <para>
@@ -310,96 +378,187 @@
     </tbody>
    </tgroup>
   </table>
-  <para>
-   The optional <tag class="element">dhCert</tag> element provides the guest
-   owner's base64-encoded Diffie-Hellman (DH) key. The key is used to negotiate
-   a master secret key between the SEV firmware and guest owner. This master
-   secret key is then used to establish a trusted channel between the SEV
-   firmware and guest owner.
-  </para>
-  <para>
-   The optional <tag class="element">session</tag> element provides the guest
-   owner's base64-encoded session blob, as defined in the SEV API specification.
-   See the LAUNCH_START section of the SEV specification for the session-blob
-   format.
-  </para>
-  <para>
-   SEV-encrypted VMs must also have all of their memory regions locked to allow
-   DMA and prevent swapping. Explicit locking of memory must be specified using
-   the <tag class="element">locked</tag> subelement of
-   <tag class="element">memoryBacking</tag>. Explicit memory locking can be
-   avoided by configuring the virtual machine to use <literal>hugepages</literal>.
-   For more information on using hugepages with VMs, see 
-   <citetitle>Virtualization Best Practices</citetitle>,
-   <xref linkend="sec-vt-best-mem-huge-pages"/>.
-  </para>
-  <para>
-   Whilst the overhead incurred is no different to that required for
-   non-SEV VMs, it is much more important to get the hard limit right
-   when pinning memory. If the limit is too low, the VM will be terminated.
-  </para>
  </sect1>
+ <sect1 xml:id="sec-amd-sev-vminst">
+  <title>VM installation</title>
 
+  <para>
+   <command>virt-install</command> supports the installation of SEV and SEV-ES
+   virtual machines. In addition to your standard installation parameters,
+   provide <command>virt-install</command> with options to satisfy the VM
+   requirements and the <literal>--launchSecurity</literal> option.
+  </para>
+
+  <para>
+   The following example starts a network installation of a SLES15 SP4 virtual
+   machine protected with SEV-ES.
+  </para>
+
+<screen>
+   virt-install --name sles15sp4-sev-es --location http://192.168.0.1/install/sles15sp4/x86_64 --disk size=20 --network=bridge=br0,model=virtio,rom.bar=off <co xml:id="sec-amd-sev-ex-rombar"/> --vcpus 4 --memory 4096 --noautoconsole --events on_reboot=destroy --machine q35 --memtune hard_limit=4563402 --launchSecurity sev,policy=0x07 <co xml:id="sec-amd-sev-ex-launchsec"/> --boot firmware=efi <co xml:id="sec-amd-sev-ex-fw"/> --vnc --serial pty
+  </screen>
+
+  <calloutlist>
+   <callout arearefs="sec-amd-sev-ex-rombar">
+    <para>
+     The iPXE option ROM is not compatible with SEV-encrypted VMs and must be
+     disabled on all virtio-net devices. While libvirt supports disabling
+     option ROMs using either the <literal>enabled</literal> or
+     <literal>bar</literal> attributes of the <tag class="element">rom</tag>
+     element, virt-install only supports disabling option ROMs using the
+     <literal>bar</literal> attribute.
+    </para>
+   </callout>
+   <callout arearefs="sec-amd-sev-ex-launchsec">
+    <para>
+     The <literal>launchSecurity</literal> option specifies the type and policy
+     to be enforced by the SEV firmware. The policy setting is described in
+     <xref linkend="table-guestpolicy"/>.
+    </para>
+   </callout>
+   <callout arearefs="sec-amd-sev-ex-fw">
+    <para>
+     The <literal>boot</literal> option allows specifying many boot-related
+     settings, including the firmware used by the virtual machine. Specifying a
+     firmware type <literal>efi</literal> allows libvirt's firmware
+     auto-selection feature to select an appropriate SEV capable firmware for
+     the virtual machine.
+    </para>
+   </callout>
+  </calloutlist>
+ </sect1>
+ <sect1 xml:id="sec-amd-sev-kubevirt">
+  <title>SEV with &kubevirt;</title>
+
+  <para>
+   &kubevirt; supports running SEV guests starting from the version
+   <literal>0.49.0</literal>. The functionality can be activated by enabling
+   the <literal>WorkloadEncryptionSEV</literal> feature gate:
+  </para>
+
+<screen>
+&prompt.user;kubectl edit kubevirt kubevirt -n kubevirt
+[...]
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+      - WorkloadEncryptionSEV
+[...]
+  </screen>
+
+  <para>
+   To run an SEV-encrypted guest, the virtual machine specification must
+   include the entry <literal>sev: {}</literal> under the
+   <literal>launchSecurity</literal> domain element. Additionally, you need to
+   configure the <literal>firmware/bootloader</literal> parameters to use the
+   <literal>efi</literal> option with the <literal>secureBoot</literal> flag
+   set to <literal>disabled</literal>. The corresponding YAML snippet will look
+   similar to the following:
+  </para>
+
+<screen>
+[...]
+spec:
+  domain:
+    firmware:
+      bootloader:
+        efi:
+          secureBoot: false
+    launchSecurity:
+      sev: {}
+[...]
+  </screen>
+ </sect1>
  <sect1 xml:id="sec-amd-sev-limits">
   <title>Current limitations</title>
+
+  <para>
+   SUSE does not recommend using the SEV and SEV-ES features with SUSE Linux
+   products on the first generation AMD EPYC™ 7000 series of processors, code
+   name Naples. It is recommended to use at least the second generation 7002
+   series processors, code name Rome. Additionally, the following limitations
+   are placed on SEV and SEV-ES VMs.
+  </para>
+
   <itemizedlist>
    <listitem>
     <para>
      The guest operating system running inside an SEV-encrypted VM must contain
-     SEV support. Currently, &sls; 12 SP4, &sls; 15, and &sls; 15 SP1 provide this.
+     SEV support. &sls; 12 SP4 and newer, and all &sls; 15 releases support
+     SEV.
     </para>
    </listitem>
    <listitem>
     <para>
-     Any operations that involve saving and restoring the memory and state of an
-     instance are currently not supported. This means that SEV-encrypted VMs
-     cannot be resumed from snapshots, and live migration is not possible.
+     Any operations that involve saving and restoring the memory and state of
+     an instance are currently not supported. This means that SEV-encrypted VMs
+     cannot be resumed from snapshots, saved/restored, or live migrated.
      Encrypted VMs can be shutdown and restarted on another host as normal.
     </para>
    </listitem>
    <listitem>
     <para>
-     SEV-encrypted VMs cannot contain directly-accessible host devices (that is,
-     PCI passthrough).
+     SEV-encrypted VMs cannot contain directly-accessible host devices (that
+     is, PCI passthrough).
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     SEV-encrypted VMs are not compatible with Secure Boot. UEFI firmware
+     containing Secure Boot support will not work with SEV or SEV-ES VMs.
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     SEV-ES VMs cannot be rebooted from within using <command>reboot</command>,
+     <command>shutdown -r now</command>, etc. A reboot must be done by shutting
+     down the VM and starting it again. This limitation does not apply to SEV
+     VMs, only SEV-ES.
     </para>
    </listitem>
   </itemizedlist>
+
   <para>
    These limitations will be removed in the future as the hardware, firmware,
    and various layers of software receive new features.
   </para>
  </sect1>
-
  <sect1 xml:id="sec-amd-sev-moreinfo">
   <title>More information</title>
+
   <itemizedlist>
    <listitem>
     <para>
-     <link xlink:href="https://developer.amd.com/sev"/>
-     &mdash; AMD-SEV landing page
+     <link xlink:href="https://developer.amd.com/sev"/> &mdash; AMD-SEV landing
+     page
     </para>
    </listitem>
    <listitem>
     <para>
-     <link xlink:href="https://developer.amd.com/wp-content/resources/55766.PDF"/>
+     <link xlink:href="https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf"/>
      &mdash; AMD SEV-KM API Specification (PDF)
     </para>
    </listitem>
    <listitem>
     <para>
-     <link xlink:href="https://github.com/AMDESE/AMDSEV/"/>
-     &mdash; AMD SEV GitHub repository containing examples and tools
+     <link xlink:href="https://github.com/AMDESE/AMDSEV/"/> &mdash; AMD SEV
+     GitHub repository containing examples and tools
     </para>
    </listitem>
    <listitem>
     <para>
-     <link xlink:href="https://libvirt.org/formatdomain.html#sev"/>
-     &mdash; libvirt SEV configuration settings
+     <link xlink:href="https://libvirt.org/formatdomain.html#sev"/> &mdash;
+     libvirt SEV configuration settings
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     <link xlink:href="https://libvirt.org/kbase/launch_security_sev.html"/>
+     &mdash; libvirt knowledge base article on AMD SEV
     </para>
    </listitem>
   </itemizedlist>
  </sect1>
-
  <xi:include href="common_gfdl1.2_i.xml"/>
-
 </article>

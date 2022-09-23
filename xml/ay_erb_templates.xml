@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE chapter
 [
-  <!ENTITY % entities SYSTEM "entity-decl.ent">
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
     %entities;
 ]>
-
 <chapter xmlns="http://docbook.org/ns/docbook"
-xmlns:xi="http://www.w3.org/2001/XInclude"
-xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0"
-xml:id="erb-templates">
+         xmlns:xi="http://www.w3.org/2001/XInclude"
+         xmlns:xlink="http://www.w3.org/1999/xlink"
+         version="5.0"
+         xml:id="erb-templates">
 
  <title>ERB templates</title>
  <info>
@@ -17,209 +17,257 @@ xml:id="erb-templates">
    <dm:translation>yes</dm:translation>
   </dm:docmanager>
  </info>
+ <para>
+  ERB templates are for embedding Ruby code within an &ay; profile to modify
+  the profile during the installation. With this approach, you can inspect
+  the system and adjust the profile by setting values, adding or skipping
+  sections, and so on.
+ </para>
+ <para>
+  To activate the ERB processing, the profile must have the extension
+  <filename>.erb</filename> (for example,
+  <filename>autoyast.xml.erb</filename>). Hence, it is not possible to
+  combine rules/classes and ERB templates.
+ </para>
+ <sect1 xml:id="erb">
+  <title>What is ERB?</title>
 
   <para>
-   ERB templates allow embedding some Ruby code within the profile to modify it
-   during the installation. With this approach, you can inspect the system and
-   adjust the profile by setting values, adding or skipping sections, etc.
+   ERB stands for <emphasis>Embedded Ruby</emphasis>. ERB
+   uses the power of the Ruby programming language to generate
+   different kinds of content. With ERB, you can include
+   some Ruby code in your profiles to adapt them at runtime, depending on
+   the installation system.
   </para>
 
   <para>
-   To activate the ERB processing, the profile must have the extension
-   <filename>.erb</filename> (for example, <filename>autoyast.xml.erb</filename>). Hence,
-   it is not possible to combine rules/classes and ERB templates.
+   When using ERB, the Ruby code is enclosed between <literal>&lt;%</literal>
+   and <literal>%&gt;</literal> signs. Use an equals sign,
+   <literal>=</literal>, to include command output in the resulting profile.
   </para>
 
-  <sect1 xml:id="erb">
-   <title>What is <literal>ERB</literal>?</title>
-
-   <para>
-    <literal>ERB</literal> stands for <emphasis>Embedded Ruby</emphasis> and
-    allows using the power of the Ruby programming language to generate
-    different kind of contents. With <literal>ERB</literal>, you can include
-    some Ruby code in your profiles to adapt them at runtime depending on the
-    installation system.
-   </para>
-
-   <para>
-    When using ERB, the Ruby code is enclosed between <literal>&lt;%</literal>
-    and <literal>%&gt;</literal> signs. If you want the output of the command to
-    be included in the resulting profile, you simply need to add an equal
-    sign (<literal>=</literal>).
-   </para>
-
-   <example xml:id="simple-erb">
-    <title>Including a file using ERB</title>
-    <screen>&lt;bootloader&gt;
+  <example xml:id="simple-erb">
+   <title>Including a file using ERB</title>
+<screen>&lt;bootloader&gt;
   &lt;% require "open-uri" %&gt;
   &lt;%= URI.open("http://192.168.1.1/profiles/bootloader-common.xml").read %&gt;
-&lt;/bootloader&gt;</screen>
+&lt;/bootloader&gt; &lt;!-- this line gets replaced with the content of bootloader-common.xml --&gt;
+</screen>
+  </example>
+
+ <para>
+   You can use Ruby facilities to run arbitrary commands. If you want
+   to get the output of a command, then enclose it between backticks.
+   If you want to know whether a command was successful or not, run the
+   command with the <literal>system</literal> function.
+  </para>
+  <example os="sles;osuse">
+   <title>Running commands with Ruby</title>
+<screen>
+&lt;% files = `ls` %&gt; &lt;!-- files contains the output of the command (for instance "file1\nfile2\nfile3") --&gt;
+&lt;% success = system("dmidecode | grep some-model") %&gt; &lt;!-- success contains true or false --&gt;
+</screen>
+  </example>
+
+  <para>
+   Also, you can use more advanced Ruby code structures such as conditions
+   and loops.
+  </para>
+  <example os="sles;osuse">
+   <title>Using Ruby structures</title>
+<screen>
+&lt;% ip_forward = File.read("/proc/sys/net/ipv4/ip_forward").strip %&gt;
+&lt;% if ip_forward == "1" %&gt;
+  &lt;!-- something --&gt;
+&lt;% end %&gt;
+
+&lt;% files = `ls /tmp/config/*.xml` %&gt;
+&lt;% files.split.each do |file| %&gt;
+  &lt;%= file.read %&gt;
+&lt;% end %&gt;
+</screen>
    </example>
 
+  <para>
+   &ay; offers a small set of <emphasis>helper functions</emphasis> to retrieve
+   information from the underlying system, like <literal>disks</literal> or
+   <literal>network_cards</literal>. You can check the list of helpers and
+   their values in the <xref linkend="erb-helpers" /> section.
+  </para>
+ </sect1>
+
+ <sect1 xml:id="erb-helpers">
+  <title>Template helpers</title>
+
+  <para>
+   Template helpers are sets of Ruby methods that can be used in the
+   profiles to retrieve information about the installation system.
+  </para>
+
+  <sect2 xml:id="erb-boot-efi-helper">
+   <title><literal>boot_efi?</literal></title>
    <para>
-     &ay; offers a small set of <emphasis>helper functions</emphasis> to
-     retrieve information from the underlying system, like
-     <literal>disks</literal> or <literal>network_cards</literal>. You can check
-     the list of helpers and their values in the <xref linkend="erb-helpers" />
-     section.
+    <literal>boot_efi?</literal> is a boolean helper that returns
+    whether the system is booted using EFI. In the example below, the
+    profile configures the bootloader according to the current boot mode.
    </para>
-  </sect1>
 
-  <sect1 xml:id="erb-helpers">
-   <title>Template helpers</title>
+  <example os="sles;osuse">
+   <title>Configuring the boot loader</title>
+<screen>
+&lt;% if env.boot_efi? %&gt;
+  &lt;loader_type&gt;grub2-efi&lt;/loader_type&gt;
+&lt;% else %&gt;
+  &lt;loader_type&gt;grub2&lt;/loader_type&gt;
+&lt;% end %&gt;
+</screen>
+   </example>
+  </sect2>
 
+  <sect2 xml:id="erb-disks-helper">
+   <title><literal>disks</literal></title>
    <para>
-    Template helpers are sets of Ruby methods that can be used in the
-    profiles to retrieve information about the installation system.
+    The <literal>disks</literal> helper returns a list of the detected disks.
+    Each element of the list contains some basic information like the device
+    name or the size.
    </para>
-
-   <sect2 xml:id="erb-disks-helper">
-    <title><literal>disks</literal></title>
-
-    <para>
-     The <literal>disks</literal> helper returns a list of the detected disks. 
-     Each element of the list contains some basic information like the device name or
-     the size.
-    </para>
-
-    <informaltable>
-     <tgroup cols="3">
-      <thead>
-       <row>
-        <entry>
-         <para>
-          Key
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Type
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Value
-         </para>
-        </entry>
-       </row>
-      </thead>
-      <tbody>
-       <row>
-        <entry>
-         <para>
-          <literal>:device</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Device kernel name (for example, <literal>sda</literal>).
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:model</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Disk model
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:serial</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Serial number
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:size</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Integer
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Disk size (in bytes)
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:udev_names</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Array&lt;String&gt;
-         </para>
-        </entry>
-        <entry>
-         <para>
-          List of disk udev names. You can use any of them to refer to the device.
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:vendor</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Disk vendor's name
-         </para>
-        </entry>
-       </row>
-      </tbody>
-     </tgroup>
-    </informaltable>
-
-    <para>
-     The profile in the example below installs the system on the largest disk.
-     It sorts the list of existing disks by size and takes the last one. Then it
-     uses the <literal>:device</literal> key as value for the
-     <literal>device</literal> element.
-    </para>
-
-    <example>
-     <title>Using the largest disk</title>
-      <screen>&lt;partitioning t="list"&gt;
+   <informaltable>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         Key
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Type
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Value
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>:device</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Device kernel name (for example, <literal>sda</literal>).
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:model</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Disk model
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:serial</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Serial number
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:size</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Integer
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Disk size (in bytes)
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:udev_names</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Array&lt;String&gt;
+        </para>
+       </entry>
+       <entry>
+        <para>
+         List of disk udev names. You can use any of them to refer to the
+         device.
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:vendor</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Disk vendor's name
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+   <para>
+    The profile in the example below installs the system on the largest disk.
+    It sorts the list of existing disks by size and takes the last one. Then it
+    uses the <literal>:device</literal> key as value for the
+    <literal>device</literal> element.
+   </para>
+   <example>
+    <title>Using the largest disk</title>
+<screen>&lt;partitioning t="list"&gt;
   &lt;drive&gt;
     &lt;% disk = disks.sort_by { |d| d[:size] }.last %&gt; &lt;!-- find the largest disk --&gt;
     &lt;device&gt;&lt;%= disk[:device] %&gt;&lt;/device&gt; &lt;!-- print the disk device name --&gt;
@@ -228,139 +276,134 @@ xml:id="erb-templates">
   &lt;/drive&gt;
 &lt;/partitioning&gt;
      </screen>
-    </example>
+   </example>
+  </sect2>
 
-   </sect2>
-
-   <sect2 xml:id="erb-network-cards-helper">
-    <title><literal>network_cards</literal></title>
-
-    <para>
-     The <literal>network_cards</literal> helper returns a list of network
-     cards, including their names, status information (for example, if they are
-     connected or not).
-    </para>
-
-    <informaltable>
-     <tgroup cols="3">
-      <thead>
-       <row>
-        <entry>
-         <para>
-          Key
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Type
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Value
-         </para>
-        </entry>
-       </row>
-      </thead>
-      <tbody>
-       <row>
-        <entry>
-         <para>
-          <literal>:device</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Device name (for example, <literal>eth0</literal> or
-          <literal>enp3s0</literal>)
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:mac</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          MAC address
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:active</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Boolean
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Whether the device is active or not
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:link</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Boolean
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Whether the device is connected or not
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:vendor</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Disk vendor's name
-         </para>
-        </entry>
-       </row>
-      </tbody>
-     </tgroup>
-    </informaltable>
-
-    <para>
-     The following example finds the first network card that is connected to the
-     network and configures it to use DHCP.
-    </para>
-
+  <sect2 xml:id="erb-network-cards-helper">
+   <title><literal>network_cards</literal></title>
+   <para>
+    The <literal>network_cards</literal> helper returns a list of network
+    cards, including their names, status information (for example, if they are
+    connected or not).
+   </para>
+   <informaltable>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         Key
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Type
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Value
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>:device</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Device name (for example, <literal>eth0</literal> or
+         <literal>enp3s0</literal>)
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:mac</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         MAC address
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:active</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Boolean
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Whether the device is active or not
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:link</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Boolean
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Whether the device is connected or not
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:vendor</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Disk vendor's name
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+   <para>
+    The following example finds the first network card that is connected to the
+    network and configures it to use DHCP.
+   </para>
    <example>
     <title>Configure the connected network cards</title>
-     <screen>&lt;interfaces t="list"&gt;
+<screen>&lt;interfaces t="list"&gt;
   &lt;% with_link = netword_cards.sort_by { |n| n[:name] }.find { |n| n[:link] } %&gt;
   &lt;% if with_link %&gt;
     &lt;interface&gt;
@@ -372,111 +415,302 @@ xml:id="erb-templates">
 &lt;/interfaces&gt;
     </screen>
    </example>
-   </sect2>
+  </sect2>
 
-   <sect2 xml:id="erb-os-release-helper">
-    <title><literal>os_release</literal></title>
-
-    <para>
-     The <literal>os_release</literal> helper returns the operating system information,
-     which is included in the <filename>/etc/os-release</filename> file.
-    </para>
-
-    <informaltable>
-     <tgroup cols="3">
-      <thead>
-       <row>
-        <entry>
-         <para>
-          Key
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Type
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Value
-         </para>
-        </entry>
-       </row>
-      </thead>
-      <tbody>
-       <row>
-        <entry>
-         <para>
-          <literal>:id</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Distribution ID (for example, <literal>sles</literal>,
-          <literal>opensuse-tumbleweed</literal>)
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:name</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Distribution name (for example, <literal>SLES</literal> or
-          <literal>openSUSE Tumbleweed</literal>)
-         </para>
-        </entry>
-       </row>
-       <row>
-        <entry>
-         <para>
-          <literal>:version</literal>
-         </para>
-        </entry>
-        <entry>
-         <para>
-          String
-         </para>
-        </entry>
-        <entry>
-         <para>
-          Distribution version (for example, <literal>15.2</literal>)
-         </para>
-        </entry>
-       </row>
-      </tbody>
-     </tgroup>
-    </informaltable>
-
-    <para>
-     You might use this information to decide which product to install, using
-     pretty much the same profile for all of them (SLE or openSUSE
-     distributions).
-    </para>
-
-    <example>
-     <title>Reusing the same profile for different distributions</title>
-     <screen>&lt;products t="list"&gt;
+  <sect2 xml:id="erb-os-release-helper">
+   <title><literal>os_release</literal></title>
+   <para>
+    The <literal>os_release</literal> helper returns the operating system
+    information, which is included in the <filename>/etc/os-release</filename>
+    file.
+   </para>
+   <informaltable>
+    <tgroup cols="3">
+     <thead>
+      <row>
+       <entry>
+        <para>
+         Key
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Type
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Value
+        </para>
+       </entry>
+      </row>
+     </thead>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>:id</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Distribution ID (<phrase os="sles;osuse">for example,
+         <literal>sles</literal>,
+         <literal>opensuse-tumbleweed</literal></phrase><phrase os="slemicro"><literal>suse-microos</literal></phrase>)
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:name</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Distribution name (<phrase os="sles;osuse">for example,
+         <literal>SLES</literal> or <literal>openSUSE
+         Tumbleweed</literal></phrase><phrase os="slemicro"><literal>SLE
+         Micro</literal></phrase>)
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>:version</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         String
+        </para>
+       </entry>
+       <entry>
+        <para>
+         Distribution version (<phrase os="sles;osuse">for example,
+         <literal>15.2</literal></phrase><phrase os="slemicro"><literal>5.1</literal></phrase>)
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+   <para os="sles;osuse">
+    You might use this information to decide which product to install, using
+    pretty much the same profile for all of them (SLE or openSUSE
+    distributions).
+   </para>
+   <example os="sles;osuse">
+    <title>Reusing the same profile for different distributions</title>
+<screen>&lt;products t="list"&gt;
   &lt;% if os_release[:id] == 'sle' %&gt;
   &lt;product&gt;SLES&lt;/product&gt;
   &lt;% else %&gt;
   &lt;product&gt;openSUSE&lt;/product&gt;
-  &lt;% end %&lt;
+  &lt;% end %&gt;
 &lt;/products&gt;</screen>
-        </example>
-    </sect2>
-   </sect1>
- </chapter>
+   </example>
+  </sect2>
+
+  <sect2 xml:id="erb-hardware-helper">
+   <title><literal>hardware</literal></title>
+   <para>
+    The <literal>hardware</literal> helper provides additional hardware information.
+    It returns all the information from the <literal>hwinfo</literal> command. You can
+    use this helper as a fallback for those cases in which the information available
+    through the described helpers is not enough. In the next example, the
+    <literal>hardware</literal> helper is used to filter USB devices. Check
+    <xref linkend="erb-running-helpers"/> to learn how to inspect all the information
+    provided by the <literal>hardware</literal> helper.
+   </para>
+
+  <example os="sles;osuse">
+   <title>Filtering USB devices</title>
+<screen>
+&lt;% usb_disks = hardware["disk"].select { |d| d["driver"] != "usb-storage" } %&gt;
+</screen>
+   </example>
+  </sect2>
+ </sect1>
+
+ <sect1 xml:id="erb-running-helpers">
+  <title>Running ERB helpers</title>
+
+  <para>
+   You can use the Ruby console to run &ay; ERB
+   helpers and find out what they offer. All ERB helpers are
+   accessed through an instance of the
+   <literal>Y2Autoinstallation::Y2ERB::TemplateEnvironment</literal> class. Start the
+   Ruby interactive interpreter by running, as root:
+   <literal>irb -ryast -rautoinstall/y2erb</literal>.
+  </para>
+
+  <example os="sles;osuse">
+   <title>Running helpers</title>
+<screen>
+irb &gt; env = Y2Autoinstallation::Y2ERB::TemplateEnvironment.new  # the env variable gives access to the helpers
+
+irb &gt; env.disks
+=&gt;
+[{:vendor=&gt;"WDC", :device=&gt;"sda", ...},
+ {:vendor=&gt;"TOSHIBA", :device=&gt;"sdb", ...},
+...]
+
+irb &gt; env.hardware.keys
+=&gt;
+["architecture",
+ "bios",
+ "bios_video",
+ ...]
+
+irb &gt; env.hardware["architecture"]
+=&gt;
+"x86_64"
+</screen>
+   </example>
+ </sect1>
+
+ <sect1 xml:id="erb-rendering-profile">
+  <title>Rendering ERB profiles</title>
+
+  <para>
+   The &ay; command line provides a <literal>check-profile</literal> command that can be used
+   to generate a profile from an ERB file. This command asks &ay; to parse, run the ERB code, and
+   generate the resulting profile. You can inspect the rendered profile to check that everything
+   worked as expected. See the command help for all the options it supports:
+   <literal>autoyast check-profile --help</literal>.
+   In the following example, <literal>check-profile</literal> asks &ay; to download and parse
+   the profile, interpret the ERB code and run the pre-scripts. The result
+   will be dumped to the <literal>result.xml</literal> file.
+  </para>
+
+  <example os="sles;osuse">
+   <title>Rendering profile</title>
+<screen>
+ &prompt.sudo;yast2 autoyast check-profile filename=<replaceable>http://192.168.1.100</replaceable>/autoinst.erb output=result.xml run-scripts=true run-erb=true
+</screen>
+  </example>
+  <warning>
+   <title><literal>check-profile</literal> permissions</title>
+   <para>
+    In most cases, <literal>check-profile</literal> requires root permissions,
+    so be careful when running pre-installation scripts and ERB profiles as root.
+    Use only profiles that you trust.
+   </para>
+  </warning>
+ </sect1>
+
+ <sect1 xml:id="erb-debugging-erb">
+  <title>Debugging ERB profiles</title>
+
+  <para>
+   For those cases in which you wantto stop the ERB evaluation
+   and check what is happening, &yast; offers integration with the
+   <literal>byebug</literal>
+   debugger. Install the <literal>rubygem(byebug)</literal> package and set
+   the <literal>Y2DEBUGGER</literal> environment variable to 1.
+  </para>
+
+  <example os="sles;osuse">
+   <title>Preparing the debug environment</title>
+<screen>
+&prompt.sudo;zypper --non-interactive in "rubygem(byebug)"
+&prompt.sudo;Y2DEBUGGER=1 yast2 autoyast check-profile ...
+</screen>
+  </example>
+
+  <para>
+   Adding breakpoints is as easy as adding &lt;% byebug %&gt; where you want to stop.
+   For more information about <literal>byebug</literal>, see
+   <link xlink:href="https://github.com/deivid-rodriguez/byebug"/>.
+  </para>
+
+  <example os="sles;osuse">
+   <title>Adding a breakpoint</title>
+<screen>
+&lt;% byebug %&gt;
+&lt;% if system("dmidecode | grep some-model") %&gt;
+  &lt;!-- do something --&gt;
+%&lt;% end %&gt;
+</screen>
+  </example>
+ </sect1>
+
+ <sect1 xml:id="erb-comparison">
+  <title>ERB compared to rules and classes</title>
+
+  <para>
+   Although both ERB and rules/classes enable generating profiles
+   dynamically, in general ERB profiles are easier to read and
+   understand. One important difference is that rules and classes can
+   merge profiles,
+   and ERB cannot. See more about merging profiles in
+   <xref linkend="rulesandclass" />. On the other hand, ERB brings all
+   the power of a high-level language, Ruby. Let's see an example
+   using both. In the following example, we want to place <literal>/home</literal>
+   directory in <literal>/dev/sdb</literal> if it exists.
+  </para>
+
+  <example os="sles;osuse">
+   <title>Rules and classes</title>
+<screen>
+&lt;rule&gt;
+  &lt;custom1&gt;
+    &lt;script&gt;
+if blkid | grep /dev/sdb &gt; /dev/null; then
+echo -n "yes"
+else
+echo -n "no"
+fi;
+    &lt;/script&gt;
+    &lt;match&gt;yes&lt;/match&gt;
+    &lt;match_type&gt;exact&lt;/match_type&gt;
+  &lt;/custom1&gt;
+  &lt;result&gt;
+    &lt;profile&gt;classes/sdb_home.xml&lt;/profile&gt;
+    &lt;dont_merge config:type="list"&gt;
+      &lt;element&gt;partition&lt;/element&gt;
+    &lt;/dont_merge&gt;
+  &lt;/result&gt;
+&lt;/rule&gt;
+</screen>
+  </example>
+
+  <example os="sles;osuse">
+   <title>ERB</title>
+<screen>
+&lt;% home_in_sdb = disks.map { |d| d[:device] }.include?("sdb") %&gt;
+
+&lt;partitioning config:type="list"&gt;
+  &lt;drive&gt;
+    ...
+  &lt;/drive&gt;
+  &lt;% if home_in_sdb %&gt;
+  &lt;drive&gt;
+    &lt;device&gt;/dev/sdb&lt;/device&gt;
+    &lt;disklabel&gt;none&lt;/disklabel&gt;
+    &lt;partitions t="list"&gt;
+      &lt;partition&gt;
+        &lt;format t="boolean"&gt;true&lt;/format&gt;
+        &lt;filesystem t="symbol"&gt;xfs&lt;/filesystem&gt;
+        &lt;mount&gt;/home&lt;/mount&gt;
+      &lt;/partition&gt;
+    &lt;/partitions&gt;
+  &lt;/drive&gt;
+  &lt;% end %&gt;
+&lt;/partitioning&gt;
+</screen>
+  </example>
+ </sect1>
+</chapter>
