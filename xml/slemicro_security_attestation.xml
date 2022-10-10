@@ -18,10 +18,10 @@
   With the growing demand on securing devices against unauthorized changes,
   usage of the security mechanism called <emphasis>remote attestation
   (RA)</emphasis> has been experiencing significant growth. Using RA a host
-  (client) can authenticate it's hardware and software configuration on a
-  remote host (server). <emphasis>Remote attestation</emphasis> is usually
-  combined with public-key encryption, thus the sent information can only be
-  read by the programs that requested the attestation.
+  (client) can authenticate its boot chain status and running software on a
+  remote host (verifier). <emphasis>Remote attestation</emphasis> is usually
+  combined with public-key encryption (by using TPM2), thus the sent information can only be
+  read by the services that requested the attestation, and the validity of the data can be verified.
  </para>
  <para>
   Throughout this document, the following terms are used:
@@ -69,9 +69,7 @@
    <term>Measured boot</term>
    <listitem>
     <para>
-     in this method each software in the booting sequence is checked by the
-     layer below. A hash based on the disk or memory content is calculated for
-     each layer and the hash is compared to a value in PCR.
+     in this method each component in the booting sequence calculates a hash of the next one before delegating execution of the next component. The hash extends one or several PCR registergs of the TPM. An event is created with information where the measurement took place and what has been measured. Such events are collected in an event log and along with the extended PCR values, the events can be compared with the expected values representing a healthy system. 
     </para>
    </listitem>
   </varlistentry>
@@ -80,7 +78,7 @@
    <listitem>
     <para>
      is a memory location in TPM that, for example, stores hashes of booting
-     layers. PCR can be signed to return a secure report called attestation.
+     layers. PCR can be updated only by using the non-reversible operation&mdash;<literal>extend</literal>. A signed list of current PCR values can be obtained by the <command>quote</command> command on TPM, and this quote can be verified by a third party during the attestation process.
     </para>
    </listitem>
   </varlistentry>
@@ -97,34 +95,32 @@
    <term>Trusted Platform Module (TPM)</term>
    <listitem>
     <para>
-     is a self-contained security processor that can be attached to a system
-     bus as a simple peripheral. TPM provides PCR for storing booting layers
-     hashes. A typical TPM can store 24 PCRs, and PCRs can utilize different
-     hash functions at the same time, for example, you can use SHA1 and SHA512
-     simultaneously.
+     is a self-contained security cryptographic processor present in the system as a hardware or implemented in the firmware that serves as a root of trust. TPM provides PCR for storing booting layers
+     hashes. A typical TPM provides several functions, like a randon number generator, counters or a local clock, it also stores 24 PCRs, grouped by banks per each supported crypthographic hash function (SHA1, SHA256, SHA384 or SHA512).
     </para>
    </listitem>
   </varlistentry>
  </variablelist>
  <para>
-  By default, TPM usage is disabled, therefore, the remote attestation does not
+  Usually by default, TPM usage is disabled, therefore, the measured boot does not
   take place. To enable the remote attestation, enable TPM in the EFI/BIOS
   menu.
  </para>
  <section xml:id="sec-keylime-about">
   <title>About <emphasis>Keylime</emphasis></title>
   <para>
-   <emphasis>Keylime</emphasis> is a TPM-based remote attestation solution that
-   enables you to monitor remote nodes using a hardware based cryptographic core
-   root of trust for measurement. <emphasis>Keylime</emphasis> also provides a
-   framework for remote attestation of any PCR. Using
-   <emphasis>Keylime</emphasis> you can create your own set of actions
-   triggered when a machine fails the attested measurements.
+   <emphasis>Keylime</emphasis> is a remote attestation solution that
+   enables you to monitor health of remote nodes using a TPM as a 
+   root of trust for measurement. With <emphasis>Keylime</emphasis> you can you can perform several tasks like validation of the PCRs extended during the measured boot, analysis and assertions of the event log, asserting the value of any PCR in the remote system, and also monitoring the validity of open or executed files.
+</para>
+
+   <para> <emphasis>Keylime</emphasis> also provides a
+   framework for delivering encrypted data to verified nodes, the data are socalled payload. The framework can also execure custom scripts that are triggered when a machine fails the attested measurements. 
   </para>
   <para>
-   <emphasis>Keylime</emphasis> consists of an agent, a verifier, registrar and
-   a command-line tool (tenant). Agents are those systems that needs to be
-   attested, verifier and registrar are on remote systems and perform
+   <emphasis>Keylime</emphasis> consists of an agent, a verifier, a registrar and
+   a command-line tool (tenant). Agents are on those systems that needs to be
+   attested, verifier and registrar are on remote systems that perform
    registration and attestation of agents. Keep in mind that only the agent
    role is available on &slema;. For details about each component, refer to the
    following sections.
@@ -133,12 +129,12 @@
    <title><emphasis>Keylime</emphasis> agent</title>
    <para>
     The agent is a service that runs on the system that needs to be attested.
-    The agent communicates with the TPM using its keys and certificates.
+    The agent sends the event log, IMA hashes and information about the measured boot to the verifier, using local TPM as a certifier of the data validity.
    </para>
    <para>
     When a new agent is started, the agent needs to register itself in
-    registrar. To do so, the agent sends its attestation key, endorsement key
-    and a endorsement to the registrar. Once the agent has been registered, it
+    registrar first. To do so, the agent needs a TLS certificate to establish the connection. The TLS certificate is generated by the registrar, but it needs to be installe manually to the agent. After the registration, the agent sends its attestation key, public part of endorsement key
+    to the registrar. Registrat responds to the agent with a challenge in a process called credential activation, which will validate the TPM of the agent. Once the agent has been registered, it
     is ready to be enrolled for attestation.
    </para>
   </section>
@@ -146,7 +142,7 @@
    <title><emphasis>Keylime</emphasis> registrar</title>
    <para>
     Registar is used to register agents that should be attested. Registar
-    collects the agent's attestation key, endorsement key and endorsement key
+    collects the agent's attestation key, the public part of the endorsement key and endorsement key
     certification, and verifies that the agent attestation key belongs to the
     endorsement key.
    </para>
@@ -169,8 +165,14 @@
   <procedure>
    <step>
     <para>
-     Check the content of the <filename>/etc/keylime.conf</filename> file:
+     Check the content of configuration files in <filename>/usr/etc/keylime/*.conf</filename>. The defaults are usually sufficient without any changes, but if you need to adjust the configuration, add the changes to either <filename>/etc/keylime/verifier.conf.d/</filename> or <filename>/etc/keylime/registrar.conf.d/</filename>. Set the ownership to <literal>keylime:tss</literal> and change the permissions as follows (for the verifier node):
     </para>
+
+    <screen>&prompt.root;chown -R keylime:tss /etc/keylime/verifier.conf.d/
+
+&prompt.root;chmod -R 600 /etc/keylime/verifier.conf.d/
+    </screen>
+   <!--
     <itemizedlist>
      <listitem>
       <para>
@@ -194,6 +196,8 @@
       </para>
      </listitem>
     </itemizedlist>
+
+-->
    </step>
    <step>
     <para>
@@ -257,8 +261,8 @@
  [agent]
  
  uuid = "d111ec46-34d8-41af-ad56-d560bc97b2e8"
- registrar_ip = "<replaceable>REMOTE_IP</replaceable>>"
- revocation_notification_ip = "<replaceable>REMOTE_IP</replaceable>"
+ registrar_ip = "<replaceable>&lt;REMOTE_IP&gt;</replaceable>"
+ revocation_notification_ip = "<replaceable>&lt;REMOTE_IP&gt;</replaceable>"
  EOF</screen>
       <para>
        where:
@@ -272,13 +276,13 @@
        </listitem>
        <listitem>
         <para>
-         <replaceable>REMOTE_IP</replaceable> is an IP address of the
+         <replaceable>&lt;REMOTE_IP&gt;</replaceable> is an IP address of the
          registrar.
         </para>
        </listitem>
        <listitem>
         <para>
-         <replaceable>REMOTE_IP</replaceable> is an IP address of the verifier.
+         <replaceable>&lt;REMOTE_IP&gt;</replaceable> is an IP address of the verifier.
         </para>
        </listitem>
       </itemizedlist>
@@ -376,11 +380,14 @@
     </para>
    </listitem>
   </itemizedlist>
+  <!--
   <para>
    Alternatively, to register the agent, add the agent's UUID into the
    verifier's <filename>/etc/keylime.conf</filename> file as follows:
   </para>
 <screen>agent_uuid = d432fbb3-d2f1-4a97-9ef7-75bd81c00000</screen>
+
+-->
   <para>
    You can list registered agents by using the <command>reglist</command>
    command as follows on the verifier host:
@@ -401,9 +408,8 @@
  <section xml:id="keylime-payload">
   <title>Secure payloads</title>
   <para>
-   Secure payload enables you to deliver encrypted data to agents. Typically
-   these payloads are used to provide keys, passwords, certificates for root of
-   trust and so on that are further used by the agent.
+   Secure payload enables you to deliver encrypted data to healthy agents. Typically
+   these payloads are used to provide keys, passwords, certificates, coniguration or scripts that are further used by the agent.
   </para>
   <para>
    The secure payload is delivered to the agent in a <filename>zip</filename>
@@ -432,16 +438,16 @@
  <section xml:id="enable-ima-tracking">
   <title>Enabling IMA tracking</title>
   <para>
-   Using IMA you can calculate a hash of a file before the file is executed.
-   The hash is compared to the one stored in PCR in TPM, if the hash is the
-   same, an access to the file is authorized. For a high level overview of
-   IMA/EMV, refer to
-   <link xlink:href="https://en.opensuse.org/SDB:Ima_evm#Introduction">IMA/EMV
+    When using IMA, the kernel calculates a hash of accessed files. The hash is then used to extend the PCR 10 in the TPM and also logged in a list of accessed files. The verifier can request a signed quote to the agent for PCR 1o to get the logs of all accessed files including the file hashes. Verifiers then compare the accessed files with a local allow list of proved files. If any of the hashes is not recognized, the system is considered unsafe and a revocation ecent is triggered.
+  </para>
+  <para>
+   For a high level overview of
+   IMA/EVM, refer to
+   <link xlink:href="https://en.opensuse.org/SDB:Ima_evm#Introduction">IMA/EVM
    introduction</link>.
   </para>
   <para>
-   With <emphasis>Keylime</emphasis>, you can perform the remote attestation of
-   the IMA hashes using the security provided by TPM. To enable the process,
+   Before <emphasis>Keylime</emphasis> can collect information, IMA/EVM needs to be enabled. To enable the process,
    boot a kernel of the agent with the parameters:
    <literal>ima_appraise=log</literal> and <literal>ima_policy=tcb</literal>.
    To use the boot parameters on boot, proceed as follows:
@@ -481,7 +487,7 @@
   </para>
 <screen>&prompt.root;keylime_tenant --allowlist
     -v 127.0.0.1 \
--u <replaceable>UUID</replaceable> 
+    -u <replaceable>UUID</replaceable> 
   </screen>
  </section>
 </chapter>
