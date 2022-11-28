@@ -4,80 +4,487 @@
   <!ENTITY % entities SYSTEM "generic-entities.ent">
     %entities;
 ]>
-
 <chapter xmlns="http://docbook.org/ns/docbook"
          xmlns:xi="http://www.w3.org/2001/XInclude"
          xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0"
          xml:id="cha-libvirt-overview">
- <title>Starting and stopping &libvirtd;</title>
- <info>
-  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
-   <dm:bugtracker>
-   </dm:bugtracker>
-   <dm:translation>yes</dm:translation>
-  </dm:docmanager>
- </info>
-
- <para>
-  The communication between the virtualization solutions (&kvm;, &xen;)
-  and the libvirt API is managed by the &libvirtd; daemon. It needs to run
-  on the &vmhost;. libvirt client applications such as virt-manager, possibly
-  running on a remote machine, communicate with &libvirtd; running on the
-  &vmhost;, which services the request using native hypervisor APIs. Use the
-  following commands to start and stop &libvirtd; or check its status:
- </para>
- <screen>&prompt.sudo;systemctl start libvirtd
-
-&prompt.sudo;systemctl status libvirtd
-libvirtd.service - Virtualization daemon
-Loaded: loaded (/usr/lib/systemd/system/libvirtd.service; enabled)
-Active: active (running) since Mon 2014-05-12 08:49:40 EDT; 2s ago
-[...]
-
-&prompt.sudo;systemctl stop libvirtd
-
-&prompt.sudo;systemctl status libvirtd
-[...]
-Active: inactive (dead) since Mon 2014-05-12 08:51:11 EDT; 4s ago
-[...]</screen>
- <para>
-  To automatically start &libvirtd; at boot time, either activate it using the
-  &yast; <guimenu>&ycc_runlevel;</guimenu> module or by entering the following
-  command:
- </para>
- <screen>&prompt.sudo;systemctl enable libvirtd</screen>
-
- <important>
-  <title>Conflicting services: <systemitem class="daemon">libvirtd</systemitem>
-  and <systemitem class="daemon">xendomains</systemitem></title>
+  <title>&libvirt; daemons</title>
+  <info>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker></dm:bugtracker>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
   <para>
-   If <systemitem class="daemon">libvirtd</systemitem> fails to start,
-   check if the service <systemitem class="daemon">xendomains</systemitem> is
-   loaded:
+    A &libvirt; deployment for accessing &kvm; or &xen; requires one or more
+    daemons to be installed and active on the host. &libvirt; provides two
+    daemon deployment options: monolithic or modular daemons. &libvirt; has
+    always provided the single monolithic daemon &libvirtd;. It includes the
+    primary hypervisor drivers and all supporting secondary drivers needed for
+    storage, for example, networking, node device and management. The
+    monolithic &libvirtd; also provides secure remote access for external
+    clients. With modular daemons, each driver runs in its own daemon, allowing
+    users to customize their &libvirt; deployment. By default, the monolithic
+    daemon is enabled, but a deployment can be switched to modular daemons by
+    managing the corresponding &systemd; service files.
   </para>
-  <screen>&prompt.user;systemctl is-active xendomains
-active</screen>
   <para>
-   If the command returns <literal>active</literal>, you need to stop
-   <systemitem class="daemon">xendomains</systemitem> before you can
-   start the <systemitem class="daemon">libvirtd</systemitem> daemon. If
-   you want <systemitem class="daemon">libvirtd</systemitem> to also start
-   after rebooting, additionally prevent <systemitem
-   class="daemon">xendomains</systemitem> from starting automatically. Disable
-   the service:
+    The modular daemon deployment is useful in scenarios where minimal
+    &libvirt; support is needed. For example, if virtual machine storage and
+    networking is not provided by &libvirt;, the various
+    <package>libvirt-daemon-driver-storage</package> and
+    <package>libvirt-daemon-driver-network</package> packages are not required.
+    &kube; is an example of an extreme case, where it handles all networking,
+    storage, cgroups, and namespace integration, etc. Only the
+    <package>libvirt-daemon-driver-&qemu;</package> package, providing
+    <systemitem class="daemon">virtqemud</systemitem>, needs to be installed.
+    Modular daemons allow configuring a custom &libvirt; deployment containing
+    only the components required for the use case.
   </para>
-  <screen>&prompt.sudo;systemctl stop xendomains
+  <sect1 xml:id="libvirt-monolithic-daemon">
+    <title>Starting and stopping the monolithic daemon</title>
+
+    <para>
+      The monolithic daemon is known as &libvirtd; and is configured via
+      <filename>/etc/libvirt/libvirtd.conf</filename>. &libvirtd; is managed
+      with several &systemd; unit files:
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          <emphasis>libvirtd.service</emphasis> - The main &systemd; unit file
+          for launching &libvirtd;. We recommend configuring
+          <filename>libvirtd.service</filename> to start on boot if VMs are
+          also configured to start on host boot.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>libvirtd.socket</emphasis> - The unit file corresponding to
+          the main read-write UNIX socket
+          <filename>/var/run/libvirt/libvirt-sock</filename>. We recommend
+          enabling this unit on boot.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>libvirtd-ro.socket</emphasis> - The unit file corresponding
+          to the main read-only UNIX socket
+          <filename>/var/run/libvirt/libvirt-sock-ro</filename>. We recommend
+          enabling this unit on boot.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>libvirtd-admin.socket</emphasis> - The unit file
+          corresponding to the administrative UNIX socket
+          <filename>/var/run/libvirt/libvirt-admin-sock</filename>. We
+          recommend enabling this unit on boot.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>libvirtd-tcp.socket</emphasis> - The unit file
+          corresponding to the TCP 16509 port for non-TLS remote access. This
+          unit should not be configured to start on boot until the
+          administrator has configured a suitable authentication mechanism.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>libvirtd-tls.socket</emphasis> - The unit file
+          corresponding to the TCP 16509 port for TLS remote access. This unit
+          should not be configured to start on boot until the administrator has
+          deployed x509 certificates and optionally configured a suitable
+          authentication mechanism.
+        </para>
+      </listitem>
+    </itemizedlist>
+
+    <para>
+      When &systemd; socket activation is used, a number of configuration
+      settings in <filename>libvirtd.conf</filename> are no longer honored.
+      Instead, these settings must be controlled via the system unit files:
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          <emphasis>listen_tcp</emphasis> - TCP socket usage is enabled by
+          starting the <filename>libvirtd-tcp.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>listen_tls</emphasis> - TLS socket usage is enabled by
+          starting the <filename>libvirtd-tls.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>tcp_port</emphasis> - Port for the non-TLS TCP socket,
+          controlled via the <option>ListenStream</option> parameter in the
+          <filename>libvirtd-tcp.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>tls_port</emphasis> - Port for the TLS TCP socket,
+          controlled via the <option>ListenStream</option> parameter in the
+          <filename>libvirtd-tls.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>listen_addr</emphasis> - IP address to listen on,
+          independently controlled via the <option>ListenStream</option>
+          parameter in the <filename>libvirtd-tcp.socket</filename> or
+          <filename>libvirtd-tls.socket</filename> unit files.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_group</emphasis> - UNIX socket group owner,
+          controlled via the <option>SocketGroup</option> parameter in the
+          <filename>libvirtd.socket</filename> and
+          <filename>libvirtd-ro.socket</filename> unit files.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_ro_perms</emphasis> - Read-only UNIX socket
+          permissions, controlled via the <option>SocketMode</option> parameter
+          in the <filename>libvirtd-ro.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_rw_perms</emphasis> - Read-write UNIX socket
+          permissions, controlled via the <option>SocketMode</option> parameter
+          in the <filename>libvirtd.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_admin_perms</emphasis> - Admin UNIX socket
+          permissions, controlled via the <option>SocketMode</option> parameter
+          in the <filename>libvirtd-admin.socket</filename> unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_dir</emphasis> - Directory in which all UNIX
+          sockets are created, independently controlled via the
+          <option>ListenStream</option> parameter in any of the
+          <filename>libvirtd.socket</filename>,
+          <filename>libvirtd-ro.socket</filename> and
+          <filename>libvirtd-admin.socket</filename> unit files.
+        </para>
+      </listitem>
+    </itemizedlist>
+
+    <important>
+      <title>Conflicting services: <systemitem class="daemon">libvirtd</systemitem> and <systemitem class="daemon">xendomains</systemitem></title>
+      <para>
+        If &libvirtd; fails to start, check if the service
+        <systemitem class="daemon">xendomains</systemitem> is loaded:
+      </para>
+<screen>&prompt.user;systemctl is-active xendomains active</screen>
+      <para>
+        If the command returns <literal>active</literal>, you need to stop
+        <systemitem class="daemon">xendomains</systemitem> before you can start
+        the &libvirtd; daemon. If you want &libvirtd; to also start after
+        rebooting, additionally prevent
+        <systemitem
+    class="daemon">xendomains</systemitem> from starting
+        automatically. Disable the service:
+      </para>
+<screen>
+&prompt.sudo;systemctl stop xendomains
 &prompt.sudo;systemctl disable xendomains
-&prompt.sudo;systemctl start libvirtd</screen>
-  <para>
-   <systemitem class="daemon">xendomains</systemitem> and <systemitem
-   class="daemon">libvirtd</systemitem> provide the same service and when used
-   in parallel may interfere with one another. As an example, <systemitem
-   class="daemon">xendomains</systemitem> may attempt to start a domU already
-   started by <systemitem class="daemon">libvirtd</systemitem>.
-  </para>
- </important>
+&prompt.sudo;systemctl start libvirtd
+</screen>
+      <para>
+        <systemitem class="daemon">xendomains</systemitem> and &libvirtd;
+        provide the same service and when used in parallel, may interfere with
+        one another. As an example,
+        <systemitem class="daemon">xendomains</systemitem> may attempt to start
+        a domU already started by &libvirtd;.
+      </para>
+    </important>
+  </sect1>
+  <sect1 xml:id="libvirt-modular-daemon">
+    <title>Starting and stopping the modular daemons</title>
 
+    <para>
+      The modular daemons are named after the driver which they are running,
+      with the pattern <quote>virt<replaceable>DRIVER</replaceable>d</quote>. They are
+      configured via the files
+      <filename>/etc/libvirt/virt<replaceable>DRIVER</replaceable>d.conf</filename>.
+      &suse; supports the virtqemud and virtxend hypervisor daemons, along with
+      all the supporting secondary daemons:
+    </para>
 
+    <itemizedlist>
+      <listitem>
+        <para>
+          <emphasis>virtnetworkd</emphasis> - The virtual network management
+          daemon which provides &libvirt;'s virtual network management APIs.
+          For example, virtnetworkd can be used to create a NAT virtual network
+          on the host for use by virtual machines.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtnodedevd</emphasis> - The host physical device
+          management daemon which provides &libvirt;'s node device management
+          APIs. For example, virtnodedevd can be used to detach a PCI device
+          from the host for use by a virtual machine.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtnwfilterd</emphasis> - The host firewall management
+          daemon which provides &libvirt;'s firewall management APIs. For
+          example, virtnwfilterd can be used to configure network traffic
+          filtering rules for virtual machines.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtsecretd</emphasis> - The host secret management daemon
+          which provides &libvirt;'s secret management APIs. For example,
+          virtsecretd can be used to store a key associated with a LUKs volume.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtstoraged</emphasis> - The host storage management
+          daemon which provides &libvirt;'s storage management APIs.
+          virtstoraged can be used to create various types of storage pools
+          and create volumes from those pools.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtinterfaced</emphasis> - The host NIC management daemon
+          which provides &libvirt;'s host network interface management APIs.
+          For example, virtinterfaced can be used to create a bonded network
+          device on the host. &suse; discourages use of &libvirt;'s interface
+          management APIs in favor of native networking tools like wicked or
+          &nm;. It is recommended to disable virtinterfaced.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtproxyd</emphasis> - A daemon to proxy connections
+          between the traditional &libvirtd; sockets and the modular daemon
+          sockets. With a modular &libvirt; deployment, virtproxyd allows
+          remote clients to access the &libvirt; APIs similar to the monolithic
+          &libvirtd;. It can also be used by local clients that connect to the
+          monolithic &libvirtd; sockets.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtlogd</emphasis> - A daemon to manage logs from virtual
+          machine consoles. virtlogd is also used by the monolithic &libvirtd;.
+          The monolithic daemon and virtqemud &systemd; unit files require
+          virtlogd, so it is not necessary to explicitly start virtlogd.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virtlockd</emphasis> - A daemon to manage locks held
+          against virtual machine resources such as disks. virtlockd is also
+          used by the monolithic &libvirtd;. The monolithic daemon, virtqemud,
+          and virtxend &systemd; unit files require virtlockd, so it is not
+          necessary to explicitly start virtlockd.
+        </para>
+      </listitem>
+    </itemizedlist>
 
+    <para>
+      &libvirt; contains two modular daemons that are also used by the
+      monolithic &libvirtd;, virtlockd and virtlogd.
+    </para>
+
+    <para>
+      By default, the modular daemons listen for connections on the
+      <filename>/var/run/libvirt/virt<replaceable>DRIVER</replaceable>d-sock</filename>
+      and
+      <filename>/var/run/libvirt/virt<replaceable>DRIVER</replaceable>d-sock-ro</filename>
+      Unix Domain Sockets. The client library will prefer these sockets over
+      the traditional <filename>/var/run/libvirt/libvirtd-sock</filename>. The
+      virtproxyd daemon is available for remote clients or local clients
+      expecting the traditional &libvirtd; socket.
+    </para>
+
+    <para>
+      Like the monolithic daemon, the modular daemons are managed with several
+      &systemd; unit files:
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          <emphasis>virt<replaceable>DRIVER</replaceable>d.service</emphasis> -
+          The main unit file for launching the
+          virt<replaceable>DRIVER</replaceable>d daemon. We recommend
+          configuring the service to start on boot if VMs are also configured to
+          start on host boot.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virt<replaceable>DRIVER</replaceable>d.socket</emphasis> -
+          The unit file corresponding to the main read-write UNIX socket
+          <filename>/var/run/libvirt/virt<replaceable>DRIVER</replaceable>d-sock</filename>.
+          We recommend starting this socket on boot by default.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virt<replaceable>DRIVER</replaceable>d-ro.socket</emphasis>
+          - The unit file corresponding to the main read-only UNIX socket
+          <filename>/var/run/libvirt/virt<replaceable>DRIVER</replaceable>d-sock-ro</filename>.
+          We recommend starting this socket on boot by default.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>virt<replaceable>DRIVER</replaceable>d-admin.socket</emphasis>
+          - The unit file corresponding to the administrative UNIX socket
+          <filename>/var/run/libvirt/virt<replaceable>DRIVER</replaceable>d-admin-sock</filename>.
+          We recommend starting this socket on boot by default.
+        </para>
+      </listitem>
+    </itemizedlist>
+
+    <para>
+      When &systemd; socket activation is used, a number of configuration
+      settings in virt<replaceable>DRIVER</replaceable>d.conf are no longer
+      honored. Instead, these settings must be controlled via the system unit
+      files:
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_group</emphasis> - UNIX socket group owner,
+          controlled via the <option>SocketGroup</option> parameter in the
+          <filename>virt<replaceable>DRIVER</replaceable>d.socket</filename>
+          and
+          <filename>virt<replaceable>DRIVER</replaceable>d-ro.socket</filename>
+          unit files.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_ro_perms</emphasis> - Read-only UNIX socket
+          permissions, controlled via the <option>SocketMode</option> parameter
+          in the
+          <filename>virt<replaceable>DRIVER</replaceable>d-ro.socket</filename>
+          unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_rw_perms</emphasis> - Read-write UNIX socket
+          permissions, controlled via the <option>SocketMode</option> parameter
+          in the
+          <filename>virt<replaceable>DRIVER</replaceable>d.socket</filename>
+          unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_admin_perms</emphasis> - Admin UNIX socket
+          permissions, controlled via the <option>SocketMode</option> parameter
+          in the
+          <filename>virt<replaceable>DRIVER</replaceable>d-admin.socket</filename>
+          unit file.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <emphasis>unix_sock_dir</emphasis> - Directory in which all UNIX
+          sockets are created, independently controlled via the
+          <option>ListenStream</option> parameter in any of the
+          <filename>virt<replaceable>DRIVER</replaceable>d.socket</filename>,
+          <filename>virt<replaceable>DRIVER</replaceable>d-ro.socket</filename>
+          and
+          <filename>virt<replaceable>DRIVER</replaceable>d-admin.socket</filename>
+          unit files.
+        </para>
+      </listitem>
+    </itemizedlist>
+  </sect1>
+  <sect1 xml:id="libvirt-switch-daemons">
+    <title>Switching to modular daemons</title>
+
+    <para>
+      Several services need to be changed when switching from the monolithic to
+      modular daemons. It is recommended to stop or evict any running virtual
+      machines before switching between the daemon options.
+    </para>
+
+    <procedure>
+      <step>
+        <para>
+          Stop the monolithic daemon and its sockets
+        </para>
+<screen>
+&prompt.sudo;systemctl stop libvirtd.service
+&prompt.sudo;systemctl stop libvirtd{,-ro,-admin}.socket
+</screen>
+      </step>
+      <step>
+        <para>
+          Disable future start of the monolithic daemon
+        </para>
+<screen>
+&prompt.sudo;systemctl disable libvirtd.service
+&prompt.sudo;systemctl disable libvirtd{,-ro,-admin}.socket
+</screen>
+      </step>
+      <step>
+        <para>
+          Enable the new daemons for &kvm; or &xen;, including the required
+          secondary drivers. The following example enables the &qemu; driver
+          for &kvm; and all the required secondary drivers:
+        </para>
+<screen>
+for drv in qemu network nodedev nwfilter secret storage
+do
+ &prompt.sudo;systemctl enable virt${drv}d.service
+ &prompt.sudo;systemctl enable virt${drv}d{,-ro,-admin}.socket
+done
+</screen>
+      </step>
+      <step>
+        <para>
+          Start the sockets for the same set of daemons
+        </para>
+<screen>
+for drv in qemu network nodedev nwfilter secret storage
+do
+ &prompt.sudo;systemctl start virt${drv}d{,-ro,-admin}.socket
+done
+</screen>
+      </step>
+      <step>
+        <para>
+          If connections from remote hosts need to be supported, the virtproxyd
+          daemon must be enabled and started:
+        </para>
+<screen>
+&prompt.sudo;systemctl enable virtproxyd.service
+&prompt.sudo;systemctl enable virtproxyd{,-ro,-admin}.socket
+&prompt.sudo;systemctl start virtproxyd{,-ro,-admin}.socket
+</screen>
+      </step>
+    </procedure>
+  </sect1>
 </chapter>
