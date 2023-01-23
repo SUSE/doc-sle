@@ -8,203 +8,216 @@
  xmlns:xi="http://www.w3.org/2001/XInclude"
  xmlns:xlink="http://www.w3.org/1999/xlink"
  xml:id="cha-ulp" xml:lang="en">
- <title>User space live patching</title>
- <info>
-  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
-   <dm:bugtracker></dm:bugtracker>
-   <dm:translation>yes</dm:translation>
-  </dm:docmanager>
-  <abstract>
-   <para>
-    This chapter describes the basic principles and usage of &ulp;.
-   </para>
-  </abstract>
- </info>
- <sect1 xml:id="sec-ulp">
-  <title>About &ulp;</title>
+  <title>User space live patching</title>
+  <info>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker></dm:bugtracker>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+    <abstract>
+      <para>
+        This chapter describes the basic principles and usage of &ulp;.
+      </para>
+    </abstract>
+  </info>
+  <sect1 xml:id="sec-ulp">
+    <title>About &ulp;</title>
 
-  <important os="slemicro">
-   <title>&ulp; technical preview</title>
-   <para>
-    On &slema;, &ulpa; is a technical preview only.
-   </para>
-  </important>
+    <important os="slemicro">
+      <title>&ulp; technical preview</title>
+      <para>
+        On &slema;, &ulpa; is a technical preview only.
+      </para>
+    </important>
 
-<note os="slemicro">
-    <title>Live patching on &slema;</title>
+    <note os="slemicro">
+      <title>Live patching on &slema;</title>
+      <para>
+        Only the currently running processes are affected by the live patches.
+        As the libraries are changed in the new snapshot and
+        <emphasis role="bold">not</emphasis> in the current one, new processes
+        started in the current snapshot still use the non-patched libraries
+        until you reboot. After the reboot, the system switches to the new
+        snapshot and all started processes will use the patched libraries.
+      </para>
+    </note>
+
     <para>
-        Only the currently running processes are affected by the live patches. As the libraries are changed in the new snapshot and <emphasis role="bold">not</emphasis> in the current one, new processes started in the current snapshot still use the non-patched libraries until you reboot. After the reboot, the system switches to the new snapshot and all started processes will use the patched libraries.
+      User space live patching (&ulpa;) refers to the process of applying
+      patches to the libraries used by a running process, without interrupting
+      it. Live patching operations are performed using the
+      <systemitem>ulp</systemitem> tool that is part of the
+      <systemitem>libpulp</systemitem>.
     </para>
-</note>
 
-  <para>
-   User space live patching (&ulpa;) refers to the process of applying patches
-   to the libraries used by a running process, without interrupting it. Live
-   patching operations are performed using the <systemitem>ulp</systemitem>
-   tool that is part of the <systemitem>libpulp</systemitem>.
-  </para>
+    <para>
+      <systemitem>libpulp</systemitem> is a framework that enables &ulp;. It
+      consists of the <systemitem>libpulp.so</systemitem> library and tools for
+      making libraries live-patchable and applying live patches (the
+      <systemitem>ulp</systemitem> binary).
+    </para>
 
-  <para>
-   <systemitem>libpulp</systemitem> is a framework that enables &ulp;. It
-   consists of the <systemitem>libpulp.so</systemitem> library and tools for
-   making libraries live-patchable and applying live patches (the
-   <systemitem>ulp</systemitem> binary).
-  </para>
-
-  <sect2 xml:id="sec-ulp-prereqs">
-   <title>Prerequisites</title>
-   <para>
-    For &ulpa; to work, two requirements must be met.
-   </para>
-   <itemizedlist>
-    <listitem os="slemicro">
-        <para>
+    <sect2 xml:id="sec-ulp-prereqs">
+      <title>Prerequisites</title>
+      <para>
+        For &ulpa; to work, two requirements must be met.
+      </para>
+      <itemizedlist>
+        <listitem os="slemicro">
+          <para>
             Install the &ulpa; on your system by running:
-        </para>
-        <screen>&prompt.root;transactional-update pkg in libpulp0 libpulp-tools</screen>
-        <para>
+          </para>
+<screen>&prompt.root;transactional-update pkg in libpulp0 libpulp-tools</screen>
+          <para>
             After successful installation, reboot your system.
-        </para>
-    </listitem>
-    <listitem os="sles;sled">
-        <para>
+          </para>
+        </listitem>
+        <listitem os="sles;sled">
+          <para>
             Install the &ulpa; on your system by running:
+          </para>
+<screen>&prompt.sudo;zypper in libpulp0 libpulp-tools</screen>
+        </listitem>
+        <listitem>
+          <para>
+            To be live-patchable, a library must be compiled with the
+            <option>-fpatchable-function-entry</option> GCC flag. No changes to
+            the library source code are required.
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            Processes must preload the <systemitem>libpulp.so</systemitem>
+            library.
+          </para>
+        </listitem>
+      </itemizedlist>
+    </sect2>
+
+    <sect2 xml:id="sec-ulp-libpulp">
+      <title>Using libpulp</title>
+      <para>
+        To use <systemitem>libpulp</systemitem> with an application, you must
+        perform the following steps:
+      </para>
+      <orderedlist>
+        <listitem>
+          <para>
+            Make a library live-patchable.
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            When launching the application, preload
+            <systemitem>libpulp</systemitem> with the
+            <command>LD_PRELOAD=/usr/lib64/libpulp.so
+            ./<replaceable>APPLICATION</replaceable></command> command.
+          </para>
+        </listitem>
+      </orderedlist>
+      <sect3 xml:id="sec-ulp-prep-lib">
+        <title>Preparing a library to be live-patchable</title>
+        <para>
+          For a library to be live-patchable, it must contain a
+          <literal>NOP</literal> prologue in all function calls. GCC version 8
+          and higher, as well as the GCC version that ships with &sls;,
+          provides the <option>-fpatchable-function-entry</option> specifically
+          for that purpose. Thus, on the &x86-64; architecture, compiling a
+          library written in C with
+          <option>-fpatchable-function-entry=16,14</option> flag is sufficient
+          to make it live-patchable.
         </para>
-        <screen>&prompt.sudo;zypper in libpulp0 libpulp-tools</screen>
-    </listitem>
-    <listitem>
-     <para>
-      To be live-patchable, a library must be compiled with the
-      <option>-fpatchable-function-entry</option> GCC flag. No changes to the
-      library source code are required.
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      Processes must preload the <systemitem>libpulp.so</systemitem> library.
-     </para>
-    </listitem>
-   </itemizedlist>
-  </sect2>
-
-  <sect2 xml:id="sec-ulp-libpulp">
-   <title>Using libpulp</title>
-   <para>
-    To use <systemitem>libpulp</systemitem> with an application, you must
-    perform the following steps:
-   </para>
-   <orderedlist>
-    <listitem>
-     <para>
-      Make a library live-patchable.
-     </para>
-    </listitem>
-    <listitem>
-     <para>
-      When launching the application, preload <systemitem>libpulp</systemitem>
-      with the <command>LD_PRELOAD=/usr/lib64/libpulp.so
-      ./<replaceable>APPLICATION</replaceable></command> command.
-     </para>
-    </listitem>
-   </orderedlist>
-   <sect3 xml:id="sec-ulp-prep-lib">
-    <title>Preparing a library to be live-patchable</title>
-    <para>
-     For a library to be live-patchable, it must contain a
-     <literal>NOP</literal> prologue in all function calls. GCC version 8 and
-     higher, as well as the GCC version that ships with &sls;, provides the
-     <option>-fpatchable-function-entry</option> specifically for that purpose.
-     Thus, on the &x86-64; architecture, compiling a library written in C with
-     <option>-fpatchable-function-entry=16,14</option> flag is sufficient to
-     make it live-patchable.
-    </para>
-    <para>
-     The libraries provided by the system packages glibc and openssl
-     (libopenssl_1_1) are already live-patchable on &productnameshort; &productnumber;.
-    </para>
-   </sect3>
-   <sect3 xml:id="sec-ulp-livepatch-check">
-    <title>Checking if a library is live-patchable</title>
-    <para>
-     To check whether a library is live-patchable, use the following command:
-    </para>
+        <para>
+          The libraries provided by the system packages glibc and openssl
+          (libopenssl_1_1) are already live-patchable on &productnameshort;
+          &productnumber;.
+        </para>
+      </sect3>
+      <sect3 xml:id="sec-ulp-livepatch-check">
+        <title>Checking if a library is live-patchable</title>
+        <para>
+          To check whether a library is live-patchable, use the following
+          command:
+        </para>
 <screen>ulp livepatchable <replaceable>LIBRARY</replaceable></screen>
-   </sect3>
-   <sect3 xml:id="sec-ulp-livepatch-container-check">
-    <title>Checking if a <filename>.so</filename> file is a live patch container</title>
-    <para>
-     A shared object (<filename>.so</filename>) is a live patch container if it
-     contains the ULP patch description embedded into it. You can verify it
-     with the following command:
-    </para>
+      </sect3>
+      <sect3 xml:id="sec-ulp-livepatch-container-check">
+        <title>Checking if a <filename>.so</filename> file is a live patch container</title>
+        <para>
+          A shared object (<filename>.so</filename>) is a live patch container
+          if it contains the ULP patch description embedded into it. You can
+          verify it with the following command:
+        </para>
 <screen>&prompt.user;readelf -S <replaceable>SHARED_OBJECT</replaceable> | grep .ulp</screen>
-    <para>
-     If the output shows that there are both <literal>.ulp</literal> and
-     <literal>.ulp.rev</literal> sections in the shared object, then it is a
-     live patch container.
-    </para>
-   </sect3>
-   <sect3 xml:id="sec-ulp-apply-livepatch">
-    <title>Applying live patches</title>
-    <para>
-     Live patches are applied using the <systemitem>ulp trigger</systemitem>
-     command, for example:
-    </para>
+        <para>
+          If the output shows that there are both <literal>.ulp</literal> and
+          <literal>.ulp.rev</literal> sections in the shared object, then it is
+          a live patch container.
+        </para>
+      </sect3>
+      <sect3 xml:id="sec-ulp-apply-livepatch">
+        <title>Applying live patches</title>
+        <para>
+          Live patches are applied using the <systemitem>ulp
+          trigger</systemitem> command, for example:
+        </para>
 <screen>ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.ulp</screen>
-    <para>
-     In this example, <literal>PID</literal> is the PID of the running process
-     that uses the library to be patched and <literal>LIVEPATCH.ulp</literal>
-     is the actual live patch file.
-    </para>
-    <para>
-     The <literal>live patching succeeded</literal> message indicates that the
-     live-patching operation was successful.
-    </para>
-    <para>
-     It is also possible to apply multiple live patches by using wildcards. For
-     example:
-    </para>
+        <para>
+          In this example, <literal>PID</literal> is the PID of the running
+          process that uses the library to be patched and
+          <literal>LIVEPATCH.ulp</literal> is the actual live patch file.
+        </para>
+        <para>
+          The <literal>live patching succeeded</literal> message indicates that
+          the live-patching operation was successful.
+        </para>
+        <para>
+          It is also possible to apply multiple live patches by using
+          wildcards. For example:
+        </para>
 <screen>&prompt.user;ulp trigger -p <replaceable>PID</replaceable> '*.so'</screen>
-    <para>
-     This command will try to apply every patch in the current folder to the
-     process holding <literal>PID</literal>. In the end, the tool will show how
-     many patches it successfully applied.
-    </para>
-   </sect3>
-   <sect3 xml:id="sec-ulp-revert-livepatch">
-    <title>Reverting live patches</title>
-    <para>
-     <command>ulp trigger</command> can be used to revert live patches. There
-     are two ways to revert live patches. You can revert a live patch by using
-     the <option>--revert</option> switch and passing the live patch container:
-    </para>
+        <para>
+          This command will try to apply every patch in the current folder to
+          the process holding <literal>PID</literal>. In the end, the tool will
+          show how many patches it successfully applied.
+        </para>
+      </sect3>
+      <sect3 xml:id="sec-ulp-revert-livepatch">
+        <title>Reverting live patches</title>
+        <para>
+          <command>ulp trigger</command> can be used to revert live patches.
+          There are two ways to revert live patches. You can revert a live
+          patch by using the <option>--revert</option> switch and passing the
+          live patch container:
+        </para>
 <screen>&prompt.user;ulp trigger -p <replaceable>PID</replaceable> --revert <replaceable>LIVEPATCH</replaceable>.so</screen>
-    <para>
-     Alternatively, it is possible to remove all patches associated with a
-     particular library. For example:
-    </para>
+        <para>
+          Alternatively, it is possible to remove all patches associated with a
+          particular library. For example:
+        </para>
 <screen>ulp trigger -p <replaceable>PID</replaceable> --revert-all=<replaceable>LIBRARY</replaceable></screen>
-    <para>
-     In the example above, <replaceable>LIBRARY</replaceable> refers to the
-     actual library, for example: <systemitem>libcrypto.so.1.1</systemitem>.
-    </para>
-    <para>
-     The latter approach can be useful when the source code of the original
-     live patch is not available, or you want to remove a specific old patch
-     and apply a new one, without the target application running potentially
-     unsecured code. For example:
-    </para>
+        <para>
+          In the example above, <replaceable>LIBRARY</replaceable> refers to
+          the actual library, for example:
+          <systemitem>libcrypto.so.1.1</systemitem>.
+        </para>
+        <para>
+          The latter approach can be useful when the source code of the
+          original live patch is not available, or you want to remove a
+          specific old patch and apply a new one, without the target
+          application running potentially unsecured code. For example:
+        </para>
 <screen>&prompt.user;ulp trigger -p <replaceable>PID</replaceable>  --revert-all=libcrypto.so.1.1 new_livepatch2.so</screen>
-   </sect3>
-  </sect2>
- </sect1>
- <sect1 xml:id="sec-ulp-info">
-  <title>More information</title>
+      </sect3>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-ulp-info">
+    <title>More information</title>
 
-  <para>
-   Further information about <systemitem>libpulp</systemitem> is available in
-   the project's <link xlink:href="https://github.com/SUSE/libpulp">Git
-   repository</link>.
-  </para>
- </sect1>
+    <para>
+      Further information about <systemitem>libpulp</systemitem> is available
+      in the project's <link xlink:href="https://github.com/SUSE/libpulp">Git
+      repository</link>.
+    </para>
+  </sect1>
 </chapter>
