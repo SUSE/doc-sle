@@ -45,7 +45,11 @@
     <para>
       User space live patching (&ulpa;) refers to the process of applying
       patches to the libraries used by a running process, without interrupting
-      it. Live patching operations are performed using the
+      it. This means that once a security fix is available as a livepatch,
+      then customer services will be secured without restart through a livepatch apply.
+    </para>
+    <para>
+      Live patching operations are performed using the
       <systemitem>ulp</systemitem> tool that is part of the
       <systemitem>libpulp</systemitem>.
     </para>
@@ -80,66 +84,37 @@
         </listitem>
         <listitem>
           <para>
-            To be live-patchable, a library must be compiled with the
-            <option>-fpatchable-function-entry</option> GCC flag. No changes to
-            the library source code are required.
-          </para>
-        </listitem>
-        <listitem>
-          <para>
-            Processes must preload the <systemitem>libpulp.so</systemitem>
-            library.
+            Applications with desired livepatch support must be
+            launched preloading <systemitem>libpulp.so.0</systemitem>. See <xref linkend="sec-ulp-libpulp"/> for more details.
           </para>
         </listitem>
       </itemizedlist>
+    </sect2>
+    <sect2 xml:id="sec-ulp-supported-libs">
+      <title> Supported Libraries</title>
+      <para>
+        Currently, only glibc and openssl (openssl1_1) are supported. To receive glibc
+        and openssl live patches, install both <systemitem>glibc-livepatches</systemitem> and <systemitem>openssl-livepatches</systemitem> packages:
+        <screen>> zypper install glibc-livepatches openssl-livepatches</screen>
+        And more packages will be available as components are prepared for livepatching.
+      </para>
     </sect2>
 
     <sect2 xml:id="sec-ulp-libpulp">
       <title>Using libpulp</title>
       <para>
         To use <systemitem>libpulp</systemitem> with an application, you must
-        perform the following steps:
+        preload <systemitem>libpulp.so.0</systemitem>:
+        <screen>> LD_PRELOAD=/usr/lib64/libpulp.so.0 <replaceable>APPLICATION</replaceable></screen>
+        This is enough to enable livepatching support on it.
       </para>
-      <orderedlist>
-        <listitem>
-          <para>
-            Make a library live-patchable.
-          </para>
-        </listitem>
-        <listitem>
-          <para>
-            When launching the application, preload
-            <systemitem>libpulp</systemitem> with the
-            <command>LD_PRELOAD=/usr/lib64/libpulp.so
-            ./<replaceable>APPLICATION</replaceable></command> command.
-          </para>
-        </listitem>
-      </orderedlist>
-      <sect3 xml:id="sec-ulp-prep-lib">
-        <title>Preparing a library to be live-patchable</title>
-        <para>
-          For a library to be live-patchable, it must contain a
-          <literal>NOP</literal> prologue in all function calls. GCC version 8
-          and higher, as well as the GCC version that ships with &sls;,
-          provides the <option>-fpatchable-function-entry</option> specifically
-          for that purpose. Thus, on the &x86-64; architecture, compiling a
-          library written in C with
-          <option>-fpatchable-function-entry=16,14</option> flag is sufficient
-          to make it live-patchable.
-        </para>
-        <para>
-          The libraries provided by the system packages glibc and openssl
-          (libopenssl_1_1) are already live-patchable on &productnameshort;
-          &productnumber;.
-        </para>
-      </sect3>
       <sect3 xml:id="sec-ulp-livepatch-check">
         <title>Checking if a library is live-patchable</title>
         <para>
           To check whether a library is live-patchable, use the following
           command:
         </para>
-<screen>ulp livepatchable <replaceable>LIBRARY</replaceable></screen>
+<screen>> ulp livepatchable <replaceable>LIBRARY</replaceable></screen>
       </sect3>
       <sect3 xml:id="sec-ulp-livepatch-container-check">
         <title>Checking if a <filename>.so</filename> file is a live patch container</title>
@@ -161,25 +136,30 @@
           Live patches are applied using the <systemitem>ulp
           trigger</systemitem> command, for example:
         </para>
-<screen>ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.ulp</screen>
+<screen>> ulp trigger -p <replaceable>PID</replaceable> <replaceable>LIVEPATCH</replaceable>.so</screen>
         <para>
           In this example, <literal>PID</literal> is the PID of the running
           process that uses the library to be patched and
-          <literal>LIVEPATCH.ulp</literal> is the actual live patch file.
+          <literal>LIVEPATCH.so</literal> is the actual live patch file.
         </para>
         <para>
-          The <literal>live patching succeeded</literal> message indicates that
-          the live-patching operation was successful.
+          The <literal>SUCCESS</literal> status message indicates that
+          the live-patching operation was successful. The <literal>SKIPPED</literal>
+          message indicates that the patch was skipped because it was not designed
+          for any library that is loaded in the process. The <literal>ERROR</literal>
+          message indicates an error, and more information can be retrieved by
+          inspectioning the libpulp internal message buffer. See <xref linkend="sec-ulp-internal-messages"/> for more information.
         </para>
         <para>
           It is also possible to apply multiple live patches by using
           wildcards. For example:
         </para>
-<screen>&prompt.user;ulp trigger -p <replaceable>PID</replaceable> '*.so'</screen>
+<screen>&prompt.user;ulp trigger '*.so'</screen>
         <para>
           This command will try to apply every patch in the current folder to
-          the process holding <literal>PID</literal>. In the end, the tool will
-          show how many patches it successfully applied.
+          every process that have libpulp loaded. If the patch is not suitable for
+          the process, it will be automatically skipped. In the end, the tool will
+          show how many patches it successfully applied to how many processes.
         </para>
       </sect3>
       <sect3 xml:id="sec-ulp-revert-livepatch">
@@ -195,7 +175,7 @@
           Alternatively, it is possible to remove all patches associated with a
           particular library. For example:
         </para>
-<screen>ulp trigger -p <replaceable>PID</replaceable> --revert-all=<replaceable>LIBRARY</replaceable></screen>
+<screen>> ulp trigger -p <replaceable>PID</replaceable> --revert-all=<replaceable>LIBRARY</replaceable></screen>
         <para>
           In the example above, <replaceable>LIBRARY</replaceable> refers to
           the actual library, for example:
@@ -208,6 +188,42 @@
           application running potentially unsecured code. For example:
         </para>
 <screen>&prompt.user;ulp trigger -p <replaceable>PID</replaceable>  --revert-all=libcrypto.so.1.1 new_livepatch2.so</screen>
+      </sect3>
+      <sect3 xml:id="sec-ulp-verify-patches">
+        <title>View applied patches</title>
+        <para>
+          It is possible to verify which applications has livepatches applied by running:
+        </para>
+        <screen>> sudo ulp patches</screen>
+        <para>
+          sudo is only necessary to see patches of other users processes.
+          The output will show which libraries are livepatchable and
+          patches loaded in programs, as well which bugs the patch
+          addresses:
+        </para>
+        <screen>
+PID: 10636, name: test
+  Livepatchable libraries:
+    in /lib64/libc.so.6:
+      livepatch: libc_livepatch1.so
+        bug labels: jsc#SLE-0000
+    in /usr/lib64/libpulp.so.0:
+        </screen>
+        <para>
+          It is also possible to see which functions are patched by the livepatch:
+        </para>
+        <screen>> ulp dump <replaceable>LIVEPATCH.so</replaceable>
+        </screen>
+      </sect3>
+
+      <sect3 xml:id="sec-ulp-internal-messages">
+        <title>View internal message queue</title>
+        <para>
+          Log messages from libpulp.so are stored in a buffer inside the library
+          and are not displayed unless requested by the user. To show these messages,
+          run:
+        </para>
+        <screen>> ulp messages -p <replaceable>PID</replaceable></screen>
       </sect3>
     </sect2>
   </sect1>
