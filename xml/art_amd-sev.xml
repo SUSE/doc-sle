@@ -427,6 +427,123 @@
    </callout>
   </calloutlist>
  </sect1>
+ <sect1 xml:id="sec-amd-sev-attest">
+  <title>VM attestation</title>
+  <para>
+   VM attestation is the process of verifying that trusted software components
+   are correctly instantiated on a trusted compute platform. The process
+   typically involves starting a VM in a paused state, retrieving a launch
+   measurement of the instantiated software components, verifying the
+   measurement, then providing a disk password or other key to unlock the VM
+   and resume the paused boot process. The launch measurement includes
+   cryptographic artifacts provided by the VM owner, with the cryptographic
+   root of trust being the AMD SEV platform. The VM owner can be confident their
+   software components have not been compromised and are running on a trusted
+   platform once the launch measurement has been verified.
+  </para>
+  <para>
+   The overall attestation process is moderately complex with plenty of
+   opportunity for error. In addition, care must be taken to ensure the process
+   itself is secure. For example, a secure attestation process cannot be
+   executed directly on the hypervisor running the VM, since the goal is to
+   demonstrate the hypervisor has not acted maliciously and contaminated the VM.
+  </para>
+  <para>
+   Although all the information and APIs required for attestation exist in
+   &slsa; 15 SP4, &slsa; 15 SP5 introduces a simple utility called
+   <command>virt-qemu-sev-validate</command> that can be used to satisfy several
+   attestation use cases. For example, automated tests in quality assurance and
+   small &libvirt;+&kvm; deployments that are not managed by large, commercial
+   management stacks.
+  </para>
+  <para>
+   <command>virt-qemu-sev-vailidate</command> is included in the
+   <literal>libvirt-client-qemu</literal> package and supports both offline and
+   online attestation modes. Offline is aptly named, since
+   <command>virt-qemu-sev-validate</command> requires all input for attestation
+   as command-line parameters. Assuming it is invoked on a trusted machine, the
+   results of <command>virt-qemu-sev-validate</command> can be trusted since no
+   information is retrieved from untrusted sources. Online mode is less secure,
+   particularly when executed directly on the hypervisor running the VM.
+  </para>
+  <para>
+   Regardless of mode, the attestation process of a &libvirt;+&kvm; VM starts
+   with creating a VM or Guest Owner (GO) certificate and session blob that
+   is unique for each start of the VM. The certificate and blob can be created
+   with the <command>sevctl</command> utility, available in the
+   <literal>sevctl</literal> package. The following example illustrates the use
+   of the <command>sevctl session</command> command to create all the
+   prelaunch SEV-related artifacts. The <replaceable>NAME</replaceable>
+   parameter is optional and allows specifying a prefix for the artifact
+   file names. Using the VM name as
+   a prefix is convenient for matching artifacts with VMs later. The path
+   to the platform Diffie-Hellman (DH) certificate and the desired SEV
+   policy are required parameters.
+  </para>
+<screen>&prompt.root;sevctl session --name test-sev /data/sev/pdh.cert 7</screen>
+  <para>
+   The <command>sevctl session</command> command produces four files: tik.bin,
+   tek.bin, godh.b64, and session.b64. If the optional <replaceable>NAME</replaceable>
+   parameter was used, the files are prefixed with the specified value. The
+   transport integrity key (tik.bin) and transport encryption key (tek.bin) are
+   used in the verification stage of the attestation process. The guest owner
+   Diffie-Hellman key (godh.b64) and session blob (session.b64) are copied to
+   the VM XML configuration prior to starting the VM. See the
+   <tag class="element">dhCert</tag> and <tag class="element">session</tag>
+   subelements of the <tag class="element">launchSecurity</tag> element in the
+   VM configuration section for more details.
+  </para>
+  <para>
+   After the VM session artifacts have been created and VM XML configuration
+   updated, the VM can be started in a paused state, for example:
+  </para>
+<screen>&prompt.screen;virsh -c qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system create --paused /path/to/vm.xml</screen>
+  <para>
+   Creating the VM in a paused state allows retrieving the launch measurement
+   from the hypervisor and comparing it to a measurement calculated on a trusted
+   host using trusted inputs. If the measurements compare, the VM owner can be
+   confident the VM has been properly instantiated on the hypervisor and
+   execution can safely be started. The following command demonstrates using the
+   <command>virsh domlaunchsecinfo</command> command to retrieve the paused VM
+   launch measurement and other SEV-related information from the hosting
+   hypervisor.
+  </para>
+<screen>&prompt.root;virsh -c qemu+ssh://username@hostname/system domlaunchsecinfo sevtest
+sev-measurement: VZjxMSlu+UuYkWHN2mAxDVVYXRmL3wqTu84kwk+5QS+4OMii7hs6cMAmXNpmmyS/
+sev-api-major  : 1
+sev-api-minor  : 51
+sev-build-id   : 3
+sev-policy     : 7</screen>
+  <para>
+   The retrieved launch measurement can then be given to
+   <command>virt-qemu-sev-validate</command> to verify the VM has been securely
+   instantiated. The following example demonstrates a full offline attestation
+   of the measurement.
+  </para>
+<screen>&prompt.root;virt-qemu-sev-validate --api-major 1 --api-minor 51 --build-id 3 --policy 7 \
+ --firmware /usr/share/qemu/ovmf-x86_64-4m.bin --tik sevtest_tik.bin --tek sevtest_tek.bin --num-cpus 4 \
+ --cpu-family 25 --cpu-model 1 --cpu-stepping 1 \
+ --measurement QJ0oDpFmWj+bGZzFoMPbAxTuC6QD44W5w88x/hQM8toVsB75ci7V1YDfYoI9GTk</screen>
+  <para>
+   It is also possible to use <command>virt-qemu-sev-validate</command> in an
+   online mode, where information needed to perform the VM attestation is
+   retrieved from the hosting hypervisor. The following example demonstrates an
+   online attestation of the VM, where only the hosting hypervisor URI, VM name,
+   and associated TIK and TEK are specified. <command>virt-qemu-sev-validate</command>
+   will retrieve the remaining information, including the measurement itself,
+   from the hosting hypervisor:
+  </para>
+<screen>&prompt.root;virt-qemu-sev-validate --tik sevtest_tik.bin --tek sevtest_tek.bin \
+ --connect qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system --domain sevtest</screen>
+  <para>
+   Once the VM launch measurement has been verified, the VM owner can optionally
+   inject a secret in the VM and resume VM execution. An example of injecting a
+   secret would be providing a key to unlock an encrypted root disk.
+  </para>
+<screen>&prompt.root;virsh -c qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system domsetlaunchsecstate sevtest \
+ --secrethdr hdr-str --secret secret-str
+&prompt.root;virsh -c qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system resume sevtest</screen>
+ </sect1>
  <sect1 xml:id="sec-amd-sev-kubevirt">
   <title>SEV with &kubevirt;</title>
 
