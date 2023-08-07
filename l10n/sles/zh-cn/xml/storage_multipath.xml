@@ -1,1 +1,2742 @@
-../../../../xml/storage_multipath.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_multipath.xml" version="5.0" xml:id="cha-multipath" xml:lang="zh-cn">
+ <title>管理设备的多路径 I/O</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  本章介绍如何使用多路径 I/O (MPIO) 来管理服务器和块存储设备间多路径的故障转移和路径负载平衡。
+ </para>
+ <sect1 xml:id="sec-multipath-intro">
+  <title>了解多路径 I/O</title>
+
+  <para>
+   多路径是服务器与跨多个物理路径（这些路径在服务器中的主机总线适配器和设备存储控制器之间）的同一物理或逻辑块存储设备通讯的能力，通常是在光纤通道 (FC) 或 iSCSI SAN 环境中。
+  </para>
+
+  <para>
+   Linux 的多路径提供连接容错，并可以跨多个活动连接提供负载平衡。当多路径已配置并且正在运行时，它会自动隔离和识别设备连接故障，并重路由 I/O 以改变连接。
+  </para>
+
+  <para>
+   多路径针对连接故障提供容错能力，但不针对存储设备本身的故障提供容错能力。针对后者的容错是通过镜像等互补技术实现的。
+  </para>
+
+  <sect2>
+   <title>多路径术语</title>
+   <variablelist>
+    <varlistentry>
+     <term>存储阵列</term>
+     <listitem>
+      <para>
+       包含许多磁盘和多个结构连接（控制器）的硬件设备，为客户端提供 SAN 存储空间。存储阵列通常具备 RAID 和故障转移功能并支持多路径。一直以来，主动/被动（故障转移）和主动/主动（负载平衡）存储阵列的配置是有区别的。这些概念仍然存在，但它们不过是新式硬件所支持的路径组和访问状态概念的特殊情况。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>主机、主机系统</term>
+     <listitem>
+      <para>
+       运行 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的计算机，充当<emphasis>存储阵列</emphasis>的客户端系统。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>多路径映射、多路径设备</term>
+     <listitem>
+      <para>
+       一组<emphasis>路径设备</emphasis>。它代表存储阵列上的存储卷，被主机系统视为单个块设备。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>路径设备</term>
+     <listitem>
+      <para>
+       多路径映射的成员，通常是一个 SCSI 设备。每个路径设备代表主机计算机与实际存储卷之间的唯一连接，例如，来自 iSCSI 会话的逻辑单元。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>WWID</term>
+     <listitem>
+      <para>
+       “全球标识符”<systemitem>multipath-tools</systemitem> 使用 WWID 来确定应将哪些低级设备汇编到多路径映射中。WWID 必须与可配置的<emphasis>映射名称</emphasis>区分开（请参见<xref linkend="sec-multipath-names"/>）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>uevent、udev 事件</term>
+     <listitem>
+      <para>
+       由内核发送到用户空间并由 <command>udev</command> 子系统处理的事件。在添加、去除设备或更改设备属性时会生成 uevent。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>设备映射程序</term>
+     <listitem>
+      <para>
+       Linux 内核中用于创建虚拟块设备的框架。被映射设备的 I/O 操作将重定向到底层块设备。设备映射可以堆叠。设备映射程序实现自身的事件信令（也称为“设备映射程序事件”或“dm 事件”）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>initramfs</term>
+     <listitem>
+      <para>
+       初始 RAM 文件系统，由于历史原因，也称为“初始 RAM 磁盘”(initrd)（请参见<xref linkend="sec-boot-terminology"/>）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ALUA</term>
+     <listitem>
+      <para>
+       “非对称逻辑单元访问”，随 SCSI 标准 SCSI-3 引入的概念。存储卷可以通过多个端口访问，这些端口按不同状态（活动、待机等）的端口组进行组织。ALUA 定义了用于查询端口组及其状态以及更改端口组状态的 SCSI 命令。支持 SCSI 的现代存储阵列通常也支持 ALUA。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-hardware">
+  <title>硬件支持</title>
+
+  <para>
+   多路径驱动程序和工具可在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 支持的所有体系结构上使用。协议无关的通用驱动程序适用于市场上大多数支持多路径的存储硬件。某些存储阵列供应商提供自己的多路径管理工具。请查看供应商的硬件文档以确定需要哪些设置。
+  </para>
+
+  <sect2 xml:id="sec-multipath-hardware-implementations">
+   <title>多路径实现：设备映射程序和 NVMe</title>
+   <para>
+    Linux 中的传统通用多路径实现使用设备映射程序框架。对于 SCSI 设备等大多数设备类型，设备映射程序多路径是唯一可用的实现。设备映射程序多路径具有很高的可配置性和灵活性。
+   </para>
+   <para>
+    Linux <emphasis>NVM Express</emphasis> (NVMe) 内核子系统在内核中本机实现多路径。这种实现可以降低 NVMe 设备（通常是延迟极低的快速设备）的计算开销。本机 NVMe 多路径不需要用户空间组件。从 SLE 15 开始，本机多路径一直是 NVMe 多路径设备的默认设置。有关细节，请参见<xref linkend="sec-nvmeof-host-configuration-multipathing"/>。
+   </para>
+   <para>
+    本章介绍设备映射程序多路径和其用户空间组件 <systemitem>multipath-tools</systemitem>。<systemitem>multipath-tools</systemitem> 也可对本机 NVMe 多路径提供有限的支持（请参见<xref linkend="sec-multipath-conf-misc" xrefstyle="SecTitleOnPage"/>）。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-hardware-autodetect">
+   <title>针对多路径的存储阵列自动检测</title>
+   <para>
+    设备映射程序多路径是一种通用技术。多路径设备检测只要求内核检测低级（例如 SCSI）设备，并要求设备属性可靠地将多个低级设备标识为同一个卷的不同“路径”，而不是实际不同的设备。
+   </para>
+   <para>
+    <filename>multipath-tools</filename> 软件包按供应商和产品名称检测存储阵列。它提供了多种不同存储产品的内置配置默认值。请查阅您的存储阵列的硬件文档：某些供应商为 Linux 多路径配置提供了具体的建议。
+   </para>
+   <para>
+    如果您需要对存储阵列的内置配置应用更改，请参阅<xref linkend="sec-multipath-conf-file"/>。
+   </para>
+   <important>
+    <title>关于内置硬件属性的免责声明</title>
+    <para>
+     <filename>multipath-tools</filename> 为许多存储阵列提供内置预设。给定存储产品存在此类预设<emphasis>并不意味着</emphasis>该存储产品的供应商已使用 <systemitem>dm-multipath</systemitem> 测试了该产品，也不意味着该供应商认可或支持对该产品使用 <systemitem>dm-multipath</systemitem>。如有支持相关的问题，请始终查阅原始供应商文档。
+    </para>
+   </important>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-hardware-handlers">
+   <title>需要特定硬件处理程序的存储阵列</title>
+   <para>
+    对于某些存储阵列，需要运行特殊命令才能从一条路径故障转移到另一条路径，或需要使用非标准的错误处理方法。这些特殊命令和方法由 Linux 内核中的硬件处理程序实现。新式 SCSI 存储阵列支持 SCSI 标准中定义的“非对称逻辑单元访问”(ALUA) 硬件处理程序。除 ALUA 之外，SLE 内核还包含 Netapp E 系列 (RDAC)、Dell/EMC CLARiiON CX 阵列系列和 HP 传统阵列的硬件处理程序。
+   </para>
+   <para>
+    从 Linux 内核 4.4 开始，Linux 内核已自动检测到大多数阵列（包括所有支持 ALUA 的阵列）的硬件处理程序。唯一的要求是在探测相应设备时装载设备处理程序模块。<systemitem>multipath-tools</systemitem> 软件包会安装适当的配置文件来确保满足此要求。一旦设备处理程序关联到给定设备，就不能再更改。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-planning">
+  <title>规划多路径</title>
+
+  <para>
+   当规划多路径 I/O 解决方案时，请使用本节中的准则。
+  </para>
+
+  <sect2 xml:id="sec-multipath-planning-prereq">
+   <title>先决条件</title>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      用于多路径设备的存储阵列必须支持多路径。有关详细信息，请参见<xref linkend="sec-multipath-hardware"/>。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      仅当在服务器中的主机总线适配器和块存储设备的主机总线控制器之间存在多个物理路径时，才需要配置多路径。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      对于某些存储阵列，供应商提供其自己的多路径软件以管理该阵列物理和逻辑设备的多路径。在这种情况下，您应遵循供应商关于为这些设备配置多路径的说明。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      当在虚拟化环境中使用多路径时，多路径在主机服务器环境中控制。先配置设备的多路径，再将其指派给虚拟 Guest 计算机。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-types">
+   <title>多路径安装类型</title>
+   <para>
+    我们根据处理根设备的方式来区分安装类型。<xref linkend="sec-multipath-installing"/>介绍了在安装期间和安装后如何创建不同的设置。
+   </para>
+   <sect3 xml:id="sec-multipath-planning-type-root">
+    <title>根文件系统位于多路径上 (SAN-boot)</title>
+    <para>
+     根文件系统位于多路径设备上。对于仅使用 SAN 存储空间的无磁盘服务器，一般都是如此。在此类系统上，需要支持多路径才能完成引导，并且必须在 initramfs 中启用多路径。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-multipath-planning-type-noroot">
+    <title>根文件系统位于本地磁盘上</title>
+    <para>
+     根文件系统（可能还包括其他某些文件系统）位于本地存储中，例如，位于直接挂接的 SATA 磁盘或本地 RAID 上，但系统另外还会使用多路径 SAN 存储空间中的文件系统。可以通过三种不同的方式配置这种系统类型：
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>为本地磁盘设置多路径</term>
+      <listitem>
+       <para>
+        所有块设备（包括本地磁盘）是多路径映射的一部分。根设备将显示为只有一条路径的降级多路径映射。如果在使用 YaST 进行初始系统安装期间启用了多路径，则会创建此配置。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry xml:id="vl-multipath-planning-type-noroot-ignore">
+      <term>将本地磁盘排除在多路径之外</term>
+      <listitem>
+       <para>
+        在此配置中，多路径是在 initramfs 中启用的，但根设备明确排除在多路径之外（请参见<xref linkend="sec-multipath-blacklist"/>）。<xref linkend="pr-multipath-disable-root"/>介绍了如何设置此配置。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry xml:id="vl-multipath-planning-type-noroot-noinitrd">
+      <term>在 initramfs 中禁用多路径</term>
+      <listitem>
+       <para>
+        如果在使用 YaST 进行初始系统安装期间未启用多路径，则会创建此设置。这种配置相当脆弱；请考虑改用其他选项之一。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-disks">
+   <title>磁盘管理任务</title>
+   <para>
+    使用第三方 SAN 阵列管理工具或存储阵列的用户界面来创建逻辑设备，并将其指派到主机。确保在两端正确配置主机身份凭证。
+   </para>
+   <para>
+    可以在正在运行的主机中添加或去除卷，但检测更改可能需要重新扫描 SCSI 目标并在主机上重新配置多路径。请参见 <xref linkend="sec-multipath-best-practice-scandev"/>。
+   </para>
+   <note>
+    <title>存储处理器</title>
+    <para>
+     在某些磁盘阵列上，存储阵列通过存储处理器管理流量。一个处理器是活动的，另一个是不活动的，直到发生故障。如果您连接到被动存储处理器，则可能找不到所需的 LUN，或者虽然找到了这些 LUN，但在尝试访问它们时会发生 I/O 错误。
+    </para>
+    <para>
+     如果一个磁盘阵列有多个存储处理器，请确保 SAN 交换机已连接到您要访问的 LUN 所属的主动存储处理器。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-raid">
+   <title>软件 RAID 和复杂的存储堆栈</title>
+   <para>
+    多路径是在 SCSI 磁盘等基本存储设备的顶层设置的。在多层存储堆栈中，多路径始终位于底层。其他层（例如软件 RAID、逻辑卷管理、块设备加密等）排布在多路径之上。因此，对于具有多个 I/O 路径以及您计划在软件 RAID 中使用的每个设备，必须将该设备配置为支持多路径，才能尝试创建软件 RAID 设备。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-ha">
+   <title>高可用性解决方案</title>
+   <para>
+    群集存储资源的高可用性解决方案基于每个节点上的多路径服务运行。确保每个节点上的 <filename>/etc/multipath.conf</filename> 文件中的配置设置在整个群集中保持一致。
+   </para>
+   <para>
+    确保多路径设备在所有设备中的名称都相同。有关细节，请参考<xref linkend="sec-multipath-names"/>。
+   </para>
+   <para>
+    用于跨 LAN 镜像设备的分布式复制块设备 (DRBD) 高可用性解决方案在多路径的基础上运行。对于具有多个 I/O 路径并且您计划在 DRDB 解决方案中使用的每个设备，必须先将该设备配置为支持多路径，再配置 DRBD。
+   </para>
+   <para>
+    将多路径与依赖于使用共享存储实现屏蔽的群集软件（例如包含 <command>sbd</command> 的 <command>pacemaker</command>）一起使用时必须格外小心。有关详细信息，请参见<xref linkend="sec-multipath-policies-cluster"/>。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-installing">
+  <title>在多路径系统上安装 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase></title>
+
+  <para>
+   在配有多路径硬件的系统上安装 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 时，不需要指定特殊的安装参数。
+  </para>
+
+  <sect2 xml:id="sec-multipath-installing-nomp">
+   <title>在未连接多路径设备的情况下安装</title>
+   <para>
+    您可能希望在本地磁盘上执行安装，而不先配置结构和存储装置，以便稍后再将多路径 SAN 设备添加到系统。在此情况下，安装将像在非多路径系统上一样进行。完成安装后，虽然会安装 <systemitem>multipath-tools</systemitem>，但将禁用 <systemitem class="daemon">systemd</systemitem> 服务 <filename>multipathd.service</filename>。系统将如<xref linkend="sec-multipath-planning-type-noroot"/>中的<xref linkend="vl-multipath-planning-type-noroot-noinitrd"/>所述进行配置。添加 SAN 硬件前，您将需要启用并启动 <filename>multipathd.service</filename>。我们建议在 <filename>/etc/multipath.conf</filename> 中为根设备创建 <literal>blacklist</literal> 项（请参见<xref linkend="sec-multipath-blacklist"/>）。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-installing-mp">
+   <title>在连接了多路径设备的情况下安装</title>
+   <para>
+    如果在安装时有多路径设备连接到系统，YaST 将检测到这些设备并在进入分区阶段前弹出窗口询问您是否应启用多路径。
+   </para>
+   <informalfigure>
+    <mediaobject>
+     <textobject role="description"><phrase>
+          YaST multipath dialog</phrase>
+     </textobject>
+     <imageobject role="fo">
+      <imagedata fileref="multipath-popup.png" width="50%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="multipath-popup.png" width="50%"/>
+     </imageobject>
+    </mediaobject>
+   </informalfigure>
+   <para>
+    如果您在此提示窗口中选择“否”（不建议如此），安装将按照<xref linkend="sec-multipath-installing-nomp"/>所述进行。在分区阶段，请勿使用/编辑稍后将成为多路径映射一部分的设备。
+   </para>
+   <para>
+    如果您在多路径提示窗口中选择“是”，<command>multipathd</command> 将在安装期间运行。不会有设备添加到 <filename>/etc/multipath.conf</filename> 的 <literal>blacklist</literal> 部分，因此，在分区对话框中，所有 SCSI 和 DASD 设备（包括本地磁盘）都将显示为多路径设备。安装后，所有 SCSI 和 DASD 设备都将是多路径设备（请参见<xref linkend="sec-multipath-planning-type-root"/>）。
+   </para>
+   <procedure xml:id="pr-multipath-disable-root">
+    <title>安装后对根磁盘禁用多路径</title>
+    <para>
+     此过程假定您将系统安装在本地磁盘上，并在安装期间启用了多路径，以便根设备现在位于多路径上，但您更希望按照<xref linkend="sec-multipath-planning-type-noroot"/>中的<xref linkend="vl-multipath-planning-type-noroot-ignore"/>所述设置系统。
+    </para>
+    <step>
+     <para>
+      检查您的系统，以获取本地根设备的 <filename>/dev/mapper/...</filename> 引用，并将它们替换为在设备不再是多路径映射时仍然有效的引用（请参见<xref linkend="sec-multipath-referring"/>）。如果以下命令未找到引用，您无需应用更改：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> grep -rl /dev/mapper/ /etc</screen>
+    </step>
+    <step>
+     <para>
+      切换到 <command>dracut</command> 的 <literal>by-uuid</literal> 永久设备策略（请参见<xref linkend="sec-multipath-initrd-persistent"/>）：
+     </para>
+<screen><prompt>&gt; </prompt>echo 'persistent_policy="by-uuid"' | \
+      sudo tee /etc/dracut.conf.d/10-persistent-policy.conf</screen>
+    </step>
+    <step>
+     <para>
+      确定根设备的 WWID：
+     </para>
+<screen><prompt>&gt; </prompt>multipathd show paths format "%i %d %w %s"
+0:2:0:0 sda 3600605b009e7ed501f0e45370aaeb77f IBM,ServeRAID M5210
+...
+	</screen>
+     <para>
+      此命令会列显所有路径设备及其 WWID 和供应商/产品信息。您将能识别出根设备（此处为 ServeRAID 设备）并记下 WWID。
+     </para>
+    </step>
+    <step>
+     <para>
+      使用您刚刚确定的 WWID 在 <filename>/etc/multipath.conf</filename> 中创建一个黑名单项（请参见<xref linkend="sec-multipath-blacklist"/>）。暂时先<emphasis>不要</emphasis>应用这些设置：
+     </para>
+<screen>blacklist {
+    wwid 3600605b009e7ed501f0e45370aaeb77f
+}</screen>
+    </step>
+    <step>
+     <para>
+      重构建 initramfs：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut -f</screen>
+    </step>
+    <step>
+     <para>
+      重引导。您的系统应使用非多路径根磁盘引导。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-offline-update">
+  <title>在多路径系统上更新 SLE</title>
+
+  <para>
+   联机更新系统时，您可以按<xref linkend="cha-upgrade-online"/>中所述操作。
+  </para>
+
+  <para>
+   系统的脱机更新过程与<xref linkend="sec-multipath-installing"/>所述的全新安装类似。系统没有 <literal>blacklist</literal>，因此，如果用户选择启用多路径，根设备将显示为多路径设备，即使它通常不是多路径设备。当 <command>dracut</command> 在更新过程中构建 initramfs 时，它看到的存储堆栈与在引导后系统上看到的不同。请参见<xref linkend="sec-multipath-initrd-persistent"/>和<xref linkend="sec-multipath-referring"/>。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-multipath-mpiotools">
+  <title>多路径管理工具</title>
+
+  <para>
+   <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 中的多路径支持以 Linux 内核的设备映射程序多路径模块及 <systemitem>multipath-tools</systemitem> 用户空间软件包为基础。
+  </para>
+
+  <para>
+   通用多路径功能由设备映射程序多路径 (DM-MP) 模块处理。有关细节，请参见<xref linkend="sec-multipath-mpiotools-dm"/>。
+  </para>
+
+  <para>
+   <systemitem class="resource">multipath-tools</systemitem> 和 <systemitem class="resource">kpartx</systemitem> 软件包提供了用于处理自动路径发现和分组的工具。这些工具包括：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>multipathd</command></term>
+    <listitem>
+     <para>
+      用于设置和监视多路径映射的守护程序，以及用来与守护程序进程通讯的命令行客户端。请参见 <xref linkend="sec-multipath-mpiotools-multipathd"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>multipath</command></term>
+    <listitem>
+     <para>
+      用于执行多路径操作的命令行工具。请参见 <xref linkend="sec-multipath-mpiotools-multipath"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kpartx</command></term>
+    <listitem>
+     <para>
+      用于管理多路径设备上的“分区”的命令行工具。请参见 <xref linkend="sec-multipath-configuration-partitioning"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>mpathpersist</command></term>
+    <listitem>
+     <para>
+      用于管理 SCSI 永久保留的命令行工具。请参见 <xref linkend="sec-multipath-mpiotools-mpathpersist"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 xml:id="sec-multipath-mpiotools-dm">
+   <title>设备映射程序多路径模块</title>
+   <para>
+    设备映射程序多路径 (DM-MP) 模块 <filename>dm-multipath.ko</filename> 为 Linux 提供了通用多路径功能。DM-MPIO 是 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 中适用于 SCSI 和 DASD 设备的首选多路径解决方案，它也适用于 NVMe 设备。
+   </para>
+   <note>
+    <title>将 DM-MP 用于 NVMe 设备</title>
+    <para>
+     从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 15 开始，建议将本机 NVMe 多路径（请参见<xref linkend="sec-multipath-hardware-implementations"/>）用于 NVMe，并且默认情况下会使用它。要禁用本机 NVMe 多路径并改用设备映射程序多路径（<emphasis>不建议如此</emphasis>），请使用内核参数 <literal>nvme-core.multipath=0</literal> 引导。
+    </para>
+   </note>
+   <para>
+    设备映射程序多路径模块可处理以下任务：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      在活动路径组内的多个路径上分配负载。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      注意到路径设备上的 I/O 错误，并将这些设备标记为发生故障，这样就不会向它们发送 I/O。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      当活动路径组中的所有路径都失败时切换路径组。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果所有路径都失败，则使多路径设备上的 I/O 失败或排队，具体取决于配置。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    以下任务由 <systemitem>multipath-tools</systemitem> 软件包中的用户空间组件处理，而不是由设备映射程序多路径模块处理：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      发现代表同一存储设备的不同路径的设备，并基于这些设备组合多路径映射。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      将具有相似属性的路径设备收集到路径组。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      主动监控路径设备是否出现故障或重新实例化。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      监控路径设备的添加和去除。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      设备映射程序多路径模块未提供易于使用的设置和配置用户界面。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    有关 <systemitem>multipath-tools</systemitem> 软件包中各组件的细节，请参见<xref linkend="sec-multipath-mpiotools-multipathd"/>。
+   </para>
+   <note>
+    <title>多路径预防的故障</title>
+    <para>
+     DM-MPIO 预防的是设备路径中的故障，而不是设备本身的故障，例如媒体错误。后一种错误必须通过其他方式来预防，例如复制。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-multipathd">
+   <title><command>multipathd</command> 守护程序</title>
+   <para>
+    <command>multipathd</command> 是新式 Linux 设备映射程序多路径设置中的最重要部分。此守护程序通常通过 systemd 服务 <filename>multipathd.service</filename> 来启动（请参见<xref linkend="sec-multipath-configuration-start"/>）。
+   </para>
+   <para>
+    <command>multipathd</command> 可处理以下任务（其中一些任务依赖于配置）：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      启动时，检测路径设备并设置从检测到的设备的多路径映射。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      监视 uevent 和设备映射程序事件，根据需要在多路径映射中添加或去除路径映射，并启动故障转移或故障回复操作。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      发现新的路径设备时立即设置新映射。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      定期检查路径设备以检测故障，并测试有故障的路径，以便在它们恢复正常时重新启用它们。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果所有路径都发生故障，<command>multipathd</command> 将使映射失败，或者将映射设备切换到排队模式并让其排队给定的一段时间。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      处理路径状态更改，并根据需要切换路径组或重新组合路径。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      测试路径的“边际”状态，即导致路径状态在正常运行和非正常运行之间来回变化的不稳定结构状况。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      处理路径设备的 SCSI 永久保留密钥（如果已配置）。请参见<xref linkend="sec-multipath-mpiotools-mpathpersist"/>。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    <command>multipathd</command> 还可充当命令行客户端，通过将交互式命令发送到正在运行的守护程序来处理这些命令。用于向守护程序发送命令的一般语法如下：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd <replaceable>COMMAND</replaceable></screen>
+   <para>
+    或
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd -k'<replaceable>COMMAND</replaceable>'</screen>
+   <para>
+    此守护程序还可在交互模式下运行，允许您发送多个后续命令：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd -k</screen>
+   <note>
+    <title>multipath 和 multipathd 如何配合工作</title>
+    <para>
+     许多 <command>multipathd</command> 命令都有等效的 <command>multipath</command> 命令。例如，<command>multipathd
+     show topology</command> 的作用与 <command>multipath
+     -ll</command> 相同。两者的显著差别在于，multipathd 命令会查询正在运行的 <command>multipathd</command> 守护程序的内部状态，而 multipath 则是直接从内核和 I/O 操作获取信息。
+    </para>
+    <para>
+     如果多路径守护程序正在运行，我们建议使用 <command>multipathd</command> 命令对系统进行修改。否则，守护程序可能会注意到配置更改并对其做出反应。在某些情况下，守护程序甚至可能尝试撤消已应用的更改。如果检测到正在运行的守护程序，<command>multipath</command> 会自动将某些可能带来风险的命令（例如销毁和刷新映射）委派给 <command>multipathd</command>。
+    </para>
+   </note>
+   <para>
+    下面的列表介绍了常用的 <command>multipathd</command> 命令：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>show topology</term>
+     <listitem>
+      <para>
+       显示当前映射拓扑和属性。请参见 <xref linkend="sec-multipath-best-practice-status"/>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show paths</term>
+     <listitem>
+      <para>
+       显示当前已知的路径设备。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show paths format &quot;<replaceable>FORMAT STRING</replaceable>&quot;</term>
+     <listitem>
+      <para>
+       使用格式字符串显示当前已知的路径设备。使用 <command>show wildcards</command> 可查看支持的格式说明符列表。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show maps</term>
+     <listitem>
+      <para>
+       显示当前配置的映射设备。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show maps format <replaceable>FORMAT STRING</replaceable></term>
+     <listitem>
+      <para>
+       使用格式字符串显示当前配置的映射设备。使用 <command>show wildcards</command> 可查看支持的格式说明符列表。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show config local</term>
+     <listitem>
+      <para>
+       显示 multipathd 当前正在使用的配置。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>reconfigure</term>
+     <listitem>
+      <para>
+       重新读取配置文件、重新扫描设备，并再次设置映射。这基本上等同于重启动 <command>multipathd</command>。有几个选项在不重启动的情况下无法修改。手册页 <systemitem>multipath.conf(5)</systemitem> 中提到了这些选项。<option>reconfigure</option> 命令只会重新装载以某种形式发生更改的映射设备。要强制重新装载每个映射设备，请使用 <command>reconfigure all</command>（从 SUSE Linux Enterprise Server 15 SP4 开始提供；在以前的版本上，<option>reconfigure</option> 可以重新装载每个映射）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>del map <replaceable>MAP DEVICE NAME</replaceable></term>
+     <listitem>
+      <para>
+       取消配置并删除给定的映射设备及其分区。<replaceable>MAP DEVICE NAME</replaceable> 可以是设备节点名称（例如 <filename>dm-0</filename>）、WWID 或映射名称。如果该设备正在使用中，则该命令将会失败。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>switchgroup map <replaceable>MAP DEVICE NAME</replaceable> group <replaceable>N</replaceable></term>
+     <listitem>
+      <para>
+       切换到索引（从 1 开始）为指定数字的路径组。对于具有手动故障回复的映射，这很有用（请参见<xref linkend="sec-multipath-policies-default"/>）。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    可以使用其他命令来修改路径状态、启用或禁用队列等。有关详细信息，请参见<systemitem>multipathd(8)</systemitem>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-multipath">
+   <title><command>multipath</command> 命令</title>
+   <para>
+    尽管多路径的大部分设置工作是自动完成并由 <command>multipathd</command> 处理，但您仍可使用 <command>multipath</command> 来执行某些管理任务。下面提供了几个命令用法示例：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>multipath</term>
+     <listitem>
+      <para>
+       检测路径设备并配置找到的所有多路径映射。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -d</term>
+     <listitem>
+      <para>
+       类似于 <command>multipath</command>，但不设置任何映射（“试运行”）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath <replaceable>DEVICENAME</replaceable></term>
+     <listitem>
+      <para>
+       配置特定多路径设备。<replaceable>DEVICENAME</replaceable> 可以使用设备节点名称 (<filename>/dev/sdb</filename>) 或 <literal>major:minor</literal> 格式的设备编号来指定成员路径设备。或者，它可以是多路径映射的 WWID 或名称。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -f <replaceable>DEVICENAME</replaceable></term>
+     <listitem>
+      <para>
+       取消配置（“刷新”）多路径映射及其分区映射。如果该映射或其某个分区正在使用中，该命令将会失败。有关 <replaceable>DEVICENAME</replaceable> 的可能值，请参见上文。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -F</term>
+     <listitem>
+      <para>
+       取消配置（“刷新”）所有多路径映射及其分区映射。如果这些映射正在使用中，该命令将会失败。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -ll</term>
+     <listitem>
+      <para>
+       显示所有当前配置的多路径设备的状态和拓扑。请参见 <xref linkend="sec-multipath-best-practice-status"/>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -ll <replaceable>DEVICENAME</replaceable></term>
+     <listitem>
+      <para>
+       显示特定多路径设备的状态。有关 <replaceable>DEVICENAME</replaceable> 的可能值，请参见上文。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -t</term>
+     <listitem>
+      <para>
+       显示内部硬件表和活动的多路径配置。有关配置参数的细节，请参见 <systemitem>multipath.conf(5)</systemitem>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -T</term>
+     <listitem>
+      <para>
+       功能与 <command>multipath -t</command> 命令类似，但仅显示与主机上检测到的硬件匹配的硬件项。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    选项 <option>-v</option> 控制输出的详细程度。提供的值会覆盖 <filename>/etc/multipath.conf</filename> 中的 <option>verbosity</option> 选项。请参见 <xref linkend="sec-multipath-conf-misc"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-mpathpersist">
+   <title>SCSI 永久保留和 <command>mpathpersist</command></title>
+   <para>
+    <command>mpathpersist</command> 实用程序用于管理设备映射程序多路径设备上的 SCSI 永久保留。永久保留用于仅限特定的 SCSI 发起端访问 SCSI 逻辑单元。在多路径配置中，必须对给定卷的所有 I_T 节点（路径）使用相同的保留密钥；否则，在一台路径设备上创建保留会导致其他路径发生 I/O 错误。
+   </para>
+   <para>
+    将此实用程序与 <filename>/etc/multipath.conf</filename> 文件中的 <literal>reservation_key</literal> 属性配合使用可以设置 SCSI 设备的永久保留。当且仅当设置了此选项时，<command>multipathd</command> 守护程序才会检查新发现的路径或重新启用的路径的永久保留。
+   </para>
+   <para>
+    您可以将该属性添加到 <filename>multipath.conf</filename> 的 <literal>defaults</literal> 或 <literal>multipaths</literal> 部分。例如：
+   </para>
+<screen>multipaths {
+    multipath {
+        wwid             3600140508dbcf02acb448188d73ec97d
+        alias            yellow
+        reservation_key  0x123abc
+    }
+}</screen>
+   <para>
+    为适用于永久管理的所有 mpath 设备设置 <literal>reservation_key</literal> 参数后，使用 <command>multipathd reconfigure</command> 重新装载配置。
+   </para>
+   <note>
+    <title>使用 “<option>reservation_key file</option>”</title>
+    <para>
+     如果在 <filename>multipath.conf</filename> 的 <literal>defaults</literal> 部分使用了特殊值 <literal>reservation_key file</literal>，则可以使用 <command>mpathpersist</command> 以动态方式在文件 <filename>/etc/multipath/prkeys</filename> 中管理保留密钥。
+    </para>
+    <para>
+     这是处理多路径映射的永久保留的建议方法。从 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 SP4 开始可以使用这种方法。
+    </para>
+   </note>
+   <para>
+    使用命令 <command>mpathpersist</command> 查询和设置由 SCSI 设备组成的多路径映射的永久保留。有关细节，请参见手册页 <systemitem>mpathpersist(8)</systemitem>。命令行选项与 <systemitem>sg3_utils</systemitem> 软件包中 <command>sg_persist</command> 的选项相同。<systemitem>sg_persist(8)</systemitem> 手册页详细解释了选项的语义。
+   </para>
+   <para>
+    在以下示例中，<replaceable>DEVICE</replaceable> 表示设备映射程序多路径设备，例如 <filename>/dev/mapper/mpatha</filename>。以下命令连同长选项一起列出，以便于阅读。所有选项都可以替换为单个字母，例如 <command>mpathpersist -oGS 123abc
+    <replaceable>DEVICE</replaceable></command>。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>mpathpersist --in --read-keys <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       读取设备的已注册保留密钥。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --in --read-reservation <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       显示设备的现有保留。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --register --param-sark=123abc <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       为设备注册一个保留密钥。这会为主机上的所有 I_T 节点（路径设备）添加保留密钥。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --reserve --param-rk=123abc --prout-type=5 <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       使用先前注册的密钥为设备创建类型 5（“独占写入 - 仅限注册者”）保留。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --release --param-rk=123abc --prout-type=5 <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       释放设备的类型 5 保留。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --register-ignore --param-sark=0 <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       从设备中删除现有的保留密钥。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-config">
+  <title>针对多路径配置系统</title>
+
+  <para/>
+
+  <sect2 xml:id="sec-multipath-configuration-start">
+   <title>启用、启动和停止多路径服务</title>
+   <para>
+    要允许多路径服务在引导时启动，请运行以下命令：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl enable multipathd</screen>
+   <para>
+    要在正在运行的系统中手动启动该服务，请输入：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl start multipathd</screen>
+   <para>
+    要重启动该服务，请输入：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart multipathd</screen>
+   <para>
+    在大多数情况下不需要重启动该服务。要简单地让 <command>multipathd</command> 重新装载其配置，请运行：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl reload multipathd</screen>
+   <para>
+    要检查该服务的状态，请输入：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl status multipathd</screen>
+   <para>
+    要停止当前会话中的多路径服务，请运行：
+   </para>
+<screen>
+<prompt>&gt; </prompt><command>sudo</command> systemctl stop multipathd multipathd.socket
+   </screen>
+   <para>
+    停止服务不会去除现有的多路径映射。要去除未使用的映射，请运行以下命令：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -F</screen>
+   <warning>
+    <title>将 <filename>multipathd.service</filename> 保持为启用状态</title>
+    <para>
+     我们强烈建议始终将 <filename>multipathd.service</filename> 保持为启用状态，并让其在配有多路径硬件的系统上运行。虽然该服务支持 <command>systemd</command> 的套接字激活机制，但我们不建议您依赖于该机制。如果禁用该服务，系统在引导期间将不会设置多路径映射。
+    </para>
+   </warning>
+   <note xml:id="ann-multipath-configuration-disable">
+    <title>禁用多路径</title>
+    <para>
+     如果您需要在出现上述警告的情况下禁用多路径，例如因为要部署第三方多路径软件，请执行以下操作。确保系统不会使用多路径设备的硬编码引用（请参见<xref linkend="sec-multipath-trouble-ref"/>）。
+    </para>
+    <para>
+     要<emphasis>仅为单次系统引导</emphasis>禁用多路径，请使用内核参数 <literal>multipath=off</literal>。这会影响已引导的系统和 initramfs（在这种情况下不需要重构建）。
+    </para>
+    <para>
+     要<emphasis>永久</emphasis>禁用 multipathd 服务，使其不会在今后引导系统时启动，请运行以下命令：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl disable multipathd multipathd.socket
+<prompt>&gt; </prompt><command>sudo</command> dracut --force --omit multipath
+</screen>
+    <para>
+     （每当禁用或启用多路径服务后，都请重构建 <systemitem>initramfs</systemitem>。请参阅<xref linkend="sec-multipath-initrd-sync"/>。）
+    </para>
+    <para>
+     如果您想确保不设置多路径设备（<emphasis>即使是手动运行 <command>multipath</command> 时</emphasis>），请在重构建 initramfs 之前，将以下几行添加到 <filename>/etc/multipath.conf</filename> 的末尾：
+    </para>
+<screen>blacklist {
+    wwid .*
+}</screen>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-configuration-sandevs">
+   <title>针对多路径准备 SAN 设备</title>
+   <para>
+    配置 SAN 设备的多路径 I/O 之前，请按需要执行以下操作准备 SAN 设备：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      使用供应商工具配置 SAN 并设置区域。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      使用供应商工具为存储阵列上的主机 LUN 配置访问权限。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      如果 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 未随附主机总线适配器 (HBA) 的驱动程序，请安装 HBA 供应商提供的 Linux 驱动程序。有关更多细节，请参见供应商的特定说明。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    如果已检测到多路径设备并已启用 <filename>multipathd.service</filename>，则应会自动创建多路径映射。如果未自动创建，<xref linkend="sec-multipath-trouble-steps" xrefstyle="SecTitleOnPage"/> 会列出一些可用于检查该情况的外壳命令。如果 HBA 驱动程序未检测到这些 LUN，请检查 SAN 中的区域设置。特别是要检查 LUN 屏蔽是否是活动的，以及是否已将 LUN 正确指派给服务器。
+   </para>
+   <para>
+    如果 HBA 驱动程序可以检测到 LUN，但未创建相应的块设备，则可能需要使用额外的内核参数。请参见 <link xlink:href="https://www.suse.com/support/kb/doc.php?id=3955167"/> 上 SUSE 知识库中的 <citetitle>TID
+    3955167: Troubleshooting SCSI (LUN) Scanning Issues</citetitle>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-configuration-partitioning">
+   <title>多路径设备上的分区和 <command>kpartx</command></title>
+   <para>
+    多路径映射可以像其路径设备一样包含分区。分区表扫描以及为分区创建设备节点的操作是由 <command>kpartx</command> 工具在用户空间中执行的。<command>kpartx</command> 由 udev 规则自动调用；通常不需要手动运行它。有关引用多路径分区的方法，请参见<xref linkend="sec-multipath-referring"/>。
+   </para>
+   <note>
+    <title>禁止调用 <command>kpartx</command></title>
+    <para>
+     可以在 <filename>/etc/multipath.conf</filename> 中使用 <literal>skip_kpartx</literal> 选项来禁止对选定的多路径映射调用 <command>kpartx</command>。例如，在虚拟化主机上，这种做法可能很有用。
+    </para>
+   </note>
+   <para>
+    可以像平时一样使用 YaST 或者使用 <command>fdisk</command> 或 <command>parted</command> 等工具来操作多路径设备上的分区表和分区。当分区工具退出时，系统将会记下应用于分区表的更改。如果这种方法不起作用（通常是因为设备繁忙），请尝试运行 <command>multipathd
+    reconfigure</command> 或重引导系统。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-initrd-sync">
+   <title>保持 initramfs 同步</title>
+   <important>
+    <para>
+     对于所有块设备，是否以及如何使用多路径，初始 RAM 文件系统 (initramfs) 与已引导系统的行为务必要保持一致。应用多路径配置更改后重构建 initramfs。
+    </para>
+   </important>
+   <para>
+    如果在系统中启用了多路径，那么也需要在 <filename>initramfs</filename> 中启用多路径，反之亦然。此规则的唯一例外情况是<xref linkend="sec-multipath-planning-type-noroot"/>中所述的选项 <xref linkend="vl-multipath-planning-type-noroot-noinitrd"/>。
+   </para>
+   <para>
+    必须在已引导系统与 initramfs 之间同步多路径配置。因此，如果您更改 <filename>/etc/multipath.conf</filename>、<filename>/etc/multipath/wwids</filename> 和 <filename>/etc/multipath/bindings</filename> 中的任一文件，或者其他与设备标识相关的配置文件或 udev 规则，请使用以下命令重构建 initramfs：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut -f</screen>
+   <para>
+    如果 <filename>initramfs</filename> 与系统不同步，系统将无法正常引导，启动过程可能会显示紧急外壳。有关如何避免或修复此类情况的说明，请参见<xref linkend="sec-multipath-trouble"/>。
+   </para>
+   <sect3 xml:id="sec-multipath-initrd-disable">
+    <title>在 initramfs 中启用或禁用多路径</title>
+    <para>
+     如果要在非一般情况下重构建 initramfs（例如，从救援系统重构建，或使用内核参数 <literal>multipath=off</literal> 引导后重构建），必须格外小心。当且仅当 <command>dracut</command> 在构建 initramfs 期间检测到根文件系统位于多路径设备上时，它才会自动在 initramfs 中包含多路径支持。在这种情况下，需要显式启用或禁用多路径。
+    </para>
+    <para>
+     要在 <filename>initramfs</filename> 中启用多路径支持，请运行以下命令：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut --force --add multipath</screen>
+    <para>
+     要在 <filename>initramfs</filename> 中禁用多路径支持，请运行以下命令：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut --force --omit multipath</screen>
+   </sect3>
+   <sect3 xml:id="sec-multipath-initrd-persistent">
+    <title>initramfs 中永久设备的名称</title>
+    <para>
+     当 <command>dracut</command> 生成 initramfs 时，它必须引用要永久挂载的磁盘和分区，以确保系统能够正常引导。当 <command>dracut</command> 检测到多路径设备时，出于此目的，它默认将使用 DM-MP 设备名称，比如
+    </para>
+<screen>/dev/mapper/3600a098000aad73f00000a3f5a275dc8-part1</screen>
+    <para>
+     如果系统<emphasis>始终</emphasis>以多路径模式运行，这样将不会产生问题。但如果系统在不使用多路径的情况下启动（如<xref linkend="sec-multipath-initrd-disable"/>所述），那么使用这样的 initramfs 引导时将会失败，因为 <filename>/dev/mapper</filename> 设备将不存在。请参见<xref linkend="sec-multipath-referring"/>了解其他可能的问题情景和一些背景信息。
+    </para>
+    <para>
+     要防止此类情况发生，请使用 <option>--persistent-policy</option> 选项更改 <command>dracut</command> 的永久设备命名策略。我们建议设置 <literal>by-uuid</literal> 使用策略：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut --force --omit multipath --persistent-policy=by-uuid</screen>
+    <para>
+     另请参见<xref linkend="pr-multipath-disable-root"/>和<xref linkend="sec-multipath-trouble-ref"/>。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-conf-file">
+  <title>多路径配置</title>
+
+  <para>
+   内置的 <systemitem>multipath-tools</systemitem> 默认值适用于大多数设置。如需进行自定义，需要创建一个配置文件。主配置文件为 <filename>/etc/multipath.conf</filename>。此外，还需考虑 <filename>/etc/multipath/conf.d/</filename> 中的文件。有关其他信息，请参见 <xref linkend="sec-multipath-conf-file-precedence"/>。
+  </para>
+
+  <important>
+   <title>供应商建议和内置硬件默认值</title>
+   <para>
+    一些存储供应商在其文档中发布了多路径选项的建议值。这些值通常代表供应商在其环境中测试后认为最适合相应存储产品的值。请参见 <xref linkend="sec-multipath-hardware-autodetect"/> 中的免责声明。
+   </para>
+   <para>
+    <systemitem>multipath-tools</systemitem> 内置了适用于许多存储阵列的默认值，这些默认值均源自供应商发布的建议。请运行 <command>multipath -T</command> 查看设备的当前设置，并将其与供应商的建议进行比较。
+   </para>
+  </important>
+
+  <sect2 xml:id="sec-multipath-conf-file-create">
+   <title>创建 <filename>/etc/multipath.conf</filename></title>
+   <para>
+    建议您创建只包含要更改的设置的最小 <filename>/etc/multipath.conf</filename>。在很多情况下，您根本不需要创建 <filename>/etc/multipath.conf</filename>。
+   </para>
+   <para>
+    如果您想要使用包含所有可能配置指令的配置模板，请运行：
+   </para>
+<screen>multipath -T &gt;/etc/multipath.conf</screen>
+   <para>
+    另请参见<xref linkend="sec-multipath-best-practice-config" xrefstyle="SecTitleOnPage"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-conf-file-syntax">
+   <title><filename>multipath.conf</filename> 语法</title>
+   <para>
+    <filename>/etc/multipath.conf</filename> 文件使用由部分、子部分和选项/值对组成的层次结构。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      空格会将令牌分隔开。多个连续的空格字符将压缩成一个空格，除非用引号将它们括住（参见下文）。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      井号 (<literal>#</literal>) 和感叹号 (<literal>!</literal>) 字符会使系统将行中的其余内容视为注释而忽略。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      部分和子部分在同一行中以部分名称和左大括号 (<literal>{</literal>) 开头，并在独立的一行中以右大括号 (<literal>}</literal>) 结尾。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      选项和值编写在一行中。不支持续行。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      选项和部分名称必须是关键字。<systemitem>multipath.conf(5)</systemitem> 中阐述了允许的关键字。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      值可以用双引号 (<literal>"</literal>) 括住。如果值包含空格或注释字符，则必须用引号将其括住。值中的双引号字符由一对双引号 (<literal>""</literal>) 表示。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      某些选项的值是 POSIX 正则表达式（请参见 <systemitem>regex(7)</systemitem>）。它们区分大小写且位置不固定，因此，“<literal>bar</literal>”会与“<literal>rhabarber</literal>”匹配，但不会与“Barbie”匹配。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    以下示例展示了相应语法：
+   </para>
+<screen>
+section {
+    subsection {
+        option1 value
+        option2      "complex value!"
+        option3    "value with ""quoted"" word"
+    } ! subsection end
+} # section end
+    </screen>
+   <sect3 xml:id="sec-multipath-conf-file-precedence">
+    <title>其他配置文件和优先级规则</title>
+    <para>
+     除了 <filename>/etc/multipath.conf</filename>，工具会读取与 <filename>/etc/multipath.conf.d/*.conf</filename> 模式匹配的文件。其他文件遵循与 <filename>/etc/multipath.conf</filename> 相同的语法规则。部分和选项可以多次出现。如果在多个文件中或者在同一文件的多行中设置了<emphasis>同一个部分的同一个选项</emphasis>，则以最后一个值为准。在 <filename>multipath.conf</filename> 的各个部分之间，适用不同的优先级规则。请参见下文。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-conf-file-sections">
+   <title><filename>multipath.conf</filename> 中的各个部分</title>
+   <para>
+    <filename>/etc/multipath.conf</filename> 文件由下列部分构成。某些选项可以出现在多个部分中。有关详细信息，请参见 <systemitem>multipath.conf(5)</systemitem>。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>defaults</term>
+     <listitem>
+      <para>
+       一般默认设置。
+      </para>
+      <important>
+       <title>覆盖内置设备属性</title>
+       <para>
+        内置硬件特定设备属性优先于 <literal>defaults</literal> 部分中的设置。因此，所需的更改必须在 <literal>devices</literal> 或 <literal>overrides</literal> 部分中进行。
+       </para>
+      </important>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>blacklist</term>
+     <listitem>
+      <para>
+       列出要忽略的设备。请参见<xref linkend="sec-multipath-blacklist" xrefstyle="HeadingOnPage"/>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>blacklist_exceptions</term>
+     <listitem>
+      <para>
+       列出要进行多路径处理的设备，即使它们与黑名单匹配。请参见<xref linkend="sec-multipath-blacklist" xrefstyle="HeadingOnPage"/>。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>devices</term>
+     <listitem>
+      <para>
+       特定于存储控制器的设置。此部分是 <literal>device</literal> 子部分的集合。此部分中的值会覆盖 <filename>defaults</filename> 部分中相同选项的值以及 <systemitem>multipath-tools</systemitem> 的内置设置。
+      </para>
+      <para>
+       <literal>devices</literal> 部分中的 <literal>device</literal> 项将与使用正则表达式的设备的供应商和产品进行匹配。这些项将“合并”，为设备设置匹配部分中的所有选项。如果在多个匹配 <literal>device</literal> 部分中设置了相同的选项，则以最后一个设备项为准，即使它不如之前的项那么“符合情况”。此规则还适用于匹配项在不同配置文件中的情况（请参见<xref linkend="sec-multipath-conf-file-precedence"/>）。在以下示例中，设备 <literal>SOMECORP STORAGE</literal> 将使用 <literal>fast_io_fail_tmo 15</literal>。
+      </para>
+<screen>
+devices {
+    device {
+        vendor SOMECORP
+        product STOR
+        fast_io_fail_tmo 10
+    }
+    device {
+        vendor SOMECORP
+        product .*
+        fast_io_fail_tmo 15
+    }
+}</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipaths</term>
+     <listitem>
+      <para>
+       单个多路径设备的设置。此部分是 <literal>multipath</literal> 子部分的列表。值会覆盖 <literal>defaults</literal> 和 <literal>devices</literal> 部分。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>overrides</term>
+     <listitem>
+      <para>
+       覆盖所有其他部分中的值的设置。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-conf-file-apply">
+   <title>应用 <filename>multipath.conf</filename> 修改</title>
+   <para>
+    要应用配置更改，请运行:
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd reconfigure</screen>
+   <para>
+    请不要忘记与 initramfs 中的配置同步。请参见 <xref linkend="sec-multipath-initrd-sync"/>。
+   </para>
+   <warning>
+    <title>不要使用 <command>multipath</command> 应用设置</title>
+    <para>
+     当 <command>multipath</command> 正在运行时，请不要使用 <command>multipathd</command> 命令应用新设置。否则可能导致设置不一致甚至损坏。
+    </para>
+   </warning>
+   <note xml:id="sec-multipath-conf-file-verify">
+    <title>校验已修改的设置</title>
+    <para>
+     可以在应用已修改的设置之前先对其进行测试，方法是运行：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -d -v2</screen>
+    <para>
+     此命令会显示要使用建议的拓扑创建的新映射，但不显示是否会去除/刷新映射。要获得更多信息，请以更高的详细程度运行：
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -d -v3 2&gt;&amp;1 | less</screen>
+   </note>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-policies-default">
+  <title>配置故障转移、排队及故障回复的策略</title>
+
+  <para>
+   多路径 I/O 旨在于存储系统与服务器之间提供连接容错。所需的默认行为取决于服务器是独立服务器还是高可用性群集中的一个节点。
+  </para>
+
+  <para>
+   本节介绍用于实现容错的最重要 <systemitem>multipath-tools</systemitem> 配置参数。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>polling_interval</term>
+    <listitem>
+     <para>
+      对路径设备进行状态检查的时间间隔（以秒为单位）。默认值为 5 秒。将按此时间间隔检查有故障的设备。对于状况良好的设备，最多可将时间间隔增加到 <literal>max_polling_interval</literal> 秒。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>detect_checker</term>
+    <listitem>
+     <para>
+      如果此选项设置为 <literal>yes</literal>（默认值，建议采用），<command>multipathd</command> 会自动检测最佳路径检查算法。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>path_checker</term>
+    <listitem>
+     <para>
+      用于检查路径状态的算法。如果您需要启用该检查程序，请按如下所示禁用 <literal>detect_checker</literal>：
+     </para>
+<screen>
+defaults {
+	  detect_checker no
+}</screen>
+     <para>
+      下面仅列出了最重要的算法。有关完整的算法列表，请参见 <systemitem>multipath.conf(5)</systemitem>。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>tur</term>
+       <listitem>
+        <para>
+         发送 TEST UNIT READY 命令。对于支持 ALUA 的 SCSI 设备，这是默认设置。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>directio</term>
+       <listitem>
+        <para>
+         使用异步 I/O (aio) 读取设备扇区。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>rdac</term>
+       <listitem>
+        <para>
+         适用于 NetAPP E 系列和相似阵列的设备特定检查程序。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>none</term>
+       <listitem>
+        <para>
+         不执行路径检查。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>checker_timeout</term>
+    <listitem>
+     <para>
+      如果设备在给定时间内未响应路径检查程序命令，则将其视为发生故障。默认值是设备内核的 SCSI 命令超时（通常为 30 秒）。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>fast_io_fail_tmo</term>
+    <listitem>
+     <para>
+      如果在 SCSI 传输层上检测到错误（例如在光纤通道远程端口上），内核传输层将在传输恢复前等待此选项所指定的时长（以秒为单位）。这段时间过后，路径设备将会失败并显示为“传输脱机”状态。这对多路径非常有用，因为它允许对经常发生的一类错误快速进行路径故障转移。该值必须与在相应结构中进行重新配置所需的典型时间间隔相匹配。默认值 5 秒对光纤通道而言很合适。iSCSI 等其他传输可能需要更长的超时。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>dev_loss_tmo</term>
+    <listitem>
+     <para>
+      如果 SCSI 传输端点（例如光纤通道远程端口）再也无法访问，内核会在端口再次出现前等待此选项所指定的时长（以秒为单位），这段时间过后，内核会永久去除 SCSI 设备节点。去除设备节点是一项复杂的操作，容易产生竞态条件或死锁，最好避免此类操作。因此，我们建议将此选项设置为较高的值。支持特殊值 <literal>infinity</literal>。默认值为 10 分钟。为避免死锁状态，<command>multipathd</command> 会确保 I/O 排队（请参见 <literal>no_path_retry</literal>）在 <literal>dev_loss_tmo</literal> 到期之前停止。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>no_path_retry</term>
+    <listitem>
+     <para>
+      决定当给定多路径映射的所有路径都发生故障时会发生什么情况。可能的值有：
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>fail</term>
+       <listitem>
+        <para>
+         使多路径映射上的 I/O 失败。这会导致上层（例如挂载的文件系统）发生 I/O 错误。受影响的文件系统（也可能是整个主机）将进入降级模式。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>queue</term>
+       <listitem>
+        <para>
+         多路径映射上的 I/O 在设备映射程序层中排队，并在路径设备重新可用时发送到设备。这是避免丢失数据的最安全选项，但如果路径设备长时间不能恢复，使用该值可能会造成负面影响。从设备读取数据的进程将会挂起并处于不间断休眠 (<literal>D</literal>) 状态。排队的数据会占用内存，而被占用的内存不可供进程使用。最终，内存将会耗尽。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><replaceable>N</replaceable></term>
+       <listitem>
+        <para>
+         <replaceable>N</replaceable> 是一个正整数。使映射设备保持排队模式 <replaceable>N</replaceable> 个巡回检测间隔。在这段时间消逝后，<command>multipathd</command> 将使映射设备失败。如果 <literal>polling_interval</literal> 为 5 秒且 <literal>no_path_retry</literal> 为 6，则 <command>multipathd</command> 会将 I/O 排队大约 6 * 5 = 30 秒，然后使映射设备上的 I/O 失败。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>flush_on_last_del</term>
+    <listitem>
+     <para>
+      如果设置为 <literal>yes</literal> 并且映射的所有路径设备均已删除（与只是失败不同），系统在去除映射前，会使映射内的所有 I/O 失败。默认值为 <literal>no</literal>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>deferred_remove</term>
+    <listitem>
+     <para>
+      如果设置为 <literal>yes</literal> 并且映射的所有路径设备均已删除，系统会等待占有者关闭映射设备的文件描述符，之后才刷新并去除映射设备。如果路径在最后一个占有者关闭映射之前重新出现，则延迟去除操作将会取消。默认值为 <literal>no</literal>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry xml:id="vle-failback">
+    <term>failback</term>
+    <listitem>
+     <para>
+      如果不活动路径组中发生故障的路径设备恢复，<command>multipathd</command> 会重新评估所有路径组的路径组优先级（请参见<xref linkend="sec-multipath-grouping"/>）。重新评估后，优先级最高的路径组有可能会成为当前不活动路径组之一。此参数决定在此状况下将发生什么情况。
+     </para>
+     <important>
+      <title>遵循供应商的建议</title>
+      <para>
+       最佳故障回复策略取决于存储设备的属性。因此，强烈建议联系存储装置供应商来确定 <option>failback</option> 设置。
+      </para>
+     </important>
+     <variablelist>
+      <varlistentry>
+       <term>manual</term>
+       <listitem>
+        <para>
+         除非管理员运行 <command>multipathd
+         switchgroup</command>，否则什么也不会发生（请参见<xref linkend="sec-multipath-mpiotools-multipathd"/>）。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>immediate</term>
+       <listitem>
+        <para>
+         立即激活优先级最高的路径组。这通常可以提升性能，特别是在独立的服务器上，但它不应该用于阵列，因为在阵列上改变路径组代价更高。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>followover</term>
+       <listitem>
+        <para>
+         与 <literal>immediate</literal> 相似，但仅在刚变为活动状态的路径是其路径组中唯一一个状态良好的路径时，才执行故障回复。此选项对群集配置很有用，可以防止某个节点在另一个节点先请求了故障转移时自动故障回复。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><replaceable>N</replaceable></term>
+       <listitem>
+        <para>
+         <replaceable>N</replaceable> 是一个正整数。在激活优先级最高的路径组之前，等待 <replaceable>N</replaceable> 个巡回检测间隔。如果在此期间内优先级再次变化，则等待期重新开始。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>eh_deadline</term>
+    <listitem>
+     <para>
+      设置一个近似值，指定在设备无响应，SCSI 命令超时且无错误响应的情况下，处理 SCSI 错误所花费时间的上限（以秒为单位）。截止期限过后，内核将执行一次完整的 HBA 重置。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   修改 <filename>/etc/multipath.conf</filename> 文件后，应用您的设置（请参见<xref linkend="sec-multipath-conf-file-apply"/>）。
+  </para>
+
+  <sect2 xml:id="sec-multipath-policies-standalone">
+   <title>独立服务器上的排队策略</title>
+   <para>
+    如果为独立服务器配置了多路径 I/O，设置为 <literal>queue</literal> 值的 <literal>no_path_retry</literal> 可使服务器操作系统在尽可能长的时间内不收到 I/O 错误。它会使消息排队，直至发生多路径故障转移。如果不需要“无限期”排队（见上文），请选择一个您认为足够高的数值，以便存储路径能在正常情况下恢复（见上文）。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-policies-cluster">
+   <title>群集服务器上的排队策略</title>
+   <para>
+    在为高可用性群集中的节点配置多路径 I/O 时，您需要让多路径报告 I/O 故障，以触发资源故障转移而不是等待多路径故障转移被解决。在群集环境中，您必须修改 <literal>no_path_retry
+    </literal> 设置，以确保当与存储系统断开连接时，群集节点会收到与群集验证进程相关的 I/O 错误（建议为 Heartbeat 容错的 50%）。此外，您还希望将多路径 <literal>failback</literal> 设为 <literal>manual</literal> 或 <literal>followover</literal>，以免因路径失败而造成资源的乒乓效应。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-grouping">
+  <title>配置路径分组和优先级</title>
+
+  <para>
+   多路径映射中的路径设备会划分到<emphasis>路径组</emphasis>中，也称为<emphasis>优先级组</emphasis>。任何时间只有一个路径组接收 I/O。<command>multipathd</command> 可向路径组指派<emphasis>优先级</emphasis>。在包含活动路径的路径组中，根据为映射配置的故障回复策略激活优先级最高的组（请参见<xref linkend="sec-multipath-policies-default" xrefstyle="SecTitleOnPage"/>）。路径组的优先级是路径组中活动路径设备的优先级的平均值。路径设备的优先级是根据设备属性计算出的整数值（请参见下方 <literal>prio</literal> 选项的说明）。
+  </para>
+
+  <para>
+   本节介绍了与确定优先级和进行路径分组相关的 <filename>multipath.conf</filename> 配置参数。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>path_grouping_policy</term>
+    <listitem>
+     <para>
+      指定用于将路径合并成组的方法。此处仅列出最重要的策略；有关其他不常使用的值，请参见 <systemitem>multipath.conf(5)</systemitem>。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>failover</term>
+       <listitem>
+        <para>
+         每个路径组一个路径。对于传统的“主动/被动”存储阵列，此设置很有用。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>multibus</term>
+       <listitem>
+        <para>
+         一个路径组中的所有路径。对于传统“主动/主动”阵列，此设置很有用。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>group_by_prio</term>
+       <listitem>
+        <para>
+         将路径优先级相同的路径设备分为一组。对于支持非对称访问状态（例如 ALUA）的新式阵列，此选项很有用。<command>multipathd</command> 设置的优先级组与 <literal>alua</literal> 或 <literal>sysfs</literal> 优先级算法结合使用时，将与存储阵列通过 ALUA 相关 SCSI 命令报告的主要目标端口组相匹配。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <para>
+      使用相同的策略名称时，可以通过以下命令临时更改多路径映射的路径分组策略：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -p <replaceable>POLICY_NAME</replaceable> <replaceable>MAP_NAME</replaceable></screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>marginal_pathgroups</term>
+    <listitem>
+     <para>
+      如果设置为 <literal>on</literal> 或 <literal>fpin</literal>，“边际”路径设备存储在单独的路径组中。这与使用中的路径分组算法无关。请参见 <xref linkend="sec-multipath-marginal" xrefstyle="SecTitleOnPage"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>detect_prio</term>
+    <listitem>
+     <para>
+      如果设置为 <literal>yes</literal>（默认值，建议采用），<command>multipathd</command> 会自动检测用于为存储设备设置优先级的最佳算法，并忽略 <literal>prio</literal> 设置。在实际情况中，这意味着在检测到 ALUA 支持时使用 <literal>sysfs</literal> 优先级算法。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>prio</term>
+    <listitem>
+     <para>
+      确定获取路径设备优先级的方法。如果您覆盖此设置，请按如下方式禁用 <literal>detect_prio</literal>：
+     </para>
+<screen>
+defaults {
+	  detect_prio no
+}
+	</screen>
+     <para>
+      下面仅列出了最重要的方法。系统还提供了其他几种方法，主要用于支持旧式硬件。有关完整的列表，请参见 <systemitem>multipath.conf(5)</systemitem>。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>alua</term>
+       <listitem>
+        <para>
+         使用 SCSI-3 ALUA 访问状态获取路径优先级值。可选 <literal>exclusive_pref_bit</literal> 参数可用于更改设置了 ALUA“首选主要目标端口组”(PREF) 位的设备的行为：
+        </para>
+<screen>
+	prio alua
+	prio_args exclusive_pref_bit
+	      </screen>
+        <para>
+         如果设置了此选项，“首选”路径将获得优先于其他活动/优化路径的优先级。否则，将会为所有活动/优化路径指派相同的优先级。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>sysfs</term>
+       <listitem>
+        <para>
+         与 <literal>alua</literal> 类似，但它不向设备发送 SCSI 命令，而是从 <systemitem>sysfs</systemitem> 获取访问状态。这会使 I/O 负载比 <literal>alua</literal> 要少，但并不适用于所有支持 ALUA 的存储阵列。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>const</term>
+       <listitem>
+        <para>
+         对所有路径使用常量值。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>path_latency</term>
+       <listitem>
+        <para>
+         测量路径设备上的 I/O 延迟（从 I/O 提交到完成的时间），并为低延迟设备指派较高的优先级。有关详细信息，请参见<systemitem>multipath.conf(5)</systemitem>。该算法仍处于实验阶段。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>weightedpath</term>
+       <listitem>
+        <para>
+         根据名称、序列号、Host:Bus:Target:Lun ID (HBTL) 或光纤通道 WWN 为路径指派优先级。优先级值不会随时间推移而发生变化。该方法需要 <literal>prio_args</literal> 参数，有关细节，请参见 <systemitem>multipath.conf(5)</systemitem>。例如：
+        </para>
+<screen>
+	prio weightedpath
+	prio_args "hbtl 2:.*:.*:.* 10 hbtl 3:.*:.*:.* 20 hbtl .* 1"
+	      </screen>
+        <para>
+         这会为 SCSI 主机 3 上的设备指派比 SCSI 主机 2 上的设备更高的优先级，并为所有其他设备指派较低的优先级。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>prio_args</term>
+    <listitem>
+     <para>
+      一些 <literal>prio</literal> 算法需要额外的参数。这些参数在此选项中指定，其语法取决于算法。请参见上文。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>hardware_handler</term>
+    <listitem>
+     <para>
+      内核在切换路径组时用来激活路径设备的内核模块的名称。此选项对最新的内核没有影响，因为系统会自动检测硬件处理程序。请参见 <xref linkend="sec-multipath-hardware-handlers" xrefstyle="SecTitleOnPage"/>。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>path_selector</term>
+    <listitem>
+     <para>
+      用于在活动路径组的路径之间平衡负载的内核模块名称。可用的选项取决于内核配置。由于历史原因，在 <filename>multipath.conf</filename> 中，名称必须一律用引号括住并后跟一个“0”，如下所示：
+     </para>
+<screen>    path_selector "queue-length 0"</screen>
+     <variablelist>
+      <varlistentry>
+       <term>service-time</term>
+       <listitem>
+        <para>
+         估算在所有路径上完成待处理 I/O 所需的时间，并选择值最低的路径。此为默认设置。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>historical-service-time</term>
+       <listitem>
+        <para>
+         根据历史服务时间（保持移动平均值）和未完成请求的数量估算未来的服务时间。估算在所有路径上完成待处理 I/O 所需的时间，并选择值最低的路径。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>queue-length</term>
+       <listitem>
+        <para>
+         选择当前待处理 I/O 请求数量最少的路径。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>round-robin</term>
+       <listitem>
+        <para>
+         采用循环方式切换路径。可以使用选项 <literal>rr_min_io_rq</literal> 和 <literal>rr_weight</literal> 调整在切换到下一个路径之前提交到路径的请求数量。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>io-affinity</term>
+       <listitem>
+        <para>
+         此路径选择器目前不适用于 <systemitem>multipath-tools</systemitem>。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   修改 <filename>/etc/multipath.conf</filename> 文件后，应用您的设置（请参见<xref linkend="sec-multipath-conf-file-apply" xrefstyle="SecTitleOnPage"/>）。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-multipath-select-devices">
+  <title>选择要用于多路径的设备</title>
+
+  <para>
+   在具有多路径设备的系统上，您可能希望避免在某些设备（通常是本地磁盘）上设置多路径映射。<systemitem>multipath-tools</systemitem> 提供了多种方法来配置应视为多路径设备的设备。
+  </para>
+
+  <note>
+   <title>本地磁盘上的多路径</title>
+   <para>
+    一般而言，在本地磁盘的基础上仅使用单个设备设置“降级”多路径映射，则不会出现问题。系统可正常工作，且不需要进行额外的配置。然而，一些管理员认为这会造成混乱，或者普遍反对这种不必要的多路径。另外，多路径层也会造成轻微的性能开销。另请参见<xref linkend="sec-multipath-planning-type-noroot"/>。
+   </para>
+  </note>
+
+  <para>
+   修改 <filename>/etc/multipath.conf</filename> 文件后，应用您的设置（请参见<xref linkend="sec-multipath-conf-file-apply"/>）。
+  </para>
+
+  <sect2 xml:id="sec-multipath-blacklist">
+   <title><filename>multipath.conf</filename> 中的 <literal>blacklist</literal> 部分</title>
+   <para>
+    <filename>/etc/multipath.conf</filename> 文件可能包含 <literal>blacklist</literal> 部分，其中会列出 <command>multipathd</command> 和 <command>multipath</command> 应该忽略的所有设备。以下示例展示了可用于排除设备的方法：
+   </para>
+   <informalexample>
+<screen>blacklist {
+    wwid 3600605b009e7ed501f0e45370aaeb77f <co xml:id="mp-co-bl-wwid"/>
+    device {  <co xml:id="mp-co-bl-device"/>
+        vendor ATA
+        product .*
+    }
+    protocol scsi:sas <co xml:id="mp-co-bl-prot"/>
+    property SCSI_IDENT_LUN_T10 <co xml:id="mp-co-bl-prop"/>
+    devnode "!^dasd[a-z]*" <co xml:id="mp-co-bl-devnode"/>
+}</screen>
+    <calloutlist>
+     <callout arearefs="mp-co-bl-wwid">
+      <para>
+       <literal>wwid</literal> 项适合用于排除特定设备，例如根磁盘。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-device">
+      <para>
+       此 <literal>device</literal> 部分排除了所有 ATA 设备（<literal>product</literal> 的正则表达式会匹配任何内容）。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-prot">
+      <para>
+       通过 <literal>protocol</literal> 排除可以排除使用特定总线类型（此处为 SAS）的设备。其他常用协议值为 <literal>scsi:fcp</literal>、<literal>scsi:iscsi</literal> 和 <literal>ccw</literal>。有关更多信息，请参见 <systemitem>multipath.conf(5)</systemitem>。要查看系统中的路径正在使用的协议，请运行以下命令：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd show paths format "%d %P"</screen>
+      <para>
+       从 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15 SP1 和 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 12 SP5 开始支持此格式。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-prop">
+      <para>
+       此 <literal>property</literal> 项会排除具有特定 udev 属性的设备（无论该属性的值是什么）。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-devnode">
+      <para>
+       建议仅对使用正则表达式的设备类采用通过 <literal>devnode</literal> 排除设备的方法，如此示例中所示，它排除了除 DASD 设备之外的所有设备。不建议对单个设备（如 <filename>sda</filename>）使用此方法，因为设备节点名称不是永久的。
+      </para>
+      <para>
+       该示例展示了仅在 <literal>blacklist</literal> 和 <literal>blacklist_exceptions</literal> 部分支持的特殊语法：在正则表达式前加上感叹号 (<literal>!</literal>) 会否定该匹配。请注意，感叹号必须位于双引号内。
+      </para>
+     </callout>
+    </calloutlist>
+   </informalexample>
+   <para>
+    默认情况下，<systemitem>multipath-tools</systemitem> 会忽略除 SCSI、DASD 或 NVMe 以外的所有设备。从技术上讲，内置的 devnode 排除列表就是下面这个被否定的正则表达式：
+   </para>
+<screen>    devnode !^(sd[a-z]|dasd[a-z]|nvme[0-9])</screen>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-blacklist-exceptions">
+   <title><filename>multipath.conf</filename> 中的 <literal>blacklist exceptions</literal> 部分</title>
+   <para>
+    有时，需要仅将非常具体的设备配置为用于多路径。在这种情况下，需默认排除设备，并将应成为多路径映射一部分的设备定义为例外。<literal>blacklist_exceptions</literal> 部分就用于实现此目的。该部分的典型用法如下方示例所示，该示例排除了所有存储设备，产品字符串为“NETAPP”的存储设备除外：
+   </para>
+<screen>blacklist {
+     wwid .*
+}
+blacklist_exceptions {
+     device {
+         vendor ^NETAPP$
+         product .*
+     }
+}</screen>
+   <para>
+    <literal>blacklist_exceptions</literal> 部分支持上文所述适用于 <literal>blacklist</literal> 部分的所有方法。
+   </para>
+   <para>
+    <literal>blacklist_exceptions</literal> 中的 <literal>property</literal> 指令是强制性的，因为每个设备<emphasis>必须</emphasis>至少具有一个“允许的”udev 属性，才能被视为多路径的路径设备（属性的值无关紧要）。<literal>property</literal> 的内置默认值为
+   </para>
+<screen>    property (SCSI_IDENT_|ID_WWN)</screen>
+   <para>
+    系统只会包含至少具有一个与此正则表达式匹配的 udev 属性的设备。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-device-select-other">
+   <title>影响选择设备的其他选项</title>
+   <para>
+    除了 <literal>blacklist</literal> 选项外，<filename>/etc/multipath.conf</filename> 中的数个其他设置也会影响哪些设备可视为多路径设备。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>find_multipaths</term>
+     <listitem>
+      <para>
+       此选项控制首次遇到未排除的设备时 <command>multipath</command> 和 <command>multipathd</command> 的行为。可能的值有：
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>greedy</term>
+        <listitem>
+         <para>
+          将 <filename>/etc/multipath.conf</filename> 中的 <literal>blacklist</literal> 未排除的所有设备视为多路径设备。这是 SUSE Linux Enterprise 的默认设置。如果此设置处于活动状态，则防止将设备添加到多路径映射的唯一方法是将它们设置为排除。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>strict</term>
+        <listitem>
+         <para>
+          排除所有设备，即便它不在 <filename>/etc/multipath.conf</filename> 的 <literal>blacklist</literal> 部分中，除非设备的 WWID 列于 <filename>/etc/multipath/wwids</filename> 文件中。用户需要手动维护 WWID 文件（请参见下面的注释）。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>yes</term>
+        <listitem>
+         <para>
+          如果设备满足 <literal>strict</literal> 的条件，或系统中至少存在一个拥有相同 WWID 的其他设备，则会将设备视为多路径设备。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>smart</term>
+        <listitem>
+         <para>
+          首次遇到新的 WWID 时，会将其暂时标记为多路径设备。<command>multipathd</command> 会等待一段时间，看看是否会有拥有相同 WWID 的其他路径出现。如果这类路径出现，则会照常设置多路径映射。如果没有出现，当等待超时后，这个设备就会作为非多路径设备释放到系统中。使用选项 <option>find_multipaths_timeout</option> 可以配置该超时。
+         </para>
+         <para>
+          此选项依赖于 <command>systemd</command> 功能，这些功能仅在 SUSE Linux Enterprise Server 15 上提供。
+         </para>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+      <note>
+       <title>维护 <filename>/etc/multipath/wwids</filename></title>
+       <para>
+        <systemitem>multipath-tools</systemitem> 会在 <filename>/etc/multipath/wwids</filename> 文件（“WWID 文件”）中保留之前所设置多路径映射的记录。WWID 列于此文件中的设备会被视为多路径设备。根据 <option>find_multipaths</option> 的任何值（<literal>greedy</literal> 除外）选择多路径设备时，该文件都必不可少。
+       </para>
+       <para>
+        如果 <option>find_multipaths</option> 设置为 <literal>yes</literal> 或 <literal>smart</literal>，<command>multipathd</command> 会在设置新映射后向 <filename>/etc/multipath/wwids</filename> 添加 WWID，以便日后能够更快地检测到这些映射。
+       </para>
+       <para>
+        可以手动修改 WWID 文件：
+       </para>
+       <informalexample>
+<screen>
+<prompt>&gt; </prompt><command>sudo</command> multipath -a 3600a098000aad1e3000064e45f2c2355 <co xml:id="mp-co-wwid-a"/>
+<prompt>&gt; </prompt><command>sudo</command> multipath -w /dev/sdf <co xml:id="mp-co-wwid-w"/>
+       </screen>
+        <calloutlist>
+         <callout arearefs="mp-co-wwid-a">
+          <para>
+           此命令会向 <filename>/etc/multipath/wwids</filename> 添加给定 WWID。
+          </para>
+         </callout>
+         <callout arearefs="mp-co-wwid-w">
+          <para>
+           此命令会去除给定设备的 WWID。
+          </para>
+         </callout>
+        </calloutlist>
+       </informalexample>
+       <para>
+        在 <literal>strict</literal> 模式下，这是添加新多路径设备的唯一方法。修改 WWID 文件后，运行 <command>multipathd reconfigure</command> 以应用更改。我们建议在应用对 WWID 文件的更改后重构建 initramfs（请参见<xref linkend="sec-multipath-initrd-sync"/>）。
+       </para>
+      </note>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>allow_usb_devices</term>
+     <listitem>
+      <para>
+       如果此选项设置为 <literal>yes</literal>，则会考虑将 USB 存储设备用于多路径。默认值为 <literal>no</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-names">
+  <title>多路径设备名称和 WWID</title>
+
+  <para>
+   <command>multipathd</command> 和 <command>multipath</command> 会在内部使用 WWID 来识别设备。WWID 还会用作默认的映射名称。为了方便起见，<systemitem>multipath-tools</systemitem> 支持为多路径设备指派更简单、更容易记住的名称。
+  </para>
+
+  <sect2 xml:id="sec-multipath-conf-file-wwid">
+   <title>WWID 和设备标识</title>
+   <para>
+    多路径操作必须能够可靠地检测到代表同一存储卷的各路径的设备。为实现此目的，<systemitem>multipath-tools</systemitem> 使用了设备的全球通用标识 (WWID)（有时也称为通用唯一 ID (UUID) 或唯一 ID（UID — 请勿与“用户 ID”混淆））。映射设备的 WWID 一律与其路径设备的 WWID 相同。
+   </para>
+   <para>
+    默认情况下，系统会从 sysfs 文件系统读取设备属性或使用特定的 I/O 命令，根据设备的 udev 属性（在 udev 规则中确定）推断路径设备的 WWID。要查看设备的 udev 属性，请运行以下命令：
+   </para>
+<screen><prompt>&gt; </prompt>udevadm info /dev/<replaceable>sdx</replaceable></screen>
+   <para>
+    <systemitem>multipath-tools</systemitem> 用于派生 WWID 的 udev 属性如下：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      对于 SCSI 设备，使用 <literal>ID_SERIAL</literal>（请勿将此与设备的“序列号”混淆）
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      对于 DASD 设备，使用 <literal>ID_UID</literal>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      对于 NVMe 设备，使用 <literal>ID_WWN</literal>
+     </para>
+    </listitem>
+   </itemizedlist>
+   <warning>
+    <title>避免更改 WWID</title>
+    <para>
+     无法更改正在使用的多路径映射的 WWID。如果所映射路径设备的 WWID 因配置更改而发生改变，则需要销毁该映射，并使用新的 WWID 设置新映射。如果旧映射正被使用，则无法执行此操作。在极端情况下，WWID 更改可能会导致数据损坏。因此，必须<emphasis>严格避免</emphasis>应用会导致映射 WWID 更改的配置更改。
+    </para>
+    <para>
+     在 <filename>/etc/multipath.conf</filename> 中启用 <literal>uid_attrs</literal> 选项可以做到这一点，请参见<xref linkend="sec-multipath-conf-misc" xrefstyle="SecTitleOnPage"/>。
+    </para>
+   </warning>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-alias">
+   <title>为多路径映射设置别名</title>
+   <para>
+    可以在 <filename>/etc/multipath.conf</filename> 的 <literal>multipaths</literal> 部分中设置任意映射名称，如下如下：
+   </para>
+<screen>multipaths {
+    multipath {
+        wwid 3600a098000aad1e3000064e45f2c2355
+        alias postgres
+    }
+}</screen>
+   <para>
+    别名较为易懂，但需要将它们分别指派给每个映射，这在大型系统上可能很麻烦。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-user-friendly-names">
+   <title>使用自动生成的用户友好名称</title>
+   <para>
+    <systemitem>multipath-tools</systemitem> 还支持自动生成的别名，即所谓的“用户友好名称”。别名的命名方案遵循以下模式：mpath<replaceable>INDEX</replaceable>，其中 <replaceable>INDEX</replaceable> 为小写字母（以 <literal>a</literal> 开头）。因此，第一个自动生成的别名为 <literal>mpatha</literal>，下一个为 <literal>mpathb</literal>、然后是 <literal>mpathc</literal>，直至 <literal>mpathz</literal>。之后是 <literal>mpathaa</literal>、<literal>mpathab</literal> 等，以此类推。
+   </para>
+   <para>
+    映射名称只有在永久存在时才有用。<systemitem>multipath-tools</systemitem> 会在 <filename>/etc/multipath/bindings</filename> 文件（“bindings 文件”）中记录指派的名称。创建新映射时，首先会在此文件中查找 WWID。如果未找到，则会为映射指派可用性最低的用户友好名称。
+   </para>
+   <para>
+    <xref linkend="sec-multipath-alias"/>中所述的明确别名优先于用户友好名称。
+   </para>
+   <para>
+    <filename>/etc/multipath.conf</filename> 中的以下选项会影响用户友好名称：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>user_friendly_names</term>
+     <listitem>
+      <para>
+       如果设置为 <literal>yes</literal>，则会指派并使用用户友好名称。否则，将使用 WWID 作为映射名称，除非配置了别名。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>alias_prefix</term>
+     <listitem>
+      <para>
+       用于创建用户友好名称的前缀，默认为 <literal>mpath</literal>。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <warning>
+    <title>高可用性群集中的映射名称</title>
+    <para>
+     对于群集操作，设备名称必须在群集的所有节点间都相同。<systemitem>multipath-tools</systemitem> 配置必须在节点之间保持同步。如果使用 <literal>user_friendly_names</literal>，<command>multipathd</command> 可以在运行时修改 <filename>/etc/multipath/bindings</filename> 文件。此类修改必须动态复制到所有节点。这同样适用于 <filename>/etc/multipath/wwids</filename>（请参见<xref linkend="sec-multipath-device-select-other" xrefstyle="SecTitleOnPage"/>）。
+    </para>
+   </warning>
+   <note>
+    <title>在运行时更改映射名称</title>
+    <para>
+     可以在运行时更改映射名称。使用本节中所述的任何方法以及运行 <command>multipathd
+     reconfigure</command> 都可更改映射名称，而不干扰系统运行。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-referring">
+   <title>引用多路径映射</title>
+   <para>
+    从技术上讲，多路径映射是设备映射程序设备，其名称一般采用 <filename>/dev/dm-<replaceable>n</replaceable></filename> 格式，其中 <replaceable>n</replaceable> 为整数。这些名称不是永久存在的。<emphasis>切勿</emphasis>使用它们引用多路径映射。<command>udev</command> 创建指向这些设备的各种符号链接，这些链接更适合作为永久引用。这些链接的不同之处在于它们不会随特定配置的更改而改变。下面的典型示例展示了所有指向同一设备的各种符号链接。
+   </para>
+   <informalexample>
+<screen>/dev/disk/by-id/dm-name-mpathb<co xml:id="mp-ref-dm-name"/> -&gt; ../../dm-1
+/dev/disk/by-id/dm-uuid-mpath-3600a098000aad73f00000a3f5a275dc8<co xml:id="mp-ref-dm-uuid"/> -&gt; ../../dm-1
+/dev/disk/by-id/scsi-3600a098000aad73f00000a3f5a275dc8<co xml:id="mp-ref-scsi"/> -&gt; ../../dm-1
+/dev/disk/by-id/wwn-0x600a098000aad73f00000a3f5a275dc8<co xml:id="mp-ref-wwn"/> -&gt; ../../dm-1
+/dev/mapper/mpathb<co xml:id="mp-ref-mapper"/> -&gt; ../dm-1</screen>
+    <calloutlist>
+     <callout arearefs="mp-ref-dm-name mp-ref-mapper">
+      <para>
+       这两种链接使用映射名称来引用映射。因此，如果映射名称更改（例如，如果您启用或禁用用户友好名称），链接也会更改。
+      </para>
+     </callout>
+     <callout arearefs="mp-ref-dm-uuid">
+      <para>
+       此链接使用设备映射程序 UUID，即 <systemitem>multipath-tools</systemitem> 使用的 WWID 并在前面加上字符串 <literal>dm-uuid-mpath-</literal>。它与映射名称无关。
+      </para>
+      <para>
+       要确保<emphasis>仅引用多路径设备</emphasis>，最好采用设备映射程序 UUID。例如，<filename>/etc/lvm/lvm.conf</filename> 中的以下一行拒绝除多路径映射之外的所有设备：
+      </para>
+<screen>filter = [ "a|/dev/disk/by-id/dm-uuid-mpath-.*|", "r|.*|" ]</screen>
+     </callout>
+     <callout arearefs="mp-ref-scsi mp-ref-wwn">
+      <para>
+       这些链接通常指向路径设备。多路径设备会取代这些链接，因为该设备具有更高的 udev 链接优先级（请参见 <systemitem>udev(7)</systemitem>）。映射销毁或多路径关闭时，它们仍然存在并改为指向路径设备之一。这提供了一种通过 WWID 引用设备的方法，无论多路径是否处于活动状态。
+      </para>
+     </callout>
+    </calloutlist>
+   </informalexample>
+   <para>
+    对于 <command>kpartx</command> 工具创建的多路径映射上的<emphasis role="bold">分区</emphasis>，存在类似的符号链接，它们源自父设备名称或 WWID 和分区号：
+   </para>
+   <informalexample>
+<screen>/dev/disk/by-id/dm-name-mpatha-part2 -&gt; ../../dm-5
+/dev/disk/by-id/dm-uuid-part2-mpath-3600a098000aad1e300000b4b5a275d45 -&gt; ../../dm-5
+/dev/disk/by-id/scsi-3600a098000aad1e300000b4b5a275d45-part2 -&gt; ../../dm-5
+/dev/disk/by-id/wwn-0x600a098000aad1e300000b4b5a275d45-part2 -&gt; ../../dm-5
+/dev/disk/by-partuuid/1c2f70e0-fb91-49f5-8260-38eacaf7992b -&gt; ../../dm-5
+/dev/disk/by-uuid/f67c49e9-3cf2-4bb7-8991-63568cb840a4 -&gt; ../../dm-5
+/dev/mapper/mpatha-part2 -&gt; ../dm-5
+</screen>
+   </informalexample>
+   <para>
+    请注意，分区通常也有 <filename>by-uuid</filename> 链接，该链接不引用设备本身，而是引用设备包含的文件系统。一般最好使用这些链接。即使将文件系统复制到不同的设备或分区，这些链接也不会改变。
+   </para>
+   <warning>
+    <title>initramfs 中的映射名称</title>
+    <para>
+     当 <command>dracut</command> 构建 initramfs 时，会在 initramfs 中创建设备的硬编码引用，并默认使用 <filename>/dev/mapper/$MAP_NAME</filename> 引用。如果 initramfs 中使用的映射名称与构建 initramfs 时使用的名称不匹配，在引导期间将找不到这些硬编码引用，导致引导失败。这种情况通常不会发生，因为 <command>dracut</command> 会将所有多路径配置文件添加到 initramfs 中。但如果 initramfs 是从不同的环境（例如，在救援系统中或在脱机更新期间）构建的，就会出现问题。为防止这类引导失败，请更改 <command>dracut</command> 的 <literal>persistent_policy</literal> 设置（如<xref linkend="sec-multipath-initrd-persistent"/>所述）。
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-conf-misc">
+  <title>其他选项</title>
+
+  <para>
+   本节列出了一些到目前为止尚未提及的有用 <filename>multipath.conf</filename> 选项。有关完整列表，请参见 <systemitem>multipath.conf(5)</systemitem>。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>verbosity</term>
+    <listitem>
+     <para>
+      控制 <command>multipath</command> 和 <command>multipathd</command> 的日志详细程度。命令行选项 <option>-v</option> 可覆盖这两个命令的此设置。值可以介于 0（仅限致命错误）和 4（详细日志记录）之间。默认值为 2。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>uid_attrs</term>
+    <listitem>
+     <para>
+      此选项可实现对 udev 事件处理的优化，即所谓的“uevent 合并”。它在数百个路径设备可能同时发生故障或重新出现的环境中非常有用。为了确保路径 WWID 不会更改（请参见<xref linkend="sec-multipath-conf-file-wwid" xrefstyle="SecTitleOnPage"/>），值应该完全按下方所示设置：
+     </para>
+<screen>defaults {
+     uid_attrs "sd:ID_SERIAL dasd:ID_UID nvme:ID_WWN"
+}</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>skip_kpartx</term>
+    <listitem>
+     <para>
+      如果针对多路径设备设置为 <literal>yes</literal>（默认为 <literal>no</literal>），请勿在给定设备的基础上创建分区设备（请参见<xref linkend="sec-multipath-configuration-partitioning" xrefstyle="SecTitleOnPage"/>）。可以用于虚拟机使用的多路径设备。以前的 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 版本使用参数“<literal>features 1 no_partitions</literal>”来实现同样的效果。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>max_sectors_kb</term>
+    <listitem>
+     <para>
+      限制在多路径映射的所有路径设备的单个 I/O 请求中发送的最大数据量。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ghost_delay</term>
+    <listitem>
+     <para>
+      在主动/被动阵列上，可能会发生被动路径（处于“ghost”状态）先于主动路径被探测到的情况。如果立即激活映射并发送 I/O，可能会导致花费很大代价才能激活路径。此参数指定在激活映射之前等待映射的活动路径出现的时间（以秒为单位）。默认值为 <literal>no</literal>（不进行 ghost 延迟）。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>recheck_wwid</term>
+    <listitem>
+     <para>
+      如果设置为 <literal>yes</literal>（默认为 <literal>no</literal>），则会在失败后再次检查已恢复路径的 WWID，并去除已改变的 WWID。这是防止数据损坏的安全措施。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable_foreign</term>
+    <listitem>
+     <para>
+      <systemitem>multipath-tools</systemitem> 为除设备映射程序多路径之外的其他多路径后端提供插件 API。API 支持使用 <command>multipath -ll</command> 等标准命令监控和显示有关多路径拓扑的信息。不支持修改拓扑。
+     </para>
+     <para>
+      <literal>enable_foreign</literal> 的值是用于匹配外部库名称的正则表达式。默认值为 “<literal>NONE</literal>”.
+     </para>
+     <para>
+      <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 随附 <literal>nvme</literal> 插件，增加了本机 NVMe 多路径支持（请参见<xref linkend="sec-multipath-hardware-implementations" xrefstyle="SecTitleOnPage"/>）。要启用 <literal>nvme</literal> 插件，请设置
+     </para>
+<screen>defaults {
+    enable_foreign nvme
+}</screen>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 xml:id="sec-multipath-marginal">
+   <title>处理不可靠（“边际”）的路径设备</title>
+   <para>
+    架构中的不稳定状况可能会导致路径设备行为不正常。它们频繁出现 I/O 错误、恢复然后再次失败。此类路径设备也称为“边际”或“不稳定”路径。本节概述了 <systemitem>multipath-tools</systemitem> 提供的一些可解决此问题的选项。
+   </para>
+   <note>
+    <title>multipathd 的边际路径检查算法</title>
+    <para>
+     如果首次失败后尚未过去 <literal>marginal_path_double_failed_time</literal>，路径设备便出现第二次失败（从良好转变为不佳），<command>multipathd</command> 会开始以每秒 10 次请求的速率监控路径，监控期为 <literal>marginal_path_err_sample_time</literal>。如果在监控期内错误率超过 <literal>marginal_path_err_rate_threshold</literal>，则该路径会归类为边际路径。<literal>marginal_path_err_recheck_gap_time</literal> 过后，该路径会再次转变为正常状态。
+    </para>
+    <para>
+     如果所有四个 <literal>marginal_path_</literal> 数字参数均设置为正值，并且 <literal>marginal_pathgroups</literal> 未设置为 <literal>fpin</literal>，系统便会使用此算法。从 SUSE Linux Enterprise Server 15 SP1 和 SUSE Linux Enterprise Server 12 SP5 开始，可以使用此算法。
+    </para>
+   </note>
+   <variablelist>
+    <varlistentry>
+     <term>marginal_path_double_failed_time</term>
+     <listitem>
+      <para>
+       触发路径监控的两次路径失败相隔的最长时间（以秒为单位）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_path_err_sample_time</term>
+     <listitem>
+      <para>
+       路径监控间隔的时长（以秒为单位）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_path_err_rate_threshold</term>
+     <listitem>
+      <para>
+       最小错误率（每千次 I/O）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_path_err_recheck_gap_time</term>
+     <listitem>
+      <para>
+       使路径保持为边际状态的时间（以秒为单位）。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_pathgroups</term>
+     <listitem>
+      <para>
+       此选项从 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15SP3 开始可用。可能的值为：
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>off</term>
+        <listitem>
+         <para>
+          边际状态由 <command>multipathd</command> 确定（见上文）。只要边际路径仍处于边际状态，它们就不会重新启用。这是低于 SUSE Linux Enterprise Server SP3 的版本的默认值和行为，在这些版本中，<literal>marginal_pathgroups</literal> 选项不可用。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>on</term>
+        <listitem>
+         <para>
+          与 <literal>off</literal> 选项类似，但不是将它们保持在失败状态，而是将边际路径移到单独的路径组，为该路径组指派的优先级将低于所有其他路径组（请参见<xref linkend="sec-multipath-grouping" xrefstyle="SecTitleOnPage"/>）。仅当其他路径组中的所有路径都失败时，此路径组中的路径才会用于 I/O。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>fpin</term>
+        <listitem>
+         <para>
+          此设置从 <phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15SP4 开始可用。边际路径状态源自 FPIN 事件（见下文）。边际路径会移到单独的路径组中，具体请参见 <literal>off</literal> 的相关内容。此设置不需要在主机端进行进一步配置。建议使用这种方法来处理支持 FPIN 的光纤通道结构上的边际路径。
+         </para>
+         <note>
+          <title>基于 FPIN 的边际路径检测</title>
+          <para>
+           <command>multipathd</command> 侦听光纤通道性能影响通知 (FPIN)。如果接收到某个路径设备的 FPIN-LI（链接完整性）事件，该路径便会进入边际状态。此状态将一直持续，直到在连接该设备的光纤通道适配器上接收到 RSCN 或链接开启事件。
+          </para>
+         </note>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    您也可以使用一种更简单的算法，该算法使用参数 <literal>san_path_err_threshold</literal>、<literal>san_path_err_forget_rate</literal> 和 <literal>san_path_err_recovery time</literal>。建议对 SUSE Linux Enterprise Server 15 (GA) 采用此算法。请参见 <systemitem>multipath.conf(5)</systemitem> 中的“不稳定路径检测”部分。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-best-practice">
+  <title>最佳实践</title>
+
+  <sect2 xml:id="sec-multipath-best-practice-config">
+   <title>有关配置的最佳实践</title>
+   <para>
+    大量的配置指令一开始会令人望而生畏。通常，使用空配置便能获得较好的结果，除非您处于群集环境中。
+   </para>
+   <para>
+    下面是一些针对独立服务器的一般建议。它们<emphasis>并非强制性</emphasis>要求。有关背景信息，请参见前面小节中各参数的相关说明。
+   </para>
+<screen>
+defaults {
+    deferred_remove      yes
+    find_multipaths      smart
+    enable_foreign       nvme
+    marginal_pathgroups  fpin    # 15.4 only, if supported by fabric
+}
+devices {
+    # A catch-all device entry.
+    device {
+        vendor                .*
+        product               .*
+        dev_loss_tmo          infinity
+        no_path_retry         60            # 5 minutes
+        path_grouping_policy  group_by_prio
+        path_selector         "historical-service-time 0"
+        reservation_key       file          # if using SCSI persistent reservations
+    }
+    # Follow up with specific device entries below, they will take precedence.
+}</screen>
+   <para>
+    修改 <filename>/etc/multipath.conf</filename> 文件后，应用您的设置（请参见<xref linkend="sec-multipath-conf-file-apply"/>）。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-best-practice-status">
+   <title>解读多路径 I/O 状态</title>
+   <para>
+    要快速了解多路径子系统，请使用 <command>multipath
+    -ll</command> 或 <command>multipathd show topology</command>。这些命令的输出具有相同格式。前一个命令读取内核状态，而后一个命令列显多路径守护程序的状态。两个状态通常是相同的。下面是一个输出示例：
+   </para>
+   <informalexample>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd show topology
+mpatha<co xml:id="mp-co-top-name"/> (3600a098000aad1e300000b4b5a275d45<co xml:id="mp-co-top-wwid"/>) dm-0<co xml:id="mp-co-top-dev"/> NETAPP,INF-01-00<co xml:id="mp-co-top-prod"/>
+size=64G features='3 queue_if_no_path pg_init_retries 50'<co xml:id="mp-co-top-feat"/> hwhandler='1 alua'<co xml:id="mp-co-top-hwh"/> wp=rw<co xml:id="mp-co-top-wp"/>
+|-+- <co xml:id="mp-co-top-pg"/>policy='historical-service-time 2'<co xml:id="mp-co-top-ps"/> prio=50<co xml:id="mp-co-top-prio"/> status=active<co xml:id="mp-co-top-pgst"/>
+| |-<co xml:id="mp-co-top-pp"/> 3:0:0:1<co xml:id="mp-co-top-hbtl"/> sdb 8:16<co xml:id="mp-co-top-sd"/> active<co xml:id="mp-co-top-dmst"/> ready<co xml:id="mp-co-top-st"/> running<co xml:id="mp-co-top-devst"/>
+| `- 4:0:0:1 sdf 8:80  active ready running
+`-+- policy='historical-service-time 2' prio=10 status=enabled
+  `- 4:0:1:1 sdj 8:144 active ready running</screen>
+    <calloutlist>
+     <callout arearefs="mp-co-top-name">
+      <para>
+       映射名称。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-wwid">
+      <para>
+       映射 WWID（如果与映射名称不同）。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-dev">
+      <para>
+       映射设备的设备节点名称。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-prod">
+      <para>
+       供应商和产品名称。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-pg">
+      <para>
+       路径组。路径组下方的缩进行列出了属于该路径组的路径设备。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-ps">
+      <para>
+       路径组使用的路径选择器算法。可以忽略“2”。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-prio">
+      <para>
+       路径组的优先级。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-pgst">
+      <para>
+       路径组的状态（<literal>active</literal>、<literal>enabled</literal> 或 <literal>disabled</literal>）。活动路径组是 I/O 当前发送到的路径组。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-pp">
+      <para>
+       路径设备。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-hbtl">
+      <para>
+       设备的总线 ID（此处为 SCSI Host:Bus:Target:Lun ID）。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-sd">
+      <para>
+       路径设备的设备节点名称和主要/次要编号。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-dmst">
+      <para>
+       路径的内核设备映射程序状态（<literal>active</literal> 或 <literal>failed</literal>）。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-st">
+      <para>
+       多路径的路径设备状态（见下文）。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-devst">
+      <para>
+       内核中路径设备的状态。这是与设备类型相关的值。对于 SCSI，它可以是 <literal>running</literal> 或 <literal>offline</literal>。
+      </para>
+     </callout>
+    </calloutlist>
+   </informalexample>
+   <para>
+    多路径的路径设备状态包括：
+   </para>
+   <informaltable>
+    <tgroup cols="2">
+     <colspec colwidth="1*"/>
+     <colspec colwidth="1*"/>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>ready</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         路径正常工作
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>ghost</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         主动/被动阵列中的被动路径
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>faulty</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         路径已关闭或无法访问
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>i/o timeout</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         检查程序命令超时
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>i/o pending</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         等待完成路径检查程序命令
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>delayed</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         延迟路径重新实例化以避免“摆动”
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>shaky</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         不可靠的路径（仅限 emc 路径检查程序）
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-lvm">
+   <title>在多路径设备上使用 LVM2</title>
+   <para>
+    LVM2 内置了多路径设备检测支持。<filename>/etc/lvm/lvm.conf</filename> 中默认会激活该支持：
+   </para>
+<screen>    multipath_component_detection=1</screen>
+   <para>
+    仅当 LVM2 也配置为从 udev 获取有关设备属性的信息时，此功能才可靠：
+   </para>
+<screen>    external_device_info_source="udev"</screen>
+   <para>
+    这是 SUSE Linux Enterprise 15 SP4 中的默认设置，但早期版本中并非如此。您也可以（尽管通常没有必要）为 LVM2 创建过滤表达式，以忽略除多路径设备之外的所有设备。请参见 <xref linkend="sec-multipath-referring" xrefstyle="SecTitleOnPage"/>。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-best-practice-io-stalled">
+   <title>解决停止的 I/O</title>
+   <para>
+    如果所有路径同时失败并且 I/O 已在排队，应用程序可能会停滞很长时间。要解决此问题，您可以使用以下程序：
+   </para>
+   <procedure>
+    <step>
+     <para>
+      在终端提示符处输入以下命令：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd disablequeueing map <replaceable>MAPNAME</replaceable></screen>
+     <para>
+      将 <literal><replaceable>MAPNAME</replaceable></literal> 替换为设备的正确 WWID 或映射别名。
+     </para>
+     <para>
+      此命令会立即导致所有排队的 I/O 失败，并且将该错误传播到调用的应用程序。文件系统将监测 I/O 错误并切换到只读模式。
+     </para>
+    </step>
+    <step>
+     <para>
+      输入以下命令重新激活排队：
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd restorequeueing <replaceable>MAPNAME</replaceable></screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-mdadm">
+   <title>多路径设备上的 MD RAID</title>
+   <para>
+    多路径上的 MD RAID 阵列是由系统的 udev 规则自动设置的。无需在 <filename>/etc/mdadm.conf</filename> 中进行特殊配置。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-best-practice-scandev">
+   <title>在不重引导的情况下扫描新设备</title>
+   <para>
+    如果已将系统配置为启用多路径，并且您需要向 SAN 添加存储，则可以使用 <command>rescan-scsi-bus.sh</command> 脚本扫描新设备。该命令的一般语法如下：
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> rescan-scsi-bus.sh [-a] [-r] --hosts=2-3,5</screen>
+   <para>
+    其中各选项的含义如下：
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>-a</term>
+     <listitem>
+      <para>
+       使用该选项可确保扫描所有 SCSI 目标来查看是否有新 LUN，否则将仅扫描现有目标。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>-r</term>
+     <listitem>
+      <para>
+       使用该选项将允许去除已在存储端去除的设备。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--hosts</term>
+     <listitem>
+      <para>
+       使用该选项可指定要扫描的主机总线适配器列表（默认为扫描所有）。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    要获取其他选项的帮助，请运行 <command>rescan-scsi-bus.sh --help</command>。
+   </para>
+   <para>
+    如果 <command>multipathd</command> 正在运行并且发现了新的 SAN 设备，系统应该会根据<xref linkend="sec-multipath-select-devices"/>所述的配置自动将它们设置为多路径映射。
+   </para>
+   <warning>
+    <title>Dell/EMC PowerPath 环境</title>
+    <para>
+     在 EMC PowerPath 环境中，请勿使用操作系统随附的 <filename>rescan-scsi-bus.sh</filename> 实用程序或 HBA 供应商脚本来扫描 SCSI 总线。为了避免可能发生的文件系统损坏，EMC 要求您遵照 EMC PowerPath for Linux 的供应商文档中提供的过程操作。
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-trouble">
+  <title>MPIO 查错</title>
+
+  <para>
+   如果某个系统在具有多路径的另一个系统上进入紧急模式，并列显有关丢失设备的消息，原因不外乎以下几种：
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     多路径设备选择配置不一致
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     使用不存在的设备引用
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 xml:id="sec-multipath-trouble-select">
+   <title>了解设备选择问题</title>
+   <para>
+    块设备要么用作多路径映射的一部分，要么直接使用（挂载为文件系统、用作交换、LVM 物理卷或其他）。如果设备已挂载，则 multipathd 想要使其成为多路径映射一部分的尝试将失败，并显示“设备或资源正忙”错误。反之亦然，如果 <command>systemd</command> 尝试挂载已成为多路径映射一部分的设备，则会出现相同的错误。
+   </para>
+   <para>
+    引导期间的存储设备激活由 <command>systemd</command>、<systemitem>udev</systemitem>、<command>multipathd</command> 和其他一些工具之间的复杂交互处理。<systemitem>udev</systemitem> 规则起着核心作用。它们会设置设备属性，用于指示其他子系统应如何使用设备。与多路径相关的 udev 规则为选择用于多路径的设备设置以下属性：
+   </para>
+<screen>SYSTEMD_READY=0
+DM_MULTIPATH_DEVICE_PATH=1</screen>
+   <para>
+    分区设备会从其父设备继承这些属性。
+   </para>
+   <para>
+    如果这些属性设置得不正确，某些工具会忽视这些属性，或者如果设置得太晚，则可能会导致 <command>multipathd</command> 与其他一些子系统之间出现竞态条件。只有一个竞争者能够胜出；另一个会看到“设备或资源正忙”错误。
+   </para>
+   <para>
+    这种情况下会出现如下问题：LVM2 套件的工具默认不评估 udev 属性。它们依靠自己的逻辑来确定设备是否是多路径组件，这有时与系统其余部分的逻辑不匹配。有关规避此问题的方法，请参见<xref linkend="sec-multipath-lvm"/>。
+   </para>
+   <note>
+    <title>引导死锁的示例</title>
+    <para>
+     假设有这样一个拥有多路径的系统，其根设备未进行多路径处理，并且没有设备被排除在多路径之外（请参见<xref linkend="sec-multipath-planning-type-noroot"/>中的<xref linkend="vl-multipath-planning-type-noroot-noinitrd"/>）。根文件系统挂载在 initramfs 中。<command>systemd</command> 切换到根文件系统，并且 <command>multipathd</command> 启动。由于设备已挂载，<command>multipathd</command> 未能为其设置多路径映射。由于未在 <literal>blacklist</literal> 中配置根设备，因此系统会将其视为多路径设备并为其设置 <literal>SYSTEMD_READY=0</literal>。
+    </para>
+    <para>
+     稍后在引导过程中，系统会尝试挂载其他文件系统，比如 <filename>/var</filename> 和 <filename>/home</filename>。通常，这些文件系统将与根文件系统位于同一设备上，默认作为根文件系统本身的 BTRFS 子卷。但 systemd 因 <literal>SYSTEMD_READY=0</literal> 无法挂载它们。<emphasis>我们陷入了死锁状态</emphasis>：无法创建 dm-multipath 设备，并且底层设备因 systemd 被封锁。无法挂载其他文件系统，导致引导失败。
+    </para>
+    <para>
+     <emphasis role="bold">我们目前已经拥有应对此问题的解决方案。</emphasis> <command>multipathd</command> 会检测到此情况并将设备释放到 <command>systemd</command>，之后其可继续挂载文件系统。尽管如此，了解这个普遍性问题很重要，因为它可能仍会以更难以察觉的方式发生。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-trouble-ref">
+   <title>了解设备引用问题</title>
+   <para>
+    <xref linkend="sec-multipath-initrd-persistent"/>中提供了设备引用问题的示例。通常情况下会有多个符号链接指向一个设备节点（请参见<xref linkend="sec-multipath-referring"/>）。但这些链接并不总是存在；<command>udev</command> 会根据当前的 udev 规则创建它们。例如，如果多路径关闭，<filename>/dev/mapper/</filename> 下多路径设备的符号链接将丢失。因此，对 <filename>/dev/mapper/</filename> 设备的任何引用都将失败。
+   </para>
+   <para>
+    此类引用可能会出现在许多地方，特别是在 <filename>/etc/fstab</filename> 和 <filename>/etc/crypttab</filename> 中、initramfs 中，甚至是在内核命令行上。
+   </para>
+   <para>
+    要规避此问题，最安全的方法就是避免使用无法在重引导后永久保留或依赖于系统配置的设备引用。一般而言，我们建议通过文件系统本身的属性（如 UUID 或标签）而不是包含引用的设备来引用文件系统（以及类似的实体，如交换空间）。如果此类引用不可用并且需要设备引用（例如，在 <filename>/etc/crypttab</filename> 中），则应仔细评估选项。例如，在 <xref linkend="sec-multipath-referring"/> 中，最佳选项可能是 <filename>/dev/disk/by-id/wwn-</filename> 链接，因为它也可与 <literal>multipath=off</literal> 搭配使用。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-trouble-steps">
+   <title>紧急模式中的查错步骤</title>
+   <para>
+    由于存在许多差别非常细微的错误情况，因此无法提供分步恢复指南。但凭借前几小节的背景知识，如果系统因多路径问题进入紧急模式，您应该能够找出问题所在。在您开始调试前，请确保您已检查以下问题：
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      多路径服务是否已启用？
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      initramfs 中是否包含多路径 dracut 模块？
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      我的根设备是否配置为多路径设备？如果没有，根设备是否如 <xref linkend="sec-multipath-blacklist"/> 所述正确排除在多路径之外，或者您是否依赖于 initramfs 中多路径模块的缺失来实现这一点（请参见<xref linkend="sec-multipath-planning-type-noroot"/>）？
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      系统进入紧急模式是在切换到真正的根文件系统之前还是之后？
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    如果您不确定最后一个问题的答案，这里有一个 dracut 紧急提示示例，切换根之前会列显示例所示的内容：
+   </para>
+<screen>Generating "/run/initramfs/rdsosreport.txt"
+Entering emergency mode. Exit the shell to continue.
+Type "journalctl" to view system logs.
+
+You might want to save "/run/initramfs/rdsosreport.txt" to a USB stick or /boot
+after mounting them and attach it to a bug report.
+
+Give root password for maintenance
+(or press Control-D to continue):</screen>
+   <para>
+    如果提到 <filename>rdsosreport.txt</filename>，即表明系统仍从 initramfs 中运行。如果您仍然不确定，请登录并检查 <filename>/etc/initrd-release</filename> 文件是否存在。此文件仅存在于 initramfs 环境中。
+   </para>
+   <para>
+    如果是在切换根之后进入紧急模式，紧急提示内容与此相似，但不会提到 <filename>rdsosreport.txt</filename>：
+   </para>
+<screen>Timed out waiting for device dev-disk-by\x2duuid-c4a...cfef77d.device.
+[DEPEND] Dependency failed for Local File Systems.
+[DEPEND] Dependency failed for Postfix Mail Transport Agent.
+Welcome to emergency shell
+Give root password for maintenance
+(or press Control-D to continue):</screen>
+   <procedure>
+    <title>分析紧急模式下的情况的步骤</title>
+    <step>
+     <para>
+      尝试通过检查失败的 systemd 单元和日志找出失败的原因。
+     </para>
+<screen><prompt role="root"># </prompt>systemctl --failed
+<prompt role="root"># </prompt>journalctl -b -o short-monotonic</screen>
+     <para>
+      在查看日志时，确定<emphasis>第一个</emphasis>失败的单元。当您发现第一处故障时，请非常仔细地检查该时间点之前和前后的消息。是否有任何警告或其他可疑消息？
+     </para>
+     <para>
+      留意根交换（“<literal>Switching root.</literal>”）以及有关 SCSI 设备、设备映射程序、多路径和 LVM2 的消息。查找有关设备和文件系统的 <command>systemd</command> 消息（“<literal>Found device</literal>…”、“<literal>Mounting</literal>…”、“<literal>Mounted</literal>…”）。
+     </para>
+    </step>
+    <step>
+     <para>
+      检查现有设备，包括低级设备和设备映射程序设备（请注意，下面的某些命令可能在 initramfs 中不可用）：
+     </para>
+<screen><prompt role="root"># </prompt>cat /proc/partitions
+<prompt role="root"># </prompt>ls -l /sys/class/block
+<prompt role="root"># </prompt>ls -l /dev/disk/by-id/* /dev/mapper/*
+<prompt role="root"># </prompt>dmsetup ls --tree
+<prompt role="root"># </prompt>lsblk
+<prompt role="root"># </prompt>lsscsi
+</screen>
+     <para>
+      从以上命令的输出中，您应该能够了解是否成功探测到低级设备，以及是否设置了任何多路径映射和多路径分区。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果设备映射程序多路径设置不符合您的预期，请检查 udev 属性，特别是 <literal>SYSTEMD_READY</literal>（见上文）
+     </para>
+<screen><prompt role="root"># </prompt>udevadm info -e</screen>
+    </step>
+    <step>
+     <para>
+      如果上一步显示了非预期的 udev 属性，则表明可能是在 udev 规则处理期间出现了问题。检查其他属性，特别是用于标识设备的属性（请参见<xref linkend="sec-multipath-conf-file-wwid" xrefstyle="SecTitleOnPage"/>）。如果 udev 属性正确，请再次检查日志中是否有 <command>multipathd</command> 消息。查找“<literal>Device
+      or resource busy</literal>”消息。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果系统无法挂载或以其他方式激活设备，通常可以尝试手动激活该设备：
+     </para>
+<screen><prompt role="root"># </prompt>mount /var
+<prompt role="root"># </prompt>swapon -a
+<prompt role="root"># </prompt>vgchange -a y</screen>
+     <para>
+      大多数情况下，手动激活都会成功，并允许继续引导系统（通常只需从紧急外壳注销），以及进一步检查引导后系统中的情况。
+     </para>
+     <para>
+      如果手动激活失败，您可能会看到错误消息，其中会提供有关问题所在的线索。您也可以再次尝试这些命令，并指定更高的详细程度。
+     </para>
+    </step>
+    <step>
+     <para>
+      此时，您应该知道出了什么问题（如果不知道，请联系 SUSE 支持部门并准备好回答上面提出的大部分问题）。
+     </para>
+     <para>
+      您应该能够使用一些外壳命令来解决这种情况，退出紧急外壳，然后成功引导。您仍然需要调整您的配置以确保以后不会再出现同样的问题。
+     </para>
+     <para>
+      否则，您将需要引导救援系统，手动设置设备以使用 <command>chroot</command> 进入真正的根文件系统，并根据您在前面的步骤中了解到的情况尝试解决问题。请注意，在这种情况下，根文件系统的存储堆栈可能与正常情况不同。根据您的设置，您可能会在构建新 initramfs 时强制添加或省略 dracut 模块。另请参见<xref linkend="sec-multipath-initrd-disable" xrefstyle="SecTitleOnPage"/>。
+     </para>
+    </step>
+    <step>
+     <para>
+      如果问题频繁发生，或者在每次尝试引导时都发生，请尝试以更高的详细程度引导，以获取有关失败的更多信息。以下内核参数或它们的组合通常很有用：
+     </para>
+     <informalexample>
+<screen>udev.log-priority=debug<co xml:id="mp-co-kparm-udev"/>
+systemd.log_level=debug<co xml:id="mp-co-kparm-sl"/>
+scsi_mod.scsi_logging_level=020400<co xml:id="mp-co-kparm-sc"/>
+rd.debug<co xml:id="mp-co-kparm-rd"/>
+	  </screen>
+      <calloutlist>
+       <callout arearefs="mp-co-kparm-udev">
+        <para>
+         提高 <command>systemd-udevd</command> 和 udev 规则处理的日志级别。
+        </para>
+       </callout>
+       <callout arearefs="mp-co-kparm-sl">
+        <para>
+         提高 <command>systemd</command> 的日志级别。
+        </para>
+       </callout>
+       <callout arearefs="mp-co-kparm-sc">
+        <para>
+         提高内核的 SCSI 子系统的日志记录级别。
+        </para>
+       </callout>
+       <callout arearefs="mp-co-kparm-rd">
+        <para>
+         跟踪 initramfs 中的脚本。
+        </para>
+       </callout>
+      </calloutlist>
+     </informalexample>
+     <para>
+      此外，您也可以为某些驱动程序启用日志记录，并配置串行控制台以在引导期间捕获输出。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-trouble-tids">
+   <title>技术信息文档</title>
+   <para>
+    有关 SUSE Linux Enterprise Server 上多路径 I/O 问题查错的详细信息，请参见 SUSE 知识库中的下列技术信息文档 (TID)：
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      <link xlink:href="https://www.suse.com/support/kb/doc/?id=000016331"><citetitle>Using
+      LVM on local and SAN attached devices</citetitle></link>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="https://www.suse.com/support/kb/doc/?id=000017521"><citetitle>Using
+      LVM on Multipath (DM MPIO) Devices</citetitle></link>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="https://www.suse.com/support/kb/doc/?id=000017762"><citetitle>HOWTO:
+      Add, Resize and Remove LUN without restarting SLES</citetitle></link>
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+</chapter>
