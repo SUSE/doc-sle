@@ -1,1 +1,249 @@
-../../../../xml/tuning_numactl.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="tuning_numactl.xml" version="5.0" xml:id="cha-tuning-numactl">
+ <title>自动平衡非一致性内存访问 (NUMA)</title>
+ <info>
+  <abstract>
+   <para>
+    需要多个 CPU 和大量内存时，对硬件会有一些物理限制。在本章中，重要的限制是 CPU 与内存之间的通讯带宽受限。非一致性内存访问 (NUMA) 便是为了解决此限制而引入的一项体系结构修改。
+   </para>
+   <para>
+    此配置中存在多个节点。每个节点包含所有 CPU 和内存的子集。访问主内存的速度由内存相对于 CPU 的位置决定。工作负载的性能取决于访问数据（位于执行线程的 CPU 本地）的应用程序线程。自动平衡 NUMA 可以按需将数据迁移到位于访问该数据的 CPU 本地的内存节点。使用 NUMA 硬件时，这可能会大幅提升性能（具体由工作负载而定）。
+   </para>
+      </abstract>
+      <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+        <dm:bugtracker>
+        </dm:bugtracker>
+	<dm:translation>yes</dm:translation>
+      </dm:docmanager>
+    </info>
+    <sect1 xml:id="sec-tuning-numactl-implementation">
+  <title>实施</title>
+
+  <para>
+   自动平衡 NUMA 通过三个基本步骤完成：
+  </para>
+
+  <orderedlist spacing="normal">
+   <listitem>
+    <para>
+     任务扫描程序定期扫描任务的部分地址空间，并标记内存，以在下一次访问数据时强制引发页错误。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     下一次访问数据会导致 NUMA 删格化错误。基于此错误，可将数据迁移到与访问内存的任务相关联的内存节点。
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     要将某个任务、该任务使用的 CPU 以及该任务访问的内存保留在一起，调度程序会将共享数据的任务分到一组。
+    </para>
+   </listitem>
+  </orderedlist>
+
+  <para>
+   数据取消映射和页错误处理会产生开销。但是，一般情况下，访问与 CPU 关联的数据的线程会抵消这项开销。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-tuning-numactl-configuration">
+  <title>配置</title>
+
+  <para>
+   在一段时间内，静态配置一直是微调 NUMA 硬件上的工作负载的建议方式。为此，可以使用 <command>numactl</command>、<command>taskset</command> 或 <command>cpusets</command> 设置内存策略。NUMA 感知应用程序可以使用特殊 API。如果已创建静态策略，则应禁用自动平衡 NUMA，因为此时数据访问就在本地进行。
+  </para>
+
+  <para>
+   <command>numactl</command> <option>--hardware</option> 将显示计算机的内存配置，以及计算机是否支持 NUMA。下面是在一台 4 节点计算机上运行该命令后的输出。
+  </para>
+
+
+
+<screen><prompt>&gt; </prompt>numactl --hardware
+available: 4 nodes (0-3)
+node 0 cpus: 0 4 8 12 16 20 24 28 32 36 40 44
+node 0 size: 16068 MB
+node 0 free: 15909 MB
+node 1 cpus: 1 5 9 13 17 21 25 29 33 37 41 45
+node 1 size: 16157 MB
+node 1 free: 15948 MB
+node 2 cpus: 2 6 10 14 18 22 26 30 34 38 42 46
+node 2 size: 16157 MB
+node 2 free: 15981 MB
+node 3 cpus: 3 7 11 15 19 23 27 31 35 39 43 47
+node 3 size: 16157 MB
+node 3 free: 16028 MB
+node distances:
+node   0   1   2   3
+  0:  10  20  20  20
+  1:  20  10  20  20
+  2:  20  20  10  20
+  3:  20  20  20  10</screen>
+
+  <para>
+   可以通过将 <literal>1</literal> 或 <literal>0</literal> 写入 <filename>/proc/sys/kernel/numa_balancing</filename>，分别为当前会话启用或禁用自动平衡 NUMA 功能。要永久启用或禁用此功能，请使用内核命令行选项 <literal>numa_balancing=[enable|disable]</literal>。
+  </para>
+
+  <para>
+   如果已启用自动平衡 NUMA，则可以配置任务扫描程序行为。
+   <remark>sknorr, 2014-08-21: "balancing the balancer": unfortunate
+   choice of words</remark>
+   任务扫描程序可以在自动平衡 NUMA 的开销与它识别最佳数据位置所需的时间之间进行平衡。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>numa_balancing_scan_delay_ms</literal>
+    </term>
+    <listitem>
+     <para>
+      在扫描数据之前线程必须消耗的 CPU 时间。这可以防止由于进程生存期较短而产生开销。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_balancing_scan_period_min_ms</literal> 和 <literal>numa_balancing_scan_period_max_ms</literal>
+    </term>
+    <listitem>
+     <para>
+      控制扫描任务数据的频率。根据错误所在的位置，扫描频率将会增大或减小。这些设置控制最小和最大扫描频率。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_balancing_scan_size_mb</literal>
+    </term>
+    <listitem>
+     <para>
+      控制当任务扫描程序处于活动状态时要扫描的地址空间大小。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-tuning-numactl-monitoring">
+  <title>监视</title>
+
+  <para>
+   最重要的任务是将度量指派到工作负载，并在启用和禁用自动平衡 NUMA 的情况下测量性能，以测量影响。可以使用分析工具来监视本地和远程内存访问（如果 CPU 支持这种监视）。可通过 <filename>/proc/vmstat</filename> 中的以下参数监视自动平衡 NUMA 活动：
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><literal>numa_pte_updates</literal>
+    </term>
+    <listitem>
+     <para>
+      标记 NUMA 删格化错误的基页的数量。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_huge_pte_updates</literal>
+    </term>
+    <listitem>
+     <para>
+      标记 NUMA 删格化错误的透明大页的数量。与 <literal>numa_pte_updates</literal> 结合使用可以计算标记的地址空间总大小。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_hint_faults</literal>
+    </term>
+    <listitem>
+     <para>
+      记录已捕获到的 NUMA 删格化错误数。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_hint_faults_local</literal>
+    </term>
+    <listitem>
+     <para>
+      显示本地节点上出现的删格化错误数。与 <literal>numa_hint_faults</literal> 结合使用可以计算本地错误与远程错误所占的百分比。如果本地删格化错误占比较高，表示工作负载更接近聚合。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><literal>numa_pages_migrated</literal>
+    </term>
+    <listitem>
+     <para>
+      记录有多少页由于位置不当而被迁移。由于迁移是一个复制操作，它占据了平衡 NUMA 所产生开销的最大一部分。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+ </sect1>
+ <sect1 xml:id="sec-tuning-numactl-impact">
+  <title>影响</title>
+
+  <para>
+   下面说明了在未对内存策略进行静态微调的情况下，在一台运行 SpecJBB 2005
+   <remark>sknorr, 2014-08-21: "benchmark"(?)</remark>
+   并使用单个 JVM 实例的 4 节点 NUMA 计算机上完成的简单测试案例。但请注意，对每个工作负载造成的影响各不相同，并且此示例基于 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 预发行版。
+  </para>
+
+<screen>            Balancing disabled      Balancing enabled
+TPut 1      26629.00 (  0.00%)     26507.00 ( -0.46%)
+TPut 2      55841.00 (  0.00%)     53592.00 ( -4.03%)
+TPut 3      86078.00 (  0.00%)     86443.00 (  0.42%)
+TPut 4     116764.00 (  0.00%)    113272.00 ( -2.99%)
+TPut 5     143916.00 (  0.00%)    141581.00 ( -1.62%)
+TPut 6     166854.00 (  0.00%)    166706.00 ( -0.09%)
+TPut 7     195992.00 (  0.00%)    192481.00 ( -1.79%)
+TPut 8     222045.00 (  0.00%)    227143.00 (  2.30%)
+TPut 9     248872.00 (  0.00%)    250123.00 (  0.50%)
+TPut 10    270934.00 (  0.00%)    279314.00 (  3.09%)
+TPut 11    297217.00 (  0.00%)    301878.00 (  1.57%)
+TPut 12    311021.00 (  0.00%)    326048.00 (  4.83%)
+TPut 13    324145.00 (  0.00%)    346855.00 (  7.01%)
+TPut 14    345973.00 (  0.00%)    378741.00 (  9.47%)
+TPut 15    354199.00 (  0.00%)    394268.00 ( 11.31%)
+TPut 16    378016.00 (  0.00%)    426782.00 ( 12.90%)
+TPut 17    392553.00 (  0.00%)    437772.00 ( 11.52%)
+TPut 18    396630.00 (  0.00%)    456715.00 ( 15.15%)
+TPut 19    399114.00 (  0.00%)    484020.00 ( 21.27%)
+TPut 20    413907.00 (  0.00%)    493618.00 ( 19.26%)
+TPut 21    413173.00 (  0.00%)    510386.00 ( 23.53%)
+TPut 22    420256.00 (  0.00%)    521016.00 ( 23.98%)
+TPut 23    425581.00 (  0.00%)    536214.00 ( 26.00%)
+TPut 24    429052.00 (  0.00%)    532469.00 ( 24.10%)
+TPut 25    426127.00 (  0.00%)    526548.00 ( 23.57%)
+TPut 26    422428.00 (  0.00%)    531994.00 ( 25.94%)
+TPut 27    424378.00 (  0.00%)    488340.00 ( 15.07%)
+TPut 28    419338.00 (  0.00%)    543016.00 ( 29.49%)
+TPut 29    403347.00 (  0.00%)    529178.00 ( 31.20%)
+TPut 30    408681.00 (  0.00%)    510621.00 ( 24.94%)
+TPut 31    406496.00 (  0.00%)    499781.00 ( 22.95%)
+TPut 32    404931.00 (  0.00%)    502313.00 ( 24.05%)
+TPut 33    397353.00 (  0.00%)    522418.00 ( 31.47%)
+TPut 34    382271.00 (  0.00%)    491989.00 ( 28.70%)
+TPut 35    388965.00 (  0.00%)    493012.00 ( 26.75%)
+TPut 36    374702.00 (  0.00%)    502677.00 ( 34.15%)
+TPut 37    367578.00 (  0.00%)    500588.00 ( 36.19%)
+TPut 38    367121.00 (  0.00%)    496977.00 ( 35.37%)
+TPut 39    355956.00 (  0.00%)    489430.00 ( 37.50%)
+TPut 40    350855.00 (  0.00%)    487802.00 ( 39.03%)
+TPut 41    345001.00 (  0.00%)    468021.00 ( 35.66%)
+TPut 42    336177.00 (  0.00%)    462260.00 ( 37.50%)
+TPut 43    329169.00 (  0.00%)    467906.00 ( 42.15%)
+TPut 44    329475.00 (  0.00%)    470784.00 ( 42.89%)
+TPut 45    323845.00 (  0.00%)    450739.00 ( 39.18%)
+TPut 46    323878.00 (  0.00%)    435457.00 ( 34.45%)
+TPut 47    310524.00 (  0.00%)    403914.00 ( 30.07%)
+TPut 48    311843.00 (  0.00%)    459017.00 ( 47.19%)
+
+                        Balancing Disabled        Balancing Enabled
+ Expctd Warehouse          48.00 (  0.00%)          48.00 (  0.00%)
+ Expctd Peak Bops      310524.00 (  0.00%)      403914.00 ( 30.07%)
+ Actual Warehouse          25.00 (  0.00%)          29.00 ( 16.00%)
+ Actual Peak Bops      429052.00 (  0.00%)      543016.00 ( 26.56%)
+ SpecJBB Bops            6364.00 (  0.00%)        9368.00 ( 47.20%)
+ SpecJBB Bops/JVM        6364.00 (  0.00%)        9368.00 ( 47.20%)</screen>
+
+  <para>
+   自动平衡 NUMA 简化了工作负载微调，可在 NUMA 计算机上实现较高的性能。如果可能，我们仍建议以静态方式微调工作负载，以便在每个节点内将其分区。但是，在所有其他情况下，自动平衡 NUMA 应该可以提升性能。
+  </para>
+ </sect1>
+</chapter>
