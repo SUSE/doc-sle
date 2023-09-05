@@ -3241,6 +3241,239 @@ LC_ALL=C PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       </para>
 <screen>&prompt.root;<command>echo 1 > /sys/devices/system/cpu/cpu<replaceable>X</replaceable>/online</command></screen>
     </sect2>
+
+    <sect2 xml:id="sec-vm-guest-scsi-pr">
+      <title>SCSI persistent reservation on a multipathed device</title>
+      <para>
+        SCSI persistent reservations allow restricting access to block devices
+        in a shared storage setup, to avoid improper multiple parallel accesses
+        to the same block device from software components on local or remote
+	hosts, which could lead to device damage, data corruption.
+      </para>
+      <para>
+        About how to manage storage multipath I/O, Please refer to
+        <link
+          xlink:href="https://documentation.suse.com/sles/15-SP5/html/SLES-all/cha-multipath.html#">Managing multipath I/O for devices</link>
+      </para>
+      <para>
+        About SCSI persistent reservations, Please refer to
+        <link
+          xlink:href="https://documentation.suse.com/sles/15-SP5/html/SLES-all/cha-multipath.html#sec-multipath-mpiotools-mpathpersist">SCSI persistent reservations and mpathpersist</link>
+      </para>
+      <para>
+	For virtualization scenario, QEMU's SCSI passthrough devices <literal>scsi-block</literal>
+        and <literal>scsi-generic</literal> support passing guest persistent
+        reservation requests to a privileged external helper program.
+        The <literal>qemu-pr-helper</literal> is that external helper, It needs
+        to start before QEMU, creates a listener socket which will accept
+        incoming connections for communication with QEMU.
+      </para>
+      <note>
+        <title>Live migration scenario with multipathed devices</title>
+        <para>
+          We recommend using the multipath alias instead of wwid, It's helpful
+          in &vmguest; live migration scenario, as it can make sure the storage path
+          are identical between source host and destination host.
+        </para>
+        <para>
+          About aliases for multipath, Please refer to
+          <link
+	    xlink:href="https://documentation.suse.com/sles/15-SP5/html/SLES-all/cha-multipath.html#sec-multipath-alias">Setting aliases for multipath maps</link>
+        </para>
+        <para>
+          About wwid for multipath, Please refer to
+          <link
+	    xlink:href="https://documentation.suse.com/sles/15-SP5/html/SLES-all/cha-multipath.html#id-1.11.6.6.4.5">Multipath terminology</link>
+        </para>
+      </note>
+      <sect3 xml:id="sec-vm-guest-scsi-pr-guide">
+        <title>Step-by-Step guide</title>
+	<para>
+          How to do scsi persistent reservation in a VM Guest against the related multipathed device in the host:
+        </para>
+	<para>
+          1. In the host, Create Multipath environment, Please refer to
+          <link
+	    xlink:href="https://documentation.suse.com/sles/15-SP5/html/SLES-all/cha-multipath.html#sec-multipath-config">Configuring the system for multipathing</link>
+          and
+          <link
+            xlink:href="https://documentation.suse.com/sles/15-SP5/html/SLES-all/cha-multipath.html#sec-multipath-conf-file">Multipath configuration</link>
+        </para>
+	<para>
+          2. In the host, Configure <literal>reservations</literal> sub-element of the
+          <literal>source</literal> element of the <literal>disk</literal> element
+          for the passed-through lun in your libvirt domain configuration. Please
+          refer to
+          <link
+            xlink:href="https://libvirt.org/formatdomain.html">Libvirt Domain XML format</link>
+        </para>
+	<para>
+          3. In the &vmguest;, Install the sg3_utils package, Reserve the scsi disks
+          on-demand by sg_persist command.
+        </para>
+      </sect3>
+      <sect3 xml:id="sec-vm-guest-scsi-pr-example">
+        <title>Example</title>
+	<para>
+          1. In the host, Make sure the multipathd.service is running, and we have
+          such a multipathed disk which is named <literal>storage1</literal>:
+        </para>
+<screen>&prompt.user;&sudo; systemctl status multipathd.service
+● multipathd.service - Device-Mapper Multipath Device Controller
+     Loaded: loaded (/usr/lib/systemd/system/multipathd.service; enabled; preset: disabled)
+     Active: active (running) since Sat 2023-08-26 21:34:13 CST; 1 week 1 day ago
+TriggeredBy: ○ multipathd.socket
+   Main PID: 79411 (multipathd)
+     Status: "up"
+      Tasks: 7
+        CPU: 1min 43.514s
+     CGroup: /system.slice/multipathd.service
+             └─79411 /sbin/multipathd -d -s</screen>
+<screen>&prompt.user;&sudo; multipath -ll
+storage1 (36589cfc000000537c47ad3eb2b20216e) dm-6 TrueNAS,iSCSI Disk
+size=50G features='0' hwhandler='1 alua' wp=rw
+|-+- policy='service-time 0' prio=50 status=active
+| `- 16:0:0:0 sdg 8:96  active ready running
+`-+- policy='service-time 0' prio=50 status=enabled
+  `- 17:0:0:0 sdh 8:112 active ready running</screen>
+
+        <para>
+          2. In the host, Add the disk element in the &vmguest; configuration file
+          (by running virsh edit CONFIGURATION):
+	</para>
+<screen>&lt;disk type='block' device='lun'<co xml:id="co-disk-lunpassthrough"/>&gt;
+  &lt;driver name='qemu' type='raw'/&gt;
+  &lt;source dev='/dev/mapper/storage1'&gt;
+    &lt;reservations<co xml:id="co-disk-reserve"/> managed='yes'<co xml:id="co-disk-reserve-managed"/>/&gt;
+  &lt;/source&gt;
+  &lt;target dev='sda' bus='scsi'/&gt;
+  &lt;address type='drive' controller='0' bus='0' target='0' unit='0'<co xml:id="co-disk-scsi-hba-unit"/>/&gt;
+&lt;/disk&gt;</screen>
+        <calloutlist>
+          <callout arearefs="co-disk-lunpassthrough">
+            <para>
+              In order to support persistent reservations, disks must be marked as
+              <literal>lun</literal> with type <literal>block</literal> so that
+              &qemu; does SCSI passthrough.
+            </para>
+          </callout>
+          <callout arearefs="co-disk-reserve">
+            <para>
+              If present it enables persistent reservations for SCSI based disks.
+              The element has one mandatory attribute <literal>managed</literal>
+              with accepted values <literal>yes</literal> and <literal>no</literal>.
+            </para>
+          </callout>
+          <callout arearefs="co-disk-reserve-managed">
+            <para>
+              If <literal>managed</literal> is <literal>yes</literal> libvirt
+              prepares and manages any resources needed.
+            </para>
+            <para>
+              When the value of the attribute <literal>managed</literal> is
+              <literal>no</literal>, then the hypervisor acts as a client and the
+              path to the server socket must be provided in the child element
+              source, which currently accepts only the following attributes:
+              <literal>type</literal> with one value <literal>unix</literal>,
+              <literal>path</literal> with value to the socket, and finally
+              <literal>mode</literal> which accepts the unique valid value
+              <literal>client</literal> specifying the role of hypervisor. It's
+              recommended to allow libvirt manage the persistent reservations.
+            </para>
+          </callout>
+          <callout arearefs="co-disk-scsi-hba-unit">
+            <para>
+              please make sure the virtio-scsi HBA that the disk attaches already
+              exists and has available units(maximum count of units per virtio-scsi
+              HBA is 7), Otherwise you need to manually add a virtio-scsi HBA to
+              avoid automatically adding the LSI HBA by libvirt. For example:
+<screen>&lt;controller type='scsi' index='0' model='virtio-scsi'&gt;
+  &lt;address type='pci' domain='0x0000' bus='0x03' slot='0x00' function='0x0'/&gt;
+&lt;/controller&gt;</screen>
+            </para>
+          </callout>
+        </calloutlist>
+
+<screen>&prompt.user;&sudo; virsh domblklist sles15sp5
+ Target   Source
+---------------------------------------------
+ vda      /mnt/images/sles15sp5/disk0.qcow2
+ sda      /dev/mapper/storage1</screen>
+        <para>
+          3. In the host, Start the &vmguest;, We'll see that libvirt launches
+          a qemu-pr-helper instance as the server role for the &vmguest; sles15sp5,
+          then launches the &vmguest; sles15sp5 as the client role.
+        </para>
+<screen>&prompt.user;&sudo; virsh start sles15sp5
+Domain 'sles15sp5' started</screen>
+
+<screen>&prompt.user;&sudo; virsh list
+ Id   Name        State
+---------------------------
+ 4    sles15sp5   running</screen>
+
+<screen>&prompt.user;&sudo; ps -eo pid,args | grep -v grep | grep qemu-pr-helper
+37063 /usr/bin/qemu-pr-helper -k /var/lib/libvirt/qemu/domain-4-sles15sp5/pr-helper0.sock</screen>
+
+<screen>&prompt.user;&sudo; virsh dumpxml sles15sp5 | grep -A11 "&lt;disk type='block' device='lun'&gt;
+&lt;disk type='block' device='lun'&gt;
+  &lt;driver name='qemu' type='raw'/&gt;
+  &lt;source dev='/dev/mapper/storage1' index='1'&gt;
+    &lt;reservations managed='yes'&gt;
+      &lt;source type='unix' path='/var/lib/libvirt/qemu/domain-4-sles15sp5/pr-helper0.sock' mode='client'/&gt;
+    &lt;/reservations&gt;
+  &lt;/source&gt;
+  &lt;backingStore/&gt;
+  &lt;target dev='sda' bus='scsi'/&gt;
+  &lt;alias name='scsi0-0-0-0'/&gt;
+  &lt;address type='drive' controller='0' bus='0' target='0' unit='0'/&gt;
+&lt;/disk&gt;</screen>
+
+        <para>
+          4. In the &vmguest;, Reserve the scsi disk(sda) with the key <literal>123abc</literal>
+        </para>
+<screen>&prompt.user;lsblk
+NAME   MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+sda      8:0    0   50G  0 disk
+vda    253:0    0   20G  0 disk
+├─vda1 253:1    0    8M  0 part
+├─vda2 253:2    0    2G  0 part [SWAP]
+└─vda3 253:3    0   18G  0 part /</screen>
+
+<screen>&prompt.user;&sudo; sg_persist --verbose --out --register --param-sark=123abc /dev/sda
+    inquiry cdb: [12 00 00 00 24 00]
+  TrueNAS   iSCSI Disk        0123
+  Peripheral device type: disk
+    Persistent reservation out cdb: [5f 00 00 00 00 00 00 00 18 00]
+PR out: command (Register) successful</screen>
+
+<screen>&prompt.user;&sudo; sg_persist --verbose --in -k /dev/sda
+    inquiry cdb: [12 00 00 00 24 00]
+  TrueNAS   iSCSI Disk        0123
+  Peripheral device type: disk
+    Persistent reservation in cdb: [5e 00 00 00 00 00 00 20 00 00]
+  PR generation=0x5, 2 registered reservation keys follow:
+    0x123abc
+    0x123abc</screen>
+
+        <para>
+          5. In the &vmguest;, Release the sda with the key <literal>123abc</literal>
+        </para>
+<screen>&prompt.user;&sudo; sg_persist --verbose --out --clear --param-rk=123abc /dev/sda
+    inquiry cdb: [12 00 00 00 24 00]
+  TrueNAS   iSCSI Disk        0123
+  Peripheral device type: disk
+    Persistent reservation out cdb: [5f 03 00 00 00 00 00 00 18 00]
+PR out: command (Clear) successful</screen>
+
+<screen>&prompt.user;&sudo; sg_persist --verbose --in -k /dev/sda
+    inquiry cdb: [12 00 00 00 24 00]
+  TrueNAS   iSCSI Disk        0123
+  Peripheral device type: disk
+    Persistent reservation in cdb: [5e 00 00 00 00 00 00 20 00 00]
+  PR generation=0x6, there are NO registered reservation keys</screen>
+      </sect3>
+    </sect2>
   </sect1>
   <!-- TODO
     <sect2 id="vt-best-guest-clock">
