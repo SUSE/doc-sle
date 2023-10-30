@@ -1,0 +1,767 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE article
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<article xml:id="article-kubevirt"
+         xmlns="http://docbook.org/ns/docbook"
+         version="5.0"
+         xml:lang="en"
+         xmlns:xi="http://www.w3.org/2001/XInclude"
+         xmlns:xlink="http://www.w3.org/1999/xlink">
+  <title>Using &kubevirt; on &sle;</title>
+  <info><date>
+<?dbtimestamp format="B d, Y" ?></date>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker>
+        <dm:url>https://bugzilla.suse.com/enter_bug.cgi</dm:url>
+        <dm:product>Documentation</dm:product>
+        <dm:component>KubeVirt</dm:component>
+        <dm:assignee>jfehlig@suse.com</dm:assignee>
+      </dm:bugtracker>
+      <dm:editurl>https://github.com/SUSE/doc-sle/blob/main/xml/</dm:editurl>
+    </dm:docmanager>
+    <authorgroup>
+      <author><personname><firstname>Jim</firstname><surname>Fehlig</surname></personname>
+        <affiliation>
+          <jobtitle>Software Engineer</jobtitle>
+          <orgname>SUSE</orgname>
+        </affiliation>
+      </author>
+      <author><personname><firstname>Vasily</firstname><surname>Ulyanov</surname></personname>
+        <affiliation>
+          <jobtitle>Software Engineer</jobtitle>
+          <orgname>SUSE</orgname>
+        </affiliation>
+      </author>
+    </authorgroup>
+    <abstract>
+      <para>
+        &kubevirt; is a virtual machine management add-on for Kubernetes.
+        &kubevirt; extends Kubernetes by adding additional virtualization
+        resource types through Kubernetes' Custom Resource Definitions (CRD)
+        API. Along with the Custom Resources, &kubevirt; includes controllers
+        and agents that provide virtual machine management capabilities on the
+        cluster. By using this mechanism, the Kubernetes API can be used to
+        manage virtual machine resources similar to other Kubernetes resources.
+      </para>
+    </abstract>
+  </info>
+  <sect1 xml:id="sec-virtualization-kubevirt">
+    <title>&kubevirt; components</title>
+
+    <para>
+      &kubevirt; consists of two RPM-based packages and six container images
+      that provide the Kubernetes virtual machine management extension. The RPM
+      packages include <package>kubevirt-virtctl</package> and
+      <package>kubevirt-manifests</package>. The container images include
+      <package>virt-api</package>, <package>virt-controller</package>,
+      <package>virt-handler</package>, <package>virt-launcher</package>, and
+      <package>virt-operator</package>, <package>libguestfs-tools</package>.
+    </para>
+
+    <para>
+      <package>kubevirt-virtctl</package> can be installed on any machine with
+      administrator access to the cluster. It contains the
+      <package>virtctl</package> tool, which provides syntactic sugar on top of
+      the <package>kubectl</package> tool for virtual machine resources.
+      Although the <package>kubectl</package> tool can be used to manage
+      virtual machines, it is a bit awkward since, unlike standard Kubernetes
+      resources, virtual machines maintain state. Migration is also unique to
+      virtual machines. If a standard Kubernetes resource needs to be evacuated
+      from a cluster node, it is destroyed and started again on an alternate
+      node. Since virtual machines are stateful, they cannot be destroyed and
+      must be live-migrated away if a node is under evacuation. The
+      <package>virtctl</package> tool abstracts the complexity of managing
+      virtual machines with <package>kubectl</package>. It can be used to stop,
+      start, pause, unpause and migrate virtual machines.
+      <package>virtclt</package> also provides access to the virtual machine's
+      serial console and graphics server.
+    </para>
+
+    <para>
+      <package>kubevirt-manifests</package> contains the manifests, or recipes,
+      for installing &kubevirt;. The most interesting files are
+      <filename>/usr/share/kube-virt/manifests/release/kubevirt-cr.yaml</filename>
+      and
+      <filename>/usr/share/kube-virt/manifests/release/kubevirt-operator.yaml</filename>.
+      <filename>kubevirt-cr.yaml</filename> contains the &kubevirt; Custom
+      Resource definition that represents the &kubevirt; service.
+      <filename>kubevirt-operator.yaml</filename> is the recipe for deploying
+      the &kubevirt; operator, which deploys the &kubevirt; service to the
+      cluster and manages its' lifecycle.
+    </para>
+
+    <para>
+      <package>virt-api</package> is a cluster component that provides the
+      Kubernetes API extension for virtual machine resources. Like
+      <package>virt-api</package>, <package>virt-controller</package> is a
+      cluster component that watches for new objects created via
+      <package>virt-api</package>, or updates to existing objects, and takes
+      action to ensure the object state matches the requested state.
+      <package>virt-handler</package> is a DaemonSet and a node component that
+      has the job of keeping the cluster-level virtual machine object in sync
+      with the <package>libvirtd</package> domain running in
+      <package>virt-launcher</package>. <package>virt-handler</package> can
+      also perform node-centric operations like configuring networking and/or
+      storage on the node per the virtual machine specification.
+      <package>virt-launcher</package> is also a node component and has the job
+      of running <package>libvirt</package> plus <package>qemu</package> to
+      provide the virtual machine environment. <package>virt-launcher</package>
+      is a lowly pod resource. <package>libguestfs-tools</package> is a
+      component providing a set of utilities for accessing and modifying VM
+      disk images.
+    </para>
+
+    <para>
+      <package>virt-operator</package> implements the Kubernetes operator
+      pattern. Operators encode the human knowledge required to deploy, run
+      and maintain an application. Operators are a Kubernetes Deployment
+      resource type and are often used to manage the custom resources and
+      custom controllers that together provide a more complex Kubernetes
+      application such as &kubevirt;.
+    </para>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-installation">
+    <title>Installing &kubevirt; on Kubernetes</title>
+
+    <para>
+      &kubevirt; can be installed on a Kubernetes cluster by installing the
+      <package>kubevirt-manifests</package> package on an admin node, applying
+      the <package>virt-operator</package> manifest, and creating the
+      &kubevirt; custom resource. For example, on a cluster admin node execute
+      the following:
+    </para>
+
+<screen>&prompt.sudo;zypper install kubevirt-manifests
+&prompt.user;kubectl apply -f /usr/share/kube-virt/manifests/release/kubevirt-operator.yaml
+&prompt.user;kubectl apply -f /usr/share/kube-virt/manifests/release/kubevirt-cr.yaml</screen>
+
+    <para>
+      After creating the &kubevirt; custom resource,
+      <package>virt-operator</package> deploys the remaining &kubevirt;
+      components. Progress can be monitored by viewing the status of the
+      resources in the <package>kubevirt</package> namespace:
+    </para>
+
+<screen>&prompt.user;kubectl get all -n kubevirt</screen>
+
+    <para>
+      The cluster is ready to deploy virtual machines once
+      <package>virt-api</package>, <package>virt-controller</package>, and
+      <package>virt-handler</package> are READY with STATUS <quote>Running</quote>.
+    </para>
+
+    <para>
+      Alternatively it is possible to wait until &kubevirt; custom resource
+      becomes available:
+    </para>
+
+<screen>&prompt.user;kubectl -n kubevirt wait kv kubevirt --for condition=Available</screen>
+
+    <para>
+      Some &kubevirt; functionality is disabled by default and must be enabled
+      via feature gates. For example, live migration and the use of HostDisk for
+      virtual machine disk images are disabled. Enabling &kubevirt; feature
+      gates can be done by altering an existing &kubevirt; custom resource and
+      specifying the list of features to enable. For example, you can enable
+      live migration and the use of HostDisks:
+    </para>
+
+<screen>&prompt.user;kubectl edit kubevirt kubevirt -n kubevirt
+    ...
+    spec:
+      configuration:
+        developerConfiguration:
+          featureGates:
+            - HostDisk
+            - LiveMigration
+  </screen>
+
+    <note>
+      <para>
+        The names of feature gates are case-sensitive.
+      </para>
+    </note>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-updating">
+    <title>Updating the &kubevirt; deployment</title>
+
+    <para>
+      Updating &kubevirt; is similar to the initial installation. The updated
+      operator manifest from the <package>kubevirt-manifests</package> package
+      is applied to the cluster.
+    </para>
+
+<screen>&prompt.sudo;zypper update kubevirt-manifests
+&prompt.user;kubectl apply -f /usr/share/kube-virt/manifests/release/kubevirt-operator.yaml
+</screen>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-deleting">
+    <title>Deleting &kubevirt; from a cluster</title>
+
+    <para>
+      &kubevirt; can be deleted from a cluster by deleting the custom resource
+      and operator:
+    </para>
+
+<screen>&prompt.user;kubectl delete -n kubevirt kubevirt kubevirt # or alternatively: kubectl delete -f /usr/share/kube-virt/manifests/release/kubevirt-cr.yaml
+&prompt.user;kubectl delete -f /usr/share/kube-virt/manifests/release/kubevirt-operator.yaml</screen>
+
+    <note>
+      <para>
+        It is important to delete the custom resource first otherwise it
+        gets stuck in the <package>Terminating</package> state. To fix that the
+        resource finalizer needs to be manually deleted:
+      </para>
+<screen>&prompt.user;kubectl -n kubevirt patch kv kubevirt --type=json -p '[{ "op": "remove", "path": "/metadata/finalizers" }]'</screen>
+    </note>
+
+    <para>
+      After deleting the resources from Kubernetes cluster the installed
+      &kubevirt; RPMs can be removed from the system:
+    </para>
+
+<screen>&prompt.sudo;zypper rm kubevirt-manifests kubevirt-virtctl</screen>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-cdi">
+    <title>Containerized Data Importer</title>
+
+    <para>
+      Containerized Data Importer (CDI) is an add-on for Kubernetes focused on
+      persistent storage management. It is primarily used for building and
+      importing Virtual Machine Disks for &kubevirt;.
+    </para>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-cdi-installation">
+      <title>Installing CDI</title>
+      <para>
+        CDI can be installed on a Kubernetes cluster in a way similar to
+        &kubevirt; by installing the RPMs and applying the operator and custom
+        resource manifests using kubectl:
+      </para>
+<screen>&prompt.sudo;zypper in containerized-data-importer-manifests
+&prompt.user;kubectl apply -f /usr/share/cdi/manifests/release/cdi-operator.yaml
+&prompt.user;kubectl apply -f /usr/share/cdi/manifests/release/cdi-cr.yaml</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-cdi-updating-deleting">
+      <title>Updating and deleting CDI:</title>
+      <para>
+        To update CDI:
+      </para>
+<screen>&prompt.sudo;zypper update containerized-data-importer-manifests
+&prompt.user;kubectl apply -f /usr/share/cdi/manifests/release/cdi-operator.yaml</screen>
+      <para>
+        To delete CDI:
+      </para>
+<screen>&prompt.user;kubectl delete -f /usr/share/cdi/manifests/release/cdi-cr.yaml
+&prompt.user;kubectl delete -f /usr/share/cdi/manifests/release/cdi-operator.yaml
+&prompt.sudo;zypper rm containerized-data-importer-manifests</screen>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-running-vm">
+    <title>Running virtual machines</title>
+
+    <para>
+      Two of the most interesting custom resources provided by &kubevirt; are
+      <emphasis
+    role="italic">VirtualMachine</emphasis> (VM) and
+      <emphasis role="italic"
+    >VirtualMachineInstance</emphasis> (VMI). As
+      the names imply, a VMI is a running instance of a VM. The lifecycle of a
+      VMI can be managed independently from a VM, but long-lived, stateful
+      virtual machines are managed as a VM. The VM is deployed to the cluster
+      in a shutoff state, then activated by changing the desired state to
+      running. Changing a VM resource state can be done with the standard
+      Kubernetes client tool <package>kubectl</package> or with the client
+      <package>virtctl</package> provided by &kubevirt;.
+    </para>
+
+    <para>
+      The VM and VMI custom resources make up part of the &kubevirt; API. To
+      create a virtual machine, a VM or VMI manifest must be created that
+      adheres to the API. The API supports setting a wide variety of the common
+      virtual machine attributes, for example, model of vCPU, number of vCPUs,
+      amount of memory, disks, network ports, etc. Below is a simple example of
+      a VMI manifest for a virtual machine with one Nehalem CPU, 2G of memory,
+      one disk, and one network interface:
+    </para>
+
+<screen>apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+metadata:
+  labels:
+    special: vmi-host-disk
+  name: sles15sp2
+spec:
+  domain:
+    cpu:
+      model: Nehalem-IBRS
+    devices:
+      disks:
+      - disk:
+          bus: virtio
+        name: host-disk
+      interfaces:
+        - name: green
+          masquerade: {}
+          ports:
+            - port: 80
+    machine:
+      type: ""
+    resources:
+      requests:
+        memory: 2048M
+  terminationGracePeriodSeconds: 0
+  networks:
+  - name: green
+    pod: {}
+  volumes:
+  - hostDisk:
+      path: /hostDisks/sles15sp2/disk.raw
+      type: Disk
+      shared: true
+    name: host-disk</screen>
+
+    <para>
+      Applying this VMI manifest to the cluster creates a virt-launcher
+      container running <package>libvirt</package> and <package>qemu</package>,
+      providing the familiar KVM virtual machine environment.
+    </para>
+
+<screen>&prompt.user;kubectl apply -f sles15sp2vmi.yaml
+&prompt.user;kubectl get vmis</screen>
+
+    <para>
+      Similar to other Kubernetes resources, VMs and VMIs can be managed with
+      the <package>kubectl</package> client tool. Any
+      <package>kubectl</package> operation that works with resource types
+      works with the &kubevirt; custom resources, for example, describe, delete,
+      get, log, patch, etc. VM resources are a bit more awkward to manage with
+      <package>kubectl</package>. Since a VM resource can be in a shutoff
+      state, turning it on requires patching the manifest to change the desired
+      state to running. Find an example below:
+    </para>
+
+<screen>&prompt.user;kubectl patch vm sles15sp2 --type merge -p '{"spec":{"running":true}}'</screen>
+
+    <para>
+      The <package>virtctl</package> tool included in the
+      <package>kubevirt-virtclt</package> package provides syntactic sugar on
+      top of <package>kubectl</package> for VM and VMI resources, allowing them
+      to be stopped, started, paused, unpaused and migrated.
+      <package>virtctl</package> also provides access to the virtual machine's
+      serial console and graphics server. Find an example below:
+    </para>
+
+<screen>&prompt.user;virtctl start VM
+&prompt.user;virtctl console VMI
+&prompt.user;virtctl stop VM
+&prompt.user;virtctl pause VM|VMI
+&prompt.user;virtctl unpause VM|VMI
+&prompt.user;virtctl vnc VMI
+&prompt.user;virtctl migrate VM</screen>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-live-migration">
+    <title>Live migration</title>
+
+    <para>
+      &kubevirt; supports live migration of VMs. Though this functionality must
+      first be activated by adding <package>LiveMigration</package> to the list
+      of feature gates in the &kubevirt; custom resource.
+    </para>
+
+<screen>&prompt.user;kubectl edit kubevirt kubevirt -n kubevirt</screen>
+
+<screen>
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+        - LiveMigration</screen>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-live-migration-prerequisites">
+      <title>Prerequisites</title>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            All the Persistent Volume Claims (PVCs) used by a VM must have
+            `ReadWriteMany` (RWX) access mode.
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            VM pod network binding must be of type
+            <package>masquerade</package>:
+          </para>
+<screen>
+spec:
+  domain:
+    devices:
+      interfaces:
+        - name: green
+          masquerade: {}</screen>
+        </listitem>
+      </itemizedlist>
+      <para>
+        Whether live migration is possible or not can be checked via the
+        <package>VMI.status.conditions</package> field of a running VM spec:
+      </para>
+<screen>&prompt.user;kubectl describe vmi sles15sp2</screen>
+<screen>
+Status:
+  Conditions:
+    Status: True
+    Type: LiveMigratable
+  Migration Method: BlockMigration</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-live-migration-init">
+      <title>Initiating live migration</title>
+      <para>
+        Live migration of a VMI can be initiated by applying the following yaml
+        file:
+      </para>
+<screen>
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstanceMigration
+metadata:
+  name: migration-job
+spec:
+  vmiName: sles15sp2</screen>
+<screen>&prompt.user;kubectl apply -f migration-job.yaml</screen>
+      <para>
+        Alternatively it is possible to migrate a VM using
+        <package>virtctl</package> tool:
+      </para>
+<screen>&prompt.user;virtctl migrate VM</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-live-migration-cancel">
+      <title>Cancelling live migration</title>
+      <para>
+        Live migration can be canceled by deleting the existing migration
+        object:
+      </para>
+<screen>&prompt.user;kubectl delete VirtualMachineInstanceMigration migration-job</screen>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-hotplug-volumes">
+    <title>Volume hotplugging</title>
+
+    <para>
+      &kubevirt; allows hotplugging additional storage into a running VM. Both
+      block and file system volume types are supported. The hotplug volumes
+      feature can be activated via the <package>HotplugVolumes</package>
+      feature gate:
+    </para>
+
+<screen>&prompt.user;kubectl edit kubevirt kubevirt -n kubevirt</screen>
+
+<screen>
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+        - HotplugVolumes</screen>
+
+    <para>
+      Assuming that <package>hp-volume</package> is an existing DataVolume or
+      PVC, <package>virtctl</package> can be used to operate with the volume on
+      a runnig VM:
+    </para>
+
+<screen>&prompt.user;virtctl addvolume sles15sp2 --volume-name=hp-volume
+&prompt.user;virtctl removevolume sles15sp2 --volume-name=hp-volume</screen>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-vmdp">
+    <title>Running Windows VMs with VMDP ISO</title>
+
+    <para>
+      The VMDP ISO is provided in the form of a container image which can be
+      consumed by &kubevirt;. To run a Windows VM with VMDP ISO attached, the
+      corresponding <package>containerDisk</package> needs to be added to the
+      VM definition:
+    </para>
+
+<screen>
+spec:
+  domain:
+    devices:
+      disks:
+        - name: vmdp
+          cdrom:
+            bus: sata
+volumes:
+  - containerDisk:
+      image: registry.suse.com/suse/vmdp/vmdp:latest
+    name: vmdp</screen>
+
+    <note>
+      <para>
+        The sequence in which the disks are defined affects the boot order. It
+        is possible to specify the <package>bootOrder</package> explicitly or
+        otherwise sort the disk items as needed.
+      </para>
+    </note>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-supported-features">
+    <title>Supported features</title>
+
+    <itemizedlist mark="bullet" spacing="normal">
+      <listitem>
+        <para>
+          Guest Agent Information
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          Live migration
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          Hotplug volumes
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          VMI Dedicated CPU resource
+        </para>
+      </listitem>
+    </itemizedlist>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-supported-hardware">
+      <title>VMI virtual hardware</title>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            machine type
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            BIOS/UEFI/SMBIOS
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            cpu
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            clock
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            RNG
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            CPU/Memory limits and requirements
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            tablet input
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            hugepage
+          </para>
+        </listitem>
+      </itemizedlist>
+    </sect2>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-supported-storage">
+      <title>VMI disks and volumes</title>
+      <para>
+        Disk types:
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            lun
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            disk
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            cdrom
+          </para>
+        </listitem>
+      </itemizedlist>
+      <para>
+        Volume sources:
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            cloudInitNoCloud
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            cloudInitConfigDrive
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            persistentVolumeClaim
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            dataVolume
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            ephemeral
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            containerDisk
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            emptyDisk
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            hostDisk
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            configMap
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            secret
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            serviceAccount
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            downwardMetrics
+          </para>
+        </listitem>
+      </itemizedlist>
+      <para>
+        High performance features:
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            IO threads
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            Virtio Block Multi-Queue
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            Disk cache
+          </para>
+        </listitem>
+      </itemizedlist>
+    </sect2>
+
+    <sect2 xml:id="sec-virtualization-kubevirt-supported-networks">
+      <title>VMI interfaces and networks</title>
+      <para>
+        Network (back-end) types:
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            pod
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            multus
+          </para>
+        </listitem>
+      </itemizedlist>
+      <para>
+        Interface (front-end) types:
+      </para>
+      <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+          <para>
+            bridge
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            masquerade
+          </para>
+        </listitem>
+      </itemizedlist>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-virtualization-kubevirt-debug">
+    <title>Debugging</title>
+
+    <para>
+      If issues are encountered the following debug resources are available to
+      help identify the problem.
+    </para>
+
+    <para>
+      The status of all &kubevirt; resources can be examined with the
+      <command>kubectl get</command> command:
+    </para>
+
+<screen>&prompt.user;kubectl get all -n kubevirt</screen>
+
+    <para>
+      Resources with failed status can be further queried by examining their
+      definition and expanded status information.
+    </para>
+
+<screen>&prompt.user;kubectl describe deployment virt-operator
+&prompt.user;kubectl get deployment virt-operator -o yaml -n kubevirt
+&prompt.user;kubectl describe pod virt-handler-xbjkg -n kubevirt
+&prompt.user;kubectl get pod virt-handler-xbjkg -o yaml -n kubevirt</screen>
+
+    <para>
+      Logs from the problematic &kubevirt; pod can contain a wealth of
+      information since <package>stderr</package> and service logging from
+      within the pod is generally available via the Kubernetes log service:
+    </para>
+
+<screen>&prompt.user;kubectl logs virt-operator-558c57bc4-mg68w -n kubevirt
+  &prompt.user;kubectl logs virt-handler-xbjkg -n kubevirt</screen>
+
+    <para>
+      If the underlying pod is running but there are problems with the service
+      running in it, a shell can be accessed to inspect the pod environment and
+      poke at its service:
+    </para>
+
+<screen>&prompt.user;kubectl -n kubevirt exec -it virt-handler-xbjkg -- /bin/bash</screen>
+  </sect1>
+</article>
