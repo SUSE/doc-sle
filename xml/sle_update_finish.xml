@@ -313,5 +313,156 @@
           xlink:href="https://www.suse.com/support/kb/doc/?id=000019702"/>.
       </para>
     </sect2>
+    <sect2 xml:id="update-finish-sle11-cyrus">
+      <title>Switch from <productname>Cyrus IMAP</productname> to <productname>Dovecot</productname> or enable &ph;</title>
+      <para>
+        &slea; 11 comes with the <productname>Cyrus IMAP</productname> server, while &slea; 12 and
+        later use <productname>Dovecot</productname> by default. If you used Cyrus, mail delivery
+        will fail and users will not be able to connect to either IMAP or POP3 service at all.
+      </para>
+      <para>
+        To switch to &gnome;, install the <package>gnome_basic</package> pattern:
+      </para>
+<screen>&prompt.root;zypper in -t pattern gnome_basic</screen>
+      <procedure>
+        <title>Migrate from <productname>Cryus</productname> to <productname>Dovecot</productname></title>
+        <step>
+          <para>
+            Install <productname>Dovecot</productname>:
+          </para>
+<screen>&prompt.sudo;zypper in dovecot</screen>
+        </step>
+        <step>
+          <para>
+            Migrate the Cyrus mailboxes to Dovecot
+          </para>
+          <substeps>
+            <step>
+              <para>
+                The Dovecot documentation provides a link to the script
+                <filename>cyrus2dovecot</filename>, which migrates individual mailboxes. Download the
+                script and make it executable:
+              </para>
+              <screen>&prompt.root;cd /root/bin
+&prompt.root;wget 'https://github.com/a-schild/cyrus2dovecot/raw/master/cyrus2dovecot'
+&prompt.root;chmod +x cyrus2dovecot</screen>
+              <important>
+                <title>Carefully check the script</title>
+                <para>
+                  The <filename>cyrus2dovecot</filename> script is not provided by &suse;. Do not
+                  run the script without carefully checking its content first.
+                </para>
+              </important>
+              <para>
+                The script requires <command>perl</command> >= 5.6. Cyrus-imapd is not required the migration.
+              </para>
+            </step>
+            <step>
+              <para>
+                To migrate all user mailboxes on the system, create a wrapper script
+                <filename>/root/bin/convert-mailboxes.sh</filename> with the following content:
+              </para>
+              <programlisting><![CDATA[
+#!/bin/sh
+  
+in=/var/spool/imap/user         # Cyrus INBOXes.
+db=/var/lib/imap/user/?         # Cyrus seen/subscription files.
+log=/tmp/conversion.log         # Log of successful conversions.
+err=/tmp/error.log              # Log of conversion errors.
+quota=2147483648                # 2 GiB quota (for maildirsize).
+
+for u in `find $in/. \! -name . -prune -exec basename \{\} \;`
+do
+  out=$(eval echo ~$u)
+  group=$(id -gn $u)
+  cyrus2dovecot --cyrus-inbox $in/$u                \
+                --cyrus-seen $db/$u.seen            \
+                --cyrus-sub $db/$u.sub              \
+                --default-quota $quota              \
+                --edit-foldernames 's/^\./.INBOX./' \
+                --dovecot-inbox $out/Maildir        \
+                $u 2>&1 >>$log | tee -a $err >&2
+  find $out/Maildir -type d -exec chown $u.$group {} \;
+  find $out/Maildir -type d -exec chmod 755 {} \;
+  find $out/Maildir -type f -exec chown $u.$group {} \;
+  find $out/Maildir -type f -exec chmod 600 {} \;
+done]]></programlisting>
+              <para>
+                This script finds all Cyrus mailboxes on the system and migrates them with 
+                <filename>cyrus2dovecot</filename>.
+              </para>
+              <para>
+                Make the script executable:
+              </para>
+<screen>&prompt.root;chmod +x convert-mailboxes.sh</screen>
+            </step>
+            <step>
+              <para>
+                Make sure <systemitem class="daemon">Dovecot</systemitem> is not running:
+              </para>
+<screen>&prompt.root;systemctl stop dovecot</screen>
+            </step>
+            <step>
+              <para>
+                Migrate the mailboxes: 
+              </para>
+<screen>&prompt.root;convert-mailboxes.sh</screen>
+            </step>
+          </substeps>
+        </step>
+        <step performance="optional">
+          <para>
+            
+            To by full compatibility with the old cyrus-imapd setup, allow users to log in without
+            SSL. Please note this is not recommended but only 
+            
+            Allow login without SSL to be compatible with old cyrus-imapd  setup. For stronger security skip this step, but clients may complain they get authentication failures when try to connect to imap/pop3
+            edit file <filename>/etc/dovecot/conf.d/10-auth.conf</filename>
+          </para>
+<screen>disable_plaintext_auth = no
+auth_mechanisms = plain login</screen>
+        </step>
+        <step>
+          <para>
+            Change and enable the SSL settings for dovecot in
+            <filename>/etc/dovecot/conf.d/10-ssl.conf</filename>:
+          </para>
+<screen>ssl=yes
+ssl_cert = &lt;/etc/ssl/servercerts/servercert.pem
+ssl_key = &lt;/etc/ssl/servercerts/serverkey.pem</screen>
+        </step>
+        <step>
+          <para>
+            After successful migration and dovecot configuration, change postfix to deliver email
+            via dovecot by editing the file <filename>/etc/postfix/main.cf</filename>
+          </para>
+<screen>mailbox_command = /usr/lib/dovecot/deliver
+mailbox_transport =</screen>
+        </step>
+        <step>
+          <para>
+            Restart postfix: 
+          </para>
+<screen>&prompt.root;systemctl restart postfix.service</screen>
+        </step>
+      </procedure>
+      
+      <para>
+        If you want to stick to <productname>cyrus</productname>, you can install it from &ph;:
+      </para>
+      <screen>&prompt.root;SUSEConnect --list-extensions | grep "PackageHub" | cut -dp -f2- | xargs SUSEConnect -p
+&prompt.root;zypper in cyrus-imapd
+&prompt.sudo;cp /etc/imapd.rpmsave /etc/imapd.conf
+&prompt.sudo;systemctl daemon-reload
+&prompt.sudo;systemctl enable cyrus
+&prompt.sudo;systemctl start cyrus</screen>
+      <para>
+        Please note that &ph; is not supported by &suse; but by the &opensuse; community.
+      </para>
+      <para>
+        For more information, refer to <link
+          xlink:href="https://www.suse.com/support/kb/doc/?id=000019715"/>.
+      </para>
+    </sect2>
   </sect1>
 </chapter>
