@@ -507,26 +507,28 @@ network=vnet_nated</screen>
       <varlistentry xml:id="vle-libvirt-inst-virt-install-ovmf">
         <term>Using &uefisecboot;</term>
         <listitem>
+          <note>
+            <para>
+              &suse; supports &uefisecboot; on &x86-64; &kvm; guests only.
+              &xen; HVM guests support booting with UEFI firmware, but
+              they do not support &uefisecboot;.
+            </para>
+          </note>
           <para>
-            Install OVMF as described in
-            <xref
-      linkend="sec-vt-installation-ovmf" />. Then add the
-            <option>--boot uefi</option> option to the
-            <command>virt-install</command> command.
+            By default, new virtual machines installed using
+            <command>virt-install</command> are configured with a legacy
+            BIOS. They can be configured to use UEFI with
+            <option>--boot firmware=efi</option>. A firmware that supports
+            &uefisecboot; and has Microsoft keys enrolled will be selected.
+            If secure boot is undesirable, the option
+            <option>--boot firmware=efi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no</option>
+            can be used to select a UEFI firmware without secure boot support.
           </para>
           <para>
-            &uefisecboot; is used automatically when setting up a new VM with
-            OVMF. To use specific firmware, use <option>--boot
-            loader=<replaceable>PATH_TO_FIRMWARE</replaceable></option>.
+            It is also possible to explicitly specify a UEFI firmware image. See
+            <xref linkend="cha-kvm-inst-virtman-advanced-uefi"/> for advanced
+            information and examples on using UEFI with virtual machines.
           </para>
-          <para>
-            For example, for the &aarch64; architecture:
-          </para>
-<screen>--boot loader=/usr/share/qemu/qemu-uefi-aarch32.bin</screen>
-          <para>
-            And for the &x86-64;; architecture:
-          </para>
-<screen>--boot loader=/usr/share/qemu/ovmf-x86_64-opensuse.bin</screen>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -565,9 +567,144 @@ network=vnet_nated</screen>
 
     <para>
       This section provides instructions for operations exceeding the scope of
-      a normal installation, such as memory ballooning and installing add-on
-      products.
+      a normal installation, such as manually configuring UEFI firmware, memory
+      ballooning and installing add-on products.
     </para>
+
+    <sect2 xml:id="cha-kvm-inst-virtman-advanced-uefi">
+      <title>Advanced UEFI Configuration</title>
+      <para>
+        The UEFI firmware used by virtual machines is provided by
+        <emphasis>OVMF</emphasis> (<emphasis>Open Virtual Machine Firmware</emphasis>).
+        The <package>qemu-ovmf-x86_64</package> package contains firmwares for
+        &x86-64; &vmguest;s. Firmwares for &aarch64; &vmguest;s are provided by
+        the <package>qemu-uefi-aarch64</package> package. Both packages contain
+        several firmwares, each supporting a different set of features and
+        capabilities. The packages also include JSON firmware descriptor files,
+        which describe the features and capabilities of the various firmwares.
+      </para>
+
+      <para>
+        &libvirt; supports two methods of selecting virtual machine UEFI
+        firmware: automatic and manual. With automatic selection, &libvirt; will
+        select a firmware based on an optional set of features specified by the
+        user. If no explicit features are specified, &libvirt; will select a
+        firmware with secure boot enabled and Microsoft keys enrolled. When using
+        manual selection, the full path of the firmware and any optional settings
+        must be explicitly specified. Users can reference the JSON descriptor
+        files to find a firmware that satisfies their requirements. 
+      </para>
+
+      <para>
+        When using <command>virt-install</command>, automatic firmware selection
+        is enabled by specifying the <emphasis>firmware=efi</emphasis> parameter
+        to the <emphasis>boot</emphasis> option, for example
+        <option>--boot firmware=efi</option>. The selection process can be
+        influenced by requesting the presence or absence of firmware features.
+        The following example illustrates automatic firmware selection with
+        &uefisecboot; disabled.
+      </para>
+
+<screen>&prompt.user;virt-install --connect qemu:///system --virt-type kvm \
+--name sle15sp5 --memory 1024 --disk size=10 --cdrom /dev/cdrom --graphics vnc \
+--boot firmware=efi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no \
+--os-variant sle15sp5</screen>
+
+      <note>
+        <para>
+          To ensure persistent &vmguest;s use the same firmware and variable
+          store throughout their lifetime, &libvirt; will record automatically
+          selected firmware in the &vmguest; XML configuration. Automatic
+          firmware selection is a one-time activity. Once firmware has been
+          selected, it will only change if the &vmguest; administrator
+          explicitly does so using the manual firmware selection method.
+        </para>
+      </note>
+
+      <para>
+        The <emphasis>loader</emphasis> and <emphasis>nvram</emphasis>
+        parameters are used for manual firmware selection. <emphasis>loader</emphasis>
+        is required, and <emphasis>nvram</emphasis> defines an optional UEFI
+        variable store. The following example illustrates manual firmware
+        selection with secure boot enabled.
+      </para>
+
+<screen>&prompt.user;virt-install --connect qemu:///system --virt-type kvm \
+--name sle15sp5 --memory 1024 --disk size=10 --cdrom /dev/cdrom --graphics vnc \
+--boot loader=/usr/share/qemu/ovmf-x86_64-smm-code.bin,loader.readonly=yes,loader.type=pflash,loader.secure=yes,nvram.template=/usr/share/qemu/ovmf-x86_64-smm-vars.bin \
+--os-variant sle15sp5</screen>
+
+      <note>
+        <para>
+          &libvirt; cannot modify any characteristics of the UEFI firmwares. For
+          example, it cannot disable &uefisecboot; in a firmware that has
+          &uefisecboot; enabled, even when specifying <emphasis>loader.secure=no</emphasis>.
+          &libvirt; will ensure the specified firmware can satisfy any specified
+          features. For example, it will reject configuration that disables secure
+          boot with <emphasis>loader.secure=no</emphasis>, but specifies a
+          firmware that has &uefisecboot; enabled.
+        </para>
+      </note>
+
+      <para>
+        The <package>qemu-ovmf-x86_64</package> package contains several UEFI
+        firmware images. For example, the following subset supports SMM,
+        &uefisecboot;, and has either Microsoft, openSUSE, or SUSE UEFI CA keys
+        enrolled:
+      </para>
+
+<screen>
+&prompt.root;<command>rpm -ql qemu-ovmf-x86_64</command>
+[...]
+/usr/share/qemu/ovmf-x86_64-smm-ms-code.bin
+/usr/share/qemu/ovmf-x86_64-smm-ms-vars.bin
+/usr/share/qemu/ovmf-x86_64-smm-opensuse-code.bin
+/usr/share/qemu/ovmf-x86_64-smm-opensuse-vars.bin
+/usr/share/qemu/ovmf-x86_64-smm-suse-code.bin
+/usr/share/qemu/ovmf-x86_64-smm-suse-vars.bin
+[...]
+</screen>
+
+      <para>
+        For the &aarch64; architecture, the package is named
+        <package>qemu-uefi-aarch32</package>:
+      </para>
+
+<screen>
+&prompt.root;<command>rpm -ql qemu-uefi-aarch32</command>
+[...]
+/usr/share/qemu/aavmf-aarch32-code.bin
+/usr/share/qemu/aavmf-aarch32-vars.bin
+/usr/share/qemu/firmware
+/usr/share/qemu/firmware/60-aavmf-aarch32.json
+/usr/share/qemu/qemu-uefi-aarch32.bin
+</screen>
+
+      <para>
+        The <filename>*-code.bin</filename> files are the UEFI firmware files.
+        The <filename>*-vars.bin</filename> files are corresponding variable
+        store images that can be used as a template for a per-VM non-volatile
+        store. &libvirt; copies the specified <literal>vars</literal> template
+        to a per-VM path under <filename>/var/lib/libvirt/qemu/nvram/</filename>
+        when first creating the VM. Files without <literal>code</literal> or
+        <literal>vars</literal> in the name can be used as a single UEFI image.
+        They are not as useful since no UEFI variables persist across power
+        cycles of the VM.
+      </para>
+
+      <para>
+        The <filename>*-ms*.bin</filename> files contain UEFI CA keys as found
+        on real hardware. Therefore, they are configured as the default in
+        &libvirt;. Likewise, the <filename>*-suse*.bin</filename> files contain
+        preinstalled &suse; keys. There is also a set of files with no
+        preinstalled keys.
+      </para>
+
+      <para>
+        For more details on OVMF, see
+        <link xlink:href="http://www.linux-kvm.org/downloads/lersek/ovmf-whitepaper-c770f8c.txt"/>.
+      </para>
+    </sect2>
 
     <sect2 xml:id="libvirt-advanced-balloon" os="sles;sled">
       <title>Memory ballooning with Windows guests</title>
