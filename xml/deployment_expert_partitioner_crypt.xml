@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE sect1
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+
+<sect1 version="5.0" xml:id="deployment-encryption" os="sles;sled"
+  xmlns="http://docbook.org/ns/docbook"
+  xmlns:xi="http://www.w3.org/2001/XInclude"
+  xmlns:xlink="http://www.w3.org/1999/xlink">
+  <title>Device encryption</title>
+
+  <info>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker/>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
+
+  <para>
+    Linux Unified Key Setup (LUKS) is the standard for Linux disk encryption. It provides a
+    standardized on-disk format and enables users to transport or migrate data seamlessly.
+  </para>
+  <para>
+    LUKS is used to encrypt block devices. The contents of the encrypted device are arbitrary, and
+    therefore any file system can be encrypted, including swap partitions. All necessary setup
+    information like encryption keys and parameters such as cipher type and key size, is stored
+    in the partition header.
+  </para>
+  <para>
+    Encryption is done with a multi-layer approach. First, the block device is encrypted using a
+    master key. Then, this master key is encrypted with each active user keys. User keys are derived
+    from passphrases, FIDO2 security keys, TPMs or smart cards. This multi-layer approach allows
+    users to change their passphrase without re-encrypting the whole block device.
+  </para>
+  <para>
+    For more information about LUKS, refer to <xref linkend="cha-configure-cryptctl"/>.
+  </para>
+
+  <sect2 xml:id="deployment-encryption-methods">
+    <title>Encryption methods</title>
+    <para>
+      To encrypt a device, follow the instruct in <xref linkend="sec-expert-partitioner-options"/>.
+    </para>
+    <tip>
+      <title>Enabling LUKS2 support in &yast;</title>
+      <para>
+        LUKS2 encryption is supported by the &yast; Partitioner as of &sle; 15 SP4, but needs to be
+        enabled explicitly. There are two ways to do this:
+      </para>
+      <orderedlist>
+        <listitem>
+          <para>
+            At boot time by adding the parameter to <literal>YAST_LUKS2_AVAILABLE</literal> to the
+            kernel command line. For information about boot parameters, refer to <xref
+              linkend="cha-boot-parameters"/>.
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            During installation in the &yast; configuration
+          </para>
+          <itemizedlist>
+            <listitem>
+              <para>
+                In the graphical interface, press <keycombo><keycap>Ctrl</keycap><keycap>Alt</keycap>
+                  <keycap>Shift</keycap><keycap>C</keycap></keycombo>.
+              </para>
+            </listitem>
+            <listitem>
+              <para>
+                In the text interface, press <keycombo><keycap>Ctrl</keycap><keycap>D</keycap></keycombo>
+                and then <keycombo><keycap>Shift</keycap><keycap>C</keycap></keycombo>.
+              </para>
+            </listitem>
+          </itemizedlist>
+          <para>
+            Check <literal>Enable Experimental LUKS2 Encryption Support</literal> and exit the
+            configuration screen with <literal>OK</literal>.
+          </para>
+        </listitem>
+      </orderedlist>
+    </tip>
+    <para>
+      If you do not enable LUKS2 support, the <guimenu>Encryption method</guimenu> selection is not
+      visible and you only need to enter the encryption password.
+    </para>
+    <variablelist xml:id="vl-encryption-methods">
+      <varlistentry>
+        <term><guimenu>Regular LUKS1</guimenu></term>
+        <listitem>
+          <para>
+            This method allows to encrypt the device using LUKS1. You have to provide the encryption
+            password. Additional passwords&mdash;up to eight in total&mdash;can be added later with
+            <command>cryptsetup luksAddKey</command>.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><guimenu>Regluar LUKS2</guimenu></term>
+        <listitem>
+          <para>
+            LUKS2 uses a newer version of the header format, which is resilient to corruption, and
+            supports up to 32 user keys and device labels. You have to provide the encryption password
+            and the password-based key derivation function (PBKDF) that will be used to protect
+            that passphrase (see <xref linkend="deployment-encryption-pbkdf"/>).
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><guimenu>Pervasive LUKS2</guimenu> (only on &zseries;)</term>
+        <listitem>
+          <para>
+            This method allows to encrypt the device using LUKS2 with a master secure key processed
+            by a Crypto Express cryptographic coprocessor configured in CCA mode. If the
+            cryptographic system already contains a secure key associated to this volume, that key
+            will be used. Otherwise, a new secure key will be generated and registered in the
+            system. You need to provide an encryption password that will be used to protect the
+            access to that master key. Moreover, when there are several APQNs in the system, you can
+            select which ones to use.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><guimenu>Encryption with Volatile Random Key</guimenu> (only for swap devices)</term>
+        <listitem>
+          <para>
+            This method encrypts a swap device with a randomly generated key at boot and therefor
+            does not support hibernation to hard disk. The swap device is re-encrypted on every
+            boot, and its previous content is destroyed. To avoid data loss, disable hibernation and
+            configure your system to shutdown instead.
+          </para>
+          <para>
+            In addition to the encryption key, the device label and the UUID change every time the
+            swap is re-encrypted, so neither are valid options to mount a randomly encrypted swap
+            device. Make sure the swap device is referenced by a stable name that is not subject to
+            change on every reboot in the <filename>/etc/crypttab</filename> file. For example, for
+            a swap partition it is safer to use the udev device id or path instead of the partition
+            device name, since that device name may be assigned to a different partition during the
+            next boot. If that happens, a wrong device could be encrypted instead of your swap!
+          </para>
+          <para>
+            &yast; tries to use stable names in <filename>/etc/crypttab</filename>, unless it is
+            configured to always use device names (see the <guimenu>Settings</guimenu> section of
+            the partitioner). But for some devices finding a fully stable name may not be possible.
+            Only use encryption with volatile keys if you are sure about the implications.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><guimenu>Protected Swap</guimenu> (only for swap devices)</term>
+        <listitem>
+          <para>
+            This method encrypts a swap device with volatile protected AES key without requiring a
+            cryptographic co-processor. It is an improvement over the <literal>Encryption with
+              Volatile Random Key</literal> method and all considerations for that method still apply.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><guimenu>Secure Swap</guimenu> (only for swap devices)</term>
+        <listitem>
+          <para>
+            This method encrypts a swap device with a volatile secure AES key generated from a
+            cryptographic co-processor. It is an improvement over the <literal>Encryption with
+              Volatile Random Key</literal> method and all considerations for that method still apply.
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </sect2>
+
+  <sect2 xml:id="deployment-encryption-pbkdf">
+    <title>Password-based key derivation functions</title>
+    <para>
+      The password-based key derivation function (PBKDF) to use depends on the context, the hardware
+      capabilities and the needed level of compatibility with other system components:
+    </para>
+    <variablelist xml:id="vl-pbkdf">
+      <varlistentry>
+        <term>PBKDF2</term>
+        <listitem>
+          <para>
+            <literal>PBKDF2</literal> is the function that LUKS1 uses. It is defined in
+            <link xlink:href="https://tools.ietf.org/html/rfc2898">RFC 2898</link>.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Argon2i</term>
+        <listitem>
+          <para>
+            Argon2 is a function designed to be more secure and to require a lot of memory to be
+            computed. It is defined in <link
+              xlink:href="https://tools.ietf.org/html/rfc9106">RFC 9106</link>. Argon2i is a variant
+            of Argon2 optimized to resist side-channel attacks by accessing the memory array in a
+            password-independent order.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Argon2id</term>
+        <listitem>
+          <para>
+            Argon2id is a hybrid version of Argon2. It follows the Argon2i approach for the first
+            half pass over memory and the Argon2d (not supported by &yast;) approach to limit GPU
+            cracking attacks for subsequent passes. RFC 9106 recommends using Argon2id if you do not
+            know the difference between the types or you consider side-channel attacks to be a
+            viable threat.
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+    <para>
+      While <literal>Argon2</literal> is more secure, there are still use cases for
+      <literal>PBKDF2</literal>:
+    </para>
+    <itemizedlist>
+      <listitem>
+        <para>
+          As an intentional security feature, Argon2 requires a lot more memory to be comupted.
+          This may result in problems on some systems. If the strength of the password can be fully
+          assured, then using PBKDF2 may still be secure and save memory.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <systemitem>grub2</systemitem> offers limited support to boot from devices encrypted with
+          LUKS2, but only if PBKDF2 is used. This means you cannot use Argon2 for a file system that
+          contains the <filename>/boot</filename> directory. Note that even if PBKDF2 is used, some
+          manual <systemitem>grub2</systemitem> configuration may be needed to boot from a LUKS2
+          device.
+        </para>
+      </listitem>
+    </itemizedlist>
+    <!--
+    <para>
+      Use the Help button in the installer to see more information about configuring LUKS2.
+      Please note that you need a separate, unencrypted boot partition in order to
+      encrypt the root file system.
+    </para>
+    -->
+    <para>
+      For more information on configuring device encryption with LUKS, use the
+      <literal>Help</literal> button in the installer and refer to
+      <xref linkend="cha-configure-cryptctl"/>.
+    </para>
+  </sect2>
+</sect1>
