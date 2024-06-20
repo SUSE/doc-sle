@@ -15,6 +15,7 @@ When opening a PR, check all versions of the documentation that your PR applies 
 
 - SLE 15/openSUSE Leap 15.x
   - [ ] SLE 15 next/openSUSE Leap next *(current `main`, no backport necessary)*
+  - [ ] SLE 15 SP6/openSUSE Leap 15.6
   - [ ] SLE 15 SP5/openSUSE Leap 15.5
   - [ ] SLE 15 SP4/openSUSE Leap 15.4
   - [ ] SLE 15 SP3/openSUSE Leap 15.3
