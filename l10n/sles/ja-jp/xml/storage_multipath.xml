@@ -1,1 +1,2742 @@
-../../../../xml/storage_multipath.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="storage_multipath.xml" version="5.0" xml:id="cha-multipath" xml:lang="ja">
+ <title>デバイスのマルチパスI/Oの管理</title>
+ <info>
+  <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+   <dm:bugtracker/>
+   <dm:translation>yes</dm:translation>
+  </dm:docmanager>
+ </info>
+ <para>
+  本項では、マルチパスI/O (MPIO)を使用して、サーバ/ブロックストレージデバイス間のマルチパスのフェールオーバーおよびパスの負荷分散を管理する方法について説明します。
+ </para>
+ <sect1 xml:id="sec-multipath-intro">
+  <title>マルチパスI/Oの理解</title>
+
+  <para>
+   マルチパス処理とは、サーバのホストバスアダプタおよびデバイスのストレージコントローラ間で、複数の物理パスをまたいで、同じ物理または論理ブロックストレージデバイスと通信するサーバの機能です。これは、通常、FC (Fibre Channel)環境またはiSCSI SAN環境で行われます。
+  </para>
+
+  <para>
+   Linuxマルチ処理は、接続に耐障害性を与え、アクティブな接続全体.に負荷を分散します。マルチパス処理が設定および実行されていると、自動的に、デバイス接続の障害が特定され、I/Oが代替の接続に再経路指定されます。
+  </para>
+
+  <para>
+   マルチパス処理は、接続の障害に対して耐障害性を提供しますが、ストレージデバイス自体の障害に対する耐障害性は提供しません。後者は、ミラーリングのような補完テクニックによって提供されます。
+  </para>
+
+  <sect2>
+   <title>マルチパスの用語</title>
+   <variablelist>
+    <varlistentry>
+     <term>ストレージアレイ</term>
+     <listitem>
+      <para>
+       SANストレージをクライアントに提供する多数のディスクおよび複数のファブリック接続(コントローラ)を備えたハードウェアデバイス。ストレージアレイは通常、RAIDとフェールオーバー機能を備えており、マルチパス処理をサポートしています。これまで、アクティブ/パッシブ(フェールオーバー)とアクティブ/アクティブ(負荷分散)のストレージアレイ設定は区別されていました。これらの概念は今でも存在しますが、最新のハードウェアでサポートされるパスグループとアクセス状態の概念の特殊なケースにすぎません。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ホスト、ホストシステム</term>
+     <listitem>
+      <para>
+       <emphasis>ストレージアレイ</emphasis>のクライアントシステムとして動作する<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>を実行しているコンピュータ。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>マルチパスマップ、マルチパスデバイス</term>
+     <listitem>
+      <para>
+       一連の<emphasis>パスデバイス</emphasis>です。ストレージアレイ上のストレージボリュームを表し、ホストシステムからは単一のブロックデバイスと認識されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>パスデバイス</term>
+     <listitem>
+      <para>
+       マルチパスマップのメンバー(通常はSCSIデバイス)です。各パスデバイスは、ホストコンピュータと実際のストレージボリューム(iSCSIセッションの論理ユニットなど)との間の固有の接続を表します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>WWID</term>
+     <listitem>
+      <para>
+       「World Wide Identifier」です。<systemitem>multipath-tools</systemitem>ではWWIDを使用して、マルチパスマップにアセンブルする必要がある低レベルデバイスを判断します。WWIDは、設定可能なマップ名と区別する必要があります(<xref linkend="sec-multipath-names"/>を参照)。<emphasis></emphasis>
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>uevent、udevイベント</term>
+     <listitem>
+      <para>
+       カーネルによってユーザスペースに送信され、<command>udev</command>サブシステムによって処理されるイベント。デバイスの追加や削除、またはプロパティの変更を行うと、ueventが生成されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>デバイスマッパー</term>
+     <listitem>
+      <para>
+       仮想ブロックデバイスを作成するためのLinuxカーネルのフレームワークです。マップデバイスに対するI/O操作は基礎となるブロックデバイスにリダイレクトされます。デバイスマッピングはスタックされる場合があります。デバイスマッパーでは独自のイベントシグナル処理を実装します。これは「デバイスマッパーイベント」または「dmイベント」とも呼ばれます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>initramfs</term>
+     <listitem>
+      <para>
+       初期RAMファイルシステムは、これまでの経緯もあって、「初期RAMディスク」(initrd)とも呼ばれます(<xref linkend="sec-boot-terminology"/>を参照)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>ALUA</term>
+     <listitem>
+      <para>
+       「Asymmetric Logical Unit Access」です。これはSCSI標準のSCSI-3で導入された概念です。ストレージボリュームには、さまざまな状態(アクティブ、スタンバイなど)でポートグループに編成されている複数のポートからアクセスできます。ALUAは、ポートグループとその状態を問い合わせ、ポートグループの状態を変更するためのSCSIコマンドを定義します。SCSIをサポートする最新のストレージアレイは通常ALUAもサポートします。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-hardware">
+  <title>ハードウェアサポート</title>
+
+  <para>
+   マルチパスドライバとツールは、<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>でサポートされているすべてのアーキテクチャで利用できます。プロトコルを区別しない汎用ドライバは、市販のほとんどのマルチパス対応ストレージハードウェアで動作します。一部のストレージアレイベンダは、独自のマルチパス処理管理ツールを提供しています。ベンダのハードウェアマニュアルを参照して、どのような設定が必要か判別してください。
+  </para>
+
+  <sect2 xml:id="sec-multipath-hardware-implementations">
+   <title>マルチパスの実装: デバイスマッパーとNVMe</title>
+   <para>
+    Linuxにおけるマルチパス処理で従来の一般的な実装では、デバイスマッパーフレームワークを使用します。SCSIデバイスなどのほとんどのデバイスタイプでは、デバイスマッパーのマルチパス処理が唯一使用可能な実装です。デバイスマッパーのマルチパスは、高度に設定可能で、柔軟性に優れています。
+   </para>
+   <para>
+    Linux <emphasis>NVM Express</emphasis> (NVMe)カーネルサブシステムでは、カーネルでマルチパス処理をネイティブに実装します。通常高速で遅延が非常に小さいNVMeデバイスの演算オーバーヘッドが、この実装で軽減されています。ネイティブNVMeマルチパス処理ではユーザスペースコンポーネントは不要です。SLE 15以降、ネイティブマルチパス処理がNVMeマルチパスデバイスのデフォルトになっています。詳細については、<xref linkend="sec-nvmeof-host-configuration-multipathing"/>を参照してください。
+   </para>
+   <para>
+    この章では、デバイスマッパーマルチパスおよびそのユーザスペースコンポーネント<systemitem>multipath-tools</systemitem>について説明します。<systemitem>multipath-tools</systemitem>は、ネイティブのNVMeマルチパス処理も限定的にサポートしています(<xref linkend="sec-multipath-conf-misc"/>を参照)。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-hardware-autodetect">
+   <title>マルチパス処理のストレージアレイ自動検出</title>
+   <para>
+    デバイスマッパーのマルチパスは一般的な技術です。マルチパスデバイスの検出で必要なことは、低レベルデバイス(SCSIなど)がカーネルによって検出されることと、デバイスのプロパティが複数の低レベルデバイスを(実際に異なるデバイスではなく)同じボリュームへの異なる「パス」として確実に識別することのみです。
+   </para>
+   <para>
+    <filename>multipath-tools</filename>パッケージは、ベンダと製品名によってストレージアレイを検出します。これには、広範なストレージ製品に対してデフォルト設定が組み込まれています。ご使用のストレージアレイのハードウェアドキュメントを参照してください。Linuxのマルチパス処理設定に対して独自の推奨事項を提示しているベンダもあります。
+   </para>
+   <para>
+    使用しているストレージアレイの組み込み設定に変更を適用する必要がある場合、<xref linkend="sec-multipath-conf-file"/>を参照してください。
+   </para>
+   <important>
+    <title>組み込みのハードウェアプロパティに関する免責条項</title>
+    <para>
+     <filename>multipath-tools</filename>には、多くのストレージアレイ用の事前設定が組み込まれています。あるストレージ製品用にこのような事前設定が存在することは、そのストレージ製品のベンダが<systemitem>dm-multipath</systemitem>で製品をテストしたことを意味しませんし、ベンダがその製品で<systemitem>dm-multipath</systemitem>の使用に関して保証やサポートを行うことも「意味しません」。<emphasis></emphasis>サポート関連の質問については、ベンダのドキュメントを必ず参照してください。
+    </para>
+   </important>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-hardware-handlers">
+   <title>特定のハードウェアハンドラを必要とするストレージアレイ</title>
+   <para>
+    あるパスから別のパスにフェールオーバーするための特殊なコマンドや標準と異なるエラー処理方法が必要なストレージアレイもあります。これらの特殊なコマンドと方法は、Linuxカーネルのハードウェアハンドラによって実装されています。最新のSCSIストレージアレイは、SCSI標準で定義されている「Asymmetric Logical Unit Access」(ALUA)ハードウェアハンドラをサポートしています。ALUAの他に、SLEカーネルには、Netapp E-Series (RDAC)、Dell/EMC CLARiiON CXアレイファミリ、およびHPのレガシアレイ用のハードウェアハンドラが含まれています。
+   </para>
+   <para>
+    Linuxカーネル4.4以降では、ほとんどのアレイ(ALUAをサポートするすべてのアレイを含む)のハードウェアハンドラをLinuxカーネルで自動検出します。要件は、それぞれのデバイスが検出されるときにデバイスハンドラモジュールがロードされることだけです。この要件は、<systemitem>multipath-tools</systemitem>パッケージが適切な設定ファイルをインストールすることによって実現します。デバイスハンドラは、特定のデバイスにアタッチされると、変更できなくなります。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-planning">
+  <title>マルチパス処理のプラニング</title>
+
+  <para>
+   マルチパスI/Oソリューションのプラニング時には、本項のガイドラインに従ってください。
+  </para>
+
+  <sect2 xml:id="sec-multipath-planning-prereq">
+   <title>前提条件</title>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      マルチパス処理対象のデバイスに使用するストレージアレイで、マルチパス処理がサポートされている必要があります。詳細については、<xref linkend="sec-multipath-hardware"/>を参照してください。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      サーバのホストバスアダプタおよびブロックストレージデバイスのバスコントローラ間に複数の物理パスが存在している場合のみ、マルチパス処理を設定する必要があります。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      一部のストレージアレイについては、アレイの物理および論理デバイスのマルチパス処理を管理するための独自のマルチパス処理ソフトウェアがベンダから提供されます。この場合は、ベンダの指示に従って、それらのデバイスのマルチ処理を設定してください。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      仮想化環境でマルチパス処理を使用する場合、マルチパス処理は、ホストサーバ環境で制御されます。デバイスのマルチパス処理を設定してから、デバイスを仮想ゲストマシンに割り当ててください。
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-types">
+   <title>マルチパスのインストールタイプ</title>
+   <para>
+    インストールタイプは、ルートデバイスを処理する方法で区別されます。<xref linkend="sec-multipath-installing"/>では、インストール中およびインストール後にさまざまなセットアップを作成する方法について説明しています。
+   </para>
+   <sect3 xml:id="sec-multipath-planning-type-root">
+    <title>マルチパスのルートファイルシステム(SANブート)</title>
+    <para>
+     ルートファイルシステムはマルチパスデバイス上にあります。これは通常、ディスクのないサーバでSANストレージのみを使用する場合です。このようなシステムでは、起動にマルチパスのサポートが必要であり、initramfsでマルチパス処理を有効にする必要があります。
+    </para>
+   </sect3>
+   <sect3 xml:id="sec-multipath-planning-type-noroot">
+    <title>ローカルディスクのルートファイルシステム</title>
+    <para>
+     ルートファイルシステム(および場合によっては他のファイルシステム)は、ローカルストレージ(直接アタッチされたSATAディスクやローカルRAIDなど)上にありますが、このシステムではさらにマルチパスのSANストレージのファイルシステムを使用します。このシステムタイプは次の3つの方法で設定できます。
+    </para>
+    <variablelist>
+     <varlistentry>
+      <term>ローカルディスク用のマルチパスセットアップ</term>
+      <listitem>
+       <para>
+        すべてのブロックデバイスはローカルディスクを含むマルチパスマップの一部です。ルートデバイスは、パスが1つしかないディグレードマルチパスマップとして表示されます。YaSTによる初期システムインストール中にマルチパス処理が有効になると、この設定が作成されます。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry xml:id="vl-multipath-planning-type-noroot-ignore">
+      <term>ローカルディスクをマルチパスから除外する</term>
+      <listitem>
+       <para>
+        この設定では、マルチパス処理はinitramfsで有効になっていますが、ルートデバイスはマルチパスから明示的に除外されます(<xref linkend="sec-multipath-blacklist"/>を参照)。<xref linkend="pr-multipath-disable-root"/>では、この設定のセットアップ方法を説明しています。
+       </para>
+      </listitem>
+     </varlistentry>
+     <varlistentry xml:id="vl-multipath-planning-type-noroot-noinitrd">
+      <term>initramfsでマルチパスを無効にする</term>
+      <listitem>
+       <para>
+        YaSTによる初期システムインストール中にマルチパス処理が有効になっていないと、このセットアップが作成されます。この設定はかなり脆弱です。代わりに、他のオプションのいずれかを使用することを検討してください。
+       </para>
+      </listitem>
+     </varlistentry>
+    </variablelist>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-disks">
+   <title>ディスク管理タスク</title>
+   <para>
+    サードパーティSANアレイ管理ツールやご使用のストレージアレイのユーザインタフェースを使用して、論理デバイスを作成し、それらをホストに割り当てます。両側でホストの資格情報を正しく設定してください。
+   </para>
+   <para>
+    実行中のホストにボリュームを追加したり、削除したりできますが、変更を検出するには、SCSIターゲットを再スキャンし、ホスト上でマルチパス処理を再設定する必要がある場合があります。<xref linkend="sec-multipath-best-practice-scandev"/>を参照してください。
+   </para>
+   <note>
+    <title>ストレージプロセッサ</title>
+    <para>
+     一部のディスクアレイでは、ストレージアレイがストレージプロセッサを使用してトラフィックを管理します。1つのプロセッサがアクティブとなり、もう1つのプロセッサは障害が発生するまでパッシブとなります。パッシブストレージプロセッサに接続している場合、目的のLUNが表示されないか、表示はされるがアクセスしようとするとI/Oエラーが発生する場合があります。
+    </para>
+    <para>
+     ディスクアレイに複数のストレージプロセッサがある場合は、アクセスしたいLUNを所有するアクティブなストレージプロセッサにSANスイッチが接続していることを必ず確認してください。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-raid">
+   <title>ソフトウェアRAIDと複雑なストレージスタック</title>
+   <para>
+    マルチパス処理は、SCSIデバイスなどの基本的なストレージデバイスの上にセットアップされます。マルチレイヤのストレージスタックでは、マルチパス処理は常に最下位レイヤです。ソフトウェアRAID、論理ボリューム管理、ブロックデバイスの暗号化などのその他のレイヤは、マルチパス処理の上に重ねられます。したがって、複数のI/Oパスを持ち、ソフトウェアRAIDで使用予定の各デバイスは、まず、マルチパス処理用に設定してから、ソフトウェアRAIDデバイスとして作成する必要があります。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-planning-ha">
+   <title>高可用性ソリューション</title>
+   <para>
+    ストレージリソースのクラスタリング用の高可用性ソリューションは、各ノード上でマルチパス処理サービスをベースとして実行されます。各ノード上の<filename>/etc/multipath.conf</filename>ファイル内の構成設定が、クラスタ全体で同一であるようにしてください。
+   </para>
+   <para>
+    マルチパスデバイスがすべてのデバイス間で同じ名前であるようにしてください。詳細については、<xref linkend="sec-multipath-names"/>を参照してください。
+   </para>
+   <para>
+    LAN上のデバイスをミラーリングするDRBD (Distributed Replicated Block Device)高可用性ソリューションは、マルチパス処理をベースとして実行されます。複数のI/Oパスを持ち、DRDBソリューションで使用予定のデバイスごとに、マルチパス処理用デバイスを設定してから、DRBDを設定する必要があります。
+   </para>
+   <para>
+    <command>pacemaker</command>と<command>sbd</command>などフェンシングに共有ストレージを使用するクラスタリングソフトウェアと共にマルチパス処理を使用する場合、特別な注意が必要です。詳細については<xref linkend="sec-multipath-policies-cluster"/>を参照してください。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-installing">
+  <title>マルチパスシステムでの<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>のインストール</title>
+
+  <para>
+   マルチパスハードウェアを含むシステムで<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>をインストールするために必要な特別なインストールパラメータはありません。
+  </para>
+
+  <sect2 xml:id="sec-multipath-installing-nomp">
+   <title>接続されているマルチパスデバイスを使用しないインストール</title>
+   <para>
+    後で、システムにマルチパスSANデバイスを追加する目的で、最初にFabricとストレージを設定せずに、ローカルディスク上でインストールを実行したい場合があります。この場合、インストールは、非マルチパスシステム上でのインストールのように続行します。インストール後、<systemitem>multipath-tools</systemitem>がインストールされますが、<systemitem class="daemon">systemd</systemitem>サービス(<filename>multipathd.service</filename>)は無効になります。システムは、<xref linkend="sec-multipath-planning-type-noroot"/>の<xref linkend="vl-multipath-planning-type-noroot-noinitrd"/>で説明しているように設定されます。SANハードウェアを追加する前に、<filename>multipathd.service</filename>を有効にし、開始する必要があります。ルートデバイス用に<filename>/etc/multipath.conf</filename>に<literal>blacklist</literal>エントリを作成することをお勧めします(<xref linkend="sec-multipath-blacklist"/>を参照)。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-installing-mp">
+   <title>接続されているマルチパスデバイスによるインストール</title>
+   <para>
+    マルチパスデバイスが、インストール時にシステムに接続される場合、YaSTはそれらを検出し、パーティショニングステージに入る前にマルチパスを有効にするかどうかを尋ねるポップアップウィンドウを表示します。
+   </para>
+   <informalfigure>
+    <mediaobject>
+     <textobject role="description"><phrase>
+          YaST multipath dialog</phrase>
+     </textobject>
+     <imageobject role="fo">
+      <imagedata fileref="multipath-popup.png" width="50%"/>
+     </imageobject>
+     <imageobject role="html">
+      <imagedata fileref="multipath-popup.png" width="50%"/>
+     </imageobject>
+    </mediaobject>
+   </informalfigure>
+   <para>
+    このプロンプトで「いいえ」を選択すると(非推奨)、インストールは<xref linkend="sec-multipath-installing-nomp"/>のように続行します。パーティショニングステージでは、後でマルチパスマップの一部になるデバイスを使用/編集しないでください。
+   </para>
+   <para>
+    マルチパスのプロンプトで「はい」を選択すると、インストール中に<command>multipathd</command>が実行されます。<filename>/etc/multipath.conf</filename>の<literal>blacklist</literal>セクションにはデバイスは追加されないため、パーティショニングダイアログでは、ローカルディスクを含むすべてのSCSIデバイスとDASDデバイスがマルチパスデバイスとして表示されます。インストール後、<xref linkend="sec-multipath-planning-type-root"/>で説明されているように、すべてのSCSIデバイスとDASDデバイスがマルチパスデバイスになります。
+   </para>
+   <procedure xml:id="pr-multipath-disable-root">
+    <title>インストール後にルートディスクのマルチパス処理を無効にする</title>
+    <para>
+     この手順は、ローカルディスクにインストールし、インストール中にマルチパス処理を有効にしていることを前提としているため、ルートデバイスがマルチパス上にありますが、<xref linkend="sec-multipath-planning-type-noroot"/>の<xref linkend="vl-multipath-planning-type-noroot-ignore"/>で説明されているように、システムを設定したいと考えています。
+    </para>
+    <step>
+     <para>
+      システムをチェックしてローカルルートデバイスへの<filename>/dev/mapper/...</filename>参照を探し、それらをデバイスがマルチパスマップでない場合にも機能する参照で置き換えます(<xref linkend="sec-multipath-referring"/>を参照)。次のコマンドを実行しても参照が見つからない場合、変更を適用する必要はありません。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> grep -rl /dev/mapper/ /etc</screen>
+    </step>
+    <step>
+     <para>
+      <command>dracut</command>の<literal>by-uuid</literal>永続デバイスポリシーに切り替えます(<xref linkend="sec-multipath-initrd-persistent"/>を参照)。
+     </para>
+<screen><prompt>&gt; </prompt>echo 'persistent_policy="by-uuid"' | \
+      sudo tee /etc/dracut.conf.d/10-persistent-policy.conf</screen>
+    </step>
+    <step>
+     <para>
+      ルートデバイスのWWIDを決定します。
+     </para>
+<screen><prompt>&gt; </prompt>multipathd show paths format "%i %d %w %s"
+0:2:0:0 sda 3600605b009e7ed501f0e45370aaeb77f IBM,ServeRAID M5210
+...
+        </screen>
+     <para>
+      このコマンドは、すべてのパスデバイスとそのWWID、およびベンダ/製品情報を出力します。ルートデバイス(ここでは、ServeRAIDデバイス)を識別し、WWIDをメモすることができます。
+     </para>
+    </step>
+    <step>
+     <para>
+      決定したWWIDを使用して<filename>/etc/multipath.conf</filename> (<xref linkend="sec-multipath-blacklist"/>を参照)にブラックリストエントリを作成します(まだこれらの設定を適用しないでください)。<emphasis></emphasis>
+     </para>
+<screen>blacklist {
+    wwid 3600605b009e7ed501f0e45370aaeb77f
+}</screen>
+    </step>
+    <step>
+     <para>
+      initramfsを再構築します。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut -f</screen>
+    </step>
+    <step>
+     <para>
+      再起動します。非マルチパスルートディスクを使用してシステムが起動します。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-offline-update">
+  <title>マルチパスシステムでのSLEの更新</title>
+
+  <para>
+   システムをオンラインで更新する場合、<xref linkend="cha-upgrade-online"/>の説明に従って続行できます。
+  </para>
+
+  <para>
+   システムのオフライン更新は、<xref linkend="sec-multipath-installing"/>で説明されている新規インストールと似ています。<literal>blacklist</literal>がないため、ユーザがマルチパスを有効にすると、ルートデバイスがマルチパスデバイスとして表示されます(これがマルチパスデバイスでない場合も同様)。更新手順中に<command>dracut</command>がinitramfsを構築するとき、ブートシステムに表示されるストレージスタックとは異なるストレージスタックが表示されます。<xref linkend="sec-multipath-initrd-persistent"/>および<xref linkend="sec-multipath-referring"/>を参照してください。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-multipath-mpiotools">
+  <title>マルチパス管理ツール</title>
+
+  <para>
+   <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>のマルチパス処理のサポートは、Linuxカーネルのデバイスマッパーマルチパスモジュールと<systemitem>multipath-tools</systemitem>ユーザスペースパッケージに基づいています。
+  </para>
+
+  <para>
+   一般的なマルチパス処理機能は、デバイスマッパーのマルチパス(DM-MP)モジュールによって処理されます。詳細については、<xref linkend="sec-multipath-mpiotools-dm"/>を参照してください。
+  </para>
+
+  <para>
+   <systemitem class="resource">multipath-tools</systemitem>および<systemitem class="resource">kpartx</systemitem>パッケージは、自動パス検出とグループ化を処理するツールを提供します。ツールを次に示します。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term><command>multipathd</command></term>
+    <listitem>
+     <para>
+      マルチパスマップを設定および監視するデーモン、およびデーモンプロセスと通信するコマンドラインクライアント。<xref linkend="sec-multipath-mpiotools-multipathd"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>multipath</command></term>
+    <listitem>
+     <para>
+      マルチパス操作用のコマンドラインツール。<xref linkend="sec-multipath-mpiotools-multipath"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>kpartx</command></term>
+    <listitem>
+     <para>
+      マルチパスデバイスの「パーティション」を管理するためのコマンドラインツール。<xref linkend="sec-multipath-configuration-partitioning"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term><command>mpathpersist</command></term>
+    <listitem>
+     <para>
+      SCSIの永続的な予約を管理するためのコマンドラインツール。<xref linkend="sec-multipath-mpiotools-mpathpersist"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 xml:id="sec-multipath-mpiotools-dm">
+   <title>デバイスマッパーマルチパスモジュール</title>
+   <para>
+    デバイスマッパーマルチパス(DM-MP)モジュール(<filename>dm-multipath.ko</filename>)は、Linuxに一般的なマルチパス処理機能を提供します。DM-MPIOは、SCSIおよびDASDデバイスに対して<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>でマルチパス処理を行う際に推奨されるソリューションであり、NVMeデバイスにも使用できます。
+   </para>
+   <note>
+    <title>NVMeデバイスに対してDM-MPを使用する</title>
+    <para>
+     <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 15以降、ネイティブNVMeマルチパス処理(<xref linkend="sec-multipath-hardware-implementations"/>を参照)がNVMeに推奨され、デフォルトで使用されています。ネイティブNVMeマルチパス処理を無効にし、代わりにデバイスマッパーマルチパスを使用するには(「非推奨」<emphasis></emphasis>)、カーネルパラメータ<literal>nvme-core.multipath=0</literal>を指定してブートします。
+    </para>
+   </note>
+   <para>
+    デバイスマッパーマルチパスモジュールは次のタスクを処理します。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      アクティブパスグループ内の複数のパスに負荷を分散する。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      パスデバイスのI/Oエラーを通知し、これらを障害とマークして、I/Oがこれらに送信されないようにする。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      アクティブパスグループのすべてのパスで障害が発生したときにパスグループを切り替える。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      すべてのパスで障害が発生した場合、設定に応じてマルチパスデバイスのI/Oを失敗させるまたはI/Oをキューに入れる。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    次のタスクは、デバイスマッパーのマルチパスモジュールではなく、<systemitem>multipath-tools</systemitem>パッケージのユーザスペースコンポーネントによって処理されます。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      同じストレージデバイスへのさまざまなパスを表すデバイスを検出し、それらからマルチパスマップをアセンブルする。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      似ているプロパティを持つパスデバイスをパスグループに収集する。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      パスデバイスをアクティブに監視して、障害または再インスタンス化を探す。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      パスデバイスの追加と削除を監視する。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      デバイスマッパーマルチパスモジュールは、セットアップと設定に使用しやすいユーザインタフェースを提供しません。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    <systemitem>multipath-tools</systemitem>パッケージのコンポーネントの詳細については、<xref linkend="sec-multipath-mpiotools-multipathd"/>を参照してください。
+   </para>
+   <note>
+    <title>マルチパスが防ぐ障害</title>
+    <para>
+     DM-MPIOは、メディアエラーなどのデバイス自体の障害ではなく、デバイスへのパスの障害からシステムを保護します。デバイス自体の障害は、レプリケーションなど別の方法で防ぐ必要があります。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-multipathd">
+   <title><command>multipathd</command>デーモン</title>
+   <para>
+    <command>multipathd</command>は、最新Linuxデバイスマッパーのマルチパスにおけるセットアップの最重要部分です。これは通常、systemdサービス<filename>multipathd.service</filename>を通じて開始されます(<xref linkend="sec-multipath-configuration-start"/>を参照)。
+   </para>
+   <para>
+    <command>multipathd</command>は次のタスクを実行します(設定によって異なるものもあります)。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      起動時に、パスデバイスを検出し、検出されたデバイスからマルチパスマップを設定します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ueventとデバイスマッパーイベントを監視し、必要に応じてマルチパスマップでパスマッピングの追加や削除を行い、フェールオーバーまたはフェールバック操作を開始します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      新しいパスデバイスが検出されるとすぐに新しいマップをセットアップします。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      パスデバイスを定期的にチェックして障害を検出し、障害が発生したパスをテストして、正常に戻ったら復帰させます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      すべてのパスで障害が発生した場合、<command>multipathd</command>はそのマップを無効にするか、またはマップデバイスを指定時間でキュー待ちモードに切り替えます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      パスの状態の変更を処理し、必要に応じて、パスグループを切り替えたり、パスを再グループ化したりします。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      パスが「ぎりぎりの」状態(すなわち、動作状態と非動作状態の間でパスの状態が切り替わる不安定なファブリック状態)であるかどうかをテストします。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      設定されている場合、パスデバイスでSCSIの永続的な予約キーを処理します。<xref linkend="sec-multipath-mpiotools-mpathpersist"/>を参照してください。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    <command>multipathd</command>では、コマンドラインのクライアントとしても動作し、インタラクティブコマンドを実行デーモンに送信することでコマンドを処理します。デーモンにコマンドを送信する一般的な構文は次のとおりです。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd <replaceable>COMMAND</replaceable></screen>
+   <para>
+    あるいは、
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd -k'<replaceable>COMMAND</replaceable>'</screen>
+   <para>
+    複数の後続のコマンドを送信できる対話的モードもあります。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd -k</screen>
+   <note>
+    <title>multipathとmultipathdを同時に動作させる方法</title>
+    <para>
+     多くの<command>multipathd</command>のコマンドには、<command>multipath</command>の同等コマンドがあります。たとえば、<command>multipathd
+     show topology</command>の動作は<command>multipath
+     -ll</command>の動作と同じです。顕著な違いは、multipathdコマンドは実行中の<command>multipathd</command>デーモンの内部状態を問い合わせるのに対して、multipathはカーネルおよびI/O操作から直接情報を取得することです。
+    </para>
+    <para>
+     マルチパスデーモンが実行中である場合、<command>multipathd</command>コマンドを使用してシステムを変更することをお勧めします。このようにしないと、デーモンが設定の変更に気づき、変更に反応する場合があります。場合によっては、適用された変更をデーモンで元に戻そうとします。<command>multipath</command>は、実行中のデーモンが検出された場合、マップの破棄やフラッシュなどの特定の危険性のあるコマンドを<command>multipathd</command>に自動的に委任します。
+    </para>
+   </note>
+   <para>
+    下記のリストでは、使用頻度が高い<command>multipathd</command>コマンドについて説明します。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>show topology</term>
+     <listitem>
+      <para>
+       現在のマップトポロジとプロパティを表示します。<xref linkend="sec-multipath-best-practice-status"/>を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show paths</term>
+     <listitem>
+      <para>
+       現在既知のパスデバイスを表示します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show paths format &quot;<replaceable>FORMAT STRING</replaceable>&quot;</term>
+     <listitem>
+      <para>
+       フォーマット文字列を使用して現在既知のパスデバイスを表示します。サポートされているフォーマット指定子のリストを表示するには、<command>show wildcards</command>を使用します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show maps</term>
+     <listitem>
+      <para>
+       現在設定されているマップデバイスを表示します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show maps format <replaceable>FORMAT STRING</replaceable></term>
+     <listitem>
+      <para>
+       フォーマット文字列を使用して、現在設定されているマップデバイスを表示します。サポートされているフォーマット指定子のリストを表示するには、<command>show wildcards</command>を使用します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>show config local</term>
+     <listitem>
+      <para>
+       multipathdが使用している現在の設定を表示します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>reconfigure</term>
+     <listitem>
+      <para>
+       設定ファイルを再読み込みし、デバイスを再スキャンして、マップを再度セットアップします。これは<command>multipathd</command>の再起動と基本的に同じです。いくつかのオプションは再起動しないと変更できません。これらについてはマニュアルページの<systemitem>multipath.conf(5)</systemitem>で説明します。<option>reconfigure</option>コマンドを実行すると、何らかの方法で変更されたマップデバイスのみが再ロードされます。すべてのマップデバイスの再ロードを強制実行するには、<command>reconfigure all</command>を使用します(SUSE Linux Enterprise Server 15 SP4以降で使用できます。以前のバージョンでは<option>reconfigure</option>を使用してすべてのマップを再ロードしていました)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>del map <replaceable>MAP DEVICE NAME</replaceable></term>
+     <listitem>
+      <para>
+       指定されたマップデバイスとそのパーティションを設定解除し、削除します。<replaceable>MAP DEVICE NAME</replaceable>には、<filename>dm-0</filename>などのデバイスノード名、WWID、またはマップ名を使用できます。このコマンドは、デバイスを使用中には失敗します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>switchgroup map <replaceable>MAP DEVICE NAME</replaceable> group <replaceable>N</replaceable></term>
+     <listitem>
+      <para>
+       指定の数値インデックスを持つパスグループに切り替えます(先頭は1)。これは、手動フェールバックを使用するマップに対して有用です(<xref linkend="sec-multipath-policies-default"/>を参照)。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    パス状態の変更、キューの有効化または無効化などを実行できるコマンドも利用できます。詳細については<systemitem>multipathd(8)</systemitem>を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-multipath">
+   <title><command>multipath</command>コマンド</title>
+   <para>
+    マルチパスのセットアップはほとんど自動化されており、<command>multipathd</command>で処理されますが、<command>multipath</command>も一部の管理タスクで依然として役立ちます。このコマンドの使用例を次に示します。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>multipath</term>
+     <listitem>
+      <para>
+       パスデバイスを検出し、検出したすべてのマルチパスマップを設定します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -d</term>
+     <listitem>
+      <para>
+       <command>multipath</command>に似ていますが、マップをセットアップしません(試行動作)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath <replaceable>DEVICENAME</replaceable></term>
+     <listitem>
+      <para>
+       特定のマルチパスデバイスを設定します。<replaceable>DEVICENAME</replaceable>は、デバイスノード名(<filename>/dev/sdb</filename>)またはデバイス番号(<literal>major:minor</literal>フォーマット)でメンバーパスデバイスを示すことができます。または、WWIDやマルチパスマップの名前も使用できます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -f <replaceable>DEVICENAME</replaceable></term>
+     <listitem>
+      <para>
+       マルチパスマップとそのパーティションマッピングを設定解除(「フラッシュ」)します。そのパーティションのいずれかまたはマップが使用中の場合、このコマンドは失敗します。<replaceable>DEVICENAME</replaceable>で使用できる値については上記を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -F</term>
+     <listitem>
+      <para>
+       すべてのマルチパスマップとそのパーティションマッピングを設定解除(「フラッシュ」)します。マップを使用中の場合、このコマンドは失敗します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -ll</term>
+     <listitem>
+      <para>
+       現在設定されているすべてのマルチパスデバイスのステータスとトポロジを表示します。<xref linkend="sec-multipath-best-practice-status"/>を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -ll <replaceable>DEVICENAME</replaceable></term>
+     <listitem>
+      <para>
+       指定されたマルチパスデバイスのステータスを表示します。<replaceable>DEVICENAME</replaceable>で使用できる値については上記を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -t</term>
+     <listitem>
+      <para>
+       マルチパスの内部ハードウェアテーブルとアクティブな設定を表示します。設定パラメータの詳細については、<systemitem>multipath.conf(5)</systemitem>を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipath -T</term>
+     <listitem>
+      <para>
+       <command>multipath -t</command>コマンドの機能と似ていますが、ホストで検出されたハードウェアと一致するハードウェアエントリのみを表示します。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    <option>-v</option>オプションによって、出力の詳細レベルが制御されます。指定した値によって、<filename>/etc/multipath.conf</filename>の<option>verbosity</option>オプションが上書きされます。<xref linkend="sec-multipath-conf-misc"/>を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-mpathpersist">
+   <title>SCSIの永続的な予約と<command>mpathpersist</command></title>
+   <para>
+    <command>mpathpersist</command>ユーティリティを使用して、デバイスマッパーマルチパスのデバイスでSCSIの永続的な予約を管理します。永続的な予約を行うと、SCSIの論理ユニットへのアクセスが特定のSCSIイニシエータに制限されます。マルチパス設定では、指定ボリュームですべてのI_T関連付け(パス)に同じ予約キーを使用することが重要です。そのようにしないと、あるパスデバイスで予約を作成すると別のパスでI/Oエラーが発生する場合があります。
+   </para>
+   <para>
+    このユーティリティを<filename>/etc/multipath.conf</filename>ファイルの<literal>reservation_key</literal>属性と共に使用して、SCSIデバイスの永続的な予約を設定します。このオプションが設定されている場合(のみ)、<command>multipathd</command>デーモンは新しく検出したパスまたは復帰したパスの永続的な予約をチェックします。
+   </para>
+   <para>
+    この属性は、<filename>multipath.conf</filename>の<literal>defaults</literal>セクションまたは<literal>multipaths</literal>セクションに追加できます。例:
+   </para>
+<screen>multipaths {
+    multipath {
+        wwid             3600140508dbcf02acb448188d73ec97d
+        alias            yellow
+        reservation_key  0x123abc
+    }
+}</screen>
+   <para>
+    永続的な管理に適用可能なすべてのmpathデバイスに対して<literal>reservation_key</literal>パラメータを設定した後、<command>multipathd reconfigure</command>を使用して設定を再ロードします。
+   </para>
+   <note>
+    <title>使用 “<option>reservation_key file</option>”</title>
+    <para>
+     特別な値である<literal>reservation_key file</literal>が<filename>multipath.conf</filename>の<literal>defaults</literal>セクションで使用される場合、<command>mpathpersist</command>を使用して<filename>/etc/multipath/prkeys</filename>ファイルで予約キーを動的に管理できます。
+    </para>
+    <para>
+     これは、マルチパスマップで永続的な予約を処理する際のお勧めの方法です。この方法は<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 12 SP4から使用できます。
+    </para>
+   </note>
+   <para>
+    <command>mpathpersist</command>コマンドを使用して、SCSIデバイスで構成されるマルチパスマップの永続的な予約を問い合わせて、設定します。詳細については、<systemitem>mpathpersist(8)</systemitem>のマニュアルページを参照してください。このコマンドラインオプションは、<systemitem>sg3_utils</systemitem>パッケージの<command>sg_persist</command>のオプションと同じです。<systemitem>sg_persist(8)</systemitem>のマニュアルページでは、このオプションの意味を詳細に説明しています。
+   </para>
+   <para>
+    次の例では、<replaceable>DEVICE</replaceable>は<filename>/dev/mapper/mpatha</filename>など、デバイスマッパーのマルチパスデバイスを示しています。下記のコマンドは、読みやすくするために長いオプションと共にリストしています。すべてのオプションには、<command>mpathpersist -oGS 123abc
+    <replaceable>DEVICE</replaceable></command>のように1文字の置換文字が含まれています。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>mpathpersist --in --read-keys <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       デバイスに登録されている予約キーを読み取ります。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --in --read-reservation <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       デバイスの既存の予約を表示します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --register --param-sark=123abc <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       デバイスの予約キーを登録します。これにより、ホストですべてのI_T関連付け(パスデバイス)の予約キーが追加されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --reserve --param-rk=123abc --prout-type=5 <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       以前登録したキーを使用して、デバイスのタイプ5(登録者のみの排他書き込み)の予約を作成します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --release --param-rk=123abc --prout-type=5 <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       デバイスのタイプ5の予約を解放します。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>mpathpersist --out --register-ignore --param-sark=0 <replaceable>DEVICE</replaceable></term>
+     <listitem>
+      <para>
+       以前存在していた予約キーをデバイスから削除します。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-config">
+  <title>マルチパス処理用システムの設定</title>
+
+  <para/>
+
+  <sect2 xml:id="sec-multipath-configuration-start">
+   <title>マルチパスサービスの有効化、起動、および停止</title>
+   <para>
+    マルチパスサービスを有効にしてブート時に起動するには、次のコマンドを実行します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl enable multipathd</screen>
+   <para>
+    実行中のシステムでサービスを手動で開始するには、次のように入力します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl start multipathd</screen>
+   <para>
+    サービスを再開するには、次のように入力します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart multipathd</screen>
+   <para>
+    ほとんどの状況で、サービスの再開は不要です。単に<command>multipathd</command>に設定を再ロードさせるには、次のコマンドを実行します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl reload multipathd</screen>
+   <para>
+    サービスのステータスを確認するには、次のように入力します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl status multipathd</screen>
+   <para>
+    現行セッションのマルチパスサービスを停止するには、次のコマンドを実行します。
+   </para>
+<screen>
+<prompt>&gt; </prompt><command>sudo</command> systemctl stop multipathd multipathd.socket
+   </screen>
+   <para>
+    サービスを停止しても既存のマルチパスマップは削除されません。未使用マップを削除するには、次のコマンドを実行します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -F</screen>
+   <warning>
+    <title><filename>multipathd.service</filename>を常に有効にしておいてください</title>
+    <para>
+     マルチパスハードウェアを備えたシステムでは、<filename>multipathd.service</filename>を常に有効にして実行しておくことを強くお勧めします。このサービスは、<command>systemd</command>のソケットアクティベーションメカニズムをサポートしていますが、このメカニズムに依存することはお勧めしません。このサービスが無効になっていると、マルチパスマップは起動時にセットアップされません。
+    </para>
+   </warning>
+   <note xml:id="ann-multipath-configuration-disable">
+    <title>マルチパスの無効化</title>
+    <para>
+     上記の警告にもかかわらずマルチパスを無効にする必要がある場合(サードパーティのマルチパス処理ソフトウェアを導入するなど)、次のように進めます。マルチパスデバイスへのハードコード化された参照をシステムで使用していないことを確認します(<xref linkend="sec-multipath-trouble-ref"/>を参照)。
+    </para>
+    <para>
+     <emphasis>1回のシステムブートに対してのみ</emphasis>マルチパス処理を無効にするには、カーネルパラメータの<literal>multipath=off</literal>を使用します。これはブートシステムとinitramfsの両方に影響します。この場合はinitramfsを再構築する必要はありません。
+    </para>
+    <para>
+     multipathdサービスを<emphasis>恒久的に</emphasis>無効にして、今後のシステムブートでこのサービスが開始されないようにするには、次のコマンドを実行します。
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl disable multipathd multipathd.socket
+<prompt>&gt; </prompt><command>sudo</command> dracut --force --omit multipath
+</screen>
+    <para>
+     (マルチパスサービスを無効または有効にするときには必ず<systemitem>initramfs</systemitem>を再構築してください。詳細については、<xref linkend="sec-multipath-initrd-sync"/>を参照してください。)
+    </para>
+    <para>
+     「<command>multipath</command>を手動で実行するときにも」マルチパスデバイスが設定されないようにする場合は、initramfsを再構築する前に、<filename>/etc/multipath.conf</filename>の最後に次の行を追加します。<emphasis></emphasis>
+    </para>
+<screen>blacklist {
+    wwid .*
+}</screen>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-configuration-sandevs">
+   <title>マルチパス処理用SANデバイスの準備</title>
+   <para>
+    SANデバイスのマルチパスI/Oを設定する前に、必要に応じて、次のようにSANデバイスを準備してください。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      ベンダのツールで、SANデバイスを設定し、ゾーン化します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ベンダのツールで、ストレージアレイ上のホストLUNのパーミッションを設定します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>でホストバスアダプタ(HBA)用ドライバが同梱されていない場合、HBAベンダからLinuxドライバをインストールします。詳細については、ベンダの特定マニュアルを参照してください。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    マルチパスデバイスが検出され、<filename>multipathd.service</filename>が有効になっている場合、マルチパスマップは自動的に作成されるはずです。作成されない場合、<xref linkend="sec-multipath-trouble-steps"/>に、状況の調査に使用できるシェルコマンドのリストが表示されます。LUNがHBAドライバによって認識されない場合は、SANのゾーン化セットアップをチェックします。特に、LUNのマスキングがアクティブであるかどうか、LUNがサーバに正しく割り当てられているかどうかをチェックしてください。
+   </para>
+   <para>
+    LUNがHBAドライバによって認識できるが、対応するブロックデバイスが作成されない場合は、追加のカーネルパラメータが必要な場合があります。SUSE Knowledgeの<citetitle>TID
+    3955167: Troubleshooting SCSI (LUN) Scanning Issues</citetitle> (<link xlink:href="https://www.suse.com/support/kb/doc.php?id=3955167"/>)を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-configuration-partitioning">
+   <title>マルチパスデバイスのパーティションと<command>kpartx</command></title>
+   <para>
+    マルチパスマップには、そのパスデバイスのようなパーティションを設けることができます。パーティションテーブルのスキャンとパーティションのデバイスノードの作成は、ユーザスペースで<command>kpartx</command>ツールによって実行されます。<command>kpartx</command>は、udevルールによって自動的に起動します。通常、手動での実行は不要です。マルチパスのパーティションを参照する方法については、<xref linkend="sec-multipath-referring"/>を参照してください。
+   </para>
+   <note>
+    <title><command>kpartx</command>の起動の無効化</title>
+    <para>
+     <filename>/etc/multipath.conf</filename>の<literal>skip_kpartx</literal>オプションを使用して、選択したマルチパスマップでの<command>kpartx</command>の起動を無効にできます。たとえば、これは仮想化ホストで有用である場合があります。
+    </para>
+   </note>
+   <para>
+    マルチパスデバイス上のパーティションテーブルとパーティションは、YaSTまたは<command>fdisk</command>や<command>parted</command>などのツールを使用して、通常どおり操作できます。パーティションテーブルに適用する変更は、パーティション処理ツールが終了するとシステムによって記録されます。これが動作しない場合(デバイスがビジーであることが原因であることが多い)、<command>multipathd
+    reconfigure</command>を試すか、またはシステムを再起動してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-initrd-sync">
+   <title>initramfsの同期状態の維持</title>
+   <important>
+    <para>
+     初期RAMファイルシステム(initramfs)とブートシステムが、すべてのブロックデバイスのマルチパス処理の使用に関して一貫した動作をしていることを確認します。マルチパス設定の変更を適用した後にinitramfsを再構築します。
+    </para>
+   </important>
+   <para>
+    システムでマルチパス処理が有効になっている場合は<filename>initramfs</filename>でも有効にする必要があり、その逆も同様です。このルールの唯一の例外は<xref linkend="sec-multipath-planning-type-noroot"/>のオプション<xref linkend="vl-multipath-planning-type-noroot-noinitrd"/>です。
+   </para>
+   <para>
+    マルチパス設定は、ブートシステムとinitramfsの間で同期する必要があります。したがって、<filename>/etc/multipath.conf</filename>、<filename>/etc/multipath/wwids</filename>、<filename>/etc/multipath/bindings</filename>のいずれかのファイル、その他の設定ファイル、またはデバイスの識別に関係のあるudevルールを変更した場合、次のコマンドを使用してinitramfsを再構築します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut -f</screen>
+   <para>
+    <filename>initramfs</filename>とシステムが同期されていない場合、システムは正しくブートせず、起動手順を実行すると緊急シェルが起動する可能性があります。このようなシナリオを回避または修復する方法については、<xref linkend="sec-multipath-trouble"/>を参照してください。
+   </para>
+   <sect3 xml:id="sec-multipath-initrd-disable">
+    <title>initramfsでのマルチパス処理の有効化または無効化</title>
+    <para>
+     initramfsが非標準的な状況で再構築される場合(カーネルパラメータの<literal>multipath=off</literal>を使用してブートした後やレスキューシステムからなど)、特別な注意が必要です。<command>dracut</command>は、initramfsの構築中に、ルートファイルシステムがマルチパスデバイス上にあることを検出した場合にのみinitramfsにマルチパス処理サポートを自動的に組み込みます。このような場合、マルチパス処理を明示的に有効または無効にする必要があります。
+    </para>
+    <para>
+     <filename>initramfs</filename>でマルチパスのサポートを有効にするには、次のコマンドを実行します。
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut --force --add multipath</screen>
+    <para>
+     <filename>initramfs</filename>でマルチパスのサポートを無効にするには、次のコマンドを実行します。
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut --force --omit multipath</screen>
+   </sect3>
+   <sect3 xml:id="sec-multipath-initrd-persistent">
+    <title>initramfsの永続的なデバイス名</title>
+    <para>
+     <command>dracut</command>がinitramfsを生成する際には、システムが確実に正しくブートするように、永続的な方法でマウントされるディスクとパーティションを参照する必要があります。<command>dracut</command>でマルチパスデバイスを検出すると、この目的で、次のようなDM-MPデバイス名が使用されます。
+    </para>
+<screen>/dev/mapper/3600a098000aad73f00000a3f5a275dc8-part1</screen>
+    <para>
+     これがデフォルトの動作です。これは、システムが「常に」マルチパスモードで実行されている場合には適切です。<emphasis></emphasis>ただし、<xref linkend="sec-multipath-initrd-disable"/>で説明しているようにマルチパス処理なしでシステムを起動した場合、<filename>/dev/mapper</filename>デバイスが存在しないため、このようなinitramfsによる起動は失敗します。別の起こりうる問題シナリオと背景情報については、<xref linkend="sec-multipath-referring"/>を参照してください。
+    </para>
+    <para>
+     この問題が起こらないようにするには、<option>--persistent-policy</option>オプションを使用して、<command>dracut</command>の永続的なデバイス命名ポリシーを変更します。<literal>by-uuid</literal>使用ポリシーを設定することをお勧めします。
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> dracut --force --omit multipath --persistent-policy=by-uuid</screen>
+    <para>
+     <xref linkend="pr-multipath-disable-root"/>および<xref linkend="sec-multipath-trouble-ref"/>も参照してください。
+    </para>
+   </sect3>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-conf-file">
+  <title>マルチパス設定</title>
+
+  <para>
+   組み込みの<systemitem>multipath-tools</systemitem>は、ほとんどのセットアップでデフォルトで正しく動作します。カスタマイズが必要な場合、設定ファイルを作成する必要があります。主要設定ファイルは<filename>/etc/multipath.conf</filename>です。また、<filename>/etc/multipath/conf.d/</filename>のファイルを考慮に入れます。詳細については、<xref linkend="sec-multipath-conf-file-precedence"/>を参照してください。
+  </para>
+
+  <important>
+   <title>ベンダの推奨値と組み込みハードウェアのデフォルト</title>
+   <para>
+    一部のストレージベンダは、マルチパスオプションの推奨値をマニュアルで公開しています。これらの値は多くの場合、ベンダが自社の環境内でテストし、ストレージ製品に最適であると判断した値を表しています。<xref linkend="sec-multipath-hardware-autodetect"/>の免責事項を参照してください。
+   </para>
+   <para>
+    <systemitem>multipath-tools</systemitem>には、公開されたベンダ推奨値から抽出した多くのストレージアレイ用の組み込みのデフォルトがあります。<command>multipath -T</command>を実行して、ご使用のデバイスの現在の設定を確認し、これをベンダの推奨値と比較します。
+   </para>
+  </important>
+
+  <sect2 xml:id="sec-multipath-conf-file-create">
+   <title><filename>/etc/multipath.conf</filename>の作成</title>
+   <para>
+    変更する設定のみが含まれている最低限の<filename>/etc/multipath.conf</filename>を作成することをお勧めします。多くの場合、<filename>/etc/multipath.conf</filename>を作成する必要はありません。
+   </para>
+   <para>
+    考え得る設定ディレクティブすべてを含む設定テンプレートで作業したい場合、次のコマンドを実行します。
+   </para>
+<screen>multipath -T &gt;/etc/multipath.conf</screen>
+   <para>
+    <xref linkend="sec-multipath-best-practice-config"/>も参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-conf-file-syntax">
+   <title><filename>multipath.conf</filename> 構文</title>
+   <para>
+    <filename>/etc/multipath.conf</filename>ファイルでは、セクション、サブセクション、およびオプション/値のペアの階層を使用します。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      トークンは空白で区切られます。連続する空白文字は、引用符で囲まれていない限り1つの空白に圧縮されます((以下を参照)。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ハッシュ(<literal>#</literal>)文字と感嘆符(<literal>!</literal>)文字により、行の残りの部分がコメントとして破棄されます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      セクションとサブセクションは、同一行のセクション名と開き中括弧(<literal>{</literal>)で開始され、独自の行の閉じ中括弧(<literal>}</literal>)で終了します。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      オプションと値は1行に書き込まれます。行の継続はサポートされていません。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      オプションとセクション名はキーワードである必要があります。使用できるキーワードについては、<systemitem>multipath.conf(5)</systemitem>を参照してください。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      値は二重引用符(<literal>"</literal>)で囲むことができます。値に空白またはコメント文字が含まれている場合、その値を引用符で囲む必要があります。値の内側にある二重引用符文字は二重引用符のペア(<literal>""</literal>)で表されます。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      一部のオプションの値はPOSIXの正規表現です(<systemitem>regex(7)</systemitem>を参照)。大文字と小文字が区別され、アンカーがないので「<literal>bar</literal>」は「<literal>rhabarber</literal>」と一致しますが、「Barbie」とは一致しません。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    構文は、次のようにします。
+   </para>
+<screen>
+section {
+    subsection {
+        option1 value
+        option2      "complex value!"
+        option3    "value with ""quoted"" word"
+    } ! subsection end
+} # section end
+    </screen>
+   <sect3 xml:id="sec-multipath-conf-file-precedence">
+    <title>追加の設定ファイルと優先ルール</title>
+    <para>
+     <filename>/etc/multipath.conf</filename>の後、ツールは、パターン<filename>/etc/multipath.conf.d/*.conf</filename>と一致するファイルを読み込みます。追加のファイルは<filename>/etc/multipath.conf</filename>と同じ構文ルールに従います。セクションとオプションは複数回使用できます。「同じセクションの同じオプション」が複数のファイルで設定されたり、同じファイルの複数の行で設定されると、最後の値が優先されます。<emphasis></emphasis><filename>multipath.conf</filename>セクション間には個別の優先ルールが適用されます。以下を参照してください。
+    </para>
+   </sect3>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-conf-file-sections">
+   <title><filename>multipath.conf</filename>セクション</title>
+   <para>
+    <filename>/etc/multipath.conf</filename>ファイルは、以下のセクションで構成されています。一部のオプションは複数のセクションで使用できます。詳細については<systemitem>multipath.conf(5)</systemitem>を参照してください。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>defaults</term>
+     <listitem>
+      <para>
+       一般的なデフォルト設定。
+      </para>
+      <important>
+       <title>組み込みのデバイスプロパティの上書き</title>
+       <para>
+        組み込みのハードウェア固有のデバイスプロパティは<literal>defaults</literal>セクションの設定より優先されます。したがって、変更は、<literal>devices</literal>セクションまたは<literal>overrides</literal>セクションで行う必要があります。
+       </para>
+      </important>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>blacklist</term>
+     <listitem>
+      <para>
+       無視するデバイスをリストします。<xref linkend="sec-multipath-blacklist"/>を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>blacklist_exceptions</term>
+     <listitem>
+      <para>
+       マルチパス処理されるデバイスをリストします(ブラックリストに含まれている場合もリストされます)。<xref linkend="sec-multipath-blacklist"/>を参照してください。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>devices</term>
+     <listitem>
+      <para>
+       ストレージコントローラ専用の設定。このセクションは<literal>device</literal>サブセクションのコレクションです。このセクションの値は、<filename>defaults</filename>セクションの同じオプションの値、および<systemitem>multipath-tools</systemitem>の組み込み設定を上書きします。
+      </para>
+      <para>
+       <literal>devices</literal>セクションの<literal>device</literal>エントリは、正規表現を使用して、デバイスのベンダおよび製品と照合されます。これらのエントリは「マージ」され、デバイスに対して照合するセクションのすべてのオプションが設定されます。複数の照合する<literal>device</literal>セクションで同じオプションが設定されている場合、最後のデバイスエントリが優先されます。それが前のエントリよりも「特定的」でない場合でも同様です。これは、照合するエントリが異なる設定ファイルに存在する場合でも適用されます(<xref linkend="sec-multipath-conf-file-precedence"/>を参照)。次の例では、デバイス<literal>SOMECORP STORAGE</literal>は<literal>fast_io_fail_tmo 15</literal>を使用します。
+      </para>
+<screen>
+devices {
+    device {
+        vendor SOMECORP
+        product STOR
+        fast_io_fail_tmo 10
+    }
+    device {
+        vendor SOMECORP
+        product .*
+        fast_io_fail_tmo 15
+    }
+}</screen>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>multipaths</term>
+     <listitem>
+      <para>
+       個々のマルチパスデバイスの設定。このセクションは<literal>multipath</literal>サブセクションのリストです。値は<literal>defaults</literal>セクションと<literal>devices</literal>セクションを上書きします。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>上書き</term>
+     <listitem>
+      <para>
+       他のすべてのセクションの値を上書きする設定。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-conf-file-apply">
+   <title><filename>multipath.conf</filename>の変更の適用</title>
+   <para>
+    設定変更を適用するには、次のコマンドを実行します。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd reconfigure</screen>
+   <para>
+    忘れずにinitramfsの設定と同期してください。<xref linkend="sec-multipath-initrd-sync"/>を参照してください。
+   </para>
+   <warning>
+    <title><command>multipath</command>を使用して設定を適用しない</title>
+    <para>
+     <command>multipath</command>を実行中に<command>multipathd</command>コマンドを使用して新しい設定を適用しないでください。適用すると、セットアップに一貫性がなくなり、セットアップが破損する可能性があります。
+    </para>
+   </warning>
+   <note xml:id="sec-multipath-conf-file-verify">
+    <title>変更したセットアップの確認</title>
+    <para>
+     変更した設定を適用する前にテストできます。そのためには次のコマンドを実行します。
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -d -v2</screen>
+    <para>
+     このコマンドは、提案されたトポロジを使用して作成される新しいマップを表示しますが、マップが削除/フラッシュされるかどうかは表示しません。より多くの情報を得るには、詳細度を上げて次のコマンドを実行します。
+    </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -d -v3 2&gt;&amp;1 | less</screen>
+   </note>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-policies-default">
+  <title>フェールオーバー、キュー格納、およびフェールバックのポリシーの設定</title>
+
+  <para>
+   マルチパスI/Oの最終目標は、ストレージシステムとサーバ間のコネクティビティ耐障害性を提供することです。望ましいデフォルトの動作は、サーバがスタンドアロンのサーバか、高可用性クラスタ内のノードかによって異なります。
+  </para>
+
+  <para>
+   このセクションでは、耐障害性を実現するために最も重要な<systemitem>multipath-tools</systemitem>設定パラメータについて説明します。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>polling_interval</term>
+    <listitem>
+     <para>
+      パスデバイスの正常性チェック間の間隔(秒単位)。デフォルトは5秒です。障害が発生したデバイスはこの間隔でチェックされます。デバイスが正常な場合、この間隔を最長<literal>max_polling_interval</literal>秒まで長くすることができます。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>detect_checker</term>
+    <listitem>
+     <para>
+      これが<literal>yes</literal> (デフォルト、推奨)に設定されている場合、<command>multipathd</command>は、最適なパスチェックアルゴリズムを自動的に検出します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>path_checker</term>
+    <listitem>
+     <para>
+      パスの状態のチェックに使用するアルゴリズム。チェッカーを有効にする必要がある場合、次のように<literal>detect_checker</literal>を無効にします。
+     </para>
+<screen>
+defaults {
+          detect_checker no
+}</screen>
+     <para>
+      次のリストには、最も重要なアルゴリズムのみが含まれます。完全なリストについては、<systemitem>multipath.conf(5)</systemitem>を参照してください。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>tur</term>
+       <listitem>
+        <para>
+         TEST UNIT READYコマンドを送信します。これは、ALUAをサポートしているSCSIデバイスのデフォルトです。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>directio</term>
+       <listitem>
+        <para>
+         非同期I/O (aio)を使用してデバイスセクタを読み取ります。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>rdac</term>
+       <listitem>
+        <para>
+         NetAPP E-Seriesおよび同様のアレイ用のデバイス固有のチェッカー。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>none</term>
+       <listitem>
+        <para>
+         パスチェックは実行されません。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>checker_timeout</term>
+    <listitem>
+     <para>
+      デバイスがパスチェッカーコマンドに一定時間応答しない場合、失敗とみなされます。デフォルトは、デバイスに対するカーネルのSCSIコマンドのタイムアウトです(通常30秒)。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>fast_io_fail_tmo</term>
+    <listitem>
+     <para>
+      SCSIトランスポートレイヤのエラーが(たとえば、ファイバチャネルのリモートポートで)検出されると、カーネルトランスポートレイヤは、トランスポートが回復するまでこの時間(秒単位)待機します。この時間経過後、パスデバイスは、「トランスポートオフライン」の状態で失敗します。これは、マルチパスでは非常に有用です。マルチパスでは、頻繁に発生するクラスのエラーに対してクイックパスフェールオーバーが許可されているためです。この値は、Fabricの再設定用に一般的なタイムスケールと一致している必要があります。デフォルト値の5秒は、ファイバチャネルでは正しく動作します。iSCSIなどのその他のトランスポートでは、より長いタイムアウトが必要な場合があります。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>dev_loss_tmo</term>
+    <listitem>
+     <para>
+      SCSIトランスポートエンドポイント(たとえば、ファイバチャネルのリモートポート)に到達できなくなった場合、カーネルは、SCSIデバイスノードを完全に削除してポートが再表示されるまでこの時間(秒単位)待機します。デバイスノードの削除は複雑な操作であり、競合状態やデッドロックになりやすいため、避けるのが最善です。したがって、この値を大きい値に設定することをお勧めします。特別な値<literal>infinity</literal>がサポートされています。デフォルトは10分です。デッドロック状態を回避するために、<command>multipathd</command>は、I/Oのキュー格納(<literal>no_path_retry</literal>を参照)を<literal>dev_loss_tmo</literal>の期限が切れる前に停止します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>no_path_retry</term>
+    <listitem>
+     <para>
+      指定マルチパスマップのすべてのパスで障害が発生した場合における処理を決定します。次の値を使用できます。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>fail</term>
+       <listitem>
+        <para>
+         マルチパスマップのI/Oは失敗します。そのため、マウントされたファイルシステムなどの上位レイヤでI/Oエラーが発生します。影響を受けるファイルシステム、および場合によってはホスト全体がディグレードモードになります。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>queue</term>
+       <listitem>
+        <para>
+         マルチパスマップ上のI/Oがデバイスマッパーレイヤのキューに入り、パスデバイスが再び利用可能になるとそのデバイスに送信されます。これは、データ損失を回避するための最も安全なオプションですが、パスデバイスが長時間復帰しないと悪影響を被る可能性があります。デバイスからの読み取りプロセスは中断できないスリープ(<literal>D</literal>)状態でハングします。キューに格納されたデータでメモリが一杯になり、処理できなくなります。最終的にメモリが枯渇します。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><replaceable>N</replaceable></term>
+       <listitem>
+        <para>
+         <replaceable>N</replaceable>は正の整数です。<replaceable>N</replaceable>秒のポーリング間隔でマップデバイスをキューモードのままにします。この時間が経過すると、マップデバイスの<command>multipathd</command>は失敗します。<literal>polling_interval</literal>が5秒で<literal>no_path_retry</literal>が6の場合、<command>multipathd</command>はI/Oをキューに約30秒間(= 6 * 5秒)格納し、時間が経過するとそのマップデバイスのI/Oは失敗します。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>flush_on_last_del</term>
+    <listitem>
+     <para>
+      <literal>yes</literal>に設定し、マップのすべてのパスデバイスが(単に失敗するだけではなく)削除される場合、マップのすべてのI/Oが失敗してから、マップを削除します。デフォルトは<literal>no</literal>です。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>deferred_remove</term>
+    <listitem>
+     <para>
+      <literal>yes</literal>に設定し、マップのすべてのパスデバイスが削除される場合、ホルダがマップデバイスのファイル記述子を閉じるのを待機してから、マップデバイスをフラッシュして削除します。最後のホルダがマップを閉じる前にパスが再表示された場合、延期された削除操作はキャンセルされます。デフォルトは<literal>no</literal>です。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry xml:id="vle-failback">
+    <term>failback</term>
+    <listitem>
+     <para>
+      非アクティブパスグループの失敗したパスデバイスが回復すると、<command>multipathd</command>は、すべてのパスグループのパスグループ優先度を再評価します(<xref linkend="sec-multipath-grouping"/>を参照)。再評価後、優先度の最も高いパスグループが、現在非アクティブのパスグループの1つになる可能性があります。このパラメータによってこの状況での動作が決まります。
+     </para>
+     <important>
+      <title>ベンダの推奨事項に従ってください</title>
+      <para>
+       最適なフェールバックポリシーは、ストレージデバイスの特性によって異なります。したがって、<option>failback</option>設定をストレージベンダに確認することを強くお勧めします。
+      </para>
+     </important>
+     <variablelist>
+      <varlistentry>
+       <term>manual</term>
+       <listitem>
+        <para>
+         管理者が<command>multipathd
+         switchgroup</command>を実行しない限り何も起こりません(<xref linkend="sec-multipath-mpiotools-multipathd"/>を参照)。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>immediate</term>
+       <listitem>
+        <para>
+         優先度の最も高いパスグループがすぐにアクティブになります。これは多くの場合(特にスタンドアロンサーバでは)パフォーマンスの観点で有利ですが、パスグループの変更が負荷の大きい操作となるアレイには使用しないでください。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>followover</term>
+       <listitem>
+        <para>
+         <literal>immediate</literal>と同様ですが、アクティブになったばかりのパスのみがパスグループ内の正常なパスである場合のみフェールバックを実行します。これは、クラスタ構成の場合に有用です。別のノードが以前にフェールオーバーを要求していたときに、ノードが自動的にフェールバックしないようにします。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term><replaceable>N</replaceable></term>
+       <listitem>
+        <para>
+         <replaceable>N</replaceable>は正の整数です。優先度の最も高いパスグループをアクティブにする前に<replaceable>N</replaceable>個のポーリング間隔待機します。この間に優先度が再度変更されると、待機期間が新たに始まります。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>eh_deadline</term>
+    <listitem>
+     <para>
+      デバイスからの応答がなく、SCSIコマンドがエラー応答なしにタイムアウトした場合に、SCSIエラー処理に費やされる時間(秒単位)のおおよその上限を設定します。期限が経過すると、カーネルはHBAを完全にリセットします。
+     </para>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   <filename>/etc/multipath.conf</filename>ファイルを変更した後、<xref linkend="sec-multipath-conf-file-apply"/>の説明に従って設定を適用します。
+  </para>
+
+  <sect2 xml:id="sec-multipath-policies-standalone">
+   <title>スタンドアロンサーバでのキューポリシー</title>
+   <para>
+    スタンドアロンサーバに対してマルチパスI/Oを設定する際は、<literal>no_path_retry</literal>で値を<literal>queue</literal>に設定することにより、サーバのオペレーティングシステムを、I/Oエラーの受信から可能な限り保護することができます。この設定では、マルチパスのフェールオーバーが発生するまでメッセージはキューに入ります。「無限」のキューを望まない場合(上記を参照)、通常の状況下でストレージパスが回復するのに十分大きいとみなされる数値を選択します(上記を参照)。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-policies-cluster">
+   <title>クラスタ化されたサーバでのキューポリシー</title>
+   <para>
+    高可用性クラスタ内のノードに対してマルチパスI/Oを構成するときには、マルチパスでリソースのフェールオーバーをトリガするためにI/O障害が報告されるようにして、マルチパスのフェールオーバーが解決されるのを待たなくて済むようにするとよいでしょう。クラスタ環境では、<literal>no_path_retry
+    </literal>設定を、ストレージシステムへの接続が失われた場合に、クラスタノードがクラスタ検証プロセスに関連するI/Oエラー(ハートビート許容値の50%を推奨)を受信するように変更する必要があります。また、パスの障害によるリソースのピンポンを避けるため、マルチパスの<literal>failback</literal>を<literal>manual</literal>または<literal>followover</literal>に設定するとよいでしょう。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-grouping">
+  <title>パスのグループ化と優先度の設定</title>
+
+  <para>
+   マルチパスマップのパスデバイスは、「パスグループ」(「優先度グループ」とも呼ばれる)にグループ化されます。<emphasis></emphasis><emphasis></emphasis>常に1つのパスグループのみがI/Oを受信します。<command>multipathd</command>は、「優先度」をパスグループに割り当てます。<emphasis></emphasis>アクティブなパスを持つパスグループの内、優先度の最も高いグループが、マップに設定されたフェールバックポリシーに応じてアクティブになります(<xref linkend="sec-multipath-policies-default"/>を参照)。パスグループの優先度は、パスグループ内のアクティブなパスデバイスの優先度の平均です。パスデバイスの優先度は、デバイスのプロパティから計算される整数値です(以下の<literal>prio</literal>オプションの説明を参照)。
+  </para>
+
+  <para>
+   このセクションでは、優先度の決定とパスのグループ化に関連する<filename>multipath.conf</filename>設定パラメータについて説明します。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>path_grouping_policy</term>
+    <listitem>
+     <para>
+      パスをグループに結合するために使用する方法を指定します。最も重要なポリシーのみがここにリストされます。使用頻度の低いその他の値については、<systemitem>multipath.conf(5)</systemitem>を参照してください。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>failover</term>
+       <listitem>
+        <para>
+         パスグループごとに1つのパス。この設定は、従来の「アクティブ/パッシブ」ストレージアレイで有用です。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>multibus</term>
+       <listitem>
+        <para>
+         1つのパスグループ内のすべてのパス。これは、従来の「アクティブ/パッシブ」アレイで有用です。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>group_by_prio</term>
+       <listitem>
+        <para>
+         同じパス優先度のパスデバイスがグループ化されます。このオプションは、ALUAのように非対称アクセス状態をサポートする最新のアレイで有用です。<literal>alua</literal>または<literal>sysfs</literal>の優先度アルゴリズムと組み合わせて、<command>multipathd</command>によってセットアップされる優先度グループは、ストレージアレイがALUA関連のSCSIコマンドを使用してレポートするプライマリターゲットポートグループと照合されます。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+     <para>
+      マルチパスマップのパスグループ化ポリシーは、同じポリシー名を使用して、次のコマンドで一時的に変更できます。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipath -p <replaceable>POLICY_NAME</replaceable> <replaceable>MAP_NAME</replaceable></screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>marginal_pathgroups</term>
+    <listitem>
+     <para>
+      <literal>on</literal>または<literal>fpin</literal>に設定すると、「ぎりぎり」のパスデバイスは、別のパスグループに分類されます。これは、使用しているパスグループ化アルゴリズムとは無関係です。<xref linkend="sec-multipath-marginal"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>detect_prio</term>
+    <listitem>
+     <para>
+      これが<literal>yes</literal> (デフォルト、推奨)に設定されている場合、<command>multipathd</command>はストレージデバイスの優先度を設定するのに最適なアルゴリズムを自動的に検出して、<literal>prio</literal>設定を無視します。実際には、これは、ALUAのサポートが検出された場合に<literal>sysfs</literal> prioアルゴリズムを使用することを意味します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>prio</term>
+    <listitem>
+     <para>
+      パスデバイスの優先度を導出する方法を決定します。これを上書きする場合、次のように<literal>detect_prio</literal>を無効にします。
+     </para>
+<screen>
+defaults {
+          detect_prio no
+}
+        </screen>
+     <para>
+      次のリストには、最も重要な方法のみが含まれます。他にもいくつかの方法が利用可能です。これらは主にレガシハードウェアをサポートするためのものです。完全なリストについては、<systemitem>multipath.conf(5)</systemitem>を参照してください。
+     </para>
+     <variablelist>
+      <varlistentry>
+       <term>alua</term>
+       <listitem>
+        <para>
+         SCSI-3 ALUAアクセス状態を使用して、パス優先値を導出します。オプションの<literal>exclusive_pref_bit</literal>引数を使用して、ALUAの「優先プライマリターゲットポートグループ」(PREF)ビットが設定されているデバイスの動作を変更できます。
+        </para>
+<screen>
+        prio alua
+        prio_args exclusive_pref_bit
+              </screen>
+        <para>
+         このオプションを設定すると、「優先」パスは、他のアクティブ/最適化パスを上回る優先度ボーナスを獲得します。このオプションを設定しないと、すべてのアクティブ/最適化パスは、同じ優先度を割り当てられます。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>sysfs</term>
+       <listitem>
+        <para>
+         <literal>alua</literal>と似ていますが、SCSIコマンドをデバイスに送信する代わりに、<systemitem>sysfs</systemitem>からアクセス状態を取得します。これにより、<literal>alua</literal>よりもI/O負荷が軽減されますが、ALUAがサポートされているすべてのストレージアレイに適しているわけではありません。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>const</term>
+       <listitem>
+        <para>
+         すべてのパスに定数値を使用します。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>path_latency</term>
+       <listitem>
+        <para>
+         パスデバイスでI/Oレイテンシ(I/O送信から完了までの時間)を測定し、低レイテンシのデバイスに高い優先度を割り当てます。詳細については<systemitem>multipath.conf(5)</systemitem>を参照してください。このアルゴリズムはまだ実験段階です。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>weightedpath</term>
+       <listitem>
+        <para>
+         名前、シリアル番号、Host:Bus:Target:Lun ID (HBTL)、またはファイバチャネルWWNに基づいて優先度をパスに割り当てます。優先度の値は時間が経過しても変化しません。この方法では、引数<literal>prio_args</literal>が必要です。詳細については、<systemitem>multipath.conf(5)</systemitem>を参照してください。例:
+        </para>
+<screen>
+        prio weightedpath
+        prio_args "hbtl 2:.*:.*:.* 10 hbtl 3:.*:.*:.* 20 hbtl .* 1"
+              </screen>
+        <para>
+         これは、SCSIホスト3のデバイスにSCSIホスト2のデバイスより高い優先度を割り当て、他のすべてに低い優先度を割り当てています。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>prio_args</term>
+    <listitem>
+     <para>
+      一部の<literal>prio</literal>アルゴリズムは、追加の引数が必要です。これらはこのオプションで指定されます。構文はアルゴリズムによって決まります。詳細については上記の説明を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>hardware_handler</term>
+    <listitem>
+     <para>
+      パスグループを切り替えるときにパスデバイスをアクティブ化するためにカーネルが使用するカーネルモジュールの名前。このオプションは、最新のカーネルでは効果がありません。最新のカーネルでは、ハードウェアハンドラが自動検出されるためです。<xref linkend="sec-multipath-hardware-handlers"/>を参照してください。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>path_selector</term>
+    <listitem>
+     <para>
+      アクティブパスグループのパス間のロードバランシングに使用するカーネルモジュールの名前。利用可能な選択肢は、カーネル設定によって決まります。過去の経緯から、<filename>multipath.conf</filename>では名前は常に引用符で囲み、その後に「0」を付ける必要があります。次に例を示します。
+     </para>
+<screen>    path_selector "queue-length 0"</screen>
+     <variablelist>
+      <varlistentry>
+       <term>service-time</term>
+       <listitem>
+        <para>
+         すべてのパスで保留中のI/Oが完了するために必要な時間を推定し、最小値のパスを選択します。これがデフォルトの設定です。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>historical-service-time</term>
+       <listitem>
+        <para>
+         過去のサービス時間(移動平均を保持する時間)、および未処理の要求数に基づいて、将来のサービス時間を推定します。すべてのパスで保留中のI/Oが完了するために必要な時間を推定し、最小値のパスを選択します。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>queue-length</term>
+       <listitem>
+        <para>
+         現在保留中のI/O要求が最も少ないパスを選択します。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>round-robin</term>
+       <listitem>
+        <para>
+         ラウンドロビン方式でパスを切り替えます。次のパスに切り替わる前に、そのパスに送信される要求数は、<literal>rr_min_io_rq</literal>と<literal>rr_weight</literal>オプションで調整できます。
+        </para>
+       </listitem>
+      </varlistentry>
+      <varlistentry>
+       <term>io-affinity</term>
+       <listitem>
+        <para>
+         このパスセレクタは、現時点では<systemitem>multipath-tools</systemitem>では機能しません。
+        </para>
+       </listitem>
+      </varlistentry>
+     </variablelist>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <para>
+   <filename>/etc/multipath.conf</filename>ファイルを変更した後、<xref linkend="sec-multipath-conf-file-apply"/>の説明に従って設定を適用します。
+  </para>
+ </sect1>
+ <sect1 xml:id="sec-multipath-select-devices">
+  <title>マルチパス処理のためのデバイスの選択</title>
+
+  <para>
+   マルチパスデバイスを含むシステムでは、一部のデバイス(通常はローカルディスク)でのマルチパスマップのセットアップを避けた方がよい場合があります。<systemitem>multipath-tools</systemitem>は、どのデバイスをマルチパスのパスデバイスとみなすかを設定するためのさまざまな方法を提供します。
+  </para>
+
+  <note>
+   <title>ローカルディスク上のマルチパス</title>
+   <para>
+    通常、ローカルディスクの上にデバイスが1つだけある「ディグレード」マルチパスマップをセットアップしても問題ありません。これは正常に動作し、追加の設定は不要です。しかし、管理者の中にはこれを分かりにくいと感じたり、一般的にこの種の不必要なマルチパス処理に反対したりする人もいます。また、マルチパスレイヤを使用すると、パフォーマンスにわずかなオーバーヘッドが生じます。<xref linkend="sec-multipath-planning-type-noroot"/>も参照してください。
+   </para>
+  </note>
+
+  <para>
+   <filename>/etc/multipath.conf</filename>ファイルを変更した後、<xref linkend="sec-multipath-conf-file-apply"/>の説明に従って設定を適用します。
+  </para>
+
+  <sect2 xml:id="sec-multipath-blacklist">
+   <title><filename>multipath.conf</filename>の<literal>blacklist</literal>セクション</title>
+   <para>
+    <filename>/etc/multipath.conf</filename>ファイルには、<command>multipathd</command>と<command>multipath</command>で無視する必要があるすべてのデバイスを列挙する<literal>blacklist</literal>セクションを含めることができます。次の例は、デバイスを除外する考えられる方法を示しています。
+   </para>
+   <informalexample>
+<screen>blacklist {
+    wwid 3600605b009e7ed501f0e45370aaeb77f <co xml:id="mp-co-bl-wwid"/>
+    device {  <co xml:id="mp-co-bl-device"/>
+        vendor ATA
+        product .*
+    }
+    protocol scsi:sas <co xml:id="mp-co-bl-prot"/>
+    property SCSI_IDENT_LUN_T10 <co xml:id="mp-co-bl-prop"/>
+    devnode "!^dasd[a-z]*" <co xml:id="mp-co-bl-devnode"/>
+}</screen>
+    <calloutlist>
+     <callout arearefs="mp-co-bl-wwid">
+      <para>
+       <literal>wwid</literal>エントリは、ルートディスクなどの特定のデバイスを除外するのに最適です。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-device">
+      <para>
+       この<literal>device</literal>セクションは、すべてのATAデバイスを除外します(<literal>product</literal>の正規表現はすべてに一致します)。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-prot">
+      <para>
+       <literal>protocol</literal>による除外では、特定のバスタイプ(ここではSAS)を使用してデバイスを除外できます。他の一般的なプロトコル値は<literal>scsi:fcp</literal>、<literal>scsi:iscsi</literal>、および<literal>ccw</literal>です。詳細については、<systemitem>multipath.conf(5)</systemitem>を参照してください。システムのパスが使用しているプロトコルを表示するには、次のコマンドを実行します。
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd show paths format "%d %P"</screen>
+      <para>
+       この形式は<phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15 SP1および<phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 12 SP5以降でサポートされています。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-prop">
+      <para>
+       この<literal>property</literal>エントリは、特定のudevプロパティを含むデバイスを除外します(プロパティの値は無関係)。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-bl-devnode">
+      <para>
+       <literal>devnode</literal>によるデバイスの除外は、例のように正規表現を使用するデバイスのクラスに対してのみ推奨されます。この例では、DASDデバイス以外のすべてを除外します。<filename>sda</filename>のような個々のデバイスにこれを使用することは、デバイスのノード名が永続的ではないため、お勧めしません。
+      </para>
+      <para>
+       この例では<literal>blacklist</literal>および<literal>blacklist_exceptions</literal>セクションでのみサポートされる特殊な構文を示しています。正規表現の前に感嘆符(<literal>!</literal>)を付けると、一致が否定されます。感嘆符は二重引用符内に配置される必要があることに注意してください。
+      </para>
+     </callout>
+    </calloutlist>
+   </informalexample>
+   <para>
+    デフォルトでは、<systemitem>multipath-tools</systemitem>は、SCSI、DASDまたはNVMeを除くすべてのデバイスを無視します。技術的には、組み込みのdevnode除外リストは、次の否定された正規表現です。
+   </para>
+<screen>    devnode !^(sd[a-z]|dasd[a-z]|nvme[0-9])</screen>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-blacklist-exceptions">
+   <title><filename>multipath.conf</filename>の<literal>blacklist exceptions</literal>セクション</title>
+   <para>
+    特定のデバイスのみをマルチパス処理用に設定することが望ましい場合があります。この場合、デバイスはデフォルトで除外され、マルチパスマップの一部となるデバイスに対して例外が定義されます。この目的で<literal>blacklist_exceptions</literal>セクションが存在します。これは通常、次の例のように使用されます。この例では、製品文字列「NETAPP」のストレージを除くすべてが除外されます。
+   </para>
+<screen>blacklist {
+     wwid .*
+}
+blacklist_exceptions {
+     device {
+         vendor ^NETAPP$
+         product .*
+     }
+}</screen>
+   <para>
+    <literal>blacklist_exceptions</literal>セクションでは、上記の<literal>blacklist</literal>セクションで説明されているすべての方法がサポートされます。
+   </para>
+   <para>
+    <literal>blacklist_exceptions</literal>の<literal>property</literal>ディレクティブは必須です。なぜなら、マルチパスのパスデバイスとみなされるために、すべてのデバイスは少なくとも1つの「許可された」udevプロパティを持つ「必要がある」ためです(プロパティの値は重要ではありません)。<emphasis></emphasis><literal>property</literal>の組み込みのデフォルトは次のとおりです。
+   </para>
+<screen>    property (SCSI_IDENT_|ID_WWN)</screen>
+   <para>
+    この正規表現に一致するudevプロパティを少なくとも1つ持つデバイスのみが含まれます。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-device-select-other">
+   <title>デバイスの選択に影響するその他のオプション</title>
+   <para>
+    <literal>blacklist</literal>オプション以外にも、<filename>/etc/multipath.conf</filename>には、どのデバイスをマルチパスのパスデバイスとみなすかに影響するその他の設定がいくつかあります。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>find_multipaths</term>
+     <listitem>
+      <para>
+       このオプションは、除外されないデバイスが最初に検出された場合の<command>multipath</command>と<command>multipathd</command>の動作を制御します。次の値を使用できます。
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>greedy</term>
+        <listitem>
+         <para>
+          <filename>/etc/multipath.conf</filename>の<literal>blacklist</literal>によって除外されないすべてのデバイスが含まれます。これは、SUSE Linux Enterpriseのデフォルトです。この設定がアクティブの場合、マルチパスマップへのデバイスの追加を防ぐ唯一の方法は、デバイスを除外と設定することです。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>strict</term>
+        <listitem>
+         <para>
+          すべてのデバイスは、<filename>/etc/multipath.conf</filename>の<literal>blacklist</literal>セクションに存在しなくても、そのWWIDが<filename>/etc/multipath/wwids</filename>ファイルにリストされていない限り、除外されます。これには、WWIDファイルの手動メンテナンスが必要です(下記の注意事項を参照)。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>yes</term>
+        <listitem>
+         <para>
+          デバイスは、<literal>strict</literal>の条件を満たしている場合、または同じWWIDを持つ他のデバイスがシステム内に少なくとも1つ存在する場合に含まれます。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>smart</term>
+        <listitem>
+         <para>
+          新しいWWIDを初めて検出した場合、これは、マルチパスのパスデバイスとして一時的にマークされます。<command>multipathd</command>は、同じWWIDを持つ追加のパスが現れるまでしばらく待機します。現れると、マルチパスマップは通常どおりにセットアップされます。それ以外の場合、タイムアウトになると、1つのデバイスが非マルチパスデバイスとしてシステムにリリースされます。タイムアウトは、オプション<option>find_multipaths_timeout</option>を使用して設定できます。
+         </para>
+         <para>
+          このオプションは、SUSE Linux Enterprise Server 15でのみ利用できる<command>systemd</command>機能に依存します。
+         </para>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+      <note>
+       <title><filename>/etc/multipath/wwids</filename>の管理</title>
+       <para>
+        <systemitem>multipath-tools</systemitem>は、前にセットアップしたマルチパスマップの記録をファイル<filename>/etc/multipath/wwids</filename> (「WWIDsファイル」)に保持します。このファイルにリストされているWWIDを持つデバイスは、マルチパスのパスデバイスとみなされます。このファイルは、<literal>greedy</literal>を除く<option>find_multipaths</option>のすべての値に対して、マルチパスデバイスの選択に重要です。
+       </para>
+       <para>
+        <option>find_multipaths</option>が<literal>yes</literal>または<literal>smart</literal>に設定されている場合、<command>multipathd</command>は、新しいマップをセットアップした後にWWIDを<filename>/etc/multipath/wwids</filename>に追加します。これにより、今後これらのマップはより迅速に検出されるようになります。
+       </para>
+       <para>
+        WWIDファイルは、手動で変更できます。
+       </para>
+       <informalexample>
+<screen>
+<prompt>&gt; </prompt><command>sudo</command> multipath -a 3600a098000aad1e3000064e45f2c2355 <co xml:id="mp-co-wwid-a"/>
+<prompt>&gt; </prompt><command>sudo</command> multipath -w /dev/sdf <co xml:id="mp-co-wwid-w"/>
+       </screen>
+        <calloutlist>
+         <callout arearefs="mp-co-wwid-a">
+          <para>
+           このコマンドを実行すると、指定されたWWIDが<filename>/etc/multipath/wwids</filename>に追加されます。
+          </para>
+         </callout>
+         <callout arearefs="mp-co-wwid-w">
+          <para>
+           このコマンドを実行すると、指定されたデバイスのWWIDが削除されます。
+          </para>
+         </callout>
+        </calloutlist>
+       </informalexample>
+       <para>
+        <literal>strict</literal>モードでは、これが新しいマルチパスデバイスを追加する唯一の方法です。WWIDファイルを変更した後、<command>multipathd reconfigure</command>を実行して変更を適用します。変更をWWIDファイルに適用した後にinitramfsを再構築することをお勧めします(<xref linkend="sec-multipath-initrd-sync"/>を参照)。
+       </para>
+      </note>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>allow_usb_devices</term>
+     <listitem>
+      <para>
+       このオプションが<literal>yes</literal>に設定されている場合、USBストレージデバイスはマルチパス処理用とみなされます。デフォルトは<literal>no</literal>です。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-names">
+  <title>マルチパスデバイス名とWWID</title>
+
+  <para>
+   <command>multipathd</command>と<command>multipath</command>は、WWIDを内部的に使用して、デバイスを識別します。WWIDは、デフォルトではマップ名としても使用されます。便宜上、<systemitem>multipath-tools</systemitem>は、よりシンプルで簡単に覚えることができる名前のマルチパスデバイスへの割り当てをサポートしています。
+  </para>
+
+  <sect2 xml:id="sec-multipath-conf-file-wwid">
+   <title>WWIDとデバイスの識別</title>
+   <para>
+    マルチパス操作では、同じストレージボリュームへのパスを表すデバイス検出の信頼性が高いことが非常に重要です。<systemitem>multipath-tools</systemitem>は、この目的でデバイスのWWID (World Wide Identification: ワールドワイドID)を使用します(これはUUID (Universally Unique ID: ユニバーサルユニークIDまたはUID (Unique ID: ユニークID)と呼ばれることもあります(ユーザIDと混同しないでください)。マップデバイスのWWIDは、常にそのパスデバイスのWWIDと同じです。
+   </para>
+   <para>
+    デフォルトでは、パスデバイスのWWIDは、sysfsファイルシステムからデバイスの属性を読み取ることによって、または固有のI/Oコマンドを使用して、udevルールで決定されるデバイスのudevプロパティから推測されます。デバイスのudevプロパティを確認するには、次のコマンドを実行します。
+   </para>
+<screen><prompt>&gt; </prompt>udevadm info /dev/<replaceable>sdx</replaceable></screen>
+   <para>
+    WWIDを導出するために<systemitem>multipath-tools</systemitem>によって使用されるudevプロパティを次に示します。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      SCSIデバイスの<literal>ID_SERIAL</literal> (これをデバイスの「シリアル番号」と混同しないでください)
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      DASDデバイスの<literal>ID_UID</literal>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      NVMeデバイスの<literal>ID_WWN</literal>
+     </para>
+    </listitem>
+   </itemizedlist>
+   <warning>
+    <title>WWIDの変更を回避する</title>
+    <para>
+     使用中のマルチパスマップのWWIDは変更できません。設定の変更により、マップされたパスデバイスのWWIDが変更された場合は、マップを破棄し、新しいWWIDで新しいマップをセットアップする必要があります。これは、古いマップを使用中には実行できません。極端な場合、WWIDの変更によってデータが破損する可能性があります。したがって、マップのWWIDが変更される結果となる設定変更の適用は、「厳格に回避する」必要があります。<emphasis></emphasis>
+    </para>
+    <para>
+     <filename>/etc/multipath.conf</filename>で<literal>uid_attrs</literal>オプションを有効にすることは許可されています。<xref linkend="sec-multipath-conf-misc"/>を参照してください。
+    </para>
+   </warning>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-alias">
+   <title>マルチパスマップのエイリアスの設定</title>
+   <para>
+    <filename>/etc/multipath.conf</filename>の<literal>multipaths</literal>セクションで、次のように任意のマップ名を設定できます。
+   </para>
+<screen>multipaths {
+    multipath {
+        wwid 3600a098000aad1e3000064e45f2c2355
+        alias postgres
+    }
+}</screen>
+   <para>
+    エイリアスは表現力が豊かですが、各マップに個別に割り当てる必要があるため、大規模なシステムでは面倒な場合があります。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-user-friendly-names">
+   <title>自動生成されるユーザフレンドリ名の使用</title>
+   <para>
+    <systemitem>multipath-tools</systemitem>は、自動生成されたエイリアス、いわゆる「ユーザフレンドリ名」もサポートしています。エイリアスの命名規則は、mpath<replaceable>INDEX</replaceable>というパターンに従います。ここで<replaceable>INDEX</replaceable>は小文字です(<literal>a</literal>で始まります)。したがって、最初に自動生成されるエイリアスは<literal>mpatha</literal>で、その後<literal>mpathb</literal>、<literal>mpathc</literal>と続き、<literal>mpathz</literal>まで続きます。その後は、<literal>mpathaa</literal>、<literal>mpathab</literal>などが続きます。
+   </para>
+   <para>
+    マップ名は、永続的である場合のみ有用です。<systemitem>multipath-tools</systemitem>は、<filename>/etc/multipath/bindings</filename>ファイル(「バインディングファイル」)で割り当てられた名前を追跡します。新しいマップが作成されると、最初にこのファイルでWWIDが検索されます。WWIDが見つからない場合、最も可用性が低いユーザフレンドリ名がこれに割り当てられます。
+   </para>
+   <para>
+    <xref linkend="sec-multipath-alias"/>で説明されているように、明示的なエイリアスがユーザフレンドリ名よりも優先されます。
+   </para>
+   <para>
+    <filename>/etc/multipath.conf</filename>の次のオプションは、ユーザフレンドリ名に影響します。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>user_friendly_names</term>
+     <listitem>
+      <para>
+       <literal>yes</literal>に設定すると、ユーザフレンドリ名が割り当てられ、使用されます。それ以外の場合、エイリアスが設定されていない限り、WWIDがマップ名として使用されます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>alias_prefix</term>
+     <listitem>
+      <para>
+       ユーザフレンドリ名を作成するために使用するプレフィクス。デフォルトでは<literal>mpath</literal>です。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <warning>
+    <title>高可用性クラスタのマップ名</title>
+    <para>
+     クラスタ操作では、クラスタ内のすべてのノードにわたってデバイス名を同じにする必要があります。<systemitem>multipath-tools</systemitem>の設定は、ノード間で同期状態を保つ必要があります。<literal>user_friendly_names</literal>を使用している場合、<command>multipathd</command>は実行時に<filename>/etc/multipath/bindings</filename>ファイルを変更する可能性があります。このような変更は、すべてのノードに対して動的に複製する必要があります。同じことが<filename>/etc/multipath/wwids</filename>にも当てはまります(<xref linkend="sec-multipath-device-select-other"/>を参照)。
+    </para>
+   </warning>
+   <note>
+    <title>実行時のマップ名の変更</title>
+    <para>
+     実行時にマップ名を変更できます。このセクションで説明されている方法のいずれかを使用して、<command>multipathd
+     reconfigure</command>を実行すると、システム操作を妨げることなくマップ名が変更されます。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-referring">
+   <title>マルチパスマップの参照</title>
+   <para>
+    技術的には、マルチパスマップは、デバイスマッパーデバイスです。これには、<filename>/dev/dm-<replaceable>n</replaceable></filename>という形式の汎用名があります(<replaceable>n</replaceable>は整数)。これらの名前は永続的ではありません。これらは、マルチパスマップを参照するために使用「しない」でください。<emphasis></emphasis><command>udev</command>を実行すると、これらのデバイスへのさまざまなシンボリックリンクが作成されます。これらは、永続的な参照としてより適切です。これらのリンクは、特定の設定変更に対する不変性の点で異なります。次の一般的な例は、すべて同じデバイスを指しているさまざまなシンボリックリンクを示しています。
+   </para>
+   <informalexample>
+<screen>/dev/disk/by-id/dm-name-mpathb<co xml:id="mp-ref-dm-name"/> -&gt; ../../dm-1
+/dev/disk/by-id/dm-uuid-mpath-3600a098000aad73f00000a3f5a275dc8<co xml:id="mp-ref-dm-uuid"/> -&gt; ../../dm-1
+/dev/disk/by-id/scsi-3600a098000aad73f00000a3f5a275dc8<co xml:id="mp-ref-scsi"/> -&gt; ../../dm-1
+/dev/disk/by-id/wwn-0x600a098000aad73f00000a3f5a275dc8<co xml:id="mp-ref-wwn"/> -&gt; ../../dm-1
+/dev/mapper/mpathb<co xml:id="mp-ref-mapper"/> -&gt; ../dm-1</screen>
+    <calloutlist>
+     <callout arearefs="mp-ref-dm-name mp-ref-mapper">
+      <para>
+       これら2つのリンクは、マップ名を使用してマップを参照します。したがって、マップ名が変更されるとリンクも変更されます(たとえば、ユーザフレンドリ名を有効または無効にした場合)。
+      </para>
+     </callout>
+     <callout arearefs="mp-ref-dm-uuid">
+      <para>
+       このリンクは、デバイスマッパーUUIDを使用します。これは、<systemitem>multipath-tools</systemitem>によって使用されているWWIDにプレフィクスとして文字列<literal>dm-uuid-mpath-</literal>が付いています。これはマップ名とは無関係です。
+      </para>
+      <para>
+       デバイスマッパーUUIDは、確実に「マルチパスデバイスのみ」が参照されるようにするために推奨される形式です。<emphasis></emphasis>たとえば、<filename>/etc/lvm/lvm.conf</filename>の次の行では、マルチパスマップを除くすべてのデバイスが拒否されます。
+      </para>
+<screen>filter = [ "a|/dev/disk/by-id/dm-uuid-mpath-.*|", "r|.*|" ]</screen>
+     </callout>
+     <callout arearefs="mp-ref-scsi mp-ref-wwn">
+      <para>
+       これらは、通常パスデバイスを指すリンクです。マルチパスデバイスは、udevリンクの優先度が高いため、これらを引き継ぎました(<systemitem>udev(7)</systemitem>を参照)。マップが破棄されたり、マルチパス処理がオフになったりしても、それらは引き続き存在し、代わりにパスデバイスのいずれかを指します。これは、マルチパス処理がアクティブかどうかに関係なく、WWIDによってデバイスを参照する手段を提供します。
+      </para>
+     </callout>
+    </calloutlist>
+   </informalexample>
+   <para>
+    <emphasis role="bold"></emphasis><command>kpartx</command>ツールで作成されたマルチパスマップ上の「パーティション」の場合、親デバイス名またはWWIDとパーティション番号から派生した同様のシンボリックリンクがあります。
+   </para>
+   <informalexample>
+<screen>/dev/disk/by-id/dm-name-mpatha-part2 -&gt; ../../dm-5
+/dev/disk/by-id/dm-uuid-part2-mpath-3600a098000aad1e300000b4b5a275d45 -&gt; ../../dm-5
+/dev/disk/by-id/scsi-3600a098000aad1e300000b4b5a275d45-part2 -&gt; ../../dm-5
+/dev/disk/by-id/wwn-0x600a098000aad1e300000b4b5a275d45-part2 -&gt; ../../dm-5
+/dev/disk/by-partuuid/1c2f70e0-fb91-49f5-8260-38eacaf7992b -&gt; ../../dm-5
+/dev/disk/by-uuid/f67c49e9-3cf2-4bb7-8991-63568cb840a4 -&gt; ../../dm-5
+/dev/mapper/mpatha-part2 -&gt; ../dm-5
+</screen>
+   </informalexample>
+   <para>
+    パーティションには<filename>by-uuid</filename>リンクもあることが多く、デバイス自体を参照するのではなく、デバイスに含まれているファイルシステムを参照します。多くの場合、これらのリンクが推奨されます。これらは、ファイルシステムが別のデバイスまたはパーティションにコピーされても不変です。
+   </para>
+   <warning>
+    <title>initramfsのマップ名</title>
+    <para>
+     <command>dracut</command>は、initramfsを構築するとき、initramfsのデバイスへのハードコード化された参照を作成します。デフォルトでは、<filename>/dev/mapper/$MAP_NAME</filename>参照を使用します。これらのハードコード化された参照は、initramfsで使用されているマップ名がinitramfs構築中に使用した名前と一致しない場合、起動中には見つからず、起動エラーになります。通常、この状況にはなりません。その理由は、<command>dracut</command>がすべてのマルチパス設定ファイルをinitramfsに追加するためです。ただし、initramfsが異なる環境(レスキューシステム、またはオフライン更新中など)から構築されている場合、この問題が発生する可能性があります。この起動エラーが発生しないようにするには、<xref linkend="sec-multipath-initrd-persistent"/>で説明されているように、<command>dracut</command>の<literal>persistent_policy</literal>設定を変更します。
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-conf-misc">
+  <title>その他のオプション</title>
+
+  <para>
+   このセクションでは、これまでに説明しなかった有用ないくつかの<filename>multipath.conf</filename>オプションを一覧表示します。完全なリストについては、<systemitem>multipath.conf(5)</systemitem>を参照してください。
+  </para>
+
+  <variablelist>
+   <varlistentry>
+    <term>verbosity</term>
+    <listitem>
+     <para>
+      <command>multipath</command>と<command>multipathd</command>両方のログ詳細度を制御します。コマンドラインオプション<option>-v</option>を使用すると、両方のコマンドについてこの設定が上書きされます。この値は、0 (致命的なエラーのみ)と4 (詳細なログ記録)の間で設定できます。デフォルトは2です。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>uid_attrs</term>
+    <listitem>
+     <para>
+      このオプションを使用すると、udevイベントの処理を最適化できます(いわゆる「ueventマージ」)。これは、数百のパスデバイスが同時に障害を起こしたり同時に再検出されたりする環境で有用です。パスのWWIDが変更されないようにするためには(<xref linkend="sec-multipath-conf-file-wwid"/>を参照)、この値を正確に次のように設定する必要があります。
+     </para>
+<screen>defaults {
+     uid_attrs "sd:ID_SERIAL dasd:ID_UID nvme:ID_WWN"
+}</screen>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>skip_kpartx</term>
+    <listitem>
+     <para>
+      マルチパスデバイスで<literal>yes</literal>に設定する場合(デフォルトは<literal>no</literal>)、指定したデバイスの上にパーティションデバイスを作成しないでください(<xref linkend="sec-multipath-configuration-partitioning"/>を参照)。仮想マシンによって使用されるマルチパスデバイスで有用です。以前の<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>リリースでは、同じ効果をパラメータ「<literal>features 1 no_partitions</literal>」を使用して実現していました。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>max_sectors_kb</term>
+    <listitem>
+     <para>
+      マルチパスマップのすべてのパスデバイスに対して1つのI/O要求で送信される最大データ量を制限します。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>ghost_delay</term>
+    <listitem>
+     <para>
+      アクティブ/パッシブアレイで、アクティブパスの前にパッシブパス(「ゴースト」状態)が検出される場合があります。マップが直ちにアクティブ化され、I/Oが送信された場合、これにより、負荷の大きいパスのアクティブ化が実行される可能性があります。このパラメータは、マップをアクティブにする前に、マップのアクティブパスが表示されるまでに待機する時間(秒単位)を指定します。デフォルトは<literal>no</literal> (ゴースト遅延なし)です。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>recheck_wwid</term>
+    <listitem>
+     <para>
+      <literal>yes</literal>に設定されている場合(デフォルトは<literal>no</literal>)、障害発生後に復元されたパスのWWIDをダブルチェックし、WWIDが変更された場合はパスを削除します。これはデータの破損を防ぐための安全対策です。
+     </para>
+    </listitem>
+   </varlistentry>
+   <varlistentry>
+    <term>enable_foreign</term>
+    <listitem>
+     <para>
+      <systemitem>multipath-tools</systemitem>は、デバイスマッパーのマルチパス以外のマルチパス処理バックエンド用にプラグインAPIを提供します。このAPIは、<command>multipath -ll</command>のような標準コマンドを使用して、マルチパストポロジに関する情報の監視および表示をサポートしています。トポロジの変更はサポートされていません。
+     </para>
+     <para>
+      <literal>enable_foreign</literal>の値は、外部のライブラリ名と照合するための正規表現です。デフォルト値は「<literal>NONE</literal>」です。
+     </para>
+     <para>
+      <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase>には、ネイティブNVMeマルチパス処理のサポートを追加する<literal>nvme</literal>プラグインが備わっています(<xref linkend="sec-multipath-hardware-implementations"/>を参照)。<literal>nvme</literal>プラグインを有効にするには、次のように設定します。
+     </para>
+<screen>defaults {
+    enable_foreign nvme
+}</screen>
+    </listitem>
+   </varlistentry>
+  </variablelist>
+
+  <sect2 xml:id="sec-multipath-marginal">
+   <title>信頼性の低い(「ぎりぎりの」)パスデバイスの処理</title>
+   <para>
+    Fabricの状態が不安定だと、パスデバイスの動作が不安定になる可能性があります。I/Oエラーの発生、回復、障害の再発が頻繁に起こります。このようなパスデバイスは、「ぎりぎりの」または「不安定な」パスと呼ばれることもあります。このセクションでは、この問題に対処するために<systemitem>multipath-tools</systemitem>が提供するオプションをまとめています。
+   </para>
+   <note>
+    <title>multipathdのぎりぎりのパスチェックアルゴリズム</title>
+    <para>
+     パスデバイスで、最初の失敗が発生してから<literal>marginal_path_double_failed_time</literal>が経過する前に、2回目の失敗(良好→不良の移行)が発生した場合、<command>multipathd</command>は、監視期間<literal>marginal_path_err_sample_time</literal>の間、1秒あたり10回の要求の速度でパスの監視を開始します。監視期間中のエラー率が<literal>marginal_path_err_rate_threshold</literal>を超えると、このパスはぎりぎりに分類されます。<literal>marginal_path_err_recheck_gap_time</literal>経過後、パスは、再び通常状態に移行します。
+    </para>
+    <para>
+     このアルゴリズムは、4つの数値パラメータ<literal>marginal_path_</literal>がすべて正の値に設定されていて、<literal>marginal_pathgroups</literal>が<literal>fpin</literal>に設定されていない場合に使用されます。これは、SUSE Linux Enterprise Server 15 SP1およびSUSE Linux Enterprise Server 12 SP5以降で利用できます。
+    </para>
+   </note>
+   <variablelist>
+    <varlistentry>
+     <term>marginal_path_double_failed_time</term>
+     <listitem>
+      <para>
+       パス監視をトリガする2回のパスの失敗間の最大時間(秒単位)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_path_err_sample_time</term>
+     <listitem>
+      <para>
+       パス監視間隔の長さ(秒単位)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_path_err_rate_threshold</term>
+     <listitem>
+      <para>
+       最小エラー率(I/O 1000回あたり)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_path_err_recheck_gap_time</term>
+     <listitem>
+      <para>
+       パスをぎりぎりの状態に保つ時間(秒単位)。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>marginal_pathgroups</term>
+     <listitem>
+      <para>
+       このオプションは、<phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15SP3以降使用できます。次の値を使用できます。
+      </para>
+      <variablelist>
+       <varlistentry>
+        <term>off</term>
+        <listitem>
+         <para>
+          ぎりぎりの状態は<command>multipathd</command>によって決まります(上記を参照)。ぎりぎりのパスは、ぎりぎりの状態である限り、復帰しません。これはデフォルトであり、<literal>marginal_pathgroups</literal>オプションが利用できなかったSUSE Linux Enterprise ServerのSP3より前のリリースにおける動作です。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>on</term>
+        <listitem>
+         <para>
+          <literal>off</literal>オプションと似ていますが、ぎりぎりのパスを失敗状態のままにするのではなく、別のパスグループに移動します。このグループは、他のすべてのパスグループより低い優先度を割り当てられます(<xref linkend="sec-multipath-grouping"/>を参照)。このパスグループのパスは、他のパスグループのすべてのパスが失敗した場合のみI/Oに使用されます。
+         </para>
+        </listitem>
+       </varlistentry>
+       <varlistentry>
+        <term>fpin</term>
+        <listitem>
+         <para>
+          この設定は、<phrase role="productname"><phrase os="sles">SLES</phrase></phrase> 15SP4以降使用できます。ぎりぎりのパス状態は、FPINイベントから導出されます(以下を参照)。ぎりぎりのパスは、<literal>off</literal>の説明と同様に別のパスグループに移動します。この設定では、ホスト側の追加設定は不要です。これは、FPINをサポートしているファイバチャネルファブリックでぎりぎりのパスを処理する場合に推奨される方法です。
+         </para>
+         <note>
+          <title>FPINベースのぎりぎりのパス検出</title>
+          <para>
+           <command>multipathd</command>は、FPIN (Fibre Channel Performance Impact Notifications: ファイバチャネルのパフォーマンスへの影響通知)をリスンします。パスデバイスに対してFPIN-LI (リンクの完全性)イベントを受信すると、パスは、ぎりぎりの状態になります。この状態は、RSCNまたはリンクアップイベントが、デバイスの接続先のファイバチャネルアダプタで受信されるまで継続します。
+          </para>
+         </note>
+        </listitem>
+       </varlistentry>
+      </variablelist>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    パラメータ<literal>san_path_err_threshold</literal>、<literal>san_path_err_forget_rate</literal>、および<literal>san_path_err_recovery time</literal>を使用したより単純なアルゴリズムも利用可能で、SUSE Linux Enterprise Server 15 (GA)で推奨されています。<systemitem>multipath.conf(5)</systemitem>の「不安定なパスの検出」セクションを参照してください。
+   </para>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-best-practice">
+  <title>ベストプラクティス</title>
+
+  <sect2 xml:id="sec-multipath-best-practice-config">
+   <title>設定のベストプラクティス</title>
+   <para>
+    設定ディレクティブの数が多いと最初は気後れします。通常、クラスタ環境で作業していない限り、空の設定で良い結果を得ることができます。
+   </para>
+   <para>
+    ここでは、スタンドアロンサーバの一般的な推奨事項を紹介します。これらは「必須ではありません」。<emphasis></emphasis>背景情報については、前の各セクションの該当するパラメータのマニュアルを参照してください。
+   </para>
+<screen>
+defaults {
+    deferred_remove      yes
+    find_multipaths      smart
+    enable_foreign       nvme
+    marginal_pathgroups  fpin    # 15.4 only, if supported by fabric
+}
+devices {
+    # A catch-all device entry.
+    device {
+        vendor                .*
+        product               .*
+        dev_loss_tmo          infinity
+        no_path_retry         60            # 5 minutes
+        path_grouping_policy  group_by_prio
+        path_selector         "historical-service-time 0"
+        reservation_key       file          # if using SCSI persistent reservations
+    }
+    # Follow up with specific device entries below, they will take precedence.
+}</screen>
+   <para>
+    <filename>/etc/multipath.conf</filename>ファイルを変更した後、<xref linkend="sec-multipath-conf-file-apply"/>の説明に従って設定を適用します。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-best-practice-status">
+   <title>マルチパスI/Oステータスの解釈</title>
+   <para>
+    マルチパスサブシステムの概要を簡単に確認するには、<command>multipath
+    -ll</command>または<command>multipathd show topology</command>を使用します。これらのコマンドの出力の形式は同じです。前のコマンドはカーネルの状態を読み取り、後のコマンドはマルチパスデーモンのステータスを出力します。通常、両方の状態は同じです。出力の一例を次に示します。
+   </para>
+   <informalexample>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd show topology
+mpatha<co xml:id="mp-co-top-name"/> (3600a098000aad1e300000b4b5a275d45<co xml:id="mp-co-top-wwid"/>) dm-0<co xml:id="mp-co-top-dev"/> NETAPP,INF-01-00<co xml:id="mp-co-top-prod"/>
+size=64G features='3 queue_if_no_path pg_init_retries 50'<co xml:id="mp-co-top-feat"/> hwhandler='1 alua'<co xml:id="mp-co-top-hwh"/> wp=rw<co xml:id="mp-co-top-wp"/>
+|-+- <co xml:id="mp-co-top-pg"/>policy='historical-service-time 2'<co xml:id="mp-co-top-ps"/> prio=50<co xml:id="mp-co-top-prio"/> status=active<co xml:id="mp-co-top-pgst"/>
+| |-<co xml:id="mp-co-top-pp"/> 3:0:0:1<co xml:id="mp-co-top-hbtl"/> sdb 8:16<co xml:id="mp-co-top-sd"/> active<co xml:id="mp-co-top-dmst"/> ready<co xml:id="mp-co-top-st"/> running<co xml:id="mp-co-top-devst"/>
+| `- 4:0:0:1 sdf 8:80  active ready running
+`-+- policy='historical-service-time 2' prio=10 status=enabled
+  `- 4:0:1:1 sdj 8:144 active ready running</screen>
+    <calloutlist>
+     <callout arearefs="mp-co-top-name">
+      <para>
+       マップ名。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-wwid">
+      <para>
+       マップのWWID (マップ名と違う場合)。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-dev">
+      <para>
+       マップデバイスのデバイスノード名。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-prod">
+      <para>
+       ベンダと製品名。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-pg">
+      <para>
+       パスグループ。パスグループの下のインデントされた行には、このグループに属しているパスデバイスがリストされます。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-ps">
+      <para>
+       パスグループで使用されるパスセレクタアルゴリズム。「2」は無視できます。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-prio">
+      <para>
+       パスグループの優先度。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-pgst">
+      <para>
+       パスグループのステータス(<literal>active</literal>、<literal>enabled</literal>または<literal>disabled</literal>)。アクティブなパスグループは、I/Oが現在送信されているグループです。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-pp">
+      <para>
+       パスデバイス。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-hbtl">
+      <para>
+       デバイスのバスID(ここでは、SCSI Host:Bus:Target:Lun ID)。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-sd">
+      <para>
+       デバイスノード名とパスデバイスのメジャー/マイナー番号。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-dmst">
+      <para>
+       パスのカーネルデバイスマッパー状態(<literal>active</literal>または<literal>failed</literal>)。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-st">
+      <para>
+       マルチパスのパスデバイスの状態(以下を参照)。
+      </para>
+     </callout>
+     <callout arearefs="mp-co-top-devst">
+      <para>
+       カーネルのパスデバイスの状態。これはデバイスタイプ固有の値です。SCSIでは、これは<literal>running</literal>または<literal>offline</literal>のいずれかです。
+      </para>
+     </callout>
+    </calloutlist>
+   </informalexample>
+   <para>
+    マルチパスのパスデバイスの状態を次に示します。
+   </para>
+   <informaltable>
+    <tgroup cols="2">
+     <colspec colwidth="1*"/>
+     <colspec colwidth="1*"/>
+     <tbody>
+      <row>
+       <entry>
+        <para>
+         <literal>ready</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         パスは正常で、稼働しています
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>ghost</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         アクティブ/パッシブアレイのパッシブパス
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>faulty</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         パスがダウンしているか、到達できません
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>i/o timeout</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         チェッカーコマンドがタイムアウトしています
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>i/o pending</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         パスチェッカーコマンドの完了を待っています
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>delayed</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         「フラッピング」を回避するためにパスの再インスタンス化が遅延しています
+        </para>
+       </entry>
+      </row>
+      <row>
+       <entry>
+        <para>
+         <literal>shaky</literal>
+        </para>
+       </entry>
+       <entry>
+        <para>
+         信頼性の低いパス(emcパスチェッカーのみ)
+        </para>
+       </entry>
+      </row>
+     </tbody>
+    </tgroup>
+   </informaltable>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-lvm">
+   <title>マルチパスデバイスでのLVM2の使用</title>
+   <para>
+    LVM2には、マルチパスデバイスを検出するためのサポートが組み込まれています。これは<filename>/etc/lvm/lvm.conf</filename>でデフォルトでアクティブになっています。
+   </para>
+<screen>    multipath_component_detection=1</screen>
+   <para>
+    これは、デバイスのプロパティに関する情報もudevから取得するようにLVM2が設定されている場合のみ安定して動作します。
+   </para>
+<screen>    external_device_info_source="udev"</screen>
+   <para>
+    これは、SUSE Linux Enterprise 15 SP4ではデフォルトですが、以前のリリースでは違います。マルチパスデバイスを除くすべてのデバイスを無視するLVM2のフィルタ式を作成することも可能です(通常は不要です)。<xref linkend="sec-multipath-referring"/>を参照してください。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-best-practice-io-stalled">
+   <title>停止したI/Oの解決</title>
+   <para>
+    すべてのパスで同時に障害が発生し、I/Oがキューに格納される場合、アプリケーションが長時間停止する可能性があります。これを解決するために、次の手順を使用できます。
+   </para>
+   <procedure>
+    <step>
+     <para>
+      端末のプロンプトで、次のコマンドを入力します。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd disablequeueing map <replaceable>MAPNAME</replaceable></screen>
+     <para>
+      <literal><replaceable>MAPNAME</replaceable></literal>をデバイスの正しいWWIDまたはマップされたエイリアス名で置き換えます。
+     </para>
+     <para>
+      このコマンドにより、待ち行列で待機中のすべてのI/Oがエラーとなり、エラーが呼び出し側アプリケーションにプロパゲートします。ファイルシステムはI/Oエラーを監視し、読み込み専用モードに切り替わります。
+     </para>
+    </step>
+    <step>
+     <para>
+      次のコマンドを入力して、キューを再びアクティブにします。
+     </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> multipathd restorequeueing <replaceable>MAPNAME</replaceable></screen>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-mpiotools-mdadm">
+   <title>マルチパスデバイスのMD RAID</title>
+   <para>
+    マルチパス処理の上部でMD RAIDアレイは、システムのudevルールによって自動的にセットアップされます。<filename>/etc/mdadm.conf</filename>の特別な設定は不要です。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-best-practice-scandev">
+   <title>新規デバイスのスキャン(再起動なし)</title>
+   <para>
+    ご使用のシステムがマルチパス処理用に設定されており、SANにストレージを追加する必要がある場合は、<command>rescan-scsi-bus.sh</command>スクリプトを使用して新しいデバイスをスキャンすることができます。コマンドの一般的な構文は次の例に従います。
+   </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> rescan-scsi-bus.sh [-a] [-r] --hosts=2-3,5</screen>
+   <para>
+    各オプションには次のような意味があります。
+   </para>
+   <variablelist>
+    <varlistentry>
+     <term>-a</term>
+     <listitem>
+      <para>
+       このオプションを使用すると、すべてのSCSIターゲットがスキャンされます。使用しないと、既存のターゲットのみが新しいLUNに対してスキャンされます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>-r</term>
+     <listitem>
+      <para>
+       このオプションを使用すると、ストレージ側で削除されたデバイスを削除できます。
+      </para>
+     </listitem>
+    </varlistentry>
+    <varlistentry>
+     <term>--hosts</term>
+     <listitem>
+      <para>
+       このオプションを使用すると、スキャンするホストバスアダプタのリストが指定されます(デフォルトはすべてスキャン)。
+      </para>
+     </listitem>
+    </varlistentry>
+   </variablelist>
+   <para>
+    その他のオプションのヘルプを表示するには、<command>rescan-scsi-bus.sh --help</command>を実行します。
+   </para>
+   <para>
+    <command>multipathd</command>が実行中で、新しいSANデバイスが検出される場合、<xref linkend="sec-multipath-select-devices"/>で説明されている設定に従って、マルチパスマップとして自動的にセットアップされるはずです。
+   </para>
+   <warning>
+    <title>Dell/EMC PowerPath環境</title>
+    <para>
+     EMC PowerPath環境では、SCSIバスをスキャンする場合に、オペレーティングシステムに付属する<filename>rescan-scsi-bus.sh</filename>ユーティリティまたはHBAベンダスクリプトを使用しないでください。ファイルシステムが破損する可能性を避けるため、EMCでは、Linux用EMC PowerPathのベンダマニュアルに記載されている手順に従うよう求めています。
+    </para>
+   </warning>
+  </sect2>
+ </sect1>
+ <sect1 xml:id="sec-multipath-trouble">
+  <title>MPIOのトラブルシューティング</title>
+
+  <para>
+   マルチパスを含むシステムでシステムが緊急モードになり、見つからないデバイスに関するメッセージが出力される場合、その理由はほとんどの場合、次のいずれかです。
+  </para>
+
+  <itemizedlist>
+   <listitem>
+    <para>
+     マルチパスデバイス選択の設定に整合性がない
+    </para>
+   </listitem>
+   <listitem>
+    <para>
+     存在しないデバイス参照を使用している
+    </para>
+   </listitem>
+  </itemizedlist>
+
+  <sect2 xml:id="sec-multipath-trouble-select">
+   <title>デバイス選択の問題の理解</title>
+   <para>
+    ブロックデバイスは、マルチパスマップの一部にするか、または直接使用(ファイルシステムとしてマウント、スワップとして使用、LVM物理モジュール、その他)することができます。デバイスがすでにマウントされている場合、これをmultipathdでマルチパスマップの一部にしようとすると失敗し、「デバイスまたはリソースがビジーです」(Device or resource busy)というエラーが表示されます。逆に、すでにマルチパスマップの一部になっているデバイスを<command>systemd</command>がマウントしようとすると同じエラーが発生します。
+   </para>
+   <para>
+    起動中のストレージデバイスのアクティブ化は、<command>systemd</command>、<systemitem>udev</systemitem>、<command>multipathd</command>および他のいくつかのツール間の複雑なやりとりで処理されます。<systemitem>udev</systemitem>ルールが中心的な役割を果たします。これらは、デバイスの使用方法を他のサブシステムに指示するデバイスのプロパティを設定します。マルチパス関連のudevルールは、マルチパス処理用に選択されたデバイスに対して次のプロパティを設定します。
+   </para>
+<screen>SYSTEMD_READY=0
+DM_MULTIPATH_DEVICE_PATH=1</screen>
+   <para>
+    パーティションデバイスは、これらのプロパティをその親から継承します。
+   </para>
+   <para>
+    これらのプロパティが正しく設定されていない場合、一部のツールがこれらのプロパティに従っていない場合、またはプロパティが設定されるのが遅すぎる場合、<command>multipathd</command>と他のサブシステムとの間で競合状態が発生する可能性があります。競合に勝ち残れるのは1つだけです。それ以外は、「デバイスまたはリソースがビジーです」(Device or resource busy)というエラーが表示されます。
+   </para>
+   <para>
+    このコンテキストにおける1つの問題は、LVM2スイートのツールがデフォルトではudevプロパティを評価しないことです。これらは、デバイスがマルチパスコンポーネントかどうかを判定する独自のロジックを使用しますが、このロジックは、システムの残りの部分のロジックと一致しない場合があります。この回避方法は、<xref linkend="sec-multipath-lvm"/>で説明されています。
+   </para>
+   <note>
+    <title>起動デッドロックの例</title>
+    <para>
+     ルートデバイスがマルチパス処理されておらず、マルチパスから除外されているデバイスがない、マルチパス処理を備えたシステムを考えてみます(<xref linkend="sec-multipath-planning-type-noroot"/>の<xref linkend="vl-multipath-planning-type-noroot-noinitrd"/>を参照)。このルートファイルシステムはinitramfsにマウントされています。<command>systemd</command>はルートファイルシステムに切り換わり、<command>multipathd</command>が起動します。デバイスがすでにマウントされているため、<command>multipathd</command>は、そのデバイスのマルチパスマップをセットアップできません。ルートデバイスは<literal>blacklist</literal>で設定されていないため、マルチパスデバイスとみなされ、このデバイス用に<literal>SYSTEMD_READY=0</literal>が設定されます。
+    </para>
+    <para>
+     起動プロセスの後半で、システムは、<filename>/var</filename>や<filename>/home</filename>などの追加のファイルシステムをマウントしようとします。通常、これらのファイルシステムはルートファイルシステムと同じデバイス上にあり、デフォルトではルートファイルシステム自体のBTRFSサブボリュームとして配置されます。ただし、systemdは、<literal>SYSTEMD_READY=0</literal>のためにこれらをマウントできません。<emphasis></emphasis>「デッドロック状態」: dm-multipathデバイスを作成できず、systemdの基礎となるデバイスはブロックされます。追加のファイルシステムをマウントできず、起動に失敗します。
+    </para>
+    <para>
+     <emphasis role="bold">この問題の解決策はすでに存在します。</emphasis> <command>multipathd</command>はこの状況を検出し、デバイスを<command>systemd</command>にリリースします。これにより、ファイルシステムのマウントを続行できます。ただし、一般的な問題を理解することが重要です。より分かりにくい形で発生する可能性もあるからです。
+    </para>
+   </note>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-trouble-ref">
+   <title>デバイス参照の問題の理解</title>
+   <para>
+    デバイス参照の問題の例は<xref linkend="sec-multipath-initrd-persistent"/>で示しました。通常、1つのデバイスノードを指すシンボリックリンクは複数存在します(<xref linkend="sec-multipath-referring"/>を参照)。ただし、これらのリンクは常に存在するわけではありません。<command>udev</command>は、現在のudevルールに従ってリンクを作成します。たとえば、マルチパス処理をオフにすると、<filename>/dev/mapper/</filename>の下にあるマルチパスデバイス用のシンボリックリンクはなくなります。したがって、<filename>/dev/mapper/</filename>デバイスへの参照は失敗します。
+   </para>
+   <para>
+    このような参照はさまざまな場所に(特に<filename>/etc/fstab</filename>および<filename>/etc/crypttab</filename>、initramfs、またはカーネルコマンドラインにも)表示されます。
+   </para>
+   <para>
+    この問題を回避する最も安全な方法は、起動と起動の間で持続しない種類のデバイス参照またはシステム設定に依存する種類のデバイス参照の使用を避けることです。一般的に、ファイルシステム(およびスワップ領域のような類似のエンティティ)は、含む側のデバイスではなく、ファイルシステム自体のプロパティ(UUIDやラベルなど)によって参照することをお勧めします。このような参照を使用できず、たとえば、<filename>/etc/crypttab</filename>で、デバイス参照が必要な場合は、オプションを注意深く評価する必要があります。たとえば、<xref linkend="sec-multipath-referring"/>では、最良のオプションは<filename>/dev/disk/by-id/wwn-</filename>リンクかもしれません。これは<literal>multipath=off</literal>でも機能するからです。
+   </para>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-trouble-steps">
+   <title>緊急モードでのトラブルシューティング手順</title>
+   <para>
+    微妙に異なるエラー状況が多数あるため、ステップバイステップのリカバリガイドを提供することは不可能です。ただし、これまでのサブセクションから背景知識を得ていれば、マルチパス処理の問題が原因でシステムが緊急モードになった場合、その問題を理解できるはずです。デバッグを始める前に、次の質問を確認してください。
+   </para>
+   <itemizedlist>
+    <listitem>
+     <para>
+      マルチパスサービスは有効になっていますか。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      initramfsにマルチパスdracutモジュールが含まれていますか。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      ルートデバイスがマルチパスデバイスとして設定されていますか。設定されていない場合、<xref linkend="sec-multipath-blacklist"/>で説明されているように、ルートデバイスはマルチパスから正しく除外されていますか。または、initramfsにマルチパスモジュールがないことに依存していますか(<xref linkend="sec-multipath-planning-type-noroot"/>を参照)。
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      システムが緊急モードになったのは、実際のルートファイルシステムに切り替わる前ですか、または切り替わった後ですか。
+     </para>
+    </listitem>
+   </itemizedlist>
+   <para>
+    最後の質問の答えがわからない場合、サンプルのdracut緊急プロンプトを次に示します。これは、ルートを切り替える前に出力されます。
+   </para>
+<screen>Generating "/run/initramfs/rdsosreport.txt"
+Entering emergency mode. Exit the shell to continue.
+Type "journalctl" to view system logs.
+
+You might want to save "/run/initramfs/rdsosreport.txt" to a USB stick or /boot
+after mounting them and attach it to a bug report.
+
+Give root password for maintenance
+(or press Control-D to continue):</screen>
+   <para>
+    <filename>rdsosreport.txt</filename>が記載されているということは、システムがまだinitramfsから実行されていることを明確に示しています。それでも不明な場合は、ログインして<filename>/etc/initrd-release</filename>ファイルが存在するかチェックします。このファイルは、initramfs環境にのみ存在します。
+   </para>
+   <para>
+    ルートを切り替えた後に緊急モードになった場合、緊急プロンプトは同じように見えますが、<filename>rdsosreport.txt</filename>は記載されません。
+   </para>
+<screen>Timed out waiting for device dev-disk-by\x2duuid-c4a...cfef77d.device.
+[DEPEND] Dependency failed for Local File Systems.
+[DEPEND] Dependency failed for Postfix Mail Transport Agent.
+Welcome to emergency shell
+Give root password for maintenance
+(or press Control-D to continue):</screen>
+   <procedure>
+    <title>緊急モードの状況を分析する手順</title>
+    <step>
+     <para>
+      障害の発生したsystemdユニットとジャーナルを調べて、障害が発生した原因を探ります。
+     </para>
+<screen><prompt role="root"># </prompt>systemctl --failed
+<prompt role="root"># </prompt>journalctl -b -o short-monotonic</screen>
+     <para>
+      ジャーナルを確認して、「最初に」障害が発生したユニットを特定します。<emphasis></emphasis>最初の障害を見つけたら、その時点の前後のメッセージを注意深く調べます。警告またはその他の疑わしいメッセージはありますか。
+     </para>
+     <para>
+      ルートスイッチ(「<literal>Switching root.</literal>」)、およびSCSIデバイス、デバイスマッパー、マルチパスおよびLVM2に関するメッセージに注意します。デバイスおよびファイルシステムに関する<command>systemd</command>メッセージ(「<literal>Found device</literal>...」、「<literal>Mounting</literal>...」、「<literal>Mounted</literal>...」)を探します。
+     </para>
+    </step>
+    <step>
+     <para>
+      既存のデバイス(低レベルのデバイスとデバイスマッパーデバイスの両方)を調べます(以下のコマンドの一部はinitramfsでは使用できない場合があることに注意してください)。
+     </para>
+<screen><prompt role="root"># </prompt>cat /proc/partitions
+<prompt role="root"># </prompt>ls -l /sys/class/block
+<prompt role="root"># </prompt>ls -l /dev/disk/by-id/* /dev/mapper/*
+<prompt role="root"># </prompt>dmsetup ls --tree
+<prompt role="root"># </prompt>lsblk
+<prompt role="root"># </prompt>lsscsi
+</screen>
+     <para>
+      上記のコマンドの出力から、低レベルのデバイスが正常に検出されたかどうか、マルチパスマップおよびマルチパスパーティションがセットアップされたかどうかがわかるはずです。
+     </para>
+    </step>
+    <step>
+     <para>
+      デバイスマッパーのマルチパスセットアップが予期どおりでない場合、udevプロパティ(特に、<literal>SYSTEMD_READY</literal>)を調べます(上記を参照)。
+     </para>
+<screen><prompt role="root"># </prompt>udevadm info -e</screen>
+    </step>
+    <step>
+     <para>
+      前の手順で予期しなかったudevプロパティが表示された場合、udevルールの処理中に不具合が発生した可能性があります。その他のプロパティ(特に、デバイスの識別に使用されたプロパティ)を確認します(<xref linkend="sec-multipath-conf-file-wwid"/>を参照)。udevプロパティが正しい場合、ジャーナルで<command>multipathd</command>のメッセージを再度確認します。「<literal>Device
+      or resource busy</literal>」メッセージを探します。
+     </para>
+    </step>
+    <step>
+     <para>
+      システムがデバイスのマウントまたはアクティブ化に失敗した場合は、このデバイスを手動でアクティブ化してみると功を奏すことがよくあります。
+     </para>
+<screen><prompt role="root"># </prompt>mount /var
+<prompt role="root"># </prompt>swapon -a
+<prompt role="root"># </prompt>vgchange -a y</screen>
+     <para>
+      ほとんどの場合、手動のアクティブ化は成功し、(通常は緊急シェルからログアウトするだけで)システム起動を続行し、起動したシステムでさらに状況を調べることができます。
+     </para>
+     <para>
+      手動のアクティブ化に失敗すると、多くの場合、不具合のヒントを示すエラーメッセージが表示されます。詳細度を上げてコマンドを再試行することもできます。
+     </para>
+    </step>
+    <step>
+     <para>
+      この時点で、問題は何であるかがある程度わかるはずです(そうでない場合は、SUSEサポートに連絡して、上記の質問のほとんどに回答できるように準備しておいてください)。
+     </para>
+     <para>
+      いくつかのシェルコマンドで状況を修正し、緊急シェルを終了し、正常に起動できるはずです。同じ問題が今後発生しないよう、引き続き設定を調整する必要があります。
+     </para>
+     <para>
+      または、レスキューシステムを起動し、デバイスを手動でセットアップして、<command>chroot</command>で実際のルートファイルシステムに変更し、前の手順で得た洞察に基づいて問題の修正を試みる必要があります。この状況では、ルートファイルシステムのストレージスタックが通常と異なっている場合があることに注意してください。セットアップに応じて、新しいinitramfsを構築するときにdracutモジュールの強制追加または省略が必要になる場合があります。<xref linkend="sec-multipath-initrd-disable"/>も参照してください。
+     </para>
+    </step>
+    <step>
+     <para>
+      問題の発生頻度が高いまたは起動のたびに問題が発生する場合、障害の詳細情報を得るために、詳細度を上げて起動を試します。次のカーネルパラメータ、またはそれらの組み合わせが役立つことがよくあります。
+     </para>
+     <informalexample>
+<screen>udev.log-priority=debug<co xml:id="mp-co-kparm-udev"/>
+systemd.log_level=debug<co xml:id="mp-co-kparm-sl"/>
+scsi_mod.scsi_logging_level=020400<co xml:id="mp-co-kparm-sc"/>
+rd.debug<co xml:id="mp-co-kparm-rd"/>
+          </screen>
+      <calloutlist>
+       <callout arearefs="mp-co-kparm-udev">
+        <para>
+         <command>systemd-udevd</command>とudevルール処理のログレベルを上げます。
+        </para>
+       </callout>
+       <callout arearefs="mp-co-kparm-sl">
+        <para>
+         <command>systemd</command>のログレベルを上げます。
+        </para>
+       </callout>
+       <callout arearefs="mp-co-kparm-sc">
+        <para>
+         カーネルのSCSIサブシステムのロギングレベルを上げます。
+        </para>
+       </callout>
+       <callout arearefs="mp-co-kparm-rd">
+        <para>
+         initramfsのスクリプトを追跡します。
+        </para>
+       </callout>
+      </calloutlist>
+     </informalexample>
+     <para>
+      また、特定のドライバのロギングを有効にし、シリアルコンソールを設定して起動中の出力をキャプチャすることが役立つ場合があります。
+     </para>
+    </step>
+   </procedure>
+  </sect2>
+
+  <sect2 xml:id="sec-multipath-trouble-tids">
+   <title>技術情報ドキュメント</title>
+   <para>
+    SUSE Linux Enterprise ServerのマルチパスI/Oの問題のトラブルシューティングの詳細については、SUSEナレッジベースにある、次のTID (技術情報ドキュメント)を参照してください。
+   </para>
+   <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+     <para>
+      <link xlink:href="https://www.suse.com/support/kb/doc/?id=000016331"><citetitle>Using
+      LVM on local and SAN attached devices</citetitle></link>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="https://www.suse.com/support/kb/doc/?id=000017521"><citetitle>Using
+      LVM on Multipath (DM MPIO) Devices</citetitle></link>
+     </para>
+    </listitem>
+    <listitem>
+     <para>
+      <link xlink:href="https://www.suse.com/support/kb/doc/?id=000017762"><citetitle>HOWTO:
+      Add, Resize and Remove LUN without restarting SLES</citetitle></link>
+     </para>
+    </listitem>
+   </itemizedlist>
+  </sect2>
+ </sect1>
+</chapter>
