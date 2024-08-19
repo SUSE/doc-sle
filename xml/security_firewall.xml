@@ -961,7 +961,173 @@ nfs-rpc
      <command>firewall-rpc-helper.py --help</command>.
     </para>
    </sect3>
-  </sect2>
+   <sect3 xml:id="sec-security-firewall-firewalld-nftables">
+    <title>nftables as the default back-end </title>
+    <para>
+  The default back-end for &firewalld; is nftables. nftables is a framework by the Linux <systemitem>netfilter</systemitem> project
+  that provides packet filtering, network address translation (NAT) and other similar functionalities. nftables reuses the existing Netfilter
+  subsystems such as the connection tracking system, user space queueing, logging and the hook infrastructure.
+  nftables is a replacement for iptables, ip6tables, arptables, ebtables, and ipset.
+</para>
+    <para>
+  The advantages of using nftables include:
+    </para>
+    <itemizedlist mark="bullet" spacing="normal">
+        <listitem>
+       <para>
+        One framework for both the IPv4 and IPv6 protocols.
+       </para>
+      </listitem>
+      <listitem>
+       <para>
+        Rules are applied atomically instead of fetching, updating and storing a complete rule set.
+        </para>
+      </listitem>
+      <listitem>
+       <para>
+        Monitor trace events in the <emphasis>nft</emphasis> tool, debug and trace the ruleset via <emphasis>nftrace</emphasis>.
+        </para>
+      </listitem>
+      <listitem>
+       <para>
+      The <command>nft</command> command line tool compiles into VM bytecode in netlink format.
+      During the rule set retrieval, the VM bytecode in netlink format is translated back into the original ruleset representation.
+      </para></listitem>
+     </itemizedlist>
+
+   <para><emphasis role="bold">A basic nftables configuration file:</emphasis></para>
+  <screen>&prompt.user; cat /etc/nftables.conf
+    #!/usr/sbin/nft -f
+
+    flush ruleset
+
+    # This matches IPv4 and IPv6
+    table inet filter {
+        # chain names are up to you.
+        # what part of the traffic they cover,
+        # depends on the type table.
+        chain input {
+            type filter hook input priority 0; policy accept;
+        }
+        chain forward {
+            type filter hook forward priority 0; policy accept;
+        }
+        chain output {
+            type filter hook output priority 0; policy accept;
+        }
+    }
+  </screen>
+  <para>In the above example, all traffic is allowed because all chains have the policy <emphasis>accept</emphasis>.
+  Note that, in reality, this is a bad practice, as firewalls should deny traffic by default.</para>
+  <para><emphasis role="bold">A basic nftables configuration file with masquerade:</emphasis></para>
+  <screen>&prompt.user; cat /etc/nftables.conf
+    #!/sbin/nft -f
+
+    flush ruleset
+
+    table ip nat {
+      chain prerouting {
+        type nat hook prerouting priority 0; policy accept;
+      }
+
+      # for all packets to WAN, after routing, replace source address with primary IP of WAN interface
+      chain postrouting {
+        type nat hook postrouting priority 100; policy accept;
+        oifname "wan0" masquerade
+      }
+    }
+  </screen>
+  <para>If you have a static IP, it would be slightly faster to use source nat (SNAT) instead of masquerade.
+    The router replaces the source with a predefined IP instead of looking up the outgoing IP for every packet.</para>
+  <para><emphasis role= "bold" >An nftables configuration file with some rules applied:</emphasis></para>
+  <screen>&prompt.user; cat /etc/nftables.conf
+    #!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain base_checks {
+        ## another set, this time for connection tracking states.
+        # allow established/related connections
+        ct state {established, related} accept;
+
+        # early drop of invalid connections
+        ct state invalid drop;
+    }
+
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        # allow from loopback
+        iif "lo" accept;
+
+        jump base_checks;
+
+        # allow icmp and igmp
+        ip6 nexthdr icmpv6 icmpv6 type { echo-request, echo-reply, packet-too-big, time-exceeded, parameter-problem, destination-unreachable, packet-too-big, mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert, ind-neighbor-solicit, ind-neighbor-advert, mld2-listener-report } accept;
+        ip protocol icmp icmp type { echo-request, echo-reply, destination-unreachable, router-solicitation, router-advertisement, time-exceeded, parameter-problem } accept;
+        ip protocol igmp accept;
+
+        # for testing reject with logging
+        counter log prefix "[nftables] input reject " reject;
+    }
+    chain forward {
+        type filter hook forward priority 0; policy accept;
+    }
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+}
+  </screen>
+  <para>In the above example: </para>
+  <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+   <para>
+   The chain policy is to drop and add a reject rule at the end, which means all incoming traffic is blocked.
+    </para>
+  </listitem>
+  <listitem>
+   <para>
+    All traffic on the <literal>localhost</literal> interface is allowed.
+    </para>
+  </listitem>
+  <listitem>
+   <para>
+   The <literal>base_checks</literal> chain handles all packets that are related to established connections.
+   This ensures that incoming packets for outgoing connections are not blocked.
+    </para>
+  </listitem>
+  <listitem>
+   <para>
+    ICMP and IGMP packets are allowed by utilizing a set and specific type names.
+   </para>
+  </listitem>
+  <listitem>
+    <para>
+    A counter keeps a count of both the total number of packets and bytes it has seen since it was last reset.
+    With nftables, you must specify a counter for each rule you want to count.
+    </para>
+   </listitem>
+ </itemizedlist>
+ <sect4 xml:id="sec-security-nftables-more-information">
+  <title>More information </title>
+  <para>For more information about nftables, see:</para>
+  <itemizedlist mark="bullet" spacing="normal">
+    <listitem>
+   <para>
+    Upstream documentation <link xlink:href="https://www.netfilter.org/projects/nftables/index.html"> </link>
+    </para>
+  </listitem>
+  <listitem>
+   <para>
+    nftables man page <link xlink:href="https://www.netfilter.org/projects/nftables/manpage.html"> </link>
+    </para>
+  </listitem>
+</itemizedlist>
+  </sect4>
+  </sect3>
+
+</sect2>
  </sect1>
 
  <sect1 xml:id="sec-security-firewall-upgrade">
