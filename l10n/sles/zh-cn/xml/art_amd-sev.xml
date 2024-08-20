@@ -1,1 +1,519 @@
-../../../../xml/art_amd-sev.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="urn:x-suse:xslt:profiling:docbook50-profile.xsl"
+ type="text/xml"
+ title="Profiling step"?>
+<article xmlns="http://docbook.org/ns/docbook" xmlns:its="http://www.w3.org/2005/11/its" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="art_amd-sev.xml" xml:id="article-amd-sev" xml:lang="zh-cn" version="5.2">
+  <info>
+    <title>AMD 安全加密虚拟化 (AMD-SEV) 指南</title>
+    <productname><phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase></productname>
+    <productnumber><phrase role="productnumber"><phrase os="sles;sled">15 SP6</phrase></phrase></productnumber>
+    <date><?dbtimestamp format="Y"?> 年 <?dbtimestamp format="B" padding="0"?> 月 <?dbtimestamp format="d" padding="0"?> 日
+</date>
+    <abstract>
+      <para>
+        AMD 的安全加密虚拟化 (SEV) 可让您加密虚拟机的内存。SEV with Encrypted State (SEV-ES) 更进一步，能够加密虚拟机的 CPU 寄存器内容。这些技术提高了系统安全性，非常适合云计算等多租户环境。它们可以防范各种跨 VM 和基于超级管理程序的攻击。举例来说，某个恶意 VM 即使避开了超级管理程序强制实施的限制，能够读取任意内存，它仍无法从 SEV 或 SEV-ES VM 窃取敏感数据。
+      </para>
+
+      <para>
+        本文旨在提供有关 SEV 和 SEV-ES 的工作原理以及如何启用和配置这些功能的基本知识。文中还涉及了与非加密虚拟化相比使用 SEV 和 SEV-ES 的某些限制。
+      </para>
+    </abstract>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+    <meta name="title" its:translate="yes">AMD 安全加密虚拟化 (AMD-SEV) 指南</meta>
+    <meta name="series" its:translate="no">产品和解决方案</meta>
+    <meta name="description" its:translate="yes">如何启用和配置 AMD 安全加密虚拟化</meta>
+    <meta name="social-descr" its:translate="yes">启用和配置 AMD-SEV</meta>
+    <meta name="task" its:translate="yes">
+      <phrase>虚拟化</phrase>
+    </meta>
+    <revhistory xml:id="rh-article-amd-sev">
+      <revision>
+        <date>2024-06-26</date>
+        <revdescription>
+          <para>
+            针对 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP6</phrase></phrase> 的初始版本进行了更新。
+          </para>
+        </revdescription>
+      </revision>
+    </revhistory>
+  </info>
+  <sect1 xml:id="sec-amd-sev-intro">
+    <title>SEV 简介</title>
+
+    <para>
+      对磁盘上存储的计算机数据进行加密这项功能已得到广泛部署，但 RAM 中存储的数据并未加密。这可能会导致这些数据暴露给通过软件或硬件嗅探入侵主机系统的攻击者，在有许多租户共享物理资源的云计算环境中更是如此。假设某个恶意租户的虚拟机利用超级管理程序 Bug 逃离了沙箱，并在内存中搜索敏感数据。
+    </para>
+
+    <para>
+      AMD 的 SEV（安全加密虚拟化）技术通过独有的密钥以透明方式加密每个 VM 的内存，可以保护 Linux KVM 虚拟机。SEV 还可计算出内存内容的签名，该签名可发送给 VM 的所有者，作为固件已正确加密内存的证明。SEV 特别适用于云计算环境，在此环境中，VM 托管在远程服务器上，并不在 VM 所有者的控制之下。SEV 可以减少需要置于超级管理程序及其主机系统管理员控制之下的可信 VM 的数量。
+    </para>
+
+    <para>
+      当虚拟机正在处理敏感数据时，它可以存在于 CPU 寄存器以及内存中。如果处理出于某种原因（例如需要提供中断或与其他进程共享时间）而停止，虚拟机的 CPU 寄存器内容将会保存到超级管理程序内存中。超级管理程序可以读取此内存，即使启用了 SEV 也是如此。SEV-ES 可以防范这种情况，它会在虚拟机的处理停止时对所有 CPU 寄存器内容进行加密。SEV-ES 在 SEV 的基础上构建而成，能够为在多租户环境中运行的虚拟机缩小受攻击面。
+    </para>
+  </sect1>
+  
+  <sect1 xml:id="sec-amd-sev-hostreqs">
+    <title>VM 主机要求</title>
+
+    <para>
+      VM 主机硬件必须支持 AMD 的 SEV 技术。要检测主机硬件是否支持 SEV，请检查 <package>libvirt</package> 的功能中是否包含 <tag class="attribute">sev</tag> 属性，并且该属性的值是否设置恰当：
+    </para>
+
+<screen>&lt;domainCapabilities&gt;
+   ...
+   &lt;features&gt;
+   ...
+   &lt;sev supported='yes'/&gt;
+   ...
+   &lt;/sev&gt;
+   &lt;/features&gt;
+&lt;/domainCapabilities&gt;</screen>
+
+    <para>
+      此外，请确保已为 <package>kvm_amd</package> 内核模块启用 <parameter>sev</parameter> 参数：
+    </para>
+
+<screen>/sys/module/kvm_amd/parameters/sev = 1</screen>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-vmreqs">
+    <title>VM 要求</title>
+
+    <para>
+      VM 必须为新型 <literal>Q35</literal> 计算机类型且必须使用 UEFI 固件。可以让 <systemitem class="library">libvirt</systemitem> 自动选择启用了 SEV 或 SEV-ES 的适当 UEFI 固件，也可以手动指定。目前，唯一受支持的固件为 <filename>/usr/share/qemu/ovmf-x86_64-code.bin</filename> 和 <filename>/usr/share/qemu/ovmf-x86_64-4m-code.bin</filename>。有关如何使用 UEFI 固件以及自动选择功能的更多细节，请参见<xref linkend="cha-kvm-inst-virtman-advanced-uefi"/>。
+    </para>
+
+    <note>
+      <title>Q35 中无 IDE 支持</title>
+      <para>
+        Q35 计算机类型没有 IDE 控制器，不支持 IDE 磁盘。
+      </para>
+    </note>
+
+    <para>
+      所有 <literal>virtio-net</literal> 设备都需要配置为禁用 iPXE 选项 ROM。iPXE 目前与 SEV 和 SEV-ES 不兼容。必须锁定对 VM 所用全部内存区域的直接内存访问 (DMA)，以防发生交换。其中包括 VM 的内存以及 QEMU 为支持 VM 运行而分配的任何内存区域，例如作为固件和变量存储区的 UEFI pflash、视频 RAM 等。
+    </para>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-config">
+    <title>VM 配置</title>
+
+    <example xml:id="sec-amd-sev-conffile">
+      <title>示例配置文件</title>
+      <para>
+        例如，配置了 4 GB 内存的 SEV 加密 VM 将包含以下 XML 配置：
+      </para>
+<screen>&lt;domain type='kvm'&gt;
+    &lt;memory unit='KiB'&gt;4194304&lt;/memory&gt;
+    &lt;currentMemory unit='KiB'&gt;4194304&lt;/currentMemory&gt;
+    &lt;memoryBacking&gt;
+    &lt;locked/&gt; <co xml:id="sec-amd-sev-ex-memlock"/>
+    &lt;/memoryBacking&gt;
+    &lt;os&gt;
+    &lt;type arch='x86_64' machine='pc-q35-2.11'&gt;hvm&lt;/type&gt;
+    &lt;loader readonly='yes' type='pflash'&gt;/usr/share/qemu/ovmf-x86_64-ms-4m-code.bin&lt;/loader&gt;
+    &lt;nvram&gt;/var/lib/libvirt/qemu/nvram/sles15-sev-guest_VARS.fd&lt;/nvram&gt;
+    &lt;boot dev='hd'/&gt;
+    &lt;/os&gt;
+    &lt;launchSecurity <co xml:id="sec-amd-sev-ex-launchsecurity"/> type='sev'&gt;
+    &lt;cbitpos&gt;47&lt;/cbitpos&gt; <co xml:id="sec-amd-sev-ex-cbitpos"/>
+    &lt;reducedPhysBits&gt;1&lt;/reducedPhysBits&gt; <co xml:id="sec-amd-sev-ex-reducedphysbits"/>
+    &lt;policy&gt;0x0033&lt;/policy&gt; <co xml:id="sec-amd-sev-ex-policy"/>
+    &lt;dhCert&gt;AAAABBBB=CCCCCDDDDD&lt;/dhCert&gt; <co xml:id="sec-amd-sev-ex-dhcert"/>
+    &lt;session&gt;AAAABBBB=EEEEEFFFFF&lt;/session&gt; <co xml:id="sec-amd-sev-ex-session"/>
+    &lt;/launchSecurity&gt;
+    &lt;devices&gt;
+    &lt;interface type='bridge'&gt;
+    &lt;source bridge='br0'/&gt;
+    &lt;model type='virtio'/&gt;
+    &lt;rom enabled='no'/&gt; <co xml:id="sec-amd-sev-ex-ipxerom"/>
+    &lt;/interface&gt;
+    ...
+    &lt;/devices&gt;
+    ...
+    &lt;/domain&gt;</screen>
+      <calloutlist>
+        <callout arearefs="sec-amd-sev-ex-memlock">
+          <para>
+            使用 <tag class="element">memoryBacking</tag> 元素及其子元素 <tag class="element">locking</tag> 来放宽 <systemitem class="library">libvirt</systemitem> 对 VM 的 cgroup 施加的内存限制。如果不这样做，当 QEMU 尝试锁定 VM 的内存区域以及用于支持 VM 操作的其他区域时，VM 创建将会失败。如需详细了解 SEV VM 的 VM 内存配置要求，请访问 <link xlink:href="https://libvirt.org/kbase/launch_security_sev.html#memory"/>。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-launchsecurity">
+          <para>
+            <tag class="element">launchSecurity type='sev'</tag> 元素及其内容用于启用 VM 内存内容加密。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-cbitpos">
+          <para>
+            启用内存加密后，如果某个内存页受保护，会使用其中一个物理地址位（也称为<quote>C 位</quote>）进行标记。必要元素 <tag class="element">cbitpos</tag> 提供 Guest 页表项中 C 位的位置。例如，值 <literal>47</literal> 表示页表项中的第 47 位将决定该页是否加密。C 位数字从主机的 CPUID 读取，因此与硬件相关。<tag class="element">cbitpos</tag> 的值与超级管理程序相关，可从域功能中的 <tag class="element">sev</tag> 元素获取。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-reducedphysbits">
+          <para>
+            启用内存加密后，我们会丢失物理地址空间的某些位。必要元素 <tag class="element">reducedPhysBits</tag> 提供此物理地址位缩减。与 <tag class="element">cbitpos</tag> 类似，<tag class="element">reducedPhysBits</tag> 的值与处理器系列相关，可从域功能中的 <tag class="element">sev</tag> 元素获取。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-policy">
+          <para>
+            必要元素 <tag class="element">policy</tag> 提供必须由 SEV 固件维护的 Guest 策略。此策略由固件强制实施，用于限制在 VM 上可由超级管理程序执行的配置和操作命令。启动 VM 时提供的 Guest 策略与该 VM 绑定在一起，且在其整个生命周期都无法更改。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-dhcert">
+          <para>
+            可选元素 <tag class="element">dhCert</tag> 提供 Guest 所有者的 base64 编码 Diffie-Hellman (DH) 密钥。该密钥用于在 SEV 固件与 Guest 所有者之间协商主机密密钥。此主机密密钥之后会用于在 SEV 固件与 Guest 所有者之间建立可信通道。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-session">
+          <para>
+            可选元素 <tag class="element">session</tag> 提供 Guest 所有者的 base64 编码会话 Blob（如 SEV API 规范中所定义）。请参见 SEV 规范中针对会话 Blob 格式的 LAUNCH_START 部分。
+          </para>
+        </callout>
+        <callout arearefs="sec-amd-sev-ex-ipxerom">
+          <para>
+            除了 <tag class="element">launchSecurity</tag> 设置以外，SEV 加密的 VM 的所有 virtio-net 设备上都必须禁用 iPXE 选项 ROM。目前，iPXE 与 SEV 加密的 VM 不兼容。
+          </para>
+        </callout>
+      </calloutlist>
+    </example>
+
+    <para>
+      Guest 策略是定义如下的 4 个无符号字节：
+    </para>
+
+    <table xml:id="table-guestpolicy">
+      <title>Guest 策略定义</title>
+      <tgroup cols="2">
+        <colspec colnum="1" colname="1" colwidth="20*"/>
+        <colspec colnum="2" colname="2" colwidth="80*"/>
+        <thead>
+          <row>
+            <entry>
+              <para>
+                位
+              </para>
+            </entry>
+            <entry>
+              <para>
+                定义
+              </para>
+            </entry>
+          </row>
+        </thead>
+        <tbody>
+          <row>
+            <entry>
+              <para>
+                0
+              </para>
+            </entry>
+            <entry>
+              <para>
+                如果设置，则不允许调试 Guest
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                1
+              </para>
+            </entry>
+            <entry>
+              <para>
+                如果设置，则不允许与其他 Guest 共享密钥
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                2
+              </para>
+            </entry>
+            <entry>
+              <para>
+                如果设置，则需要 SEV-ES
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                3
+              </para>
+            </entry>
+            <entry>
+              <para>
+                如果设置，则不允许将 Guest 发送到其他平台
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                4
+              </para>
+            </entry>
+            <entry>
+              <para>
+                如果设置，则不得将 Guest 传送到不属于该域的其他平台
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                5
+              </para>
+            </entry>
+            <entry>
+              <para>
+                如果设置，则不得将 Guest 传送到不支持 SEV 的其他平台
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                6-15
+              </para>
+            </entry>
+            <entry>
+              <para>
+                保留
+              </para>
+            </entry>
+          </row>
+          <row>
+            <entry>
+              <para>
+                16-32
+              </para>
+            </entry>
+            <entry>
+              <para>
+                不得将 Guest 传送到固件版本更低的其他平台
+              </para>
+            </entry>
+          </row>
+        </tbody>
+      </tgroup>
+    </table>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-vminst">
+    <title>VM 安装</title>
+
+    <para>
+      <command>virt-install</command> 支持安装 SEV 和 SEV-ES 虚拟机。除了标准安装参数以外，还需要为 <command>virt-install</command> 提供用于满足 VM 要求的选项以及 <literal>--launchSecurity</literal> 选项。
+    </para>
+
+    <para>
+      下面的示例会启动通过 SEV-ES 提供保护的 SLES 15 SP4 虚拟机的网络安装。
+    </para>
+
+<screen>
+   virt-install --name sles15sp4-sev-es --location http://192.168.0.1/install/sles15sp4/x86_64 --disk size=20 --network=bridge=br0,model=virtio,rom.bar=off <co xml:id="sec-amd-sev-ex-rombar"/> --vcpus 4 --memory 4096 --noautoconsole --events on_reboot=destroy --machine q35 --memtune hard_limit=4563402 --launchSecurity sev,policy=0x07 <co xml:id="sec-amd-sev-ex-launchsec"/> --boot firmware=efi <co xml:id="sec-amd-sev-ex-fw"/> --vnc --serial pty
+  </screen>
+
+    <calloutlist>
+      <callout arearefs="sec-amd-sev-ex-rombar">
+        <para>
+          iPXE 选项 ROM 与 SEV 加密的 VM 不兼容，必须在所有 virtio-net 设备上将其禁用。<systemitem class="library">libvirt</systemitem> 支持使用 <tag class="element">rom</tag> 元素的 <literal>enabled</literal> 或 <literal>bar</literal> 属性禁用选项 ROM，而 virt-install 仅支持使用 <literal>bar</literal> 属性来禁用选项 ROM。
+        </para>
+      </callout>
+      <callout arearefs="sec-amd-sev-ex-launchsec">
+        <para>
+          <literal>launchSecurity</literal> 选项指定 SEV 固件要强制实施的类型和策略。策略设置详见<xref linkend="table-guestpolicy"/>。
+        </para>
+      </callout>
+      <callout arearefs="sec-amd-sev-ex-fw">
+        <para>
+          <literal>boot</literal> 选项可用于指定许多与引导相关的设置，包括虚拟机使用的固件。指定 <literal>efi</literal> 固件类型表示允许 libvirt 的固件自动选择功能为虚拟机选择支持 SEV 的适当固件。
+        </para>
+      </callout>
+    </calloutlist>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-attest">
+    <title>VM 证明</title>
+
+    <para>
+      VM 证明是校验可信软件组件是否在可信计算平台上正确实例化的过程。该过程通常涉及启动处于暂停状态的 VM，检索已实例化软件组件的启动度量，校验该度量，然后提供磁盘口令或其他密钥来解锁 VM 并恢复已暂停的引导过程。启动度量包括 VM 拥有者提供的加密项目，其中的加密信任根是 AMD SEV 平台。启动度量经过校验后，VM 拥有者就可以确认其软件组件未受到侵害并在可信平台上运行。
+    </para>
+
+    <para>
+      整个证明过程相当复杂，并且很可能会发生错误。必须小心确保该过程本身是安全的。例如，安全证明过程不能直接在运行 VM 的超级管理程序上执行，因为其目标是证明超级管理程序不存在恶意行为，并且不会污染 VM。
+    </para>
+
+    <para>
+      SLES 15 SP4 中提供了该证明所需的所有信息和 API，而 SLES 15 SP5 则引入了一个名为 <command>virt-qemu-sev-validate</command> 的简单实用程序，可用于满足多种证明用例的需要。例如，用于质量保证的自动化测试，以及不受大型商业管理堆栈管理的小规模 <systemitem class="library">libvirt</systemitem>+KVM 部署。
+    </para>
+
+    <para>
+      <command>virt-qemu-sev-vailidate</command> 包含在 <literal>libvirt-client-qemu</literal> 软件包中，支持脱机和联机证明模式。<command>virt-qemu-sev-validate</command> 要求以命令行参数的形式为证明提供输入。如果在可信计算机上调用该实用程序，则可以信任 <command>virt-qemu-sev-validate</command> 的结果，因为不会从不可信的来源检索任何信息。联机模式不太安全，尤其是直接在运行 VM 的超级管理程序上执行时。
+    </para>
+
+    <para>
+      无论采用哪种模式，<systemitem class="library">libvirt</systemitem>+KVM VM 的证明过程首先都会创建 VM 或来宾拥有者 (GO) 证书和会话 Blob，每次启动 VM 时，该证书和会话 Blob 都是唯一的。可以使用 <literal>sevctl</literal> 软件包中提供的 <command>sevctl</command> 实用程序创建该证书和 Blob。以下示例说明如何使用 <command>sevctl session</command> 命令创建所有与预启动 SEV 相关的项目。<replaceable>NAME</replaceable> 参数是可选的，用于为项目文件名指定前缀。使用 VM 名称作为前缀可便于稍后将项目与 VM 进行匹配。平台 Diffie-Hellman (DH) 证书的路径和所需的 SEV 策略是必需参数。
+    </para>
+
+<screen><prompt role="root"># </prompt>sevctl session --name test-sev /data/sev/pdh.cert 7</screen>
+
+    <para>
+      <command>sevctl session</command> 命令会生成四个文件：tick.bin、take.bin、godh.b64 和 session.b64。如果使用可选的 <replaceable>NAME</replaceable> 参数，则文件将以指定的值作为前缀。传输完整性密钥 (tik.bin) 和传输加密密钥 (tek.bin) 用于证明过程的校验阶段。在启动 VM 之前，来宾拥有者 Diffie-Hellman 密钥 (godh.b64) 和会话 Blob (session.b64) 将复制到 VM XML 配置中。有关更多细节，请参见 VM 配置部分中 <tag class="element">launchSecurity</tag> 元素的 <tag class="element">dhCert</tag> 和 <tag class="element">session</tag> 子元素。
+    </para>
+
+    <para>
+      创建 VM 会话项目并更新 VM XML 配置后，可以在暂停状态下启动 VM，例如：
+    </para>
+
+<screen><prompt role="root"># </prompt>virsh -c qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system create --paused /path/to/vm.xml</screen>
+
+    <para>
+      在暂停状态下创建 VM 可以从超级管理程序检索启动度量，并将其与使用可信输入在可信主机上计算的度量进行比较。如果这些度量相同，则 VM 拥有者可以确信 VM 已在超级管理程序上正确实例化，并且可以安全地启动执行。以下命令演示如何使用 <command>virsh
+      domlaunchsecinfo</command> 命令从宿主超级管理程序检索已暂停 VM 的启动度量和其他 SEV 相关信息。
+    </para>
+
+<screen><prompt role="root"># </prompt>virsh -c qemu+ssh://username@hostname/system domlaunchsecinfo sevtest
+sev-measurement: VZjxMSlu+UuYkWHN2mAxDVVYXRmL3wqTu84kwk+5QS+4OMii7hs6cMAmXNpmmyS/
+sev-api-major  : 1
+sev-api-minor  : 51
+sev-build-id   : 3
+sev-policy     : 7</screen>
+
+    <para>
+      然后，可以将检索到的启动度量提供给 <command>virt-qemu-sev-validate</command>，以校验 VM 是否已安全实例化。以下示例演示度量的完整脱机证明。
+    </para>
+
+<screen><prompt role="root"># </prompt>virt-qemu-sev-validate --api-major 1 --api-minor 51 --build-id 3 --policy 7 \
+ --firmware /usr/share/qemu/ovmf-x86_64-4m.bin --tik sevtest_tik.bin --tek sevtest_tek.bin --num-cpus 4 \
+ --cpu-family 25 --cpu-model 1 --cpu-stepping 1 \
+ --measurement QJ0oDpFmWj+bGZzFoMPbAxTuC6QD44W5w88x/hQM8toVsB75ci7V1YDfYoI9GTk</screen>
+
+    <para>
+      还可以在联机模式下使用 <command>virt-qemu-sev-validate</command>，在此模式下，将从宿主超级管理程序检索执行 VM 证明所需的信息。以下示例演示 VM 的联机证明，在此模式下，仅指定了宿主超级管理程序 URI、VM 名称以及关联的 TIK 和 TEK。<command>virt-qemu-sev-validate</command> 从宿主超级管理程序检索其余的信息，包括度量本身：
+    </para>
+
+<screen><prompt role="root"># </prompt>virt-qemu-sev-validate --tik sevtest_tik.bin --tek sevtest_tek.bin \
+ --connect qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system --domain sevtest</screen>
+
+    <para>
+      校验 VM 启动度量后，VM 拥有者可以选择在 VM 中注入机密并继续执行 VM。注入机密的示例是提供一个密钥来解锁已加密的根磁盘。
+    </para>
+
+<screen><prompt role="root"># </prompt>virsh -c qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system domsetlaunchsecstate sevtest \
+ --secrethdr hdr-str --secret secret-str
+<prompt role="root"># </prompt>virsh -c qemu+ssh://<replaceable>USER_NAME</replaceable>@<replaceable>HOST_NAME</replaceable>/system resume sevtest</screen>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-kubevirt">
+    <title>SEV 与 KubeVirt</title>
+
+    <para>
+      KubeVirt 从版本 <literal>0.49.0</literal> 开始支持运行 SEV Guest。该功能可通过启用 <literal>WorkloadEncryptionSEV</literal> 功能门控来激活：
+    </para>
+
+<screen>
+<prompt>&gt; </prompt>kubectl edit kubevirt kubevirt -n kubevirt
+[...]
+spec:
+  configuration:
+    developerConfiguration:
+      featureGates:
+      - WorkloadEncryptionSEV
+[...]
+  </screen>
+
+    <para>
+      要运行 SEV 加密的 Guest，必须在虚拟机规范中的 <literal>launchSecurity</literal> 域元素下包含 <literal>sev: {}</literal> 项。此外，您需要配置 <literal>firmware/bootloader</literal> 参数，以便在将 <literal>secureBoot</literal> 标志设置为 <literal>disabled</literal> 的情况下使用 <literal>efi</literal> 选项。相应的 YAML 代码段如下所示：
+    </para>
+
+<screen>
+[...]
+spec:
+  domain:
+    firmware:
+      bootloader:
+        efi:
+          secureBoot: false
+    launchSecurity:
+      sev: {}
+[...]
+  </screen>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-limits">
+    <title>当前限制</title>
+
+    <para>
+      SUSE 不建议在第一代 AMD EPYC™ 7000 系列处理器（代号 Naples）上将 SEV 和 SEV-ES 功能与 SUSE Linux 产品搭配使用。建议至少使用第二代 7002 系列处理器（代号 Rome）。此外，SEV 和 SEV-ES VM 还存在以下限制。
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          在 SEV 加密的 VM 内运行的 Guest 操作系统必须包含 SEV 支持。SUSE Linux Enterprise Server 12 SP4 及更高版本以及所有 SUSE Linux Enterprise Server 15 版本都支持 SEV。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          目前不支持涉及保存及恢复实例内存和状态的任何操作。这意味着 SEV 加密的 VM 无法从快照恢复，也无法保存/恢复或实时迁移。加密的 VM 可照常在其他主机上关闭和重启动。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          SEV 加密的 VM 无法包含可直接访问的主机设备（即 PCI 直通）。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          SEV 加密的 VM 与安全引导不兼容。包含安全引导支持的 UEFI 固件不适用于 SEV 或 SEV-ES VM。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          SEV-ES VM 无法使用 <command>reboot</command>、<command>shutdown -r now</command> 等命令重引导。必须通过关闭 VM 然后再次启动来进行重引导。此限制不适用于 SEV VM，仅适用于 SEV-ES VM。
+        </para>
+      </listitem>
+    </itemizedlist>
+
+    <para>
+      日后，当硬件、固件和特定软件层具有新功能时，将会解除这些限制。
+    </para>
+  </sect1>
+  <sect1 xml:id="sec-amd-sev-moreinfo">
+    <title>更多信息</title>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          <link xlink:href="https://developer.amd.com/sev"/> — AMD-SEV 登录页
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf">AMD
+          SEV-KM API Specification (PDF)</link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="https://github.com/AMDESE/AMDSEV/">AMD SEV GitHub
+          repository containing examples and tools</link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="https://libvirt.org/formatdomain.html#sev">libvirt
+          SEV configuration settings</link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <link xlink:href="https://libvirt.org/kbase/launch_security_sev.html">
+          <systemitem class="library">libvirt</systemitem> knowledge base article on AMD SEV</link>
+        </para>
+      </listitem>
+    </itemizedlist>
+  </sect1>
+  <xi:include href="common_copyright_quick.xml"/>
+  <xi:include href="common_license_gfdl1.2.xml"/>
+</article>
