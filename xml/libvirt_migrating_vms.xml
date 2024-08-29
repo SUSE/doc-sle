@@ -1,0 +1,607 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook"
+xmlns:xi="http://www.w3.org/2001/XInclude"
+xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0"
+xml:id="sec-libvirt-admin-migrate">
+  <title>Migrating &vmguest;s</title>
+  <info>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker></dm:bugtracker>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
+  <para>
+    One of the major advantages of virtualization is that &vmguest;s are
+    portable. When a &vmhost; needs maintenance, or when the host becomes
+    overloaded, the guests can be moved to another &vmhost;. &kvm; and &xen;
+    even support <quote>live</quote> migrations during which the &vmguest; is
+    constantly available.
+  </para>
+  <sect1 xml:id="libvirt-migration-types">
+    <title>Types of migration</title>
+
+    <para>
+      Depending on the required scenario, there are three ways you can migrate
+      virtual machines (VM).
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term>Live migration</term>
+        <listitem>
+          <para>
+            The source VM continues to run while its configuration and memory is
+            transferred to the target host. When the transfer is complete, the
+            source VM is suspended and the target VM is resumed.
+          </para>
+          <para>
+            Live migration is useful for VMs that need to be online without any
+            downtime.
+          </para>
+          <note>
+            <para>
+              VMs experiencing heavy I/O load or frequent memory page writes are
+              challenging to live migrate. In such cases, consider using
+              non-live or offline migration.
+            </para>
+          </note>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Non-live migration</term>
+        <listitem>
+          <para>
+            The source VM is suspended and its configuration and memory
+            transferred to the target host. Then the target VM is resumed.
+          </para>
+          <para>
+            Non-live migration is more reliable than live migration, although it
+            creates downtime for the VM. If downtime is tolerable, non-live
+            migration can be an option for VMs that are difficult to live
+            migrate.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Offline migration</term>
+        <listitem>
+          <para>
+            The VM definition is transferred to the target host. The source VM
+            is not stopped and the target VM is not resumed.
+          </para>
+          <para>
+            Offline migration can be used to migrate inactive VMs.
+          </para>
+          <important>
+            <para>
+              The <option>--persistent</option> option must be used together
+              with offline migration.
+            </para>
+          </important>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </sect1>
+  <sect1 xml:id="libvirt-admin-live-migration-requirements">
+    <title>Migration requirements</title>
+
+    <para>
+      To successfully migrate a &vmguest; to another &vmhost;, the following
+      requirements need to be met:
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          The source and target systems must have the same architecture.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          Storage devices must be accessible from both machines, for example,
+          via NFS or iSCSI. For more information, see
+          <xref
+          linkend="cha-libvirt-storage"/>.
+        </para>
+        <para>
+          This is also true for CD-ROM or floppy images that are connected
+          during the move. However, you can disconnect them before the move as
+          described in <xref linkend="sec-libvirt-config-cdrom-media-change"/>.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          &libvirtd; needs to run on both &vmhost;s and you must be able to open
+          a remote &libvirt; connection between the target and the source host
+          (or vice versa). Refer to <xref linkend="sec-libvirt-connect-remote"/>
+          for details.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          If a firewall is running on the target host, ports need to be opened
+          to allow the migration. If you do not specify a port during the
+          migration process, &libvirt; chooses one from the range 49152:49215.
+          Make sure that either this range (recommended) or a dedicated port of
+          your choice is opened in the firewall on the <emphasis>target
+          host</emphasis>.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          The source and target machines should be in the same subnet on the
+          network, otherwise networking fails after the migration.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          All &vmhost;s participating in migration must have the same UID for
+          the qemu user and the same GIDs for the kvm, qemu and libvirt groups.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          No running or paused &vmguest; with the same name must exist on the
+          target host. If a shut-down machine with the same name exists, its
+          configuration is overwritten.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          All CPU models, except the <emphasis>host cpu</emphasis> model, are
+          supported when migrating &vmguest;s.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          The <xref linkend="gloss-vt-acronym-sata"/> disk device type is not
+          migratable.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          File system pass-through feature is incompatible with migration.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          The &vmhost; and &vmguest; need to have proper timekeeping installed.
+          See <xref linkend="sec-kvm-managing-clock"/>.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          No physical devices can be passed from host to guest. Live migration
+          is currently not supported when using devices with PCI pass-through or
+          <xref linkend="vt-io-sriov"/>. If live migration needs to be
+          supported, use software virtualization (paravirtualization or full
+          virtualization).
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          The cache mode setting is an important setting for migration. See:
+          <xref linkend="sec-cache-mode-live-migration"/>.
+        </para>
+      </listitem>
+      <listitem os="sles;sled">
+        <para os="sles;sled">
+          Backward migration, for example, from &slsa; 15 SP2 to 15 SP1, is not
+          supported.
+        </para>
+      </listitem>
+      <listitem os="sles;sled">
+        <para>
+          SUSE strives to support live migration of &vmguest;s from a &vmhost;
+          running a service pack under LTSS to a &vmhost; running a newer
+          service pack within the same &slsa; major version. For example,
+          &vmguest; migration from a &slsa; 12 SP2 host to a &slsa; 12 SP5 host.
+          SUSE only performs minimal testing of LTSS-to-newer migration
+          scenarios and recommends thorough on-site testing before attempting to
+          migrate critical &vmguest;s.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          The image directory should be located in the same path on both hosts.
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          All hosts should be on the same level of microcode (especially the
+          Spectre microcode updates). This can be achieved by installing the
+          latest updates of &productname; on all hosts.
+        </para>
+      </listitem>
+    </itemizedlist>
+  </sect1>
+  <sect1 xml:id="sec-libvirt-admin-migrate-virtmanager">
+    <title>Live-migrating with &vmm;</title>
+
+    <para>
+      When using the &vmm; to migrate &vmguest;s, it does not matter on which
+      machine it is started. You can start &vmm; on the source or the target
+      host or even on a third host. In the latter case, you need to be able to
+      open remote connections to both the target and the source host.
+    </para>
+
+    <procedure>
+      <step>
+        <para>
+          Start &vmm; and establish a connection to the target or the source
+          host. If the &vmm; was started neither on the target nor the source
+          host, connections to both hosts need to be opened.
+        </para>
+      </step>
+      <step>
+        <para>
+          Right-click the &vmguest; that you want to migrate and choose
+          <guimenu>Migrate</guimenu>. Make sure the guest is running or
+          paused&mdash;it is not possible to migrate guests that are shut down.
+        </para>
+        <tip>
+          <title>Increasing the speed of the migration</title>
+          <para>
+            To increase the speed of the migration, pause the &vmguest;. This is
+            the equivalent of <quote>non-live migration</quote> described in
+            <xref linkend="libvirt-migration-types"/>.
+          </para>
+        </tip>
+      </step>
+      <step>
+        <para>
+          Choose a <guimenu>New Host</guimenu> for the &vmguest;. If the desired
+          target host does not show up, make sure that you are connected to the
+          host.
+        </para>
+        <para>
+          To change the default options for connecting to the remote host, under
+          <guimenu>Connection</guimenu>, set the <guimenu>Mode</guimenu>, and
+          the target host's <guimenu>Address</guimenu> (IP address or host name)
+          and <guimenu>Port</guimenu>. If you specify a <guimenu>Port</guimenu>,
+          you must also specify an <guimenu>Address</guimenu>.
+        </para>
+        <para>
+          Under <guimenu>Advanced options</guimenu>, choose whether the move
+          should be permanent (default) or temporary, using <guimenu>Temporary
+          move</guimenu>.
+        </para>
+        <para>
+          Additionally, there is the option <guimenu>Allow unsafe</guimenu>,
+          which allows migrating without disabling the cache of the &vmhost;.
+          This can speed up the migration but only works when the current
+          configuration allows for a consistent view of the &vmguest; storage
+          without using
+          <literal>cache=&quot;none&quot;</literal>/<literal>0_DIRECT</literal>.
+        </para>
+        <note>
+          <title>Bandwidth option</title>
+          <para>
+            In recent versions of &vmm;, the option of setting a bandwidth for
+            the migration has been removed. To set a specific bandwidth, use
+            <command>virsh</command> instead.
+          </para>
+        </note>
+      </step>
+      <step>
+        <para>
+          To perform the migration, click <guimenu>Migrate</guimenu>.
+        </para>
+        <para>
+          When the migration is complete, the <guimenu>Migrate</guimenu> window
+          closes and the &vmguest; is now listed on the new host in the &vmm;
+          window. The original &vmguest; is still available on the source host
+          in the shut-down state.
+        </para>
+      </step>
+    </procedure>
+  </sect1>
+  <sect1 xml:id="sec-libvirt-admin-migrate-virsh">
+    <title>Migrating with <command>virsh</command></title>
+
+    <para>
+      To migrate a &vmguest; with <command>virsh</command>
+      <option>migrate</option>, you need to have direct or remote shell access
+      to the &vmhost;, because the command needs to be run on the host. The
+      migration command looks like this:
+    </para>
+
+<screen>&prompt.user;virsh migrate [OPTIONS] <replaceable>VM_ID_or_NAME</replaceable> <replaceable>CONNECTION_URI</replaceable> [--migrateuri tcp://<replaceable>REMOTE_HOST:PORT</replaceable>]</screen>
+
+    <para>
+      The most important options are listed below. See <command>virsh help
+      migrate</command> for a full list.
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term><option>--live</option></term>
+        <listitem>
+          <para>
+            Does a live migration. If not specified, the guest is paused during
+            the migration (<quote>non-live migration</quote>).
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--suspend</option></term>
+        <listitem>
+          <para>
+            Leaves the VM paused on the target host during live or non-live
+            migration.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--persistent</option></term>
+        <listitem>
+          <para>
+            Persists the migrated VM on the target host. Without this option,
+            the VM is not be included in the list of domains reported by
+            <command>virsh list --all</command> when shut down.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--undefinesource</option></term>
+        <listitem>
+          <para>
+            When specified, the &vmguest; definition on the source host is
+            deleted after a successful migration. However, virtual disks
+            attached to this guest are <emphasis>not</emphasis> deleted.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--parallel --parallel-connections <replaceable>NUM_OF_CONNECTIONS</replaceable></option></term>
+        <listitem>
+          <para>
+            Parallel migration can be used to increase migration data throughput
+            in cases where a single migration thread is not capable of
+            saturating the network link between source and target hosts. On
+            hosts with 40&nbsp;GB network interfaces, it may require four
+            migration threads to saturate the link. With parallel migration, the
+            time required to migrate large memory VMs can be reduced.
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+
+    <para>
+      The following examples use &wsIVname; as the source system and &wsIname;
+      as the target system; the &vmguest;'s name is
+      <literal>opensuse131</literal> with ID <literal>37</literal>.
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term>Non-live migration with default parameters</term>
+        <listitem>
+<screen>&prompt.user;virsh migrate 37 qemu+ssh://&exampleuser_plain;@&wsIname;/system</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Transient live migration with default parameters</term>
+        <listitem>
+<screen>&prompt.user;virsh migrate --live opensuse131 qemu+ssh://&exampleuser_plain;@&wsIname;/system</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Persistent live migration; delete VM definition on source</term>
+        <listitem>
+<screen>&prompt.user;virsh migrate --live --persistent --undefinesource 37 \
+qemu+tls://&exampleuser_plain;@&wsIname;/system</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Non-live migration using port 49152</term>
+        <listitem>
+<screen>&prompt.user;virsh migrate opensuse131 qemu+ssh://&exampleuser_plain;@&wsIname;/system \
+--migrateuri tcp://@&wsIname;:49152</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Live migration transferring all used storage</term>
+        <listitem>
+<screen>&prompt.user;virsh migrate --live --persistent --copy-storage-all \
+opensuse156 qemu+ssh://&exampleuser_plain;@&wsIname;/system</screen>
+          <important>
+            <para>
+              When migrating VM's storage using the
+              <option>--copy-storage-all</option> option, the storage must be
+              placed in a &libvirt; storage pool. The target storage pool must
+              exist with identical type and name as the source pool.
+            </para>
+            <para>
+              To obtain the XML representation of the source pool, use the
+              following command:
+            </para>
+<screen>&prompt.sudo;virsh pool-dumpxml <replaceable>EXAMPLE_VM</replaceable> > <replaceable>EXAMPLE_POOL.xml</replaceable></screen>
+            <para>
+              To create and start the storage pool on the target host, copy its
+              XML representation there and use the following commands:
+            </para>
+<screen>&prompt.sudo;virsh pool-define <replaceable>EXAMPLE_POOL.xml</replaceable>
+&prompt.sudo;virsh pool-start <replaceable>EXAMPLE_VM</replaceable></screen>
+          </important>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+
+    <note>
+      <title>Transient compared to persistent migrations</title>
+      <para>
+        By default, <command>virsh migrate</command> creates a temporary
+        (transient) copy of the &vmguest; on the target host. A shut-down
+        version of the original guest description remains on the source host. A
+        transient copy is deleted from the server after it is shut down.
+      </para>
+      <para>
+        To create a permanent copy of a guest on the target host, use the switch
+        <option>--persistent</option>. A shut-down version of the original guest
+        description remains on the source host, too. Use the option
+        <option>--undefinesource</option> together with
+        <option>--persistent</option> for a <quote>real</quote> move where a
+        permanent copy is created on the target host and the version on the
+        source host is deleted.
+      </para>
+      <para>
+        It is not recommended to use <option>--undefinesource</option> without
+        the <option>--persistent</option> option, since this results in the loss
+        of both &vmguest; definitions when the guest is shut down on the target
+        host.
+      </para>
+    </note>
+  </sect1>
+<!-- Step by step example -->
+  <sect1 xml:id="sec-libvirt-migrate-stepbstep">
+    <title>Step-by-step example</title>
+
+    <sect2 xml:id="sec-migrate-stepbstep-export">
+      <title>Exporting the storage</title>
+      <para>
+        First, you need to export the storage to share the guest image between
+        hosts. This can be done by an NFS server. In the following example, we
+        want to share the <filename>/volume1/VM</filename> directory for all
+        machines that are on the network 10.0.1.0/24. We are using a &sle; NFS
+        server. As root user, edit the <filename>/etc/exports</filename> file
+        and add:
+      </para>
+<screen>/volume1/VM 10.0.1.0/24  (rw,sync,no_root_squash)</screen>
+      <para>
+        You need to restart the NFS server:
+      </para>
+<screen>&prompt.sudo;systemctl restart nfsserver
+&prompt.sudo;exportfs
+/volume1/VM      10.0.1.0/24</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-pool">
+      <title>Defining the pool on the target hosts</title>
+      <para>
+        On each host where you want to migrate the &vmguest;, the pool must be
+        defined to be able to access the volume (that contains the Guest image).
+        Our NFS server IP address is 10.0.1.99, its share is the
+        <filename>/volume1/VM</filename> directory, and we want to get it
+        mounted in the <filename>/var/lib/libvirt/images/VM</filename>
+        directory. The pool name is <emphasis>VM</emphasis>. To define this
+        pool, create a <filename>VM.xml</filename> file with the following
+        content:
+      </para>
+<screen>&lt;pool type='netfs'&gt;
+  &lt;name&gt;VM&lt;/name&gt;
+  &lt;source&gt;
+    &lt;host name='10.0.1.99'/&gt;
+    &lt;dir path='/volume1/VM'/&gt;
+    &lt;format type='auto'/&gt;
+  &lt;/source&gt;
+  &lt;target&gt;
+    &lt;path&gt;/var/lib/libvirt/images/VM&lt;/path&gt;
+    &lt;permissions&gt;
+      &lt;mode&gt;0755&lt;/mode&gt;
+      &lt;owner&gt;-1&lt;/owner&gt;
+      &lt;group&gt;-1&lt;/group&gt;
+    &lt;/permissions&gt;
+  &lt;/target&gt;
+  &lt;/pool&gt;</screen>
+      <para>
+        Then load it into &libvirt; using the <command>pool-define</command>
+        command:
+      </para>
+<screen>&prompt.root;virsh pool-define VM.xml</screen>
+      <para>
+        An alternative way to define this pool is to use the
+        <command>virsh</command> command:
+      </para>
+<screen>&prompt.root;virsh pool-define-as VM --type netfs --source-host 10.0.1.99 \
+     --source-path /volume1/VM --target /var/lib/libvirt/images/VM
+Pool VM created</screen>
+      <para>
+        The following commands assume that you are in the interactive shell of
+        <command>virsh</command>, which can also be reached by using the command
+        <command>virsh</command> without any arguments. Then the pool can be set
+        to start automatically at host boot (autostart option):
+      </para>
+<screen><prompt>virsh # </prompt>pool-autostart VM
+Pool VM marked as autostarted</screen>
+      <para>
+        To disable the autostart:
+      </para>
+<screen><prompt>virsh # </prompt>pool-autostart VM --disable
+Pool VM unmarked as autostarted</screen>
+      <para>
+        Check if the pool is present:
+      </para>
+<screen><prompt>virsh # </prompt>pool-list --all
+ Name                 State      Autostart
+-------------------------------------------
+ default              active     yes
+ VM                   active     yes
+
+<prompt>virsh # </prompt>pool-info VM
+Name:           VM
+UUID:           42efe1b3-7eaa-4e24-a06a-ba7c9ee29741
+State:          running
+Persistent:     yes
+Autostart:      yes
+Capacity:       2,68 TiB
+Allocation:     2,38 TiB
+Available:      306,05 GiB</screen>
+      <warning>
+        <title>Pool needs to exist on all target hosts</title>
+        <para>
+          Remember: this pool must be defined on each host where you want to be
+          able to migrate your &vmguest;.
+        </para>
+      </warning>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-volume">
+      <title>Creating the volume</title>
+      <para>
+        The pool has been defined&mdash;now we need a volume which contains the
+        disk image:
+      </para>
+<screen><prompt>virsh # </prompt>vol-create-as VM sled12.qcow2 8G --format qcow2
+Vol sled12.qcow2 created</screen>
+      <para>
+        The volume names shown are used later to install the guest with
+        virt-install.
+      </para>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-guest">
+      <title>Creating the &vmguest;</title>
+      <para>
+        Let us create a &productname; &vmguest; with the
+        <command>virt-install</command> command. The <emphasis>VM</emphasis>
+        pool is specified with the <command>--disk</command> option,
+        <emphasis>cache=none</emphasis> is recommended if you do not want to use
+        the <command>--unsafe</command> option while doing the migration.
+      </para>
+<screen>&prompt.root;virt-install --connect qemu:///system --virt-type kvm --name \
+   sles15 --memory 1024 --disk vol=VM/sled12.qcow2,cache=none --cdrom \
+   /mnt/install/ISO/SLE-15-Server-DVD-x86_64-Build0327-Media1.iso --graphics \
+   vnc --os-variant sled15
+Starting install...
+Creating domain...</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-migrate">
+      <title>Migrate the &vmguest;</title>
+      <para>
+        Everything is ready to do the migration now. Run the
+        <command>migrate</command> command on the &vmhost; that is currently
+        hosting the &vmguest;, and choose the target.
+      </para>
+<screen>virsh # migrate --live sled12 --verbose qemu+ssh://<replaceable>IP/Hostname</replaceable>/system
+Password:
+Migration: [ 12 %]</screen>
+    </sect2>
+  </sect1>
+</chapter>
