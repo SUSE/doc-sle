@@ -1,0 +1,2516 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+    %entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude"
+xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha-tuning-tuned">
+  <title>Adaptive and dynamic tuning using &tunedapp;</title>
+  <info>
+    <abstract>
+      <para>
+        &tunedapp; is a daemon for Linux systems that monitors CPU and disk usage and adjusts
+        specific settings to optimize system performance under certain workloads. Other system
+        settings, such as those configured via <command>sysctl</command>, are applied when the
+        service starts, and remain static unless manually reloaded. &tunedapp; offers predefined
+        tuning profiles tailored for common use cases such as servers and virtual machines, as well
+        as the ability to create custom profiles. &tunedapp; leverages several tuning plug-ins that
+        interact with underlying Linux subsystems to tune the CPU, disk I/O, networking, virtual
+        memory, power management, and other components.
+      </para>
+    </abstract>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker></dm:bugtracker>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
+  <sect1 xml:id="sec-tuning-tuned-introduction">
+    <title>Introduction to &tunedapp;</title>
+
+    <para>
+      The &tunedapp; application monitors and adjusts system settings on certain &sles; workloads
+      based on usage of different system resources, such as the CPU and the disk. The primary goal
+      of &tunedapp; is to deliver energy efficiency, optimized performance and efficient resource
+      utilization without requiring manual configuration of low-level system settings, which can be
+      complex and error-prone.
+    </para>
+
+    <para>
+      System administrators can apply predefined or customized <emphasis>&tunedapp;
+      profiles</emphasis> based on the current usage scenario or workload on the system. These
+      profiles contain settings for certain system components such as the CPU, disk I/O schedulers,
+      virtual memory, and power management. The system components are managed by
+      <emphasis>plug-ins</emphasis>, which tune the system based on the activated profile settings.
+    </para>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-components">
+    <title>Components of &tunedapp;</title>
+
+    <para>
+      The &tunedapp; application consists of the following key components:
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term>&tuned; daemon</term>
+        <listitem>
+          <para>
+            The core daemon process that runs in the background, monitoring system usage and
+            applying tuning settings. It handles profile switching and coordination of the other
+            components. The following items are associated with the daemon:
+          </para>
+          <itemizedlist>
+            <listitem>
+              <para>
+                The <command>tuned</command> command that you can use after enabling &tunedapp;
+                using <command>systemctl</command>. By default, when invoked from the terminal
+                manually, <command>tuned</command> runs as a normal process. However, you can use
+                the <option>--daemon</option> option to run it as a background process.
+              </para>
+            </listitem>
+            <listitem>
+              <para>
+                A &tuned; systemd service that manages the daemon process, such as starting the
+                daemon at boot time, stopping or restarting it, and ensuring it runs with the
+                necessary permissions and environment.
+              </para>
+            </listitem>
+          </itemizedlist>
+          <para>
+            For more information, read the man page for &tuned;.
+          </para>
+<screen>&prompt.user;<command>man tuned</command></screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>tuned-adm</term>
+        <listitem>
+          <para>
+            A command-line utility to manage or administer the &tuned; daemon. To understand the
+            basics of managing the &tuned; daemon using <command>tuned-adm</command>, see
+            <xref linkend="sec-tuning-use-tuned-adm"></xref>.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Profiles</term>
+        <listitem>
+          <para>
+            A <emphasis>&tunedapp; profile</emphasis> is a collection of settings for system
+            components that you can apply to tune the system. System administrators can either use
+            the supported profiles that are installed at <filename>/usr/lib/tuned/</filename> as
+            part of the <package>tuned</package> package, or apply customized profiles by creating
+            them at <filename>/etc/tuned/</filename>. If the filenames for a custom and a supported
+            profile matches, the custom profile takes precedence when applied. For more
+            information, see <xref linkend="sec-tuning-tuned-profiles"></xref>.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Plug-ins</term>
+        <listitem>
+          <para>
+            A <emphasis>&tunedapp; plug-in</emphasis> is an implementation of tuning logic for
+            different subsystems. A plug-in is invoked when a profile contains a setting that is
+            relevant to the subsystem it controls. The plug-in tunes the subsystem based on the
+            value of the relevant setting. A few key and most frequently used plug-ins manage
+            subsystems, such as the CPU, disk, network, virtual machines, video and audio. In
+            addition, there are optional monitoring plug-ins that monitor certain subsystems and
+            pass on relevant information to the daemon for dynamic tuning. For more information,
+            see <xref linkend="sec-tuning-tuned-plugins"></xref>.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>Extension scripts</term>
+        <listitem>
+          <para>
+            System administrators can extend the ecosystem of &tunedapp; profiles and plug-ins
+            using custom scripts that can be executed before or after a profile is applied. To use
+            an extension script, specify the path and the type of the script in the profile
+            configuration. Such extensibility allows the implementation of custom tuning logic and
+            offers more control over the entire process of applying profiles. For more information,
+            see <xref linkend="sec-tuning-tuned-profile-hooks"></xref>.
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-management">
+    <title>Managing &tunedapp;</title>
+
+    <para>
+      This section covers the essential tasks for managing the &tuned; service lifecycle on &sles;.
+      It guides you through installing the <package>tuned</package> package from official
+      repositories, enabling and disabling the associated systemd service for automatic startup,
+      and running the &tuned; daemon either as a background process managed by systemd or as a
+      normal foreground process. Proper management of the &tuned; service ensures that the dynamic
+      tuning capabilities are available when required and can be controlled effectively, allowing
+      you to optimize system performance and resource utilization based on your needs.
+    </para>
+
+    <sect2 xml:id="sec-tuning-tuned-installation">
+      <title>Installing &tunedapp;</title>
+      <para>
+        The recommended way to install a supported version of &tunedapp; is to install the
+        <package>tuned</package> package using the <command>zypper</command> package manager.
+      </para>
+      <note>
+        <title><package>tuned</package> is available only for &sles;</title>
+        <para>
+          The <package>tuned</package> package is available only in the official &sles;
+          repositories. There is no equivalent package available in the official &sled;
+          repositories.
+        </para>
+      </note>
+      <procedure>
+        <step>
+          <para>
+            To install the &tuned; daemon, command-line utilities, profiles and plug-ins, run the
+            following command:
+          </para>
+<screen>&prompt.sudo;<command>zypper install -y tuned</command></screen>
+        </step>
+        <step>
+          <para>
+            Verify the installation by running the following commands:
+          </para>
+<screen>&prompt.user;<command>tuned --help</command></screen>
+<screen>&prompt.user;<command>tuned-adm --help</command></screen>
+        </step>
+        <step performance="optional">
+          <para>
+            To know more, read the <emphasis>man pages</emphasis> for <literal>tuned</literal>,
+            <literal>tuned-adm</literal>, <literal>tuned-profiles</literal> and
+            <literal>tuned.conf</literal>.
+          </para>
+        </step>
+      </procedure>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-enable">
+      <title>Enabling &tuned;</title>
+      <para>
+        To enable &tuned;, perform the following procedure:
+      </para>
+      <procedure>
+        <step>
+          <para>
+            Check the status of the &tuned; service:
+          </para>
+<screen>&prompt.sudo;<command>systemctl status tuned</command></screen>
+          <para>
+            By default, the status of the service is <emphasis>disabled</emphasis>.
+          </para>
+        </step>
+        <step>
+          <para>
+            To enable a systemd service for future boots so that the &tuned; daemon starts
+            automatically at the boot time, run the following command:
+          </para>
+<screen>&prompt.sudo;<command>systemctl enable tuned</command></screen>
+          <para>
+            However, this command does not start the &tuned; process. If you check the status of
+            the systemd service now, it should be <emphasis>enabled</emphasis> and
+            <emphasis>inactive</emphasis>.
+          </para>
+        </step>
+      </procedure>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-start">
+      <title>Starting &tuned;</title>
+      <para>
+        After enabling the associated systemd service for &tuned;, for the current session you can
+        start &tuned; either as a background daemon or as a normal process connected to the TTY.
+      </para>
+      <para>
+        Alternatively, you can enable the associated systemd service and start the daemon
+        simultaneously.
+      </para>
+      <procedure>
+        <step>
+          <para>
+            Depending on how you want to start &tuned; across sessions, you have the following
+            options:
+          </para>
+          <stepalternatives>
+            <step>
+              <para>
+                To start &tuned; only for the current session, perform one of the following steps:
+              </para>
+              <substeps>
+                <step>
+                  <para>
+                    Start &tuned; as a background process and let systemd manage the states of the
+                    daemon:
+                  </para>
+<screen>&prompt.sudo;<command>systemctl start tuned</command></screen>
+                  <note>
+                    <title>Profile run by &tuned;</title>
+                    <para>
+                      Once activated, &tuned; starts tuning the system based on the default profile
+                      that is appropriate for the system, or the currently active profile. To
+                      change it, use the <command>tuned-adm</command> command. For more
+                      information, see <xref linkend="sec-tuning-tuned-profiles"></xref> and
+                      <xref linkend="sec-tuning-tuned-plugins"></xref>.
+                    </para>
+                  </note>
+                </step>
+                <step>
+                  <para>
+                    Start &tuned; as a normal process connected to the TTY only for the current
+                    session:
+                  </para>
+<screen>&prompt.sudo;<command>tuned</command></screen>
+                  <tip>
+                    <title>Running the <command>tuned</command> command</title>
+                    <para>
+                      You can use this command to activate a profile, or even run it as a daemon.
+                      For more information, run the <command>tuned --help</command> command.
+                    </para>
+                  </tip>
+                </step>
+              </substeps>
+            </step>
+            <step>
+              <para>
+                To enable a systemd service for future boots and simultaneously start the &tuned;
+                daemon in the current session, run the following command:
+              </para>
+<screen>&prompt.sudo;<command>systemctl enable --now tuned</command></screen>
+            </step>
+          </stepalternatives>
+        </step>
+      </procedure>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-disable">
+      <title>Disabling &tuned;</title>
+      <para>
+        As a best practice, perform the following steps to disable &tuned;:
+      </para>
+      <procedure>
+        <step>
+          <para>
+            Check the status of the &tuned; systemd service:
+          </para>
+<screen>&prompt.sudo;<command>systemctl status tuned</command></screen>
+        </step>
+        <step>
+          <para>
+            Turn off or disable all tuning settings applied earlier:
+          </para>
+<screen>&prompt.sudo;<command>tuned-adm off</command></screen>
+        </step>
+        <step>
+          <para>
+            If the status of the &tuned; daemon is <emphasis>active</emphasis>, stop the daemon:
+          </para>
+<screen>&prompt.sudo;<command>systemctl stop tuned</command></screen>
+        </step>
+        <step>
+          <para>
+            To stop the &tuned; daemon from being automatically activated during the next boot, you
+            have two options:
+          </para>
+          <stepalternatives>
+            <step>
+              <para>
+                Disable only the associated systemd service:
+              </para>
+<screen>&prompt.sudo;<command>systemctl disable tuned</command></screen>
+            </step>
+            <step>
+              <para>
+                Simultaneously disable the &tuned; systemd service and stop the &tuned; daemon
+                immediately:
+              </para>
+<screen>&prompt.sudo;<command>systemctl disable --now tuned</command></screen>
+            </step>
+          </stepalternatives>
+        </step>
+      </procedure>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-profiles">
+    <title>&tunedapp; profiles</title>
+
+    <para>
+      &tunedapp; optimizes &sles; systems using predefined profiles with settings tailored for
+      different use cases. These profiles adjust several system settings, including CPU governor
+      policies, disk I/O scheduling, network parameters, and kernel parameters, to enhance
+      performance, energy efficiency, or other system characteristics. Each profile is designed for
+      specific scenarios, such as high throughput, low latency, power saving, or virtualized
+      environments. System administrators can switch between profiles using the
+      <command>tuned-adm</command> command and customize or combine profiles to meet unique
+      requirements. This section covers the basics of managing, creating and customizing &tunedapp;
+      profiles.
+    </para>
+
+    <sect2 xml:id="sec-tuning-supported-tuned-profiles">
+      <title>Supported &tunedapp; profiles</title>
+      <para>
+        &sles; supports the following profiles:
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term>balanced</term>
+          <listitem>
+            <para>
+              The <literal>balanced</literal> profile provides a general-purpose optimization of
+              the system, offering a good compromise between performance and energy consumption. It
+              dynamically adjusts CPU frequency and power states, and balances I/O and network
+              performance with power saving, making it suitable for most desktop and server
+              environments.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>cpu-partitioning</term>
+          <listitem>
+            <para>
+              The <literal>cpu-partitioning</literal> profile is designed for systems where CPU
+              resources need to be partitioned for specific tasks or applications. It configures
+              CPU isolation and affinity settings and adjusts scheduler parameters to ensure
+              predictable performance and reduce interference between processes. The configuration
+              variables for this profile are defined in
+              <filename>/etc/tuned/cpu-partitioning-variables.conf</filename>.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>desktop</term>
+          <listitem>
+            <para>
+              The <literal>desktop</literal> profile optimizes the system for desktop environments,
+              enhancing performance for graphical interfaces and desktop applications. It optimizes
+              CPU and I/O performance, settings for low-latency audio and video playback, and
+              reduces power-saving measures to ensure a smooth and responsive user experience.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>latency-performance</term>
+          <listitem>
+            <para>
+              The <literal>latency-performance</literal> profile prioritizes low latency and
+              deterministic performance over power savings. It sets the CPU governor to performance
+              mode, adjusts kernel parameters to reduce latency, and disables power-saving features
+              that could introduce delays, making it suitable for real-time applications and
+              high-performance computing.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>mssql</term>
+          <listitem>
+            <para>
+              The <literal>mssql</literal> profile optimizes the system for running Microsoft SQL
+              Server by tuning CPU and memory settings, optimizing disk I/O for database access
+              patterns, and enhancing network settings for improved database connectivity.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>network-latency</term>
+          <listitem>
+            <para>
+              The <literal>network-latency</literal> profile optimizes the network performance for
+              applications requiring low latency, such as financial trading platforms and real-time
+              communication systems. It configures network settings to reduce latency, sets the CPU
+              governor to performance mode, and adjusts kernel parameters to prioritize network
+              traffic.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>network-throughput</term>
+          <listitem>
+            <para>
+              The <literal>network-throughput</literal> profile enhances the system for sustained
+              high data transfer rates, particularly on older CPUs or high-speed networks. It tunes
+              network stack parameters for maximum throughput and optimizes CPU settings to handle
+              high network loads.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>powersave</term>
+          <listitem>
+            <para>
+              Optimizes the system for energy efficiency, possibly at the cost of performance.
+              While using this configuration as a stand-alone or merged profile, carefully analyze
+              the deployment use case and ensure that it saves more power than the
+              <literal>balanced</literal> profile.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>throughput-performance</term>
+          <listitem>
+            <para>
+              The <literal>throughput-performance</literal> profile maximizes overall system
+              performance for general-purpose servers handling diverse tasks. It sets the CPU
+              governor to performance mode, tunes I/O and network settings for high throughput, and
+              adjusts kernel parameters to enhance system performance.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>virtual-guest</term>
+          <listitem>
+            <para>
+              The <literal>virtual-guest</literal> profile optimizes performance and efficiency for
+              virtual machines running as guests. It tunes CPU and memory settings for virtualized
+              environments and adjusts disk and network settings to ensure optimal resource
+              utilization and VM performance.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>virtual-host</term>
+          <listitem>
+            <para>
+              The <literal>virtual-host</literal> profile enhances systems running KVM guests by
+              optimizing resource allocation and performance. It configures CPU and memory settings
+              for hosting multiple virtual machines, tunes I/O and network settings, and enhances
+              kernel parameters to support virtualization.
+            </para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        For information on the &tunedapp; profile configuration files, see the following sections:
+      </para>
+      <itemizedlist>
+        <listitem>
+          <para>
+            <xref linkend="sec-tuning-tuned-supported-profile-configuration"></xref>
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            <xref linkend="sec-tuning-custom-tuned-profile-configuration"></xref>
+          </para>
+        </listitem>
+      </itemizedlist>
+    </sect2>
+
+    <sect2 xml:id="sec--tuning-manage-tuned-profiles">
+      <title>Managing &tunedapp; profiles</title>
+      <para>
+        If you just want to activate a profile, pass the profile name to the
+        <command>tuned</command> command:
+      </para>
+<screen>&prompt.sudo;<command>tuned --profile <replaceable>PROFILE_NAME</replaceable></command></screen>
+      <para>
+        However, the best practice for managing the lifecycle of &tunedapp; profiles is to use the
+        <command>tuned-adm</command> command-line tool.
+      </para>
+      <sect3 xml:id="sec-tuning-use-tuned-adm">
+        <title>Using <command>tuned-adm</command></title>
+        <para>
+          You can use the <command>tuned-adm</command> command to perform the following tasks:
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              List all available profiles.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm list</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              List active profile.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm active</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Display information about the current profile.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm profile_info</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Display information about a specified profile.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm profile_info <replaceable>PROFILE_NAME</replaceable></command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Recommend a profile based on the current system usage.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm recommend</command></screen>
+            <para>
+              By default, &tunedapp; in &sles; recommends a profile based on the configuration
+              mentioned in <filename>/usr/lib/tuned/recommend.d/50-tuned.conf</filename>. You can
+              also define custom recommendation rules by creating the file
+              <filename>/etc/tuned/recommend.conf</filename>, which takes precedence over the
+              default rules.
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              Display the current profile selection mode.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm profile_mode</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Select a profile automatically, and switch to the recommended profile.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm auto_profile</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Manually switch to a specified profile.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm profile <replaceable>PROFILE_NAME</replaceable></command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Verify that a profile has been successfully applied, and the system state matches the
+              profile's configurations.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm verify</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              Turn off all tunings.
+            </para>
+<screen>&prompt.sudo;<command>tuned-adm off</command></screen>
+          </listitem>
+        </itemizedlist>
+        <para>
+          For more information on <command>tuned-adm</command>, see its help information or man
+          page.
+        </para>
+<screen>&prompt.sudo;<command>tuned-adm --help</command></screen>
+<screen>&prompt.user;<command>man tuned-adm</command></screen>
+      </sect3>
+      <sect3 xml:id="sec-tuning-tuned-profile-hooks">
+        <title>Using profile hooks</title>
+        <para>
+          <emphasis>Profile hooks</emphasis> are specific scripts that are executed at different
+          stages of a profile's lifecycle. They allow for more granular control and customization
+          of what happens when a profile is applied. Profile hooks are generally placed in the
+          profile directory under
+          <filename>/etc/tuned/<replaceable>PROFILE_NAME</replaceable>/</filename> for custom
+          profiles, and
+          <filename>/usr/lib/tuned/<replaceable>PROFILE_NAME</replaceable>/</filename> for the
+          default or supported profiles.
+        </para>
+        <para>
+          Profile hooks can be used to execute custom commands or scripts before or after certain
+          events, such as:
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              Starting a profile
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              Stopping a profile
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              Verifying a profile
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              Fully rolling back a profile
+            </para>
+          </listitem>
+        </itemizedlist>
+        <example>
+          <title>Creating and applying a profile hook</title>
+          <para>
+            For example, in a custom profile that mixes the <literal>balanced</literal> and
+            <literal>powersave</literal> profiles, we can include a profile hook that displays
+            certain relevant information before applying the profile.
+          </para>
+          <procedure>
+            <step>
+              <para>
+                Create a script named <filename>start.sh</filename> in the custom profile directory
+                <filename>/etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/</filename>
+                with the following content:
+              </para>
+              <example>
+                <title>Custom hook script to handle specific tasks before applying the custom profile</title>
+<screen>
+#!/bin/bash
+
+# Example task: Log the current CPU governor and energy performance bias
+echo "Current CPU governor: $(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor)" >>
+/var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+echo "Current energy performance bias: $(cat /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_bias)" >> /var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+
+# Example task: Check for specific conditions before applying settings
+if [ ! -d "/sys/devices/system/cpu/cpufreq/policy0" ]; then
+    echo "CPU frequency scaling not available, aborting profile application." >> /var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+    exit 1
+fi
+
+# Example task: Notify about the upcoming profile application
+echo "Preparing to apply custom profile settings." >> /var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+</screen>
+              </example>
+            </step>
+            <step>
+              <para>
+                Ensure the script is executable:
+              </para>
+<screen>&prompt.sudo;<command>chmod +x /etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/start.sh</command></screen>
+            </step>
+            <step>
+              <para>
+                Include the path to the custom script in
+                <filename>/etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/tuned.conf</filename>
+                by using the <literal>[script]</literal> section:
+              </para>
+              <example>
+                <title>&tunedapp; profile with custom script path</title>
+<screen>
+[main]
+include=balanced
+
+[cpu]
+governor=powersave
+energy_perf_bias=powersave
+
+[disk]
+# Inherit settings from balanced profile
+
+[sysctl]
+vm.swappiness=10
+
+[script]
+script=/etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/start.sh
+</screen>
+              </example>
+            </step>
+            <step>
+              <para>
+                Apply the custom profile to test the custom script:
+              </para>
+<screen>&prompt.sudo;<command>tuned-adm profile <replaceable>CUSTOM_PROFILE_NAME</replaceable></command></screen>
+            </step>
+          </procedure>
+        </example>
+      </sect3>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-configuration">
+    <title>&tunedapp; configuration</title>
+
+    <para>
+      Configuration files form the foundation of &tunedapp; and its profiles. In &sles;, the
+      <filename>/etc/tuned/</filename> file is the main configuration file for the &tuned; daemon.
+      This file contains global settings that affect the overall behavior of &tunedapp;.
+    </para>
+
+    <para>
+      Also, each &tunedapp; profile has its <filename>tuned.conf</filename> configuration file that
+      defines the specific tuning parameters and plug-in settings for a particular profile. The
+      profile-specific configuration files are divided into sections, each corresponding to a
+      specific &tunedapp; plug-in or a group of related settings. System administrators can specify
+      system tuning parameters across different subsystems, such as CPU, disk and network. For more
+      information on &tunedapp; plug-ins, see <xref linkend="sec-tuning-tuned-plugins"></xref>.
+    </para>
+
+    <sect2 xml:id="sec-tuning-global-tuned-configuration">
+      <title>Global &tunedapp; configuration</title>
+      <para>
+        When &tuned; starts running (as a daemon, by default), the settings in the
+        <filename>/etc/tuned/tuned-main.conf</filename> global configuration file are applied on
+        the system. This action prepares the system to apply additional profile-specific tuning in
+        the subsequent stages.
+      </para>
+      <para>
+        The default <filename>/etc/tuned/tuned-main.conf</filename> file contains the following
+        global settings:
+      </para>
+      <example>
+        <title>Default global &tunedapp; configuration</title>
+<screen>
+daemon = 1 <co xml:id="tuned-main-conf-daemon"></co>
+
+dynamic_tuning = 1 <co xml:id="tuned-main-conf-dynamic-tuning"></co>
+
+sleep_interval = 1 <co xml:id="tuned-main-conf-sleep-interval"></co>
+
+update_interval = 10 <co xml:id="tuned-main-conf-update-interval"></co>
+
+recommend_command = 1 <co xml:id="tuned-main-conf-recommend-command"></co>
+
+reapply_sysctl = 1 <co xml:id="tuned-main-conf-reapply-sysctl"></co>
+
+default_instance_priority = 0 <co xml:id="tuned-main-conf-default-instance-priority"></co>
+
+udev_buffer_size = 1MB <co xml:id="tuned-main-conf-udev-buffer-size"></co>
+
+log_file_count = 2 <co xml:id="tuned-main-conf-log-file-count"></co>
+
+log_file_max_size = 1MB <co xml:id="tuned-main-conf-log-file-max-size"></co>
+</screen>
+      </example>
+      <calloutlist>
+        <callout arearefs="tuned-main-conf-daemon">
+          <para>
+            Specifies whether to use the &tuned; daemon. When set to <literal>1</literal>, the
+            daemon is used, enabling features such as D-Bus integration, settings rollback, hotplug
+            support, and dynamic tuning. Disabling the daemon by setting it to <literal>0</literal>
+            is <emphasis>not recommended</emphasis>, as it limits &tunedapp;'s functionality to
+            static tuning only.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-dynamic-tuning">
+          <para>
+            Enables or disables dynamic tuning of devices. When set to <literal>1</literal>,
+            &tunedapp; dynamically adjusts settings based on system activity. When disabled by
+            setting it to <literal>0</literal>, only static tuning is applied. Since dynamic tuning
+            relies on the daemon to function, setting <literal>dynamic_tuning=1</literal> becomes
+            irrelevant when the daemon is disabled by setting it to <literal>daemon=0</literal>.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-sleep-interval">
+          <para>
+            Defines the interval in seconds that the &tuned; daemon sleeps before checking for
+            events. A higher value reduces overhead but increases response time to changes.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-update-interval">
+          <para>
+            Sets the interval in seconds for updating dynamic tunings. This value must be a
+            multiple of <literal>sleep_interval</literal>.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-recommend-command">
+          <para>
+            Controls the availability of the <command>tuned-adm recommend</command> command. When
+            enabled by setting it to <literal>1</literal>, &tuned; parses the custom recommendation
+            figuration at <filename>/etc/tuned/recommend.conf</filename> or the default
+            recommendation configuration
+            <filename>/usr/lib/tuned/recommend.d/50-tuned.conf</filename> and provides profile
+            recommendations. When disabled by setting it to <literal>0</literal>, the daemon
+            returns a single hard-coded profile, typically <literal>balanced</literal>.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-reapply-sysctl">
+          <para>
+            Determines whether system sysctl settings from files such as
+            <filename>/etc/sysctl.conf</filename> and <filename>/etc/sysctl.d</filename> should be
+            reapplied after &tunedapp; sysctl settings are applied. When enabled by setting to 1,
+            system sysctl settings override &tunedapp; sysctl settings.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-default-instance-priority">
+          <para>
+            Specifies the default priority assigned to the &tunedapp; instances. Higher values
+            indicate a higher priority.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-udev-buffer-size">
+          <para>
+            Defines the buffer size for udev events. This setting helps manage the amount of data
+            processed from udev.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-log-file-count">
+          <para>
+            Sets the number of log files to keep in the directory
+            <filename>/var/log/tuned/</filename>. This helps in log rotation, where older logs are
+            archived and new logs are created.
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-log-file-max-size">
+          <para>
+            Specifies the maximum size of each log file before it is rotated. This prevents log
+            files from growing indefinitely. For example, when the default log file
+            <filename>/var/log/tuned/tuned.log</filename> reaches the size set by this parameter, a
+            new file is started.
+          </para>
+        </callout>
+      </calloutlist>
+      <warning>
+        <para>
+          Modify the values of the global settings in <filename>/etc/tuned/</filename> only when
+          you are sure of its effects on the behavior of &tunedapp;.
+        </para>
+      </warning>
+      <para>
+        For a detailed overview of the main &tunedapp; configuration file, read its man page:
+      </para>
+<screen>&prompt.user;<command>man 5 tuned-main.conf</command></screen>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-supported-profile-configuration">
+      <title>Supported profile configuration</title>
+      <para>
+        Every supported &tunedapp; profile has its own directory under
+        <filename>/usr/lib/tuned/</filename>, and each such profile directory contains the
+        <filename>/usr/lib/tuned/<replaceable>PROFILE_NAME</replaceable>/tuned.conf</filename>
+        configuration file. The configuration file contains a default set of plug-ins, parameters
+        and options that are appropriate for the profile.
+      </para>
+      <sect3 xml:id="sec-tuning-tuned-profile-general-syntax">
+        <title>General syntax of &tunedapp; profiles</title>
+        <para>
+          The general syntax for a profile configuration file is as follows:
+        </para>
+<screen>
+[main]
+summary=<replaceable>SUMMARY_TEXT_STRING</replaceable>
+include=<replaceable>ANOTHER_PROFILE_NAME_AS_BASE</replaceable>
+
+[<replaceable>PLUG-IN</replaceable>]
+<replaceable>PARAMETER</replaceable>=<replaceable>OPTION</replaceable>
+<replaceable>PARAMETER</replaceable>=<replaceable>OPTION</replaceable>
+...
+
+[<replaceable>PLUG-IN</replaceable>]
+# <replaceable>COMMENT_STRING</replaceable>
+<replaceable>PARAMETER</replaceable>=<replaceable>OPTION</replaceable>
+
+...
+</screen>
+        <para>
+          For an overview of the &tunedapp; configuration files, read its man page:
+        </para>
+<screen>&prompt.user;<command>man 5 tuned.conf</command></screen>
+      </sect3>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-custom-tuned-profile-configuration">
+      <title>Custom profile configuration</title>
+      <para>
+        Also, you can define <emphasis role="strong">custom</emphasis> profiles. For each custom
+        profile, create a <replaceable>PROFILE_NAME</replaceable> directory in
+        <filename>/etc/tuned/</filename>, and place its configuration file within its own
+        directory. For example, the configuration file for a custom profile can be at the path
+        <filename>/etc/tuned/<replaceable>PROFILE_NAME</replaceable>/tuned.conf</filename>.
+        However, if there is a match between <replaceable>PROFILE_NAME</replaceable> in the default
+        path <filename>/usr/lib/tuned/<replaceable>PROFILE_NAME</replaceable></filename> path and
+        the custom path <filename>/etc/tuned/<replaceable>PROFILE_NAME</replaceable></filename>,
+        the custom profile configuration is prioritized and applied. As a best practice for
+        customizing a supported profile, copy it from <filename>/usr/lib/tuned/</filename> to
+        <filename>/etc/tuned/</filename> and then modify it. This preserves the original profile
+        and separates custom configurations.
+      </para>
+      <note>
+        <title>Path to &tunedapp; profile configuration files</title>
+        <para>
+          Although <emphasis>not recommended</emphasis>, you can specify paths in the
+          <filename>/etc/tuned/</filename> other than the standard paths for supported and custom
+          profiles:
+        </para>
+<screen>profile_dirs=/etc/tuned/,/usr/lib/tuned/,<replaceable>/PATH/TO/CUSTOM/DIRECTORY/</replaceable></screen>
+        <para>
+          The directories are searched for profiles according to the order of their listing. In the
+          above example, <filename>/etc/tuned/</filename> is searched first, followed by
+          <filename>/usr/lib/tuned/</filename> and
+          <replaceable>/PATH/TO/CUSTOM/DIRECTORY/</replaceable>.
+        </para>
+      </note>
+      <warning>
+        <para>
+          &suse; does not support any profile that is not part of the supported profiles supplied
+          with the <package>tuned</package> from official &sles; repositories. Create and apply a
+          custom profile on a production system only if you are sure of its effect.
+        </para>
+      </warning>
+      <sect3 xml:id="sec-tuning-tuned-custom-merge-profile">
+        <title>Creating a custom profile by merging configurations</title>
+        <para>
+          As a best practice, always merge two or more profiles by manually creating a custom
+          profile configuration. This approach makes you aware of the exact mix of parameters and
+          plug-ins in your custom merged profile. It is a more involved process compared to
+          applying two or more profiles simultaneously without checking the result of the merge
+          that gets generated on-the-fly.
+        </para>
+        <para>
+          As an example, consider a simple merge of the <literal>balanced</literal> and
+          <literal>powersave</literal> profiles.
+        </para>
+        <example>
+          <title>Merging <literal>balanced</literal> and <literal>powersave</literal> &tunedapp; profiles</title>
+          <procedure>
+            <step>
+              <para>
+                Create the path for the custom profile:
+              </para>
+<screen>&prompt.sudo;<command>mkdir /etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable></command></screen>
+            </step>
+            <step>
+              <para>
+                Create a profile configuration file in the following directory:
+              </para>
+<screen>&prompt.sudo;<command>vi /etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/tuned.conf</command></screen>
+            </step>
+            <step>
+              <para>
+                Add the following configuration to the file:
+              </para>
+              <example>
+                <title>Merged configuration for <literal>balanced</literal> and <literal>powersave</literal> &tunedapp; profiles</title>
+<screen>
+[main]
+include=balanced <co xml:id="include-balanced"></co>
+
+[cpu] <co xml:id="cpu-settings-override"></co>
+governor=powersave
+energy_perf_bias=powersave
+
+[disk] <co xml:id="inherit-disk-balanced"></co>
+# Inherit settings from balanced profile
+
+[sysctl]
+vm.swappiness=10 <co xml:id="reduce-vm-swappiness"></co>
+</screen>
+              </example>
+              <calloutlist>
+                <callout arearefs="include-balanced">
+                  <para>
+                    Include the <literal>balanced</literal> profile as a base, which is suitable
+                    for general purpose use.
+                  </para>
+                </callout>
+                <callout arearefs="cpu-settings-override">
+                  <para>
+                    Overrides CPU parameters such as <literal>governor</literal> and
+                    <literal>energy-perf-bias</literal> to <literal>powersave</literal>.
+                  </para>
+                </callout>
+                <callout arearefs="inherit-disk-balanced">
+                  <para>
+                    Inherit disk settings from the <literal>balanced</literal> profile.
+                  </para>
+                </callout>
+                <callout arearefs="reduce-vm-swappiness">
+                  <para>
+                    Add a sysctl parameter to reduce swappiness, which can be beneficial for both
+                    performance and power consumption in certain scenarios.
+                  </para>
+                </callout>
+              </calloutlist>
+            </step>
+            <step>
+              <para>
+                Save the configuration file and exit the text editor.
+              </para>
+            </step>
+            <step>
+              <para>
+                Apply the new custom profile after merging certain parameters from
+                <literal>balanced</literal> and <literal>powersave</literal> profiles.
+              </para>
+<screen>&prompt.sudo;<command>tuned-adm profile <replaceable>CUSTOM_PROFILE_NAME</replaceable></command></screen>
+            </step>
+          </procedure>
+        </example>
+      </sect3>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-plugins">
+    <title>&tunedapp; plug-ins</title>
+
+    <para>
+      &tunedapp; plug-ins are modular components that extend the functionality of the &tunedapp;
+      system daemon. These plug-ins allow system administrators to create custom optimization
+      profiles tailored to specific workloads or hardware configurations. By leveraging several
+      system metrics and user-defined parameters, &tunedapp; plug-ins can dynamically adjust kernel
+      settings, CPU frequencies, disk I/O schedulers, and other low-level system parameters to
+      achieve optimal performance and energy efficiency. While the core <package>tuned</package>
+      package includes several preconfigured profiles, you can extend it through custom plug-ins
+      for fine-grained control over the system.
+    </para>
+
+    <para>
+      The general syntax for including plug-ins in the &tunedapp; profile configuration files is as
+      follows:
+    </para>
+
+<screen>
+...
+[<replaceable>PLUGIN-NAME</replaceable>]
+<replaceable>PARAMETER_1</replaceable>=<replaceable>VALUE_1</replaceable>
+<replaceable>PARAMETER_2</replaceable>=<replaceable>VALUE_2</replaceable>
+...
+</screen>
+
+    <para>
+      The supported &tunedapp; profiles for &sles; have multiple plug-ins and their parameters
+      included within them. To see a list of all such plug-ins, run the following command:
+    </para>
+
+<screen>&prompt.sudo;<command>grep -r '\[.*\]' /usr/lib/tuned/*/tuned.conf | sort -u</command></screen>
+
+    <sect2 xml:id="sec-tuning-tuned-supported-plugins">
+      <title>Supported &tunedapp; plug-ins</title>
+      <para>
+        On &sles;, the following &tunedapp; plug-ins are supported:
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term>main</term>
+          <listitem>
+            <para>
+              <literal>main</literal> is not a plug-in, but a special section in the &tunedapp;
+              profile configuration files that provides overall settings and metadata for the
+              profile. The most commonly used parameters for the <literal>[main]</literal> section
+              are as follows:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>summary</parameter>: A summary of the key functionality of the
+                  profile.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>include</parameter>: Provision to include other profiles as a parent,
+                  so that its configuration can be inherited as a base. In case of conflict, the
+                  configuration of the child profile takes precedence over the configuration of the
+                  included profile.
+                </para>
+                <note>
+                  <title>Impact of updated &tunedapp; profile</title>
+                  <para>
+                    When the configuration for a parent profile is updated, the child profiles that
+                    inherit the parent profile also get impacted.
+                  </para>
+                </note>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>modules</term>
+          <listitem>
+            <para>
+              The <literal>modules</literal> plug-in manages kernel modules within the profiles. It
+              can load or unload specific modules when a profile is activated, allowing
+              administrators to optimize system behavior for different workloads by controlling
+              which kernel modules are active. When this plug-in is used, &tunedapp; writes
+              information about the kernel modules in the
+              <filename>/etc/modprobe.d/tuned.conf</filename> file.
+            </para>
+            <para>
+              If you need to add a kernel module parameter that should be handled by &tuned;,
+              include it in the profile configuration using the following syntax:
+            </para>
+<screen>
+[modules]
+<replaceable>MODULE_NAME</replaceable>=<replaceable>MODULE_PARAMETERS</replaceable><co xml:id="module-parameters"></co>
+</screen>
+            <calloutlist>
+              <callout arearefs="module-parameters">
+                <para>
+                  You can mention multiple module parameters separated by comma.
+                </para>
+              </callout>
+            </calloutlist>
+            <para>
+              If you want the module to be reloaded automatically, use the <literal>+r</literal>
+              option:
+            </para>
+<screen>
+[modules]
+<replaceable>MODULE_NAME</replaceable>=+r,<replaceable>MODULE_PARAMETERS</replaceable>
+</screen>
+            <para>
+              For example:
+            </para>
+            <example>
+              <title>Automatic reload of kernel modules by &tunedapp;</title>
+<screen>
+[modules]
+cpufreq_conservative=+r,down_threshold=20,up_threshold=80,sampling_rate=20000 <co xml:id="cpu-conservative-r"></co>
+</screen>
+            </example>
+            <calloutlist>
+              <callout arearefs="cpu-conservative-r">
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <parameter>cpufreq_conservative</parameter> is a kernel module that adjusts
+                      the CPU clock speed based on the system load. It is more conservative in its
+                      frequency scaling compared to other governors like
+                      <literal>ondemand</literal>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      The <literal>=+r</literal> syntax indicates that the module should be loaded
+                      if it is not already, and &tunedapp; keeps track of how many profiles are
+                      using this module. When a module with <literal>+r</literal> is loaded,
+                      &tunedapp; increments the reference count for this module. If the profile is
+                      later deactivated, the reference count is decremented. The module is unloaded
+                      only when the reference count reaches zero, which implies that no other
+                      active profile is using it.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      The parameters mean the following:
+                    </para>
+                    <itemizedlist>
+                      <listitem>
+                        <para>
+                          <parameter>down_threshold=20</parameter> indicate that when the CPU usage
+                          drops below 20%, the governor lowers the CPU frequency to conserve power.
+                        </para>
+                      </listitem>
+                      <listitem>
+                        <para>
+                          <parameter>up_threshold=80</parameter> indicate that when the CPU usage
+                          exceeds 80%, the governor raises the CPU frequency to improve
+                          performance.
+                        </para>
+                      </listitem>
+                      <listitem>
+                        <para>
+                          <parameter>sampling_rate=20000</parameter> indicate that the governor
+                          samples the CPU usage every 20,000 microseconds (or 20 milliseconds).
+                        </para>
+                      </listitem>
+                    </itemizedlist>
+                  </listitem>
+                </itemizedlist>
+              </callout>
+            </calloutlist>
+            <para>
+              For more information on kernel modules, refer to <xref linkend="cha-mod"/>.
+              Additionally, you can check the parameters of the installed modules on your system by
+              looking at
+              <filename>/sys/module/<replaceable>MODULE_NAME</replaceable>/parameters/</filename>.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>cpu</term>
+          <listitem>
+            <para>
+              The <literal>cpu</literal> plug-in manages and optimizes CPU-related settings to
+              enhance performance, power savings, or a balance between the two. This plug-in allows
+              fine-grained control over how the CPU operates, including setting the frequency
+              governor, energy performance bias, and other parameters that directly influence the
+              CPU's behavior and performance characteristics.
+            </para>
+            <para>
+              Certain commonly used parameters for the <literal>cpu</literal> plug-in are as
+              follows:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>priority</parameter>: Sets the priority of CPU tuning operations.
+                  Higher values give the tuning operation a higher priority.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>governor</parameter>: Sets the CPU frequency scaling governor. Common
+                  options for this parameter include the following:
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>performance</literal>: Forces the CPU to run at the maximum
+                      frequency, providing the best performance at the cost of higher power
+                      consumption.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>ondemand</literal>: Dynamically adjusts the CPU frequency based on
+                      system load, providing a balance between performance and power saving.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>conservative</literal>: Similar to the <literal>ondemand</literal>
+                      governor, but increases or decreases the CPU frequency more gradually. It is
+                      suitable for systems where power saving is important but performance should
+                      still be maintained.
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>energy_perf_bias</parameter>: Hints to the CPU how to balance between
+                  power consumption and performance. Common options for this parameter include the
+                  following:
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>performance</literal>: Bias towards maximum performance, possibly
+                      increasing power consumption.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>powersave</literal>: Bias towards power saving, possibly reducing
+                      performance.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>power</literal>: A more aggressive power-saving setting compared to
+                      <literal>powersave</literal>, but potentially less demanding compared to
+                      <literal>performance</literal>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>normal</literal>: A balanced setting between performance and power
+                      saving.
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>force_latency</parameter>: Controls the forced latency setting for the
+                  CPU. Lower values mean the system aggressively applies power-saving measures,
+                  possibly at the cost of increased latency. Higher values reduce the
+                  aggressiveness of power-saving measures, possibly improving responsiveness.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>min_perf_pct</parameter>: Specifies the minimum performance level as a
+                  percentage of the CPU's maximum performance. For example, a value of 100 means
+                  the CPU always runs at its maximum performance level. Lower values allow the CPU
+                  to run at lower performance levels when full performance is not needed, which can
+                  save power.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              For example, a profile created for CPU-intensive workload, such as high-performance
+              computing, can configure the plug-in for maximum CPU usage:
+            </para>
+            <example>
+              <title>&tunedapp; plug-in configuration for CPU-intensive workload</title>
+<screen>
+[cpu]
+priority=1
+governor=performance
+energy_perf_bias=performance
+force_latency=10
+min_perf_pct=100
+</screen>
+            </example>
+            <para>
+              For more information on CPU performance scaling, refer to
+              <link xlink:href="https://www.kernel.org/doc/Documentation/admin-guide/pm/cpufreq.rst"></link>.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>audio</term>
+          <listitem>
+            <para>
+              The <literal>audio</literal> plug-in tunes the system to optimize audio performance.
+              This can involve adjusting CPU scheduling policies, setting CPU affinity, and
+              configuring other system parameters to minimize audio latency, ensure smooth audio
+              playback, and record real-time audio activities. For example:
+            </para>
+            <example>
+              <title>&tunedapp; plug-in configuration for optimal audio performance</title>
+<screen>
+[audio]
+timeout=10 <co xml:id="audio-plugin-timeout-parameter"></co>
+reset_controller=False <co xml:id="audio-plugin-reset-controller-parameter"></co>
+</screen>
+            </example>
+            <calloutlist>
+              <callout arearefs="audio-plugin-timeout-parameter">
+                <para>
+                  The <parameter>timeout</parameter> parameter specifies the time period (in
+                  seconds) for which the system should remain in the optimized state after the last
+                  audio activity is detected. This is intended to prevent the system from
+                  frequently switching back and forth between optimized and non-optimized states,
+                  which can cause instability or glitches in audio performance.
+                </para>
+              </callout>
+              <callout arearefs="audio-plugin-reset-controller-parameter">
+                <para>
+                  The <parameter>reset_controller</parameter> parameter manages the behavior of the
+                  audio module's power-saving controller. It allows you to enable or disable the
+                  resetting of the controller, which can influence how the system handles power
+                  management for audio devices. The parameter interacts with a system file located
+                  at
+                  <filename>/sys/module/<replaceable>AUDIO_MODULE_NAME</replaceable>/parameters/power_save_controller</filename>
+                  (for example, <filename>snd_hda_intel</filename>). By default, it is set to
+                  <literal>False</literal>.
+                </para>
+              </callout>
+            </calloutlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>video</term>
+          <listitem>
+            <para>
+              The <literal>video</literal> plug-in provides options for tuning power-saving
+              settings for certain graphics cards, particularly AMD Radeon cards. For example:
+            </para>
+<screen>
+[video]
+radeon_powersave=dpm-balanced
+</screen>
+            <para>
+              Common parameters used with this plug-in are as follows:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>radeon_powersave</parameter>: This parameter controls the power-saving
+                  mode of AMD Radeon graphics cards. It determines how the GPU handles power
+                  management, impacting performance and energy consumption. Configuration options
+                  used with this parameter include the following:
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>default</literal>: The default power-saving profile, which is the
+                      default setting provided by the graphics driver.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>auto</literal>: Automatically adjusts power-saving settings based on
+                      current system usage.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>low</literal>: A low-power profile that reduces performance to save
+                      energy.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>mid</literal>: A medium-power profile that balances performance and
+                      power savings.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>high</literal>: A high-power profile that maximizes performance at
+                      the cost of higher power consumption.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dynpm</literal>: Dynamic Power Management (DPM)&mdash;a mode that
+                      allows for dynamic adjustments based on the workload.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dpm-battery</literal>: A DPM profile optimized for battery usage.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dpm-balanced</literal>: A DPM profile that balances performance and
+                      power efficiency.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dpm-performance</literal>: A DPM profile optimized for maximum
+                      performance.
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>disk</term>
+          <listitem>
+            <para>
+              The <literal>disk</literal> plug-in tunes and optimizes the performance and power
+              consumption of disk drives.
+            </para>
+            <para>
+              Common parameters and their possible values are as follows:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>devices</parameter>: Specifies on which disk devices the tuning
+                  parameters should be applied. By default, all devices are included. You can
+                  specify devices separated by comma.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>dynamic</parameter>: Boolean values that enable or disable dynamic
+                  tuning based on disk load. By default, it is set to <literal>True</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>elevator</parameter>: Configures the I/O scheduler (elevator) for the
+                  disk. Depending on the system's available schedulers, the possible options
+                  include <literal>noop</literal>, <literal>deadline</literal> or
+                  <literal>cfq</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>apm</parameter>: An integer (1&ndash;254) that sets the Advanced Power
+                  Management (APM) level of the disk. Higher values typically mean better
+                  performance, but higher power consumption.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>spindown</parameter>: The integer value for the
+                  <parameter>spindown</parameter> parameter is a special encoding used by the
+                  <package>hdparm</package> utility to set the spin-down timeout for a disk. For an
+                  explanation of the acceptable spin-down values, read about the
+                  <option>-S</option> option in the man page of <package>hdparm</package>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>readahead</parameter>: An integer that sets the readahead value for
+                  the disk in kilobytes. You can change this to sectors by adding the appropriate
+                  suffix. For example, <literal>readahead = 8192 s</literal>. Ensure there is at
+                  least one space between the number and the suffix.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>readahead_multiply</parameter>: A float value that indicates the
+                  factor by which the value of the <parameter>readahead</parameter> parameter is
+                  multiplied.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>scheduler_quantum</parameter>: An integer that sets the number of I/O
+                  requests the scheduler handles simultaneously. Setting a higher quantum can
+                  improve throughput for sequential I/O operations by allowing more requests to be
+                  processed before switching. Conversely, a lower quantum can improve
+                  responsiveness for random I/O operations by reducing latency.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              As an example, consider the following <literal>disk</literal> plug-in configuration
+              in a &tunedapp; profile:
+            </para>
+            <example>
+              <title><literal>disk</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+[disk]
+# Comma separated list of devices, all devices if commented out.
+devices=sda,sdb
+
+dynamic=True
+elevator=deadline
+apm=128
+spindown=60
+
+# Readahead adjusted to sectors by specifying relevant suffix.
+# There must be at least one space between the number and suffix.
+readahead=8192 s
+
+readahead_multiply=1.5
+scheduler_quantum=64
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>scsi_host</term>
+          <listitem>
+            <para>
+              The <literal>scsi_host</literal> plug-in is used to manage power-saving settings for
+              SCSI (Small Computer System Interface) host adapters on Linux systems. Commonly used
+              parameters for this plug-in include the following:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>alpm</parameter>: The Aggressive Link Power Management (ALPM) setting
+                  controls the power management policy for Serial ATA (SATA) links. It can take
+                  different values to balance between power savings and performance. The possible
+                  options for this parameter include the following:
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>min_power</literal>: This setting is more aggressive in terms of
+                      power savings. It puts the system into a lower power state when the SATA
+                      links are idle, which can save more power but may increase latency when
+                      accessing the disks.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>medium_power</literal>: This setting provides a balance between
+                      power savings and performance. It aims to reduce power consumption without
+                      impacting system performance too much.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>max_performance</literal>: This setting keeps SCSI hosts and devices
+                      in their highest power state. It prioritizes speed and responsiveness over
+                      energy efficiency, disabling power-saving features to minimize latency and
+                      maximize throughput.
+                    </para>
+                  </listitem>
+                </itemizedlist>
+                <para>
+                  For example, consider the following configuration that is appropriate for
+                  battery-powered devices, low-usage servers, and systems with long idle periods:
+                </para>
+<screen>
+[scsi_host]
+alpm=min_power
+</screen>
+                <note>
+                  <title>Read/write of link power management policy by &tunedapp;</title>
+                  <para>
+                    The possible values are typically read from or written to the
+                    <filename>/sys/class/scsi_host/<replaceable>SCSI_HOST_NAME</replaceable>/link_power_management_policy</filename>
+                    file. The exact values may depend on what the kernel and the hardware support.
+                  </para>
+                </note>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>variables</term>
+          <listitem>
+            <para>
+              The <literal>variables</literal> plug-in allows for the definition of variables that
+              you can use across different &tunedapp; profiles. This is particularly useful for
+              setting parameters that may change based on the system environment or user
+              preferences. By centralizing variable definitions, you can simplify profile
+              management and enhance the flexibility of your tuning configurations.
+            </para>
+            <para>
+              Within the <literal>[variables]</literal> section of your profile configuration, you
+              can specify variables using the following methods:
+            </para>
+<screen>
+[variables]
+
+include=<replaceable>PATH/TO/VARIABLE/CONFIGURATION/FILE</replaceable> <co xml:id="variable-include"></co>
+
+<replaceable>VAR_NAME</replaceable>=<replaceable>value</replaceable> <co xml:id="variable-value"></co>
+
+<replaceable>VAR_ANOTHER</replaceable>=${<replaceable>VAR_NAME_suffix</replaceable>} <co xml:id="variable-variable"></co>
+
+<replaceable>VAR_DYNAMIC</replaceable>=$(uname -r) <co xml:id="variable-command"></co>
+</screen>
+            <calloutlist>
+              <callout arearefs="variable-include">
+                <para>
+                  Include a configuration file that already contains variable definitions for a
+                  certain context. For example, you can include the
+                  <filename>/etc/tuned/cpu-partitioning-variables.conf</filename> file to make
+                  variables such as <literal>isolated_cores</literal> and its values available for
+                  the ongoing profile configuration.
+                </para>
+              </callout>
+              <callout arearefs="variable-value">
+                <para>
+                  Define a variable directly by assigning a value.
+                </para>
+              </callout>
+              <callout arearefs="variable-variable">
+                <para>
+                  Define a variable using another variable.
+                </para>
+              </callout>
+              <callout arearefs="variable-command">
+                <para>
+                  Define a variable using a command output.
+                </para>
+              </callout>
+            </calloutlist>
+            <para>
+              For example, consider the following configuration for variables and its subsequent
+              use in configuring other plug-ins for a profile configuration:
+            </para>
+            <example>
+              <title>Using dynamic variables for plug-in configurations in a &tunedapp; profile</title>
+<screen>
+[variables]
+
+include=/etc/tuned/cpu-partitioning-variables.conf
+
+SWAPPINESS_VALUE=10
+NETWORK_INTERFACE=$(ip -o -4 route show to default | awk '{print $5}')
+
+[sysctl]
+vm.swappiness=${SWAPPINESS_VALUE}
+
+[net]
+interface=${NETWORK_INTERFACE}
+disable_offload=yes
+</screen>
+            </example>
+            <para>
+              For more technically involved variable definitions, inspect the
+              <literal>[variables]</literal> plug-in configurations available in the supported
+              profile configuration files. To get a list of such profile configuration paths where
+              the <literal>[variables]</literal> plug-in is included, run the following command:
+            </para>
+<screen>&prompt.sudo;<command>grep -r '\[.*\]' /usr/lib/tuned/*/tuned.conf | sort -u | grep variables
+</command></screen>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>sysctl</term>
+          <listitem>
+            <para>
+              The <literal>sysctl</literal> plug-in offers a powerful way to customize several
+              kernel parameters at runtime. This allows system administrators to optimize system
+              performance, enhance security, and adjust network behavior without directly editing
+              system files or running manual sysctl commands.
+            </para>
+            <para>
+              The <literal>sysctl</literal> plug-in accepts a wide range of parameters. Certain
+              common categories include:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  Kernel parameters (<parameter>kernel.*</parameter>)
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  Virtual Memory parameters (<parameter>vm.*</parameter>)
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  Network parameters (<parameter>net.*</parameter>)
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  File system parameters (<parameter>fs.*</parameter>)
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              where <literal>*</literal> is the wild card expression denoting permissible
+              parameters for that category. When applying these parameters, &tunedapp; might use
+              the <command>sysctl</command> under the hood. For example:
+            </para>
+<screen>&prompt.user;<command>sysctl -q -w
+<replaceable>CATEGORY.PARAMETER=VALUE</replaceable></command></screen>
+            <para>
+              Common parameters and their possible values for the <literal>sysctl</literal> plug-in
+              are summarized below:
+            </para>
+            <important>
+              <title>Understand the impact before modifying <literal>sysctl</literal> parameters</title>
+              <para>
+                Modifying these parameters can considerably impact system behavior. It is crucial
+                to understand their implications before making changes. Consult the official kernel
+                documentation for detailed descriptions.
+              </para>
+            </important>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>kernel.hung_task_timeout_secs</parameter>: Time in seconds before a
+                  task is considered hung (default: <literal>120</literal>).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.numa_balancing</parameter>: Enable (<literal>1</literal>) or
+                  disable (<literal>0</literal>) automatic NUMA balancing.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.nmi_watchdog</parameter>: Enable (<literal>1</literal>) or
+                  disable (<literal>0</literal>) the NMI watchdog.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.timer_migration</parameter>: Enable (<literal>1</literal>) or
+                  disable (<literal>0</literal>) timer migration.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.sched_autogroup_enabled</parameter>: Enable
+                  (<literal>1</literal>) or disable (<literal>0</literal>) scheduler autogrouping.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.sched_min_granularity_ns</parameter>: Minimum preemption
+                  granularity (in nanoseconds) for CPU-bound tasks.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.sched_migration_cost_ns</parameter>: The time (in nanoseconds)
+                  the scheduler considers a migrated process <quote>cache hot</quote>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.stat_interval</parameter>: Interval between updates of virtual
+                  machine statistics (default: <literal>1</literal>).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.dirty_ratio</parameter>: The percentage of system memory that can
+                  be filled with dirty pages before the processes must write them to disk.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.dirty_background_ratio</parameter>: The percentage of system memory
+                  that can be filled with dirty pages before the background writeback process
+                  starts writing them to disk.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.swappiness</parameter>: The tendency of the kernel to swap out idle
+                  processes. A swappiness of <literal>0</literal> instructs the kernel to keep the
+                  processes in the main memory for as long as possible.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.max_map_count</parameter>: Maximum number of memory map areas a
+                  process may have.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.core.busy_read</parameter>: Number of busy loops for
+                  <literal>recvmsg</literal> (default: <literal>50</literal>).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.core.busy_poll</parameter>: Number of busy loops for
+                  <literal>poll</literal> (default: <literal>50</literal>).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.tcp_fastopen</parameter>: Enable (<literal>1</literal>) or
+                  disable (<literal>0</literal>) TCP Fast Open.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.tcp_rmem</parameter>: TCP read buffer size (minimum, default
+                  and maximum values separated by space).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.tcp_wmem</parameter>: TCP write buffer size (minimum, default
+                  and maximum values separated by space).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.udp_mem</parameter>: UDP buffer size (minimum, default and
+                  maximum values separated by space).
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.aio-max-nr</parameter>: Maximum number of allowed concurrent
+                  asynchronous I/O requests.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.file-max</parameter>: Maximum number of file handles that the Linux
+                  kernel allocates.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.inotify.max_user_instances</parameter>: Maximum number of
+                  <literal>inotify</literal> instances per user.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.inotify.max_user_watches</parameter>: Maximum number of
+                  <literal>inotify</literal> watches per user.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.nr_open</parameter>: Maximum number of file descriptors a process
+                  can have.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.suid_dumpable</parameter>: Controls whether core dumps are produced
+                  for set-user-ID or set-group-ID programs.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              As an example, consider the following configuration for the <literal>sysctl</literal>
+              plug-in:
+            </para>
+            <example>
+              <title>Sample configuration for the <literal>sysctl</literal> plug-in in a &tunedapp; profile</title>
+<screen>
+[sysctl]
+
+# Kernel Parameters
+kernel.hung_task_timeout_secs = 600
+kernel.nmi_watchdog = 0
+kernel.timer_migration = 1
+kernel.sched_autogroup_enabled = 1
+kernel.sched_min_granularity_ns = 10000000
+kernel.sched_migration_cost_ns = 5000000
+kernel.sched_latency_ns = 60000000
+kernel.sched_wakeup_granularity_ns = 2000000
+kernel.numa_balancing = 0
+
+# Virtual Machine Parameters
+vm.stat_interval = 10
+vm.dirty_ratio = 10
+vm.dirty_background_ratio = 3
+vm.swappiness = 10
+vm.max_map_count = 800000
+
+# Network Parameters
+net.core.busy_read = 50
+net.core.busy_poll = 50
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_rmem = "4096 87380 16777216"
+net.ipv4.tcp_wmem = "4096 16384 16777216"
+net.ipv4.udp_mem = "3145728 4194304 16777216"
+
+# Filesystem Parameters
+fs.aio-max-nr = 1048576
+fs.file-max = 2097152
+fs.inotify.max_user_instances = 1024
+fs.inotify.max_user_watches = 524288
+fs.nr_open = 1048576
+fs.suid_dumpable = 1
+</screen>
+            </example>
+            <tip>
+              <title>Best practices for changing <literal>sysctl</literal> settings</title>
+              <para>
+                Optimal sysctl settings can vary greatly depending on the specific use case,
+                hardware and workload of your system. It is recommended to test changes thoroughly
+                and monitor system performance after applying new sysctl configurations.
+              </para>
+            </tip>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>sysfs</term>
+          <listitem>
+            <para>
+              The <literal>sysfs</literal> plug-in accepts any valid file path under the system
+              file system, or the <filename>/sys/</filename> directory. The plug-in checks whether
+              a file path is valid and can read and write the values in the files that are part of
+              the configuration. For example, consider the following configuration of the
+              <literal>sysfs</literal> plug-in:
+            </para>
+            <example>
+              <title><literal>sysfs</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+[sysfs]
+/sys/bus/workqueue/devices/writeback/cpumask = 2,6 <co xml:id="non-isolated-cpu-mask-value"></co>
+/sys/devices/virtual/workqueue/cpumask = 3-5 <co xml:id="non-isolated-cpu-mask-range"></co>
+/sys/devices/system/machinecheck/machinecheck*/ignore_ce = 1 <co xml:id="ignore-ce"></co>
+</screen>
+            </example>
+            <calloutlist>
+              <callout arearefs="non-isolated-cpu-mask-value">
+                <para>
+                  Single CPUs separated by comma. Only those CPUs that are not isolated using the
+                  <parameter>isolcpus</parameter> kernel boot parameter are allowed. To check the
+                  CPUs that are already isolated, run the <command>grep isolcpus
+                  /proc/cmdline</command> command. To check the total number of CPUs in your
+                  system, run the <command>lscpu | grep "^CPU(s):"</command> command.
+                </para>
+              </callout>
+              <callout arearefs="non-isolated-cpu-mask-range">
+                <para>
+                  Range of CPUs. Only those CPUs that are not isolated using the
+                  <parameter>isolcpus</parameter> kernel boot parameter are allowed. To check the
+                  CPUs that are already isolated, run the command <command>grep isolcpus
+                  /proc/cmdline</command>. To check the total number of CPUs in your system, run
+                  the <command>lscpu | grep "^CPU(s):"</command> command.
+                </para>
+              </callout>
+              <callout arearefs="ignore-ce">
+                <para>
+                  Corrected Errors (CEs) are hardware errors that the system has detected and
+                  corrected automatically. The <literal>ignore_ce</literal> attribute is a sysfs
+                  setting that controls whether the system must report these corrected errors. When
+                  <literal>ignore_ce</literal> is set to <literal>1</literal>, the system ignores
+                  corrected errors, meaning they are not logged or reported to the operating
+                  system's error handling mechanisms. When <literal>ignore_ce</literal> is set to
+                  <literal>0</literal> (the default value), corrected errors are reported and
+                  logged by the system, allowing administrators to monitor them.
+                </para>
+              </callout>
+            </calloutlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>systemd</term>
+          <listitem>
+            <para>
+              The <literal>systemd</literal> plug-in focuses on configuring the parameters of
+              &systemd;, which is the system and service manager for &sles;. For example, consider
+              the plug-in configuration for CPU affinity of &systemd; processes:
+            </para>
+            <example>
+              <title><literal>systemd</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+[systemd]
+cpu_affinity=0,1,2 <co xml:id="systemd-plugin-cpu-affinity"></co>
+</screen>
+              <calloutlist>
+                <callout arearefs="systemd-plugin-cpu-affinity">
+                  <para>
+                    Binds the systemd services to multiple specified CPU cores. By default, it is
+                    <literal>None</literal>. In this example, the services are configured to run on
+                    CPU cores <literal>0</literal>, <literal>1</literal>, and <literal>2</literal>.
+                    Alternate ways of passing the values include passing a range of CPU cores, such
+                    as <literal>0-2</literal>. However, you <emphasis>cannot</emphasis> pass on the
+                    CPU cores as values which you have declared as
+                    <parameter>isolated_cores</parameter> in the file
+                    <filename>/etc/tuned/cpu-partitioning-variables.conf</filename>. Configuring
+                    the <parameter>cpu_affinity</parameter> parameter in the plug-in is equivalent
+                    to configuring the <parameter>CPUAffinity</parameter> in the &systemd;
+                    configuration file <filename>/etc/systemd/system.conf</filename>.
+                  </para>
+                </callout>
+              </calloutlist>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>script</term>
+          <listitem>
+            <para>
+              The <literal>script</literal> plug-in allows users to execute custom scripts that
+              &tunedapp; runs at different stages. System administrators can use it to automate
+              several system configurations and optimizations by specifying paths to such scripts.
+              Common parameters and their possible values include the following:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>priority</parameter>: An integer value that sets the priority level
+                  for the script. &tunedapp; executes scripts based on their priority, with lower
+                  numbers indicating higher priority. So, a priority of <literal>5</literal> means
+                  this script has a low priority compared to scripts with a priority number lower
+                  than <literal>5</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>script</parameter>: This specifies the path to the script that
+                  &tunedapp; executes. You can either provide the absolute path to the script as
+                  its value, or use the <varname>PROFILE_DIR</varname> variable to pass the
+                  relative path to the script.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              For example, consider the following use of a relative script path:
+            </para>
+            <example>
+              <title>Using variables for including a relative script path in a &tunedapp; profile</title>
+<screen>
+[script]
+priority=5
+script=${i:PROFILE_DIR}/script.sh
+</screen>
+            </example>
+            <tip>
+              <title>Resource for definition of variables</title>
+              <para>
+                For a list of useful variables, inspect the constants defined in the source file
+                <link xlink:href="https://github.com/redhat-performance/tuned/blob/&tunedver;/tuned/consts.py"></link>.
+              </para>
+            </tip>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>scheduler</term>
+          <listitem>
+            <para>
+              The <literal>scheduler</literal> plug-in is used to manage the isolation of CPU cores
+              and the selection of processes for management based on adding to an approved list or
+              a blocklist. This plug-in is primarily concerned with isolating specific CPU cores
+              and managing which processes should or should not be managed by the scheduler.
+              Commonly used parameters and their possible values include the following:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>isolated_cores</parameter>: Isolates specific CPU cores from the
+                  general scheduler. Processes can be pinned to these isolated cores to ensure they
+                  run without interference from other system processes. To pass values to this
+                  parameter, use comma-separated integers representing the cores, or the bitmask of
+                  the integers in the hexadecimal format. For example,
+                  <literal>isolated_cores=0,1</literal> can also be represented by
+                  <literal>0x3</literal> in a more compact manner.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>ps_whitelist</parameter>: A list of allowed process names that the
+                  scheduler plug-in is empowered to manage. Only processes matching this pattern
+                  are considered for scheduling adjustments. Pass regular expressions of process
+                  names as values to this parameter. For example, <literal>.*</literal> matches all
+                  processes, and <literal>^bash$</literal> matches only the <literal>bash</literal>
+                  process.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>ps_blacklist</parameter>: A list of process names that the plug-in
+                  excludes from management. Processes matching this pattern are not adjusted by the
+                  plug-in. Pass regular expressions of process names as values to this parameter.
+                  For example, <literal>.*</literal> matches all processes, and
+                  <literal>^idle$</literal> matches only the <literal>idle</literal> process.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              For example, consider the following configuration for the
+              <literal>scheduler</literal> plug-in:
+            </para>
+            <example>
+              <title><literal>scheduler</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+isolated_cores=0x3
+ps_whitelist=.*
+ps_blacklist=^idle$;.*pmd.*;.*PMD.*;^DPDK;.*qemu-kvm.*
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>bootloader</term>
+          <listitem>
+            <para>
+              The <literal>bootloader</literal> plug-in is used to apply performance profiles that
+              require changes to the boot parameters of the system. These changes are made in the
+              boot loader configuration file (typically &grub; configuration) and are applied when
+              the system boots up. This plug-in is particularly useful for optimizing system
+              performance by setting specific kernel parameters, such as those controlling CPU
+              isolation or power management, as well as other boot-time settings that can affect
+              the overall system behavior and performance.
+            </para>
+            <para>
+              Common parameters and their values are summarized below:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>grub2_cfg_file</parameter>: Specifies the &grub; configuration file to
+                  modify. If not provided, the plug-in uses the default GRUB2 configuration files
+                  located in the system.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_dst_img</parameter>: Sets the destination path for the initrd
+                  image. If specified, the initrd image is copied to this location. The path must
+                  be absolute, and if it is not provided, the default boot directory is used.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_add_img</parameter>: Adds the path to an initrd image in the
+                  &grub; configuration, so that custom initrd images can be used during the boot
+                  process.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_add_dir</parameter>: Adds a directory to be included in the
+                  initrd image. This parameter specifies the path to a directory whose contents are
+                  packaged into an initrd image and included in the boot configuration. This is
+                  useful for adding custom modules or scripts to the initrd.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_remove_dir</parameter>: A boolean option to specify whether to
+                  remove the directory specified in <parameter>initrd_add_dir</parameter> after it
+                  has been packaged into the initrd image. If set to <literal>True</literal>, the
+                  source directory is deleted after the initrd image is created.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>cmdline</parameter>: Specifies additional kernel command-line
+                  parameters to be added to the &grub; configuration. This allows the addition of
+                  custom kernel parameters that can optimize system performance or behavior based
+                  on the specific needs of the workload.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              As an example, consider the following configuration for the
+              <literal>bootloader</literal> plug-in:
+            </para>
+            <example>
+              <title><literal>bootloader</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+[bootloader]
+cmdline="isolcpus=1-3 nohz_full=1-3 intel_pstate=disable"
+initrd_add_img="/path/to/custom-initrd.img"
+initrd_add_dir="/path/to/custom-initrd-dir"
+initrd_remove_dir=True
+initrd_dst_img="/boot/initrd-custom.img"
+grub2_cfg_file="/etc/grub2.cfg"
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>net</term>
+          <listitem>
+            <para>
+              The <literal>net</literal> plug-in is used to configure several parameters for
+              optimizing network performance. Common parameters and their values used with this
+              plug-in are summarized below:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>devices</parameter>: Specifies a comma-separated list of the network
+                  device names. For example, <literal>devices=eth0,eth1</literal>. By default, the
+                  settings are applied on all network devices.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>dynamic</parameter>: Boolean values
+                  (<literal>true</literal>/<literal>false</literal>) that enable or disable dynamic
+                  tuning based on network load.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>wake_on_lan</parameter>: Configure Wake-on-LAN (WoL) settings using
+                  any combination of the following characters:
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>p</literal>: Wake on PHY activity.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>u</literal>: Wake on unicast messages.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>m</literal>: Wake on multicast messages.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>b</literal>: Wake on broadcast messages.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>a</literal>: Wake on ARP.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>g</literal>: Wake on MagicPacket<superscript>TM</superscript>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>s</literal>: Enable SecureOn<superscript>TM</superscript> for
+                      MagicPacket<superscript>TM</superscript>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>d</literal>: Disable WoL.
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>nf_conntrack_hashsize</parameter>: Integer value setting the size of
+                  the connection-tracking hash table.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>features</parameter>: A dictionary of network device feature names and
+                  their desired states. For example, <literal>tx-checksum: off, sg: on</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>coalesce</parameter>: A dictionary of packet coalescing parameters.
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>adaptive-rx</literal> and <literal>adaptive-tx</literal> have the
+                      possible values <literal>on</literal> or <literal>off</literal>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      The following ones have integer values: <literal>rx-usecs</literal>,
+                      <literal>rx-frames</literal>, <literal>rx-usecs-irq</literal>,
+                      <literal>rx-frames-irq</literal>, <literal>tx-usecs</literal>,
+                      <literal>tx-frames</literal>, <literal>tx-usecs-irq</literal>,
+                      <literal>tx-frames-irq</literal>, <literal>stats-block-usecs</literal>,
+                      <literal>pkt-rate-low</literal>, <literal>rx-usecs-low</literal>,
+                      <literal>rx-frames-low</literal>, <literal>tx-usecs-low</literal>,
+                      <literal>tx-frames-low</literal>, <literal>pkt-rate-high</literal>,
+                      <literal>rx-usecs-high</literal>, <literal>rx-frames-high</literal>,
+                      <literal>tx-usecs-high</literal>, <literal>tx-frames-high</literal>,
+                      <literal>sample-interval</literal>
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>pause</parameter>: A dictionary of pause frame parameters. The
+                  following pause frame parameters have <literal>on</literal> or
+                  <literal>off</literal> values: <literal>autoneg</literal>, <literal>rx</literal>
+                  and <literal>tx</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>ring</parameter>: A dictionary of ring buffer sizes. Each of the
+                  following ring buffer size parameter has integer values: <literal>rx</literal>,
+                  <literal>rx-mini</literal>, <literal>rx-jumbo</literal> and
+                  <literal>tx</literal>.
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              As an example of configuring network device parameters, consider the following:
+            </para>
+            <example>
+              <title><literal>net</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+[net]
+devices=eth0,eth1
+dynamic=true
+wake_on_lan=g
+nf_conntrack_hashsize=16384
+features=tx-checksum:off, sg:on
+coalesce=adaptive-rx:on, rx-usecs:50, rx-frames:32
+pause=autoneg:on, rx:on, tx:off
+ring=rx:2048, tx:1024
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>vm</term>
+          <listitem>
+            <para>
+              The <literal>vm</literal> plug-in optimizes memory management in virtualized
+              environments. It provides mechanisms for tuning memory-related parameters,
+              specifically focusing on the management of Transparent Hugepages (THP). Commonly used
+              parameters and their values for this plug-in include the following:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>transparent_hugepage</parameter> or
+                  <parameter>transparent_hugepages</parameter>: Often used interchangeably, these
+                  parameters are aliases for each other and perform the function of controlling the
+                  behavior of Transparent Hugepages. The common properties and values associated
+                  with this parameter are as follows:
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>enabled</literal>: Controls the overall enabling of transparent
+                      hugepages. Possible values are <literal>always</literal>,
+                      <literal>madvise</literal> and <literal>never</literal>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>defrag</literal>: Determines when, if defragmentation should occur.
+                      Possible values are <literal>always</literal>, <literal>defer</literal>,
+                      <literal>madvise</literal>, <literal>defer+madvise</literal> and
+                      <literal>never</literal>.
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>khugepaged</literal>: Configures settings related to the khugepaged
+                      daemon, including options such as <literal>scan_sleep_millisecs</literal> and
+                      <literal>alloc_sleep_millisecs</literal>.
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+            </itemizedlist>
+            <para>
+              For example, consider the following configuration of the <literal>vm</literal>
+              plug-in in a &tunedapp; profile:
+            </para>
+            <example>
+              <title><literal>vm</literal> plug-in configuration in a &tunedapp; profile</title>
+<screen>
+[vm]
+transparent_hugepages.enabled=always
+transparent_hugepage.defrag=always
+transparent_hugepages.khugepaged.scan_sleep_millisecs=10000
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>eeepc_she</term>
+          <listitem>
+            <para>
+              The <literal>eeepc_she</literal> plug-in enhances power management on ASUS EeePC
+              netbooks, specifically those equipped with the Super Hybrid Engine (SHE) technology.
+              It optimizes system performance by dynamically adjusting CPU frequencies and power
+              states to achieve a balance between energy efficiency and processing power. The
+              commonly used parameters and their values are as follows:
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>load_threshold_normal</parameter>: Threshold for load to switch to
+                  normal mode. Default value is <literal>0.6</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>load_threshold_powersave</parameter>: Threshold for load to switch to
+                  powersave mode. Default value is <literal>0.4</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>she_powersave</parameter>: Value to set SHE to power saving mode.
+                  Default value is <literal>2</literal>.
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>she_normal</parameter>: Value to set SHE to normal mode. Default value
+                  is <literal>1</literal>.
+                </para>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-more">
+    <title>More information</title>
+
+    <para>
+      For more information, refer to the following resources:
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          The official Web site of the &tunedapp; project:
+          <link xlink:href="https://tuned-project.org/"></link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          Source code repository on GitHub:
+          <link
+          xlink:href="https://github.com/redhat-performance/tuned"></link>. You may
+          find the following resources to be particularly helpful:
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              Configuration files for several profiles are available at
+              <link
+              xlink:href="https://github.com/redhat-performance/tuned/tree/&tunedver;/profiles"></link>.
+              These configuration examples can provide a good starting point for creating a custom
+              profile that is not available as part of the <package>tuned</package> package for
+              &sles;.
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              If you are interested in implementing the plug-ins that monitor and dynamically tune
+              the system based on values provided in the profiles, the source code is available at
+              <link xlink:href="https://github.com/redhat-performance/tuned/tree/&tunedver;/tuned/plugins"></link>.
+            </para>
+          </listitem>
+        </itemizedlist>
+      </listitem>
+    </itemizedlist>
+
+    <tip>
+      <title>Refer to appropriate version of &tunedapp; source code</title>
+      <para>
+        Check for the version of &tuned; in your &sles; system by running the <command>tuned
+        --version</command> command. On the GitHub repository, select the corresponding branch or
+        tag for inspecting the source code of the specific &tuned; version installed on your
+        system.
+      </para>
+    </tip>
+  </sect1>
+</chapter>
