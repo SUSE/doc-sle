@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE chapter
+[
+<!ENTITY % entities SYSTEM "generic-entities.ent">
+%entities;
+]>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="vm_security.xml" version="5.0" xml:id="cha-vm-security">
+<title>Enhancing virtual machine security with AMD SEV-SNP</title>
+<info>
+<abstract>
+<para>You can enhance the security of your virtual machines with AMD Secure Encrypted Virtualization-Secure Nested Paging (SEV-SNP). The AMD SEV-SNP feature isolates virtual machines from the host system and other VMs, protecting the data and code. This feature encrypts data and ensures that all changes with the code and data in the VM are detected or tracked. Since this isolates VMs, the other VMs or the host machine are not affected with threats.</para>
+<para>This section explains the steps to enable and use AMD SEV-SNP on your AMD EPYC server with &productname; &productnumber;.</para>
+</abstract>
+<abstract>
+<note>
+<title>Technology preview for &productname; 15 SP6</title>
+<para>
+This feature is shipped as a technology preview in &productname; 15 SP6. The necessary packages are not part of the default installation or repositories. These packages are shipped via confidential compute module.
+</para>
+</note>
+</abstract>
+<dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+<dm:bugtracker/>
+<dm:translation>yes</dm:translation>
+</dm:docmanager>
+</info>
+<sect1 xml:id="vm-security-hardware-support">
+<title>Supported hardware</title>
+
+<para>
+A system with an AMD EPYC (3rd Gen or newer) is required to run AMD SEV-SNP virtual machines. The BIOS of the AMD machine must provide the necessary options to enable support for confidential computing on the platform.</para>
+</sect1>
+<sect1 xml:id="vm-security-enable-confidential-compute-module">
+<title>Enabling confidential compute module</title>
+
+<para>The necessary packages for AMD SEV-SNP feature are shipped via confidential compute module. You must enable it at system installation time or later via the SUSEConnect command-line tool.</para>
+<itemizedlist>
+<listitem>
+<para>To check whether the module is already enabled, run the command:
+</para>
+<screen> &prompt.sudo; suseconnect -l</screen>
+<para>This displays the list of available modules with their activation status and commands to enable the inactive modules.</para>
+<para>The inactive confidential compute module appears as given below:</para>
+<screen>Confidential Computing Technical Preview Module 15 SP6 x86_64
+Activate with: suseconnect -p sle-module-confidential-computing/15.6/x86_64</screen>
+</listitem>
+<listitem> <para>To enable the confidential computing module technology preview, run the command:</para>
+<screen> &prompt.sudo; <command>suseconnect -p sle-module-confidential-computing/15.6/x86_64</command>
+Registering system to SUSE Customer Center
+Updating system details on https://scc.suse.com ...
+Activating sle-module-confidential-computing 15.6 x86_64 ...
+Adding service to system ...
+Installing release package ...
+Successfully registered system</screen>
+<para>The confidential compute module is enabled and you can install the packages.</para>
+</listitem>
+</itemizedlist>
+</sect1>
+<sect1 xml:id="vm-security-verify-setup">
+<title>Installing packages and setting up the base system</title>
+
+<para>
+The confidential compute module provides replacement packages supporting AMD SEV-SNP. To ensure a maximum of compatibility, these packages are based on the code streams from &productname; &productnumber;.</para>
+<para>The three components that need to be replaced are:</para>
+<itemizedlist>
+<listitem>
+<para>The Linux kernel</para>
+</listitem>
+<listitem>
+<para>QEMU Virtual Machine Monitor</para>
+</listitem>
+<listitem>
+<para>&libvirt; framework</para>
+</listitem>
+</itemizedlist>
+<procedure>
+<step>
+<para>To install the replacement packages, run the command:</para>
+<screen>
+&prompt.sudo; <command>zypper install --from SLE-Module-Confidential-Computing-15-SP6-Pool --from SLE-Module-Confidential-Computing-15-SP6-Updates qemu libvirt</command></screen>
+<para>After replacing the packages, you must set up the system with a configuration change to make the AMD SEV-SNP feature ready to use. The IOMMU on the host side must be configured in non-passthrough mode. This is required to prevent peripheral devices from writing to memory that belongs to an encrypted guest and destroying its data integrity. The default IOMMU configuration in &productname; &productnumber; is <literal>passthrough</literal> mode.</para>
+</step>
+<step>
+<para>To disable the IOMMU configuration in &productname; &productnumber;, open the <filename>/etc/default/grub</filename> file and add <literal>iommu=nopt</literal> to the <varname>GRUB_CMDLINE_LINUX_DEFAULT</varname> variable. </para>
+</step>
+<step><para>To update the bootloader configuration, run the command:</para>
+<screen>&prompt.sudo;; <command>update-bootloader</command></screen></step>
+<step><para>The system is now ready to be restarted with the confidential computing kernel. It is not selected as the default kernel in the bootloader, so ensure to select it in the boot menu.</para></step>
+</procedure>
+</sect1>
+<sect1 xml:id="vm-verify-setup">
+<title>Verifying setup</title>
+<para>You can verify the installation and configuration of the packages.</para>
+<procedure>
+<step><para>To verify whether the system has started with the new kernel, check the response for the command <command>uname -r</command>.</para>
+<screen>&prompt.sudo; <command>uname -r</command> <replaceable>6.4.0-150616.coco15sp6-coco</replaceable></screen>
+<para>Ensure that the kernel version displayed contains the coco tag.</para></step>
+<step><para>To check the initialization result of the AMD Secure Processor in the kernel log when the kernel is running, run the command:</para>
+<screen>&prompt.sudo; <command>dmesg | grep -i ccp</command>
+[ 10.103166] ccp 0000:42:00.1: enabling device (0000 -> 0002)
+[ 10.114951] ccp 0000:42:00.1: no command queues available
+[ 10.127137] ccp 0000:42:00.1: sev enabled
+[ 10.133152] ccp 0000:42:00.1: psp enabled
+[ 10.240817] ccp 0000:42:00.1: SEV firmware update successful
+[ 11.128307] ccp 0000:42:00.1: SEV API:1.55 build:8
+[ 11.135057] ccp 0000:42:00.1: SEV-SNP API:1.55 build:8</screen>
+<para>The message about the SEV-SNP API version indicates the successful initialization of the AMD Secure Processor. Sometimes it happens that these messages do not appear in the kernel log. In this case the BIOS settings or the IOMMU configuration are often the root-cause.</para>
+</step>
+</procedure>
+</sect1>
+<sect1 xml:id="vm-launch-amd-sv-snp-vm">
+<title>Launching an AMD SEV-SNP Virtual Machine</title>
+<para>
+You can run AMD SEV-SNP protected virtual machines using the &libvirt; framework once the confidential computing kernel is booted and the AMD Security Processor is initialized.</para>
+<para>&libvirt; has several ways of setting up new virtual machines, this document uses a prepared disk image and the virt-manager graphical user interface.</para>
+<procedure>
+<step><para>Connect virt-manager to the AMD EPYC host and create a new virtual machine.</para></step>
+<step><para>In the Create a new virtual machine window, select the details:</para>
+<itemizedlist><listitem><para>Select how you want to install the operating system.</para></listitem>
+<listitem><para>Select the ISO or CDROM install media.</para></listitem>
+<listitem><para>Select the memory and CPU settings.</para></listitem>
+<listitem><para>Select the required storage details.</para></listitem>
+</itemizedlist></step>
+<step><para>In the fifth step, verify the details and select <guilabel>Customize configuration before install</guilabel>.</para>
+<figure>
+<title>Create Virtual Machine</title>
+<mediaobject>
+<imageobject role="fo">
+<imagedata fileref="vm_security_create_vm.png" width="75%"/>
+</imageobject>
+<imageobject role="html">
+<imagedata fileref="vm_security_create_vm.png" width="75%"/>
+</imageobject>
+</mediaobject>
+</figure>
+</step>
+<step><para>Click <guilabel>Finish</guilabel>.</para></step>
+<step>
+<para>Select the XML tab in the virtual machine configuration window.</para>
+<para>In the XML tab, you can edit the XML configuration of the virtual machine used by the &libvirt; back-end.</para>
+<figure>
+<title><guimenu>XML</guimenu> view of virtual machine configuration</title>
+<mediaobject>
+<imageobject role="fo">
+<imagedata fileref="vm_security_create_vm_xml.png" width="75%"/>
+</imageobject>
+<imageobject role="html">
+<imagedata fileref="vm_security_create_vm_xml.png" width="75%"/>
+</imageobject>
+</mediaobject>
+</figure>
+</step>
+<step>
+<para>
+To protect the virtual machine with AMD SEV-SNP, set the correct firmware by modifying the &lt;os&gt; section as given below:</para>
+<screen>
+&lt;os&gt;
+&lt;type arch="x86_64" machine="pc-q35-8.2"&gt;hvm /type&gt;
+&lt;loader readonly="yes" type="rom"&gt;/usr/share/qemu/ovmf-x86_64-sev.bin /loader&gt;
+&lt;boot dev="hd"/&gt;
+/os&gt; </screen>
+<para>The &lt;loader&gt; line sets the firmware to the SEV version of OVMF.</para>
+</step>
+<step><para>Add a &lt;launchSecurity&gt; section. For AMD SEV-SNP, the section looks like this:</para>
+<screen>&lt;launchSecurity type="sev-snp"&gt;
+&lt;policy&gt;0x00030000&lt;/policy&gt;
+&lt;/launchSecurity&gt;</screen></step>
+<step>
+<para>Click <guilabel>Apply</guilabel> and then click the <guilabel>Details</guilabel> tab.</para>
+</step>
+<step>
+<para>Select CPUs in the left-hand list, and set the CPU type to host-model:</para>
+<figure>
+<title><guimenu>Details</guimenu> view of virtual machine configuration</title>
+<mediaobject>
+<imageobject role="fo">
+<imagedata fileref="vm_security_create_vm_details.png" width="75%"/>
+</imageobject>
+<imageobject role="html">
+<imagedata fileref="vm_security_create_vm_details.png" width="75%"/>
+</imageobject>
+</mediaobject>
+</figure>
+</step>
+<step>
+<para>Click <guilabel>Apply</guilabel> and click <guilabel>Begin Installation</guilabel>.</para><para>This starts the virtual machine and install it according to your settings. The virtual machine boots up once the process is complete and you can verify the AMD SEV-SNP protection.</para>
+</step>
+</procedure>
+</sect1> 
+<sect1 xml:id="vm-verify-amd-sv-snp-vm">
+<title>Verifying the AMD SEV-SNP virtual machine</title>
+<para>
+From the appearance of the virtual machine one can not tell whether it runs in a confidential computing environment or not. But there are several ways to verify that from within the virtual machine.</para>
+<para>To check the kernel log, run the command:</para>
+<screen>&prompt.sudo; <command>dmesg | grep -i sev-snp</command>
+[ 1.986186] Memory Encryption Features active: AMD SEV SEV-ES SEV-SNP</screen>
+<para>The SEV-SNP feature appears in the kernel log among the active memory encryption features shows that the feature is active for the virtual machine.</para>
+<para>There are also cryptographically secure ways for prove the security of the AMD SEV-SNP environment.
+</para>
+</sect1>
+</chapter>
