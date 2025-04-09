@@ -487,13 +487,69 @@
     </para>
 
     <para>
-      The &vmguest; is saved to a state file. Make sure there is enough space
-      on the partition you are going to save to. For an estimation of the file
-      size in megabytes to be expected, issue the following command on the
-      guest:
+      &libvirt; supports several save file formats. The default format is termed
+      <option>raw</option>, and consists of a sequential stream of &vmguest;
+      memory pages. The sequential layout of the <option>raw</option> format is
+      not well suited for multiple readers and writers.
+    </para>
+
+    <para>
+      In addition to the <option>raw</option> save file format, &libvirt; also
+      supports several compressed formats: <option>zstd</option>,
+      <option>lzop</option>, <option>gzip</option>, <option>bzip2</option>,
+      and <option>xz</option>. Similar to the <option>raw</option> format, the
+      compressed formats consist of a sequential stream of &vmguest; memory
+      pages, but are compressed by the named compression algorithm before writing
+      to or reading from the save file. The compression formats can be used to
+      conserve space on the device holding save file, but result in longer
+      save/restore times and increased host CPU usage.
+    </para>
+
+    <para>
+      The <option>sparse</option> save file format uses pre-calculated, fixed
+      offsets within the save file to read/write the &vmguest; memory pages. This
+      results in a save file that is roughly the logical size of the &vmguest;'s
+      memory, although on-disk size is a function of &vmguest;'s actual memory
+      usage. With fixed offsets for the &vmguest; memory pages, the
+      <option>sparse</option> format is well suited to support multiple readers
+      and writers, which may improve save and restore times for large memory
+      &vmguest;s.
+    </para>
+
+    <para>
+      The default save file format can be changed with the
+      <option>save_image_format</option> setting in
+      <filename>/etc/libvirt/qemu.conf</filename>. The format can also be
+      specified when performing a save operation using <command>virsh</command>.
+      See <xref linkend="sec-libvirt-manage-save-virsh"/> for more information on
+      save and restore with <command>virsh</command>.
+    </para>
+
+    <para>
+      Since the &vmguest;'s state is saved to a file, care must be taken to
+      ensure there is enough space on the device hosting the save file. When
+      using the <option>sparse</option> save file format, the logical save
+      file size will be approximately the same size as the &vmguest; memory
+      allocation. However, actual on-disk file size is usually less and is
+      a function of &vmguest; memory usage. Unused memory in the &vmguest;
+      will not be written to the save file, hence the term
+      <literal>sparse</literal>.
+    </para>
+
+    <para>
+      For the <option>raw</option> save file format, the logical file size
+      and on-disk file size will be equivalent, and will also be a function
+      of &vmguest; memory usage. Whether using the <option>raw</option> or
+      <option>sparse</option> formats, the on-disk save file size in megabytes
+      can be estimated by running the following command in the &vmguest;:
     </para>
 
 <screen>&prompt.user;free -mh | awk '/^Mem:/ {print $3}'</screen>
+
+    <para>
+      The compressed formats will result in a smaller on-disk size, depending
+      on the efficiency of the specified compression algorithm.
+    </para>
 
     <warning xml:id="adm-vm-restore">
       <title>Always restore saved guests</title>
@@ -569,28 +625,58 @@
     <sect2 xml:id="sec-libvirt-manage-save-virsh">
       <title>Saving and restoring with <command>virsh</command></title>
       <para>
-        Save a running &vmguest; with the command <command>virsh</command>
-        <option>save</option> and specify the file which it is saved to.
+        &libvirt; provides more control over the save and restore operations
+        than &vmm;. <command>virsh</command><option>save</option> and
+        <command>virsh</command><option>restore</option> support several
+        options to modify the behavior of the operations. In the most basic
+        form, a &vmguest; is saved by providing its name, ID, or UUID, and
+        a file name. For example:
       </para>
-      <variablelist>
-        <varlistentry>
-          <term>Save the guest named <literal>opensuse13</literal></term>
-          <listitem>
-<screen>&prompt.user;virsh save opensuse13 /virtual/saves/opensuse13.vmsav</screen>
-          </listitem>
-        </varlistentry>
-        <varlistentry>
-          <term>Save the guest with the ID <literal>37</literal></term>
-          <listitem>
-<screen>&prompt.user;virsh save 37 /virtual/saves/opensuse13.vmsave</screen>
-          </listitem>
-        </varlistentry>
-      </variablelist>
+<screen>&prompt.user;virsh save openSUSE-Leap /virtual/saves/openSUSE-Leap.vmsav</screen>
       <para>
-        To restore a &vmguest;, use <command>virsh</command>
-        <option>restore</option>:
+        A basic &vmguest; restore operation only requires specifying the save
+        file name. For example:
       </para>
-<screen>&prompt.user;virsh restore /virtual/saves/opensuse13.vmsave</screen>
+<screen>&prompt.user;virsh restore /virtual/saves/openSUSE-Leap.vmsave</screen>
+      <para>
+        As &vmguest; memory size increases, save and restore operations may
+        require additional options to attain satisfactory transfer rates,
+        particularly when the save image files are backed by high throughput
+        storage. The &vmhost; file system cache is often counterproductive
+        in these scenarios and should be avoided with the
+        <option>bypass-cache</option> option. For example:
+      </para>
+<screen>&prompt.user;virsh save --bypass-cache openSUSE-Leap /virtual/saves/openSUSE-Leap.vmsav</screen>
+<screen>&prompt.user;virsh restore --bypass-cache /virtual/saves/openSUSE-Leap.vmsav</screen>
+      <para>
+        The time required to save and restore &vmguest;s to high throughput
+        storage can be improved my using multiple channels to write and read
+        the &vmguest; memory pages. As noted in
+        <xref linkend="sec-libvirt-manage-save"/>, the <option>sparse</option>
+        image format is required to use multiple channels. When selecting the
+        number of channels, care must be taken to ensure the operation does not
+        adversely affect other workloads running on the &vmhost;. When the
+        &vmhost; resources are statically partitioned, general advice would be
+        to use the same number of channels as physical CPUs dedicated to the
+        &vmguest;. The vCPUs of a &vmguest; are stopped at the start of a
+        save operation, thus it would be safe to use those CPU resources
+        to save &vmguest; memory pages.
+      </para>
+      <para>
+        The following examples save and restore a &vmguest; using 4 channels,
+        while also bypassing the &vmhost; file system cache:
+      </para>
+<screen>&prompt.user;virsh save --bypass-cache --image-format sparse --parallel-channels 4 openSUSE-Leap /virtual/saves/openSUSE-Leap.vmsav</screen>
+<screen>&prompt.user;virsh restore --bypass-cache --parallel-channels 4 /virtual/saves/openSUSE-Leap.vmsav</screen>
+      <para>
+        The image format is encoded in the save image file and does not need to
+        be specified on a restore operation.
+      </para>
+      <para>
+        For more information on save/restore and the supported options, see
+        <command>virsh help save</command>, <command>virsh help restore</command>,
+        or <command>man 1 virsh</command>.
+      </para>
     </sect2>
   </sect1>
   <sect1 xml:id="sec-libvirt-managing-snapshots">
