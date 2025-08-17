@@ -1,1 +1,1972 @@
-../../../../xml/tuning_tuned.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="tuning_tuned.xml" version="5.0" xml:id="cha-tuning-tuned">
+  <title>使用 TuneD 进行自适应动态微调</title>
+  <info>
+    <abstract>
+      <para>
+        TuneD 是 Linux 系统的一个守护程序，它会监控 CPU 和磁盘使用情况，并调整特定设置，以在特定工作负载下优化系统性能。其他系统设置（如通过 <command>sysctl</command> 配置的那些）会在服务启动时应用，且保持静态，除非手动重新加载。TuneD 提供了为服务器、虚拟机等常见用例量身定制的预定义微调配置文件，同时支持创建自定义配置文件。TuneD 借助多个微调插件与底层 Linux 子系统交互，对 CPU、磁盘 I/O、网络、虚拟内存、电源管理及其他组件进行微调。
+      </para>
+    </abstract>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker/>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
+  <sect1 xml:id="sec-tuning-tuned-introduction">
+    <title>TuneD 简介</title>
+
+    <para>
+      TuneD 应用程序会根据 CPU、磁盘等不同系统资源的使用情况，监控并调整特定 SUSE Linux Enterprise Server 工作负载上的系统设置。TuneD 的主要目标是在无需手动配置底层系统设置（这些设置可能复杂且容易出错）的情况下，实现能源效率、优化性能和高效的资源利用。
+    </para>
+
+    <para>
+      系统管理员可根据当前的使用场景或系统上的工作负载，应用预定义或自定义的 <emphasis>TuneD 配置文件</emphasis>。这些配置文件包含针对 CPU、磁盘 I/O 调度程序、虚拟内存和电源管理等特定系统组件的设置。系统组件由<emphasis>插件</emphasis>进行管理，这些插件会根据已激活的配置文件设置对系统进行微调。
+    </para>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-components">
+    <title>TuneD 的组件</title>
+
+    <para>
+      TuneD 应用程序由以下关键组件构成：
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term><systemitem class="daemon">tuned</systemitem> 守护程序</term>
+        <listitem>
+          <para>
+            这是在后台运行的核心守护进程，负责监控系统使用情况并应用微调设置。它处理配置文件切换以及其他组件的协调工作。与该守护程序相关联的内容如下：
+          </para>
+          <itemizedlist>
+            <listitem>
+              <para>
+                <command>tuned</command> 命令：在使用 <command>systemctl</command> 启用 TuneD 后即可使用。默认情况下，从终端手动调用时，<command>tuned</command> 以普通进程形式运行。不过，您可使用 <option>--daemon</option> 选项使其以后台进程形式运行。
+              </para>
+            </listitem>
+            <listitem>
+              <para>
+                <systemitem class="daemon">tuned</systemitem> systemd 服务：用于管理守护进程，例如在系统引导时启动守护程序、停止或重启守护程序，以及确保其在必要的权限和环境下运行。
+              </para>
+            </listitem>
+          </itemizedlist>
+          <para>
+            有关详细信息，请查看 <systemitem class="daemon">tuned</systemitem> 手册页。
+          </para>
+<screen><prompt>&gt; </prompt><command>man tuned</command></screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>tuned-adm</term>
+        <listitem>
+          <para>
+            这是一个用于管理 <systemitem class="daemon">tuned</systemitem> 守护程序的命令行实用程序。要了解使用 <command>tuned-adm</command> 管理 <systemitem class="daemon">tuned</systemitem> 守护程序的基础知识，请参见<xref linkend="sec-tuning-use-tuned-adm"/>。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>配置文件</term>
+        <listitem>
+          <para>
+            <emphasis>TuneD 配置文件</emphasis>是一组系统组件设置的集合，可应用于系统以进行微调。系统管理员既可使用随 <package>tuned</package> 软件包一同安装在 <filename>/usr/lib/tuned/</filename> 目录下的受支持配置文件，也可在 <filename>/etc/tuned/</filename> 目录下创建自定义配置文件来应用此类配置文件。如果自定义配置文件与受支持配置文件的文件名相同，则优先应用自定义配置文件。有关详细信息，请访问 <xref linkend="sec-tuning-tuned-profiles"/>。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>插件</term>
+        <listitem>
+          <para>
+            <emphasis>TuneD 插件</emphasis>是针对不同子系统的微调逻辑实现。当配置文件中包含与其控制的子系统相关的设置时，会调用插件。插件根据相关设置的值对该子系统进行微调。一些关键且最常用的插件用于管理 CPU、磁盘、网络、虚拟机、视频和音频等子系统。此外，我们还提供了可选的监控插件，用于监控特定子系统并将相关信息传递给守护程序，以进行动态微调。有关详细信息，请访问 <xref linkend="sec-tuning-tuned-plugins"/>。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>扩展脚本</term>
+        <listitem>
+          <para>
+            系统管理员可通过自定义脚本来扩展 TuneD 配置文件和插件的生态系统，这些脚本可在应用配置文件之前或之后执行。要使用扩展脚本，需在配置文件配置中指定脚本的路径和类型。这种可扩展性支持实现自定义微调逻辑，并能更好地控制整个配置文件应用过程。有关详细信息，请参见<xref linkend="sec-tuning-tuned-profile-hooks"/>。
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-management">
+    <title>管理 TuneD</title>
+
+    <para>
+      本节介绍用于在 SUSE Linux Enterprise Server 上管理 <systemitem class="daemon">tuned</systemitem> 服务生命周期的基本任务。内容包括如何安装来自官方储存库的 <package>tuned</package> 软件包、启用和禁用相关的 systemd 服务以实现自动启动，以及将 <systemitem class="daemon">tuned</systemitem> 守护程序作为由 systemd 管理的后台进程运行或作为普通的前台进程运行。对 <systemitem class="daemon">tuned</systemitem> 服务进行妥善管理可确保动态微调功能在需要时可用且能得到有效控制，从而让您能够根据需求优化系统性能和资源利用率。
+    </para>
+
+    <sect2 xml:id="sec-tuning-tuned-installation">
+      <title>安装 TuneD</title>
+      <para>
+        安装受支持版本的 TuneD 的推荐方法是使用 <command>zypper</command> 软件包管理器安装 <package>tuned</package> 软件包。
+      </para>
+      <note>
+        <title><package>tuned</package> 仅适用于 SUSE Linux Enterprise Server</title>
+        <para>
+          <package>tuned</package> 软件包仅在 SUSE Linux Enterprise Server 官方储存库中提供。SUSE Linux Enterprise Desktop 官方储存库中没有对应的软件包。
+        </para>
+      </note>
+      <procedure>
+        <step>
+          <para>
+            运行以下命令安装 <systemitem class="daemon">tuned</systemitem> 守护程序、命令行实用程序、配置文件和插件：
+          </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>zypper install -y tuned</command></screen>
+        </step>
+        <step>
+          <para>
+            运行以下命令确认安装结果：
+          </para>
+<screen><prompt>&gt; </prompt><command>tuned --help</command></screen> <screen><prompt>&gt; </prompt><command>tuned-adm --help</command></screen>
+        </step>
+        <step performance="optional">
+          <para>
+            要了解更多信息，请查看 <literal>tuned</literal>、<literal>tuned-adm</literal>、<literal>tuned-profiles</literal> 和 <literal>tuned.conf</literal> 的<emphasis>手册页</emphasis>。
+          </para>
+        </step>
+      </procedure>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-enable">
+      <title>启用 <systemitem class="daemon">tuned</systemitem></title>
+      <para>
+        要启用 <systemitem class="daemon">tuned</systemitem>，请执行以下过程：
+      </para>
+      <procedure>
+        <step>
+          <para>
+            检查 <systemitem class="daemon">tuned</systemitem> 服务的状态：
+          </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl status tuned</command></screen>
+          <para>
+            默认情况下，该服务处于<emphasis>禁用</emphasis>状态。
+          </para>
+        </step>
+        <step>
+          <para>
+            如果要启用 systemd 服务以确保 <systemitem class="daemon">tuned</systemitem> 守护程序在未来系统引导时自动启动，请运行以下命令：
+          </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl enable tuned</command></screen>
+          <para>
+            不过，此命令不会启动 <systemitem class="daemon">tuned</systemitem> 过程。如果现在检查 systemd 服务的状态，它应该处于<emphasis>已启用</emphasis>但<emphasis>非活动</emphasis>状态。
+          </para>
+        </step>
+      </procedure>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-start">
+      <title>启动 <systemitem class="daemon">tuned</systemitem></title>
+      <para>
+        为 <systemitem class="daemon">tuned</systemitem> 启用相关的 systemd 服务后，对于当前会话，您可以启动 <systemitem class="daemon">tuned</systemitem> 作为后台守护程序运行或作为连接到 TTY 的普通前台进程运行。
+      </para>
+      <para>
+        或者，您也可以启用相关的 systemd 服务并同时启动该守护程序。
+      </para>
+      <procedure>
+        <step>
+          <para>
+            根据您希望如何在不同会话中启动 <systemitem class="daemon">tuned</systemitem>，您有以下选项：
+          </para>
+          <stepalternatives>
+            <step>
+              <para>
+                如果只想在当前会话中启动 <systemitem class="daemon">tuned</systemitem>，请执行以下步骤之一：
+              </para>
+              <substeps>
+                <step>
+                  <para>
+                    启动 <systemitem class="daemon">tuned</systemitem> 作为后台进程并让 systemd 管理该守护程序的状态：
+                  </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl start tuned</command></screen>
+                  <note>
+                    <title><systemitem class="daemon">tuned</systemitem> 运行的配置文件</title>
+                    <para>
+                      一旦激活，<systemitem class="daemon">tuned</systemitem> 就会根据适用于系统的默认配置文件或当前活动的配置文件开始进行系统微调。要更改此行为，请使用 <command>tuned-adm</command> 命令。有关详细信息，请参见<xref linkend="sec-tuning-tuned-profiles"/>和<xref linkend="sec-tuning-tuned-plugins"/>。
+                    </para>
+                  </note>
+                </step>
+                <step>
+                  <para>
+                    仅在当前会话中启动 <systemitem class="daemon">tuned</systemitem> 作为连接到 TTY 的普通进程运行：
+                  </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned</command></screen>
+                  <tip>
+                    <title>运行 <command>tuned</command> 命令</title>
+                    <para>
+                      您可以使用此命令来激活配置文件，甚至将其作为守护程序运行。有关详细信息，请运行 <command>tuned --help</command> 命令。
+                    </para>
+                  </tip>
+                </step>
+              </substeps>
+            </step>
+            <step>
+              <para>
+                要让 systemd 服务在未来系统引导时启动，同时在当前会话中启动 <systemitem class="daemon">tuned</systemitem> 守护程序，请运行以下命令：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl enable --now tuned</command></screen>
+            </step>
+          </stepalternatives>
+        </step>
+      </procedure>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-disable">
+      <title>禁用 <systemitem class="daemon">tuned</systemitem></title>
+      <para>
+        作为最佳实践，请执行以下步骤禁用 <systemitem class="daemon">tuned</systemitem>：
+      </para>
+      <procedure>
+        <step>
+          <para>
+            检查 <systemitem class="daemon">tuned</systemitem> systemd 服务的状态：
+          </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl status tuned</command></screen>
+        </step>
+        <step>
+          <para>
+            关闭或禁用之前应用的所有微调设置：
+          </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm off</command></screen>
+        </step>
+        <step>
+          <para>
+            如果 <systemitem class="daemon">tuned</systemitem> 守护程序处于<emphasis>活动</emphasis>状态，停止该守护程序：
+          </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl stop tuned</command></screen>
+        </step>
+        <step>
+          <para>
+            要阻止 <systemitem class="daemon">tuned</systemitem> 守护程序在下次系统引导时自动激活，您可以采用两种方式：
+          </para>
+          <stepalternatives>
+            <step>
+              <para>
+                仅禁用相关的 systemd 服务：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl disable tuned</command></screen>
+            </step>
+            <step>
+              <para>
+                同时禁用 <systemitem class="daemon">tuned</systemitem> systemd 服务并立即停止 <systemitem class="daemon">tuned</systemitem> 守护程序：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>systemctl disable --now tuned</command></screen>
+            </step>
+          </stepalternatives>
+        </step>
+      </procedure>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-profiles">
+    <title>TuneD 配置文件</title>
+
+    <para>
+      TuneD 通过预定义配置文件对 SUSE Linux Enterprise Server 系统进行优化，这些配置文件包含为不同使用场景量身定制的设置。这些配置文件会调整多项系统设置，包括 CPU 调节器策略、磁盘 I/O 调度、网络参数和内核参数等，以提升性能、能源效率或其他系统特性。每个配置文件都针对特定场景设计，例如高吞吐量、低延迟、节能或虚拟化环境等。系统管理员可以使用 <command>tuned-adm</command> 命令在不同配置文件之间切换，也可以自定义或组合配置文件以满足特殊需求。本节介绍管理、创建和自定义 TuneD 配置文件的基础知识。
+    </para>
+
+    <sect2 xml:id="sec-tuning-supported-tuned-profiles">
+      <title>支持的 TuneD 配置文件</title>
+      <para>
+        SUSE Linux Enterprise Server 支持以下配置文件：
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term>balanced</term>
+          <listitem>
+            <para>
+              <literal>balanced</literal> 配置文件提供通用的系统优化，在性能和能耗之间取得良好平衡。它会动态调整 CPU 频率和电源状态，平衡 I/O 及网络性能与节能需求，适用于大多数桌面和服务器环境。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>cpu-partitioning</term>
+          <listitem>
+            <para>
+              <literal>cpu-partitioning</literal> 配置文件专为需要为特定任务或应用程序划分 CPU 资源的系统设计。它会配置 CPU 隔离和亲和性设置，并调整调度程序参数，以确保性能可预测性并减少进程间的干扰。该配置文件的配置变量在 <filename>/etc/tuned/cpu-partitioning-variables.conf</filename> 中定义。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>desktop</term>
+          <listitem>
+            <para>
+              <literal>desktop</literal> 配置文件针对桌面环境优化系统，提升图形界面和桌面应用程序的性能。它会优化 CPU 和 I/O 性能，调整低延迟音频和视频播放设置，并减少节能措施，以确保流畅且响应迅速的用户体验。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>latency-performance</term>
+          <listitem>
+            <para>
+              <literal>latency-performance</literal> 配置文件优先考虑低延迟和确定性性能，而非节能。它将 CPU 调节器设置为性能模式，调整内核参数以减少延迟，并禁用可能产生延迟的节能功能，适用于实时应用程序和高性能计算场景。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>mssql</term>
+          <listitem>
+            <para>
+              <literal>mssql</literal> 配置文件通过微调 CPU 和内存设置、针对数据库访问模式优化磁盘 I/O、提升网络设置以改善数据库连接，从而优化运行 Microsoft SQL Server 的系统。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>network-latency</term>
+          <listitem>
+            <para>
+              <literal>network-latency</literal> 配置文件针对要求低延迟的应用程序（如金融交易平台和实时通讯系统）优化网络性能。它会配置网络设置以减少延迟，将 CPU 调节器设为性能模式，并调整内核参数以优先处理网络流量。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>network-throughput</term>
+          <listitem>
+            <para>
+              <literal>network-throughput</literal> 配置文件可增强系统以支持持续的高数据传输速率，尤其适用于旧款 CPU 或高速网络环境。它会微调网络堆栈参数以实现最大的吞吐量，并优化 CPU 设置以应对高网络负载。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>powersave</term>
+          <listitem>
+            <para>
+              该模式会优化系统以提升能源效率，这可能会以牺牲性能为代价。将此配置作为独立配置文件或合并配置文件使用时，请仔细分析部署场景，确保其比 <literal>balanced</literal> 配置文件更节能。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>throughput-performance</term>
+          <listitem>
+            <para>
+              <literal>throughput-performance</literal> 配置文件可为处理多种任务的通用服务器最大化整体系统性能。它将 CPU 调节器设为性能模式，微调 I/O 和网络设置以实现高吞吐量，并调整内核参数以提升系统性能。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>virtual-guest</term>
+          <listitem>
+            <para>
+              <literal>virtual-guest</literal> 配置文件可为作为 Guest 运行的虚拟机优化性能和效率。它会针对虚拟化环境微调 CPU 和内存设置，并调整磁盘和网络设置，以确保实现最佳的资源利用率和虚拟机性能。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>virtual-host</term>
+          <listitem>
+            <para>
+              <literal>virtual-host</literal> 配置文件通过优化资源分配和性能，增强运行 KVM Guest 的系统。它会配置 CPU 和内存设置以支持托管多个虚拟机，微调 I/O 和网络设置，并优化内核参数以支持虚拟化。
+            </para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        有关 TuneD 配置文件的信息，请参见以下章节：
+      </para>
+      <itemizedlist>
+        <listitem>
+          <para>
+            <xref linkend="sec-tuning-tuned-supported-profile-configuration"/>
+          </para>
+        </listitem>
+        <listitem>
+          <para>
+            <xref linkend="sec-tuning-custom-tuned-profile-configuration"/>
+          </para>
+        </listitem>
+      </itemizedlist>
+    </sect2>
+
+    <sect2 xml:id="sec--tuning-manage-tuned-profiles">
+      <title>管理 TuneD 配置文件</title>
+      <para>
+        如果您只想激活某个配置文件，请将其名称传递给 <command>tuned</command> 命令：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned --profile <replaceable>PROFILE_NAME</replaceable></command></screen>
+      <para>
+        不过，管理 TuneD 配置文件生命周期的最佳做法是使用 <command>tuned-adm</command> 命令行工具。
+      </para>
+      <sect3 xml:id="sec-tuning-use-tuned-adm">
+        <title>使用 <command>tuned-adm</command></title>
+        <para>
+          您可以使用 <command>tuned-adm</command> 命令执行以下任务：
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              列出所有可用配置文件。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm list</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              列出活动配置文件。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm active</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              显示当前配置文件的信息。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm profile_info</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              显示指定配置文件的信息。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm profile_info <replaceable>PROFILE_NAME</replaceable></command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              根据当前系统使用情况推荐配置文件。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm recommend</command></screen>
+            <para>
+              默认情况下，SUSE Linux Enterprise Server 中的 TuneD 会根据 <filename>/usr/lib/tuned/recommend.d/50-tuned.conf</filename> 中指定的配置推荐配置文件。您还可以通过创建文件 <filename>/etc/tuned/recommend.conf</filename> 来定义自定义推荐规则，其优先级高于默认规则。
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              显示当前配置文件选择模式。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm profile_mode</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              自动选择配置文件，以及改用推荐的配置文件。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm auto_profile</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              手动改用指定的配置文件。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm profile <replaceable>PROFILE_NAME</replaceable></command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              验证是否已成功应用配置文件，以及系统状态是否与配置文件的配置相匹配。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm verify</command></screen>
+          </listitem>
+          <listitem>
+            <para>
+              关闭所有微调配置。
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm off</command></screen>
+          </listitem>
+        </itemizedlist>
+        <para>
+          有关 <command>tuned-adm</command> 的详细信息，请参见其帮助信息或手册页。
+        </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm --help</command></screen> <screen><prompt>&gt; </prompt><command>man tuned-adm</command></screen>
+      </sect3>
+      <sect3 xml:id="sec-tuning-tuned-profile-hooks">
+        <title>使用配置文件钩子</title>
+        <para>
+          <emphasis>配置文件钩子</emphasis>是在配置文件生命周期的不同阶段执行的特定脚本。使用它们，可以在应用配置文件时对所发生的操作进行更精细的控制和自定义。自定义配置文件的钩子通常放在 <filename>/etc/tuned/<replaceable>PROFILE_NAME</replaceable>/</filename> 配置文件目录下，默认或受支持配置文件的钩子则放在 <filename>/usr/lib/tuned/<replaceable>PROFILE_NAME</replaceable>/</filename> 目录下。
+        </para>
+        <para>
+          配置文件钩子可用于在特定事件发生前后执行自定义命令或脚本，这些事件包括：
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              启动配置文件
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              停止配置文件
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              验证配置文件
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              完全回滚配置文件
+            </para>
+          </listitem>
+        </itemizedlist>
+        <example>
+          <title>创建并应用配置文件钩子</title>
+          <para>
+            例如，在一个混用 <literal>balanced</literal> 和 <literal>powersave</literal> 配置文件的自定义配置文件中，我们可以包含一个配置文件钩子，以在应用该配置文件前显示某些相关信息。
+          </para>
+          <procedure>
+            <step>
+              <para>
+                在自定义配置文件目录 <filename>/etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/</filename> 中创建名为 <filename>start.sh</filename> 的脚本，其内容如下：
+              </para>
+              <example>
+                <title>自定义钩子脚本以在应用自定义配置文件之前处理特定任务</title>
+<screen>
+#!/bin/bash
+
+# Example task: Log the current CPU governor and energy performance bias
+echo "Current CPU governor: $(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor)" &gt;&gt;
+/var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+echo "Current energy performance bias: $(cat /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_bias)" &gt;&gt; /var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+
+# Example task: Check for specific conditions before applying settings
+if [ ! -d "/sys/devices/system/cpu/cpufreq/policy0" ]; then
+    echo "CPU frequency scaling not available, aborting profile application." &gt;&gt; /var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+    exit 1
+fi
+
+# Example task: Notify about the upcoming profile application
+echo "Preparing to apply custom profile settings." &gt;&gt; /var/log/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>.log
+</screen>
+              </example>
+            </step>
+            <step>
+              <para>
+                确保该脚本可执行：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>chmod +x /etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/start.sh</command></screen>
+            </step>
+            <step>
+              <para>
+                在 <filename>/etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/tuned.conf</filename> 的 <literal>[script]</literal> 部分中添加该自定义脚本的路径：
+              </para>
+              <example>
+                <title>包含自定义脚本路径的 TuneD 配置文件</title>
+<screen>
+[main]
+include=balanced
+
+[cpu]
+governor=powersave
+energy_perf_bias=powersave
+
+[disk]
+# Inherit settings from balanced profile
+
+[sysctl]
+vm.swappiness=10
+
+[script]
+script=/etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/start.sh
+</screen>
+              </example>
+            </step>
+            <step>
+              <para>
+                应用自定义配置文件以测试自定义脚本：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm profile <replaceable>CUSTOM_PROFILE_NAME</replaceable></command></screen>
+            </step>
+          </procedure>
+        </example>
+      </sect3>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-configuration">
+    <title>TuneD 配置</title>
+
+    <para>
+      配置文件 (Configuration file) 构成了 TuneD 及其配置文件 (profile) 的基础。在 SUSE Linux Enterprise Server 中，<filename>/etc/tuned/</filename> 文件是 <systemitem class="daemon">tuned</systemitem> 守护程序的主配置文件。该文件包含影响 TuneD 整体行为的全局设置。
+    </para>
+
+    <para>
+      此外，每个 TuneD 配置文件都有相应的 <filename>tuned.conf</filename> 配置文件，用于定义特定配置文件的具体微调参数和插件设置。特定于配置文件的配置文件分为几个部分，每个部分对应一个特定的 TuneD 插件或一组相关设置。系统管理员可以跨不同的子系统（例如 CPU、磁盘和网络）指定系统微调参数。有关 TuneD 插件的详细信息，请参见<xref linkend="sec-tuning-tuned-plugins"/>。
+    </para>
+
+    <sect2 xml:id="sec-tuning-global-tuned-configuration">
+      <title>全局 TuneD 配置</title>
+      <para>
+        当 <systemitem class="daemon">tuned</systemitem> 开始运行时（默认作为守护程序运行），系统会应用 <filename>/etc/tuned/tuned-main.conf</filename> 全局配置文件中的设置。此操作会为系统做好准备，以便在后续阶段应用特定于配置文件的额外微调。
+      </para>
+      <para>
+        默认的 <filename>/etc/tuned/tuned-main.conf</filename> 文件包含以下全局设置：
+      </para>
+      <example>
+        <title>TuneD 的默认全局配置</title>
+<screen>
+daemon = 1 <co xml:id="tuned-main-conf-daemon"/>
+
+dynamic_tuning = 1 <co xml:id="tuned-main-conf-dynamic-tuning"/>
+
+sleep_interval = 1 <co xml:id="tuned-main-conf-sleep-interval"/>
+
+update_interval = 10 <co xml:id="tuned-main-conf-update-interval"/>
+
+recommend_command = 1 <co xml:id="tuned-main-conf-recommend-command"/>
+
+reapply_sysctl = 1 <co xml:id="tuned-main-conf-reapply-sysctl"/>
+
+default_instance_priority = 0 <co xml:id="tuned-main-conf-default-instance-priority"/>
+
+udev_buffer_size = 1MB <co xml:id="tuned-main-conf-udev-buffer-size"/>
+
+log_file_count = 2 <co xml:id="tuned-main-conf-log-file-count"/>
+
+log_file_max_size = 1MB <co xml:id="tuned-main-conf-log-file-max-size"/>
+</screen>
+      </example>
+      <calloutlist>
+        <callout arearefs="tuned-main-conf-daemon">
+          <para>
+            指定是否使用 <systemitem class="daemon">tuned</systemitem> 守护程序。如果设为 <literal>1</literal>，将使用该守护程序，以启用 D-Bus 集成、设置回滚、热插拔支持和动态微调等功能。<emphasis>不建议</emphasis>将其设为 <literal>0</literal> 以禁用守护程序，因为这会将 TuneD 的功能限制为仅静态微调。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-dynamic-tuning">
+          <para>
+            启用或禁用设备的动态微调。如果设为 <literal>1</literal>，TuneD 会根据系统活动动态调整设置；如果设为 <literal>0</literal>（表示禁用），仅应用静态微调。由于动态微调依赖守护程序运行，因此当守护程序被设为 <literal>daemon=0</literal> 处于禁用状态时，设置 <literal>dynamic_tuning=1</literal> 将无效。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-sleep-interval">
+          <para>
+            定义 <systemitem class="daemon">tuned</systemitem> 守护程序在检查事件前的休眠间隔（以秒为单位）。值越大，开销越小，但对变化的响应时间越长。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-update-interval">
+          <para>
+            设置更新动态微调的间隔（以秒为单位）。此值必须是 <literal>sleep_interval</literal> 的倍数。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-recommend-command">
+          <para>
+            控制 <command>tuned-adm recommend</command> 命令的可用性。如果设为 <literal>1</literal>（表示启用），<systemitem class="daemon">tuned</systemitem> 会解析 <filename>/etc/tuned/recommend.conf</filename> 中的自定义推荐配置或 <filename>/usr/lib/tuned/recommend.d/50-tuned.conf</filename> 中的默认推荐配置，并提供配置文件推荐。如果设为 <literal>0</literal>（表示禁用），守护程序会返回一个硬编码的配置文件，通常是 <literal>balanced</literal>。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-reapply-sysctl">
+          <para>
+            决定在应用 TuneD 的 sysctl 设置后，是否重新应用来自 <filename>/etc/sysctl.conf</filename> 和 <filename>/etc/sysctl.d</filename> 等文件的系统 sysctl 设置。如果设为 1（表示启用），系统 sysctl 设置会覆盖 TuneD 的 sysctl 设置。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-default-instance-priority">
+          <para>
+            指定分配给 TuneD 实例的默认优先级。值越大，优先级越高。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-udev-buffer-size">
+          <para>
+            定义 udev 事件的缓冲区大小。此设置有助于管理从 udev 处理的数据量。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-log-file-count">
+          <para>
+            设置 <filename>/var/log/tuned/</filename> 目录中保留的日志文件数量。这有助于日志轮换（将旧日志归档，并创建新日志）。
+          </para>
+        </callout>
+        <callout arearefs="tuned-main-conf-log-file-max-size">
+          <para>
+            指定每个日志文件在轮换前的最大大小。这可防止日志文件无限增大。例如，当默认日志文件 <filename>/var/log/tuned/tuned.log</filename> 达到此参数设置的大小时，会开始生成新文件。
+          </para>
+        </callout>
+      </calloutlist>
+      <warning>
+        <para>
+          仅当确定修改会对 TuneD 的行为产生何种影响时，才可调整 <filename>/etc/tuned/</filename> 中全局设置的值。
+        </para>
+      </warning>
+      <para>
+        有关 TuneD 主配置文件的详细说明，请查看手册页：
+      </para>
+<screen><prompt>&gt; </prompt><command>man 5 tuned-main.conf</command></screen>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-tuned-supported-profile-configuration">
+      <title>支持的配置文件配置</title>
+      <para>
+        每个支持的 TuneD 配置文件在 <filename>/usr/lib/tuned/</filename> 下都有对应的目录，每个该目录中都包含 <filename>/usr/lib/tuned/<replaceable>PROFILE_NAME</replaceable>/tuned.conf</filename> 配置文件。该配置文件 (configuration file) 包含一组适用于此配置文件 (profile) 的默认插件、参数和选项。
+      </para>
+      <sect3 xml:id="sec-tuning-tuned-profile-general-syntax">
+        <title>TuneD 配置文件的通用语法</title>
+        <para>
+          配置文件的通用语法如下：
+        </para>
+<screen>
+[main]
+summary=<replaceable>SUMMARY_TEXT_STRING</replaceable>
+include=<replaceable>ANOTHER_PROFILE_NAME_AS_BASE</replaceable>
+
+[<replaceable>PLUG-IN</replaceable>]
+<replaceable>PARAMETER</replaceable>=<replaceable>OPTION</replaceable>
+<replaceable>PARAMETER</replaceable>=<replaceable>OPTION</replaceable>
+...
+
+[<replaceable>PLUG-IN</replaceable>]
+# <replaceable>COMMENT_STRING</replaceable>
+<replaceable>PARAMETER</replaceable>=<replaceable>OPTION</replaceable>
+
+...
+</screen>
+        <para>
+          要大致了解 TuneD 配置文件，请查看其手册页：
+        </para>
+<screen><prompt>&gt; </prompt><command>man 5 tuned.conf</command></screen>
+      </sect3>
+    </sect2>
+
+    <sect2 xml:id="sec-tuning-custom-tuned-profile-configuration">
+      <title>自定义配置文件配置</title>
+      <para>
+        此外，您可以定义<emphasis role="strong">自定义</emphasis>配置文件。对于每个自定义配置文件，需在 <filename>/etc/tuned/</filename> 中创建一个 <replaceable>PROFILE_NAME</replaceable> 目录，并将其配置文件放在该目录中。例如，自定义配置文件 (profile) 的配置文件 (configuration file) 可能位于路径 <filename>/etc/tuned/<replaceable>PROFILE_NAME</replaceable>/tuned.conf</filename> 下。不过，如果默认路径 <filename>/usr/lib/tuned/<replaceable>PROFILE_NAME</replaceable></filename> 与自定义路径 <filename>/etc/tuned/<replaceable>PROFILE_NAME</replaceable></filename> 中的 <replaceable>PROFILE_NAME</replaceable> 相同，则会优先应用自定义配置文件配置。自定义受支持配置文件的最佳实践是，从 <filename>/usr/lib/tuned/</filename> 将该配置文件复制到 <filename>/etc/tuned/</filename>，然后再进行修改。这样可保留原始配置文件，并将自定义配置分离开来。
+      </para>
+      <note>
+        <title>TuneD 配置文件的路径</title>
+        <para>
+          您可以在 <filename>/etc/tuned/</filename> 中指定除受支持配置文件和自定义配置文件的标准路径之外的路径，但<emphasis>不建议</emphasis>这么做，具体语法如下：
+        </para>
+<screen>profile_dirs=/etc/tuned/,/usr/lib/tuned/,<replaceable>/PATH/TO/CUSTOM/DIRECTORY/</replaceable></screen>
+        <para>
+          系统会按列出顺序在这些目录中搜索配置文件。在上面的示例中，会先搜索 <filename>/etc/tuned/</filename>，再搜索 <filename>/usr/lib/tuned/</filename>，最后搜索 <replaceable>/PATH/TO/CUSTOM/DIRECTORY/</replaceable>。
+        </para>
+      </note>
+      <warning>
+        <para>
+          SUSE 不支持任何不属于 SUSE Linux Enterprise Server 官方储存库所提供 <package>tuned</package> 中包含的受支持配置文件的其他配置文件。仅当确定其效果后，才可在生产系统上创建并应用自定义配置文件。
+        </para>
+      </warning>
+      <sect3 xml:id="sec-tuning-tuned-custom-merge-profile">
+        <title>通过合并配置创建自定义配置文件</title>
+        <para>
+          最佳做法是，始终通过手动创建自定义配置文件配置来合并两个或多个配置文件。这种方式能让您清楚了解自定义的合并配置文件中参数和插件的具体组合。相比同时应用两个或多个配置文件而不检查动态生成的合并结果，这种方式虽然更繁琐，但更可靠。
+        </para>
+        <para>
+          在下面的示例中，我们来简单合并 <literal>balanced</literal> 和 <literal>powersave</literal> 配置文件。
+        </para>
+        <example>
+          <title>合并 TuneD 的 <literal>balanced</literal> 和 <literal>powersave</literal> 配置文件</title>
+          <procedure>
+            <step>
+              <para>
+                创建自定义配置文件的路径：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>mkdir /etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable></command></screen>
+            </step>
+            <step>
+              <para>
+                在以下目录中创建配置文件：
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>vi /etc/tuned/<replaceable>CUSTOM_PROFILE_NAME</replaceable>/tuned.conf</command></screen>
+            </step>
+            <step>
+              <para>
+                将以下配置添加到该文件：
+              </para>
+              <example>
+                <title><literal>balanced</literal> 和 <literal>powersave</literal> TuneD 配置文件的合并配置</title>
+<screen>
+[main]
+include=balanced <co xml:id="include-balanced"/>
+
+[cpu] <co xml:id="cpu-settings-override"/>
+governor=powersave
+energy_perf_bias=powersave
+
+[disk] <co xml:id="inherit-disk-balanced"/>
+# Inherit settings from balanced profile
+
+[sysctl]
+vm.swappiness=10 <co xml:id="reduce-vm-swappiness"/>
+</screen>
+              </example>
+              <calloutlist>
+                <callout arearefs="include-balanced">
+                  <para>
+                    包含 <literal>balanced</literal> 配置文件作为基础配置，适合一般用途。
+                  </para>
+                </callout>
+                <callout arearefs="cpu-settings-override">
+                  <para>
+                    覆盖 CPU 参数，例如将 <literal>governor</literal> 和 <literal>energy-perf-bias</literal> 设为 <literal>powersave</literal>。
+                  </para>
+                </callout>
+                <callout arearefs="inherit-disk-balanced">
+                  <para>
+                    从 <literal>balanced</literal> 配置文件集成磁盘设置。
+                  </para>
+                </callout>
+                <callout arearefs="reduce-vm-swappiness">
+                  <para>
+                    添加一个 sysctl 参数以降低交换性，这在某些情况下对性能和功耗都有益处。
+                  </para>
+                </callout>
+              </calloutlist>
+            </step>
+            <step>
+              <para>
+                保存配置文件并退出文本编辑器。
+              </para>
+            </step>
+            <step>
+              <para>
+                合并 <literal>balanced</literal> 和 <literal>powersave</literal> 配置文件中的特定参数后，应用新的自定义配置文件。
+              </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>tuned-adm profile <replaceable>CUSTOM_PROFILE_NAME</replaceable></command></screen>
+            </step>
+          </procedure>
+        </example>
+      </sect3>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-plugins">
+    <title>TuneD 插件</title>
+
+    <para>
+      TuneD 插件是扩展 TuneD 系统守护程序功能的模块化组件。借助这些插件，系统管理员可以创建针对特定工作负载或硬件配置的自定义优化配置文件。TuneD 插件会利用多种系统指标和用户定义的参数，动态调整内核设置、CPU 频率、磁盘 I/O 调度程序以及其他底层系统参数，以实现最佳性能和能效。尽管核心 <package>tuned</package> 软件包中包含了多个预配置的配置文件，您仍可通过自定义插件扩展该软件包的功能，从而对系统进行更精细的控制。
+    </para>
+
+    <para>
+      在 TuneD 配置文件中包含插件的通用语法如下：
+    </para>
+
+<screen>
+...
+[<replaceable>PLUGIN-NAME</replaceable>]
+<replaceable>PARAMETER_1</replaceable>=<replaceable>VALUE_1</replaceable>
+<replaceable>PARAMETER_2</replaceable>=<replaceable>VALUE_2</replaceable>
+...
+</screen>
+
+    <para>
+      SUSE Linux Enterprise Server 支持的 TuneD 配置文件中包含多个插件及其参数。要查看所有此类插件的列表，请运行以下命令：
+    </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>grep -r '\[.*\]' /usr/lib/tuned/*/tuned.conf | sort -u</command></screen>
+
+    <sect2 xml:id="sec-tuning-tuned-supported-plugins">
+      <title>支持的 TuneD 插件</title>
+      <para>
+        SUSE Linux Enterprise Server 上支持以下 TuneD 插件：
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term>main</term>
+          <listitem>
+            <para>
+              <literal>main</literal> 并非插件，而是 TuneD 配置文件中的一个特殊部分，用于提供配置文件的整体设置和元数据。<literal>[main]</literal> 部分最常用的参数如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>summary</parameter>：配置文件关键功能的摘要。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>include</parameter>：用于将其他配置文件作为父配置文件包含在内，以便其配置可作为基础被继承。如果存在冲突，子配置文件的配置优先于被包含的配置文件的配置。
+                </para>
+                <note>
+                  <title>TuneD 配置文件更新的影响</title>
+                  <para>
+                    当父配置文件的配置更新时，继承该父配置文件的子配置文件也会受到影响。
+                  </para>
+                </note>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>modules</term>
+          <listitem>
+            <para>
+              <literal>modules</literal> 插件用于在配置文件中管理内核模块。当配置文件被激活时，该插件可以加载或卸载特定模块，这样管理员便可通过控制激活的内核模块来优化系统针对不同工作负载的行为。使用此插件时，TuneD 会将内核模块的相关信息写入 <filename>/etc/modprobe.d/tuned.conf</filename> 文件。
+            </para>
+            <para>
+              如需添加应由 <systemitem class="daemon">tuned</systemitem> 处理的内核模块参数，请使用以下语法将其包含在配置文件配置中：
+            </para>
+<screen>
+[modules]
+<replaceable>MODULE_NAME</replaceable>=<replaceable>MODULE_PARAMETERS</replaceable><co xml:id="module-parameters"/>
+</screen>
+            <calloutlist>
+              <callout arearefs="module-parameters">
+                <para>
+                  多个模块参数可用逗号分隔。
+                </para>
+              </callout>
+            </calloutlist>
+            <para>
+              如果希望模块自动重新加载，请使用 <literal>+r</literal> 选项：
+            </para>
+<screen>
+[modules]
+<replaceable>MODULE_NAME</replaceable>=+r,<replaceable>MODULE_PARAMETERS</replaceable>
+</screen>
+            <para>
+              例如：
+            </para>
+            <example>
+              <title>通过 TuneD 自动重新加载内核模块</title>
+<screen>
+[modules]
+cpufreq_conservative=+r,down_threshold=20,up_threshold=80,sampling_rate=20000 <co xml:id="cpu-conservative-r"/>
+</screen>
+            </example>
+            <calloutlist>
+              <callout arearefs="cpu-conservative-r">
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <parameter>cpufreq_conservative</parameter> 是一个根据系统负载调整 CPU 时钟速度的内核模块。与 <literal>ondemand</literal> 等其他调节器相比，它在频率调节方面更为保守。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>=+r</literal> 语法表示如果模块尚未加载，则应加载该模块，且 TuneD 会跟踪有多少配置文件正在使用此模块。当加载带有 <literal>+r</literal> 的模块时，TuneD 会增加该模块的引用计数。如果之后配置文件被停用，引用计数会减少。仅当引用计数为零时，模块才会被卸载，这意味着没有其他活动的配置文件在使用它。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      这些参数的含义如下：
+                    </para>
+                    <itemizedlist>
+                      <listitem>
+                        <para>
+                          <parameter>down_threshold=20</parameter> 表示当 CPU 使用率降至 20% 以下时，调节器会降低 CPU 频率以节省电量。
+                        </para>
+                      </listitem>
+                      <listitem>
+                        <para>
+                          <parameter>up_threshold=80</parameter> 表示当 CPU 使用率超过 80% 时，调节器会提高 CPU 频率以提升性能。
+                        </para>
+                      </listitem>
+                      <listitem>
+                        <para>
+                          <parameter>sampling_rate=20000</parameter> 表示调节器每 20,000 微秒（即 20 毫秒）进行一次 CPU 使用率采样。
+                        </para>
+                      </listitem>
+                    </itemizedlist>
+                  </listitem>
+                </itemizedlist>
+              </callout>
+            </calloutlist>
+            <para>
+              有关内核模块的详细信息，请参见<xref linkend="cha-mod"/>。此外，您可以通过查看 <filename>/sys/module/<replaceable>MODULE_NAME</replaceable>/parameters/</filename> 来检查系统上已安装模块的参数。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>cpu</term>
+          <listitem>
+            <para>
+              <literal>cpu</literal> 插件用于管理和优化与 CPU 相关的设置，以提升性能、节能或在两者之间取得平衡。此插件允许对 CPU 的运行方式进行精细控制，包括设置频率调节器、能源性能偏向，以及其他直接影响 CPU 行为和性能特性的参数。
+            </para>
+            <para>
+              <literal>cpu</literal> 插件的一些常用参数如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>priority</parameter>：设置 CPU 微调操作的优先级。值越大，微调操作的优先级越高。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>governor</parameter>：设置 CPU 频率调节调节器。该参数的常见选项如下：
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>performance</literal>：强制 CPU 以最高频率运行，以更高的功耗为代价提供最佳性能。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>ondemand</literal>：根据系统负载动态调整 CPU 频率，在性能和节能之间取得平衡。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>conservative</literal>：与 <literal>ondemand</literal> 调节器类似，但 CPU 频率升降更为平缓。适用于对节能的要求很高但仍需维持性能的系统。
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>energy_perf_bias</parameter>：指示 CPU 如何平衡功耗与性能。该参数的常见选项如下：
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>performance</literal>：偏向最高性能，可能会增加功耗。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>powersave</literal>：偏向节能，可能会降低性能。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>power</literal>：比 <literal>powersave</literal> 更激进的节能设置，但对性能的影响可能小于 <literal>performance</literal>。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>normal</literal>：性能与节能之间的平衡设置。
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>force_latency</parameter>：控制 CPU 的强制延迟设置。值越小，系统越积极地应用节能措施，可能会以增加延迟为代价。值越大，节能措施的积极性越低，可能会提高响应速度。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>min_perf_pct</parameter>：以 CPU 最高性能的百分比指定最低性能水平。例如，值为 100 表示 CPU 始终以最高性能水平运行。如果值较小，则表示 CPU 可在不需要全性能时以较低性能水平运行，从而实现节能。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              例如，为 CPU 密集型工作负载（如高性能计算）创建的配置文件可以将该插件配置为最大限度地利用 CPU 资源：
+            </para>
+            <example>
+              <title>CPU 密集型工作负载的 TuneD 插件配置</title>
+<screen>
+[cpu]
+priority=1
+governor=performance
+energy_perf_bias=performance
+force_latency=10
+min_perf_pct=100
+</screen>
+            </example>
+            <para>
+              有关 CPU 性能调节的详细信息，请访问 <link xlink:href="https://www.kernel.org/doc/Documentation/admin-guide/pm/cpufreq.rst"></link>。
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>音频配合使用</term>
+          <listitem>
+            <para>
+              <literal>audio</literal> 插件可对系统进行微调，以优化音频性能。这可能包括调整 CPU 调度策略、设置 CPU 亲和性以及配置其他系统参数，以将音频延迟降至最低、确保音频播放流畅并记录实时音频活动。例如：
+            </para>
+            <example>
+              <title>优化音频性能的 TuneD 插件配置</title>
+<screen>
+[audio]
+timeout=10 <co xml:id="audio-plugin-timeout-parameter"/>
+reset_controller=False <co xml:id="audio-plugin-reset-controller-parameter"/>
+</screen>
+            </example>
+            <calloutlist>
+              <callout arearefs="audio-plugin-timeout-parameter">
+                <para>
+                  <parameter>timeout</parameter> 参数指定在检测到最后一次音频活动后，系统应保持优化状态的时长（以秒为单位）。此设置旨在防止系统在优化状态和非优化状态之间频繁切换，因为如此可能会导致音频性能不稳定或出现异常。
+                </para>
+              </callout>
+              <callout arearefs="audio-plugin-reset-controller-parameter">
+                <para>
+                  <parameter>reset_controller</parameter> 参数管理音频模块节能控制器的行为。您可以使用它来启用或禁用控制器的重置，这会影响系统对音频设备进行电源管理的方式。该参数会与位于 <filename>/sys/module/<replaceable>AUDIO_MODULE_NAME</replaceable>/parameters/power_save_controller</filename>的系统文件（例如 <filename>snd_hda_intel</filename>）交互。默认情况下，其值设为 <literal>False</literal>。
+                </para>
+              </callout>
+            </calloutlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>video</term>
+          <listitem>
+            <para>
+              <literal>video</literal> 插件提供了用于微调特定显卡（尤其是 AMD Radeon 显卡）节能设置的选项。例如：
+            </para>
+<screen>
+[video]
+radeon_powersave=dpm-balanced
+</screen>
+            <para>
+              此插件的常用参数如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>radeon_powersave</parameter>：该参数控制 AMD Radeon 显卡的节能模式。它决定 GPU 如何处理电源管理，会影响性能和能耗。该参数的配置选项如下：
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>default</literal>：默认节能配置文件，是显卡驱动程序提供的默认设置。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>auto</literal>：根据当前系统使用情况自动调整节能设置。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>low</literal>：降低性能以节省能源的低功耗配置文件。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>mid</literal>：平衡性能与节能的中功耗配置文件。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>high</literal>：以更高功耗为代价实现性能最大化的高功耗配置文件。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dynpm</literal>：允许根据工作负载动态调整的动态电源管理 (DPM) 模式。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dpm-battery</literal>：针对电池使用优化的 DPM 配置文件。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dpm-balanced</literal>：平衡性能与能效的 DPM 配置文件。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>dpm-performance</literal>：针对最高性能优化的 DPM 配置文件。
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>disk</term>
+          <listitem>
+            <para>
+              <literal>disk</literal> 插件可对磁盘驱动器的性能和功耗进行微调和优化。
+            </para>
+            <para>
+              常用参数及其可能的值如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>devices</parameter>：指定微调参数应该应用于哪些磁盘设备。默认情况下，包含所有设备。可用逗号分隔指定多个设备。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>dynamic</parameter>：用于启用或禁用基于磁盘负载的动态微调的布尔值。默认情况下设为 <literal>True</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>elevator</parameter>：为磁盘配置 I/O 调度程序（电梯算法）。根据系统可用的调度程序，可能的选项包括 <literal>noop</literal>、<literal>deadline</literal> 或 <literal>cfq</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>apm</parameter>：用于设置磁盘高级电源管理 (APM) 级别的整数 (1–254)。值越大，通常性能越好，但功耗也越高。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>spindown</parameter>：<parameter>spindown</parameter> 参数的整数值是 <package>hdparm</package> 实用程序用于设置磁盘停转超时的特殊编码。有关可接受的停转值的说明，请查看 <package>hdparm</package> 手册页中的 <option>-S</option> 选项。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>readahead</parameter>：设置磁盘预读值（以千字节为单位）的整数。可以通过添加适当的后缀将其改为扇区。例如，<literal>readahead = 8192 s</literal>。确保数字和后缀之间至少有一个空格。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>readahead_multiply</parameter>：一个浮点值，表示 <parameter>readahead</parameter> 参数值的乘数因子。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>scheduler_quantum</parameter>：一个整数，用于设置调度程序同时处理的 I/O 请求数量。如果设置较大的值，则允许在切换前处理更多请求，从而提升顺序 I/O 操作的吞吐量。相反，如果设置的值较小，则会降低延迟，从而提升随机 I/O 操作的响应速度。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              以 TuneD 配置文件中的以下 <literal>disk</literal> 插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>disk</literal> 插件配置</title>
+<screen>
+[disk]
+# Comma separated list of devices, all devices if commented out.
+devices=sda,sdb
+
+dynamic=True
+elevator=deadline
+apm=128
+spindown=60
+
+# Readahead adjusted to sectors by specifying relevant suffix.
+# There must be at least one space between the number and suffix.
+readahead=8192 s
+
+readahead_multiply=1.5
+scheduler_quantum=64
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>scsi_host</term>
+          <listitem>
+            <para>
+              <literal>scsi_host</literal> 插件用于管理 Linux 系统上 SCSI（小型计算机系统接口）主机适配器的节能设置。该插件的常用参数如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>alpm</parameter>：积极链路电源管理 (ALPM) 设置用于控制串行 ATA (SATA) 链路的电源管理策略。它可接受不同的值，以在节能与性能之间取得平衡。该参数的可能选项如下：
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>min_power</literal>：此设置在节能方面更为激进。当 SATA 链路空闲时，它会将系统置于较低功耗状态，这样可以节省更多电量，但可能会增加磁盘访问时的延迟。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>medium_power</literal>：此设置在节能与性能之间实现平衡。其目标是在不过度影响系统性能的前提下降低功耗。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>max_performance</literal>：此设置使 SCSI 主机和设备保持在最高功耗状态。它优先考虑速度和响应性而非能效，会禁用节能功能，以最大限度地降低延迟和提升吞吐量。
+                    </para>
+                  </listitem>
+                </itemizedlist>
+                <para>
+                  例如，我们来看看下面的配置，该配置适用于电池供电设备、低使用率服务器和长时间空闲的系统：
+                </para>
+<screen>
+[scsi_host]
+alpm=min_power
+</screen>
+                <note>
+                  <title>TuneD 对链路电源管理策略的读写</title>
+                  <para>
+                    通常会从 <filename>/sys/class/scsi_host/<replaceable>SCSI_HOST_NAME</replaceable>/link_power_management_policy</filename> 文件读取可能的值或将值写入该文件。具体的值可能取决于内核和硬件的支持情况。
+                  </para>
+                </note>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>variables</term>
+          <listitem>
+            <para>
+              <literal>variables</literal> 插件可用于定义可在不同 TuneD 配置文件中使用的变量。这对于设置可能会因系统环境或用户偏好而异的参数特别有用。通过集中定义变量，可以简化配置文件管理并提高微调配置的灵活性。
+            </para>
+            <para>
+              在配置文件配置的 <literal>[variables]</literal> 部分，可以通过以下方式指定变量：
+            </para>
+<screen>
+[variables]
+
+include=<replaceable>PATH/TO/VARIABLE/CONFIGURATION/FILE</replaceable> <co xml:id="variable-include"/>
+
+<replaceable>VAR_NAME</replaceable>=<replaceable>value</replaceable> <co xml:id="variable-value"/>
+
+<replaceable>VAR_ANOTHER</replaceable>=${<replaceable>VAR_NAME_suffix</replaceable>} <co xml:id="variable-variable"/>
+
+<replaceable>VAR_DYNAMIC</replaceable>=$(uname -r) <co xml:id="variable-command"/>
+</screen>
+            <calloutlist>
+              <callout arearefs="variable-include">
+                <para>
+                  包含一个已包含特定上下文变量定义的配置文件。例如，可以包含 <filename>/etc/tuned/cpu-partitioning-variables.conf</filename> 文件，使 <literal>isolated_cores</literal> 等变量及其值可用于当前的配置文件配置。
+                </para>
+              </callout>
+              <callout arearefs="variable-value">
+                <para>
+                  通过赋值直接定义变量。
+                </para>
+              </callout>
+              <callout arearefs="variable-variable">
+                <para>
+                  使用另一个变量定义变量。
+                </para>
+              </callout>
+              <callout arearefs="variable-command">
+                <para>
+                  使用命令输出定义变量。
+                </para>
+              </callout>
+            </calloutlist>
+            <para>
+              例如，我们来看看下面的变量配置，以及它后续在为某个配置文件配置其他插件时的用法：
+            </para>
+            <example>
+              <title>在 TuneD 配置文件中为插件配置使用动态变量</title>
+<screen>
+[variables]
+
+include=/etc/tuned/cpu-partitioning-variables.conf
+
+SWAPPINESS_VALUE=10
+NETWORK_INTERFACE=$(ip -o -4 route show to default | awk '{print $5}')
+
+[sysctl]
+vm.swappiness=${SWAPPINESS_VALUE}
+
+[net]
+interface=${NETWORK_INTERFACE}
+disable_offload=yes
+</screen>
+            </example>
+            <para>
+              对于更复杂的变量定义，请查看受支持配置文件中的 <literal>[variables]</literal> 插件配置。要获取包含 <literal>[variables]</literal> 插件的配置文件配置路径列表，请运行以下命令：
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> <command>grep -r '\[.*\]' /usr/lib/tuned/*/tuned.conf | sort -u | grep variables
+</command></screen>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>sysctl</term>
+          <listitem>
+            <para>
+              <literal>sysctl</literal> 插件提供了一种在运行时自定义多个内核参数的有效方式。这样系统管理员便能优化系统性能、增强安全性并调整网络行为，而无需直接编辑系统文件或手动运行 sysctl 命令。
+            </para>
+            <para>
+              <literal>sysctl</literal> 插件接受多种参数。常见类别包括：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  内核参数 (<parameter>kernel.*</parameter>)
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  虚拟内存参数 (<parameter>vm.*</parameter>)
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  网络参数 (<parameter>net.*</parameter>)
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  文件系统参数 (<parameter>fs.*</parameter>)
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              其中 <literal>*</literal> 是通配符，表示该类别允许的参数。应用这些参数时，TuneD 可能会在底层使用 <command>sysctl</command>。例如：
+            </para>
+<screen><prompt>&gt; </prompt><command>sysctl -q -w
+<replaceable>CATEGORY.PARAMETER=VALUE</replaceable></command></screen>
+            <para>
+              下面概述了 <literal>sysctl</literal> 插件的常用参数及可能的值：
+            </para>
+            <important>
+              <title>修改 <literal>sysctl</literal> 参数前需了解相关影响</title>
+              <para>
+                修改这些参数可能会显著影响系统行为。在进行更改前，务必了解其影响。有关详细说明，请参见官方内核文档。
+              </para>
+            </important>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>kernel.hung_task_timeout_secs</parameter>：任务被视为挂起前的时长（以秒为单位，默认值：<literal>120</literal>）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.numa_balancing</parameter>：启用 (<literal>1</literal>) 或禁用 (<literal>0</literal>) 自动 NUMA 平衡。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.nmi_watchdog</parameter>：启用 (<literal>1</literal>) 或禁用 (<literal>0</literal>) NMI 看门狗。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.timer_migration</parameter>：启用 (<literal>1</literal>) 或禁用 (<literal>0</literal>) 计时器迁移。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.sched_autogroup_enabled</parameter>：启用 (<literal>1</literal>) 或禁用 (<literal>0</literal>) 调度程序自动分组。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.sched_min_granularity_ns</parameter>：CPU 密集型任务的最小抢占粒度（以纳秒为单位）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>kernel.sched_migration_cost_ns</parameter>：调度程序将迁移的进程视为<quote>缓存热点</quote>的时长（以纳秒为单位）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.stat_interval</parameter>：虚拟机统计信息的更新间隔（默认值：<literal>1</literal>）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.dirty_ratio</parameter>：系统内存中可被脏页填充的百分比，达到此百分比后，进程必须将脏页写入磁盘。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.dirty_background_ratio</parameter>：系统内存中可被脏页填充的百分比，达到此百分比后，后台写回进程开始将脏页写入磁盘。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.swappiness</parameter>：内核换出空闲进程的倾向。如果 swappiness 值为 <literal>0</literal>，则表示内核应尽可能长时间地将进程保留在主内存中。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>vm.max_map_count</parameter>：一个进程可拥有的内存映射区域的最大数量。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.core.busy_read</parameter>：<literal>recvmsg</literal> 的忙循环次数（默认值：<literal>50</literal>）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.core.busy_poll</parameter>：<literal>poll</literal> 的忙循环次数（默认值：<literal>50</literal>）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.tcp_fastopen</parameter>：启用 (<literal>1</literal>) 或禁用 (<literal>0</literal>) TCP 快速打开。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.tcp_rmem</parameter>：TCP 读缓冲区大小（最小值、默认值和最大值，以空格分隔）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.tcp_wmem</parameter>：TCP 写缓冲区大小（最小值、默认值和最大值，以空格分隔）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>net.ipv4.udp_mem</parameter>：UDP 缓冲区大小（最小值、默认值和最大值，以空格分隔）。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.aio-max-nr</parameter>：允许的最大并发异步 I/O 请求数量。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.file-max</parameter>：Linux 内核分配的最大文件句柄数量。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.inotify.max_user_instances</parameter>：每个用户的最大 <literal>inotify</literal> 实例数量。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.inotify.max_user_watches</parameter>：每个用户的最大 <literal>inotify</literal> 监视点数量。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.nr_open</parameter>：一个进程可拥有的最大文件描述符数量。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>fs.suid_dumpable</parameter>：控制是否为设置了用户 ID 或设置了组 ID 的程序生成核心转储。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              以下面的 <literal>sysctl</literal> 插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>sysctl</literal> 插件配置示例</title>
+<screen>
+[sysctl]
+
+# Kernel Parameters
+kernel.hung_task_timeout_secs = 600
+kernel.nmi_watchdog = 0
+kernel.timer_migration = 1
+kernel.sched_autogroup_enabled = 1
+kernel.sched_min_granularity_ns = 10000000
+kernel.sched_migration_cost_ns = 5000000
+kernel.sched_latency_ns = 60000000
+kernel.sched_wakeup_granularity_ns = 2000000
+kernel.numa_balancing = 0
+
+# Virtual Machine Parameters
+vm.stat_interval = 10
+vm.dirty_ratio = 10
+vm.dirty_background_ratio = 3
+vm.swappiness = 10
+vm.max_map_count = 800000
+
+# Network Parameters
+net.core.busy_read = 50
+net.core.busy_poll = 50
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_rmem = "4096 87380 16777216"
+net.ipv4.tcp_wmem = "4096 16384 16777216"
+net.ipv4.udp_mem = "3145728 4194304 16777216"
+
+# Filesystem Parameters
+fs.aio-max-nr = 1048576
+fs.file-max = 2097152
+fs.inotify.max_user_instances = 1024
+fs.inotify.max_user_watches = 524288
+fs.nr_open = 1048576
+fs.suid_dumpable = 1
+</screen>
+            </example>
+            <tip>
+              <title>更改 <literal>sysctl</literal> 设置的最佳实践</title>
+              <para>
+                最佳 sysctl 设置可能会因具体使用场景、硬件和系统的工作负载而有很大差异。建议对更改进行全面测试，并在应用新的 sysctl 配置后监控系统性能。
+              </para>
+            </tip>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>sysfs</term>
+          <listitem>
+            <para>
+              <literal>sysfs</literal> 插件接受系统文件系统下的任何有效文件路径或 <filename>/sys/</filename> 目录。该插件会检查文件路径是否有效，并可以读取和写入属于配置的文件中的值。以下面的 <literal>sysfs</literal> 插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>sysfs</literal> 插件配置</title>
+<screen>
+[sysfs]
+/sys/bus/workqueue/devices/writeback/cpumask = 2,6 <co xml:id="non-isolated-cpu-mask-value"/>
+/sys/devices/virtual/workqueue/cpumask = 3-5 <co xml:id="non-isolated-cpu-mask-range"/>
+/sys/devices/system/machinecheck/machinecheck*/ignore_ce = 1 <co xml:id="ignore-ce"/>
+</screen>
+            </example>
+            <calloutlist>
+              <callout arearefs="non-isolated-cpu-mask-value">
+                <para>
+                  以逗号分隔的单个 CPU。仅允许那些未使用 <parameter>isolcpus</parameter> 内核引导参数隔离的 CPU。要检查已隔离的 CPU，请运行 <command>grep isolcpus
+                  /proc/cmdline</command> 命令。要检查系统中的 CPU 总数，请运行 <command>lscpu | grep "^CPU(s):"</command> 命令。
+                </para>
+              </callout>
+              <callout arearefs="non-isolated-cpu-mask-range">
+                <para>
+                  CPU 范围。仅允许那些未使用 <parameter>isolcpus</parameter> 内核引导参数隔离的 CPU。要检查已隔离的 CPU，请运行 <command>grep isolcpus
+                  /proc/cmdline</command> 命令。要检查系统中的 CPU 总数，请运行 <command>lscpu | grep "^CPU(s):"</command> 命令。
+                </para>
+              </callout>
+              <callout arearefs="ignore-ce">
+                <para>
+                  可纠正错误 (CE) 是系统已检测到并自动纠正的硬件错误。<literal>ignore_ce</literal> 属性属于 sysfs 设置，用于控制系统是否必须报告这些可纠正错误。如果 <literal>ignore_ce</literal> 设为 <literal>1</literal>，系统会忽略可纠正错误，即这些错误不会被记录或报告给操作系统的错误处理机制。如果 <literal>ignore_ce</literal> 设为 <literal>0</literal>（默认值），系统会报告并记录可纠正错误，供管理员监控。
+                </para>
+              </callout>
+            </calloutlist>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>systemd</term>
+          <listitem>
+            <para>
+              <literal>systemd</literal> 插件主要用于配置 <systemitem class="daemon">systemd</systemitem> 的参数，后者是 SUSE Linux Enterprise Server 的系统和服务管理器。以 <systemitem class="daemon">systemd</systemitem> 进程 CPU 亲和性的插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>systemd</literal> 插件配置</title>
+<screen>
+[systemd]
+cpu_affinity=0,1,2 <co xml:id="systemd-plugin-cpu-affinity"/>
+</screen>
+              <calloutlist>
+                <callout arearefs="systemd-plugin-cpu-affinity">
+                  <para>
+                    将 systemd 服务绑定到多个指定的 CPU 核心。默认为 <literal>None</literal>。此示例中将服务配置为在 CPU 核心 <literal>0</literal>、<literal>1</literal> 和 <literal>2</literal> 上运行。传递值的其他方式包括传递 CPU 核心范围，例如 <literal>0-2</literal>。不过，传递的值<emphasis>不能</emphasis>是在 <filename>/etc/tuned/cpu-partitioning-variables.conf</filename> 文件中声明为 <parameter>isolated_cores</parameter> 的 CPU 核心。在该插件中配置 <parameter>cpu_affinity</parameter> 参数等同于在 <systemitem class="daemon">systemd</systemitem> 配置文件 <filename>/etc/systemd/system.conf</filename> 中配置 <parameter>CPUAffinity</parameter>。
+                  </para>
+                </callout>
+              </calloutlist>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>script</term>
+          <listitem>
+            <para>
+              利用 <literal>script</literal> 插件，用户可以执行自定义脚本，TuneD 会在不同阶段运行这些脚本。系统管理员可以通过指定此类脚本的路径，使用该插件自动执行多项系统配置和优化操作。常用参数及可能的值如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>priority</parameter>：用于设置脚本优先级的整数值。TuneD 会根据脚本的优先级执行脚本，数值越小表示优先级越高。因此，优先级为 <literal>5</literal> 的脚本与优先级数字小于 <literal>5</literal> 的脚本相比，前者的优先级较低。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>script</parameter>：指定 TuneD 要执行的脚本的路径。可以提供脚本的绝对路径作为参数值，也可以使用 <varname>PROFILE_DIR</varname> 变量传递脚本的相对路径。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              例如，我们来看看下面的相对脚本路径用法：
+            </para>
+            <example>
+              <title>在 TuneD 配置文件中使用变量包含相对脚本路径</title>
+<screen>
+[script]
+priority=5
+script=${i:PROFILE_DIR}/script.sh
+</screen>
+            </example>
+            <tip>
+              <title>变量定义的参考资源</title>
+              <para>
+                有关实用变量的列表，请查看源代码文件 <link xlink:href="https://github.com/redhat-performance/tuned/blob/v2.10.0/tuned/consts.py"></link> 中定义的常量。
+              </para>
+            </tip>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>scheduler</term>
+          <listitem>
+            <para>
+              <literal>scheduler</literal> 插件用于管理 CPU 核心的隔离，以及通过添加到许可列表或 拒绝列表来选择要管理的进程。该插件主要用于隔离特定 CPU 核心，并管理哪些进程应由调度程序管理或不应由调度程序管理。常用参数及可能的值如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>isolated_cores</parameter>：将特定 CPU 核心与通用调度程序隔离。进程可以绑定到这些隔离的核心上，以确保它们运行时不受其他系统进程的干扰。要为此参数传递值，请使用表示核心的整数（多个值需以逗号分隔）或十六进制格式的整数位掩码。例如，<literal>isolated_cores=0,1</literal> 也可以用更简洁的 <literal>0x3</literal> 表示。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>ps_whitelist</parameter>：调度程序插件有权管理的允许的进程名称列表。只有与该模式匹配的进程才会被纳入调度调整范围。为此参数传递的值应是进程名称的正则表达式。例如，<literal>.*</literal> 会与所有进程匹配，而 <literal>^bash$</literal> 仅会与 <literal>bash</literal> 进程匹配。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>ps_blacklist</parameter>：插件排除在管理范围之外的进程名称列表。与该模式匹配的进程不会被插件调整。为此参数传递的值应是进程名称的正则表达式。例如，<literal>.*</literal> 会与所有进程匹配，而 <literal>^idle$</literal> 仅会与 <literal>idle</literal> 进程匹配。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              以下面的 <literal>scheduler</literal> 插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>scheduler</literal> 插件配置</title>
+<screen>
+isolated_cores=0x3
+ps_whitelist=.*
+ps_blacklist=^idle$;.*pmd.*;.*PMD.*;^DPDK;.*qemu-kvm.*
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>bootloader</term>
+          <listitem>
+            <para>
+              <literal>bootloader</literal> 插件用于应用需要更改系统引导参数的性能配置文件。这些更改在引导加载程序配置文件（通常是 GRUB 2 配置）中进行，并在系统引导时应用。需要通过设置特定内核参数（如控制 CPU 隔离或电源管理的参数）以及其他可能影响整体系统行为和性能的引导时设置来优化系统性能时，该插件特别有用。
+            </para>
+            <para>
+              下面概述了常用参数及其值：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>grub2_cfg_file</parameter>：指定要修改的 GRUB 2 配置文件。如果未提供，插件将使用系统中默认的 GRUB2 配置文件。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_dst_img</parameter>：设置 initrd 映像的目标路径。如果指定了该参数，initrd 映像将会复制到相应位置。路径必须是绝对路径，如果未提供，将使用默认的引导目录。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_add_img</parameter>：在 GRUB 2 配置中添加 initrd 映像的路径，以便在引导过程中使用自定义 initrd 映像。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_add_dir</parameter>：添加一个要包含在 initrd 映像中的目录。该参数会指定一个目录的路径，该目录的内容会被封装到 initrd 映像中并包含在引导配置中。这对于向 initrd 添加自定义模块或脚本非常有用。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>initrd_remove_dir</parameter>：一个布尔选项，用于指定在 <parameter>initrd_add_dir</parameter> 中指定的目录被封装到 initrd 映像后是否去除该目录。如果设为 <literal>True</literal>，创建 initrd 映像后会删除源目录。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>cmdline</parameter>：指定要添加到 GRUB 2 配置中的额外内核命令行参数。使用此参数，您可以添加可根据工作负载的特定需求优化系统性能或行为的自定义内核参数。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              以下面的 <literal>bootloader</literal> 插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>bootloader</literal> 插件配置</title>
+<screen>
+[bootloader]
+cmdline="isolcpus=1-3 nohz_full=1-3 intel_pstate=disable"
+initrd_add_img="/path/to/custom-initrd.img"
+initrd_add_dir="/path/to/custom-initrd-dir"
+initrd_remove_dir=True
+initrd_dst_img="/boot/initrd-custom.img"
+grub2_cfg_file="/etc/grub2.cfg"
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>net</term>
+          <listitem>
+            <para>
+              <literal>net</literal> 插件用于配置多项优化网络性能的参数。下面概述了该插件常用的参数及其值：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>devices</parameter>：指定以逗号分隔的网络设备名称列表。例如，<literal>devices=eth0,eth1</literal>。默认情况下，该设置会应用于所有网络设备。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>dynamic</parameter>：用于启用或禁用基于网络负载的动态微调的布尔值 (<literal>true</literal>/<literal>false</literal>)。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>wake_on_lan</parameter>：使用以下字符的任意组合配置网络唤醒 (WoL) 设置：
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>p</literal>：通过 PHY 活动唤醒。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>u</literal>：通过单播消息唤醒。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>m</literal>：通过多播消息唤醒。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>b</literal>：通过广播消息唤醒。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>a</literal>：通过 ARP 唤醒。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>g</literal>：通过 MagicPacket<superscript>TM</superscript> 唤醒。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>s</literal>：为 MagicPacket<superscript>TM</superscript> 启用 SecureOn<superscript>TM</superscript>。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>d</literal>：禁用网络唤醒。
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>nf_conntrack_hashsize</parameter>：用于设置连接跟踪哈希表大小的整数值。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>features</parameter>：网络设备功能名称及其期望状态的字典。例如，<literal>tx-checksum: off, sg: on</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>coalesce</parameter>：数据包合并参数的字典。
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>adaptive-rx</literal> 和 <literal>adaptive-tx</literal> 的可能值为 <literal>on</literal> 或 <literal>off</literal>。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      以下参数的值为整数：<literal>rx-usecs</literal>、<literal>rx-frames</literal>、<literal>rx-usecs-irq</literal>、<literal>rx-frames-irq</literal>、<literal>tx-usecs</literal>、<literal>tx-frames</literal>、<literal>tx-usecs-irq</literal>、<literal>tx-frames-irq</literal>、<literal>stats-block-usecs</literal>、<literal>pkt-rate-low</literal>、<literal>rx-usecs-low</literal>、<literal>rx-frames-low</literal>、<literal>tx-usecs-low</literal>、<literal>tx-frames-low</literal>、<literal>pkt-rate-high</literal>、<literal>rx-usecs-high</literal>、<literal>rx-frames-high</literal>、<literal>tx-usecs-high</literal>、<literal>tx-frames-high</literal>、<literal>sample-interval</literal>
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>pause</parameter>：暂停帧参数的字典。暂停帧参数 <literal>autoneg</literal>、<literal>rx</literal> 和 <literal>tx</literal> 的值为 <literal>on</literal> 或 <literal>off</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>ring</parameter>：环形缓冲区大小的字典。以下环形缓冲区大小参数的值为整数：<literal>rx</literal>、<literal>rx-mini</literal>、<literal>rx-jumbo</literal> 和 <literal>tx</literal>。
+                </para>
+              </listitem>
+            </itemizedlist>
+            <para>
+              以下面的网络设备参数配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>net</literal> 插件配置</title>
+<screen>
+[net]
+devices=eth0,eth1
+dynamic=true
+wake_on_lan=g
+nf_conntrack_hashsize=16384
+features=tx-checksum:off, sg:on
+coalesce=adaptive-rx:on, rx-usecs:50, rx-frames:32
+pause=autoneg:on, rx:on, tx:off
+ring=rx:2048, tx:1024
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>vm</term>
+          <listitem>
+            <para>
+              <literal>vm</literal> 插件用于优化虚拟化环境中的内存管理。它提供了微调与内存相关的参数的机制，特别侧重于透明大页 (THP) 的管理。该插件的常用参数及其值如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>transparent_hugepage</parameter> 或 <parameter>transparent_hugepages</parameter>：这两个参数通常可互换使用，它们是别名，功能是控制透明大页的行为。与此参数相关的常见属性和值如下：
+                </para>
+                <itemizedlist>
+                  <listitem>
+                    <para>
+                      <literal>enabled</literal>：控制透明大页的整体启用。可能的值为 <literal>always</literal>、<literal>madvise</literal> 和 <literal>never</literal>。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>defrag</literal>：确定碎片整理应在何时进行（如果需要）。可能值的为 <literal>always</literal>、<literal>defer</literal>、<literal>madvise</literal>、<literal>defer+madvise</literal> 和 <literal>never</literal>。
+                    </para>
+                  </listitem>
+                  <listitem>
+                    <para>
+                      <literal>khugepaged</literal>：配置与 khugepaged 守护程序相关的设置，包括 <literal>scan_sleep_millisecs</literal> 和 <literal>alloc_sleep_millisecs</literal> 等选项。
+                    </para>
+                  </listitem>
+                </itemizedlist>
+              </listitem>
+            </itemizedlist>
+            <para>
+              以 TuneD 配置文件中的以下 <literal>vm</literal> 插件配置为例：
+            </para>
+            <example>
+              <title>TuneD 配置文件中的 <literal>vm</literal> 插件配置</title>
+<screen>
+[vm]
+transparent_hugepages.enabled=always
+transparent_hugepage.defrag=always
+transparent_hugepages.khugepaged.scan_sleep_millisecs=10000
+</screen>
+            </example>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term>eeepc_she</term>
+          <listitem>
+            <para>
+              <literal>eeepc_she</literal> 插件增强了 ASUS EeePC 上网本的电源管理功能，特别是那些配备了超级混合引擎 (SHE) 技术的机型。它通过动态调整 CPU 频率和电源状态来优化系统性能，从而在能效和处理能力之间取得平衡。常用参数及其值如下：
+            </para>
+            <itemizedlist>
+              <listitem>
+                <para>
+                  <parameter>load_threshold_normal</parameter>：切换至正常模式的负载阈值。默认值是 <literal>0.6</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>load_threshold_powersave</parameter>：切换至节能模式的负载阈值。默认值是 <literal>0.4</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>she_powersave</parameter>：用于将 SHE 设置为节能模式的值。默认值是 <literal>2</literal>。
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <parameter>she_normal</parameter>：用于将 SHE 设置为正常模式的值。默认值是 <literal>1</literal>。
+                </para>
+              </listitem>
+            </itemizedlist>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+    </sect2>
+  </sect1>
+  <sect1 xml:id="sec-tuning-tuned-more">
+    <title>更多信息</title>
+
+    <para>
+      有关详细信息，请参考以下资源：
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          TuneD 项目官方网站：<link xlink:href="https://tuned-project.org/"></link>
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          GitHub 上的源代码储存库：<link xlink:href="https://github.com/redhat-performance/tuned"></link>。您可能会发现以下资源特别有用：
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              <link xlink:href="https://github.com/redhat-performance/tuned/tree/v2.10.0/profiles"></link> 上提供了多个配置文件 (profile) 的配置文件 (configuration file)。利用这些配置示例，您可以轻松着手创建 SUSE Linux Enterprise Server 的 <package>tuned</package> 软件包中未包含的自定义配置文件。
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              如果您有兴趣实现插件，以便根据配置文件中提供的值监控并动态微调系统，可在 <link xlink:href="https://github.com/redhat-performance/tuned/tree/v2.10.0/tuned/plugins"></link> 上获取源代码。
+            </para>
+          </listitem>
+        </itemizedlist>
+      </listitem>
+    </itemizedlist>
+
+    <tip>
+      <title>参考对应版本的 TuneD 源代码</title>
+      <para>
+        通过运行 <command>tuned
+        --version</command> 命令查看 SUSE Linux Enterprise Server 系统中的 <systemitem class="daemon">tuned</systemitem> 版本。在 GitHub 储存库中，选择对应分支或标记，以查看系统上安装的特定 <systemitem class="daemon">tuned</systemitem> 版本的源代码。
+      </para>
+    </tip>
+  </sect1>
+</chapter>

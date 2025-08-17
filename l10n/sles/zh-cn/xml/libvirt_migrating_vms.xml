@@ -1,1 +1,462 @@
-../../../../xml/libvirt_migrating_vms.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="libvirt_migrating_vms.xml" version="5.0" xml:id="sec-libvirt-admin-migrate">
+  <title>迁移 VM Guest</title>
+  <info>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker/>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
+  <para>
+    虚拟化的主要优势之一是 VM Guest 可移植。当 VM 主机服务器需要维护时，或者当该主机过载时，可以轻松将 Guest 迁移到另一台 VM 主机服务器。KVM 和 Xen 甚至支持<quote>实时</quote>迁移，在此期间，VM Guest 仍然可用。
+  </para>
+  <sect1 xml:id="libvirt-migration-types">
+    <title>迁移类型</title>
+
+    <para>
+      根据所需场景，您可以通过三种方式迁移虚拟机 (VM)。
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term>实时迁移</term>
+        <listitem>
+          <para>
+            源 VM 在将配置和内存传输至目标主机期间持续运行。传输完成后，源 VM 会暂停，目标虚拟机恢复运行。
+          </para>
+          <para>
+            实时迁移适用于需要保持在线不停机的 VM。
+          </para>
+          <note>
+            <para>
+              I/O 负载较重或内存页写入频繁的 VM 很难进行实时迁移。此类情况建议采用非实时迁移或离线迁移。
+            </para>
+          </note>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>非实时迁移</term>
+        <listitem>
+          <para>
+            源 VM 将被暂停，其配置和内存将传输至目标主机。随后目标 VM 恢复运行。
+          </para>
+          <para>
+            非实时迁移相比实时迁移更为可靠，但会造成 VM 中断。如果能接受停机，对于难以实施实时迁移的 VM，可采用非实时迁移方案。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>离线迁移</term>
+        <listitem>
+          <para>
+            VM 定义会被传输至目标主机。源 VM 不会被停止，目标 VM 也不会恢复运行。
+          </para>
+          <para>
+            离线迁移适用于迁移处于非活动状态的 VM。
+          </para>
+          <important>
+            <para>
+            采用离线迁移时，必须使用 <option>--persistent</option> 选项。
+            </para>
+          </important>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </sect1>
+  <sect1 xml:id="libvirt-admin-live-migration-requirements">
+    <title>迁移要求</title>
+
+    <para>
+      要成功将 VM Guest 迁移到另一台 VM 主机服务器，需符合以下要求：
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          源和目标系统必须采用相同的体系结构。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          两台计算机必须都能访问存储设备，例如通过 NFS 或 iSCSI。有关详细信息，请访问 <xref linkend="cha-libvirt-storage"/>。
+        </para>
+        <para>
+          在迁移期间连接的 CD-ROM 或软盘映像也需要符合此要求。不过，您可以按照<xref linkend="sec-libvirt-config-cdrom-media-change"/>中所述在迁移之前断开其连接。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          这两台 VM 主机服务器上都需要运行 <systemitem class="daemon">libvirtd</systemitem>，并且您必须能够打开从目标主机到源主机（或反向）的远程 <systemitem class="library">libvirt</systemitem> 连接。有关细节，请参见<xref linkend="sec-libvirt-connect-remote"/>。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          如果目标主机上在运行防火墙，则需要打开端口以允许迁移。如果您在迁移期间不指定端口，<systemitem class="library">libvirt</systemitem> 将从 49152:49215 范围内选择一个端口。确保在<emphasis>目标主机</emphasis>上的防火墙中打开此端口范围（建议）或所选的专用端口。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          源计算机和目标计算机应位于网络上的同一子网中，否则迁移后网络功能无法正常工作。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          所有参与迁移的 VM 主机服务器所用 qemu 用户的 UID 必须相同，并且使用的 kvm、qemu 和 libvirt 组的 GID 必须相同。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          目标主机上不能存在正在运行或已暂停的同名 VM Guest。如果存在已关闭的同名计算机，其配置将被覆盖。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          迁移 VM Guest 时支持除<emphasis>主机 CPU</emphasis> 型号以外的所有 CPU 型号。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <xref linkend="gloss-vt-acronym-sata"/> 类型地磁盘设备无法迁移。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          文件系统直通功能不可迁移。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          需在 VM 主机服务器和 VM Guest 上安装适当的计时功能。请参见<xref linkend="sec-kvm-managing-clock"/>。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          无法将物理设备从主机迁移到 Guest。目前，在使用具有 PCI 直通或 <xref linkend="vt-io-sriov"/> 功能的设备时，不支持实时迁移。如果需要支持实时迁移，请使用软件虚拟化（半虚拟化或全虚拟化）。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          缓存模式设置是重要的迁移设置。请参见<xref linkend="sec-cache-mode-live-migration"/>。
+        </para>
+      </listitem>
+      <listitem os="sles;sled">
+        <para os="sles;sled">
+          不支持向后迁移（例如，从 SLES 15 SP2 迁移到 15 SP1）。
+        </para>
+      </listitem>
+      <listitem os="sles;sled">
+        <para>
+          SUSE 致力于支持将 VM Guest 从运行 LTSS 所涵盖的服务包的 VM 主机服务器，迁移到运行同一 SLES 主要版本中更新的服务包的 VM 主机服务器。例如，将 VM Guest 从 SLES 12 SP2 主机迁移到 SLES 12 SP5 主机。对于从 LTSS 迁移到更新的服务包的场景，SUSE 只会执行极简单的测试，建议在尝试迁移关键 VM Guest 之前执行全面的现场测试。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          在两台主机上，映像目录应位于同一路径。
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          所有主机的微代码级别（尤其是 Spectre 微代码更新）应该相同。在所有主机上安装 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> 的最新更新即可实现此目的。
+        </para>
+      </listitem>
+    </itemizedlist>
+  </sect1>
+  <sect1 xml:id="sec-libvirt-admin-migrate-virtmanager">
+    <title>使用虚拟机管理器进行实时迁移</title>
+
+    <para>
+      使用虚拟机管理器迁移 VM Guest 时，在哪台计算机上启动虚拟机管理器并不重要。您可以在源主机或目标主机上启动虚拟机管理器，甚至可以在这两台之外的主机上启动。对于后一种情况，您需要能够同时与目标主机和源主机建立远程连接。
+    </para>
+
+    <procedure>
+      <step>
+        <para>
+          启动虚拟机管理器，并与目标主机或源主机建立连接。如果虚拟机管理器不是在目标主机或源主机上启动的，则需要与这两台主机都建立连接。
+        </para>
+      </step>
+      <step>
+        <para>
+          右键单击要迁移的 VM Guest，然后选择<guimenu>迁移</guimenu>。确保该 Guest 正在运行或已暂停 — 关闭的 Guest 无法迁移。
+        </para>
+        <tip>
+          <title>提高迁移速度</title>
+          <para>
+            要提高迁移速度，请暂停 VM Guest。这相当于 <xref linkend="libvirt-migration-types"/> 中介绍的<quote>非实时迁移</quote>。
+          </para>
+        </tip>
+      </step>
+      <step>
+        <para>
+          为 VM Guest 选择一个<guimenu>新主机</guimenu>。如果所需的目标主机未显示，请确保您已连接到该主机。
+        </para>
+        <para>
+          要更改用于连接到远程主机的默认选项，请在<guimenu>连接</guimenu>下设置<guimenu>模式</guimenu>，以及目标主机的<guimenu>地址</guimenu>（IP 地址或主机名）和<guimenu>端口</guimenu>。如果指定<guimenu>端口</guimenu>，还必须指定<guimenu>地址</guimenu>。
+        </para>
+        <para>
+          在<guimenu>高级选项</guimenu>下，选择迁移是永久性的（默认设置）还是暂时性的（使用<guimenu>临时迁移</guimenu>）。
+        </para>
+        <para>
+          此外我们还提供了一个选项<guimenu>允许不安全的迁移</guimenu>，它允许在不禁用 VM 主机服务器缓存的情况下进行迁移。这样可以加速迁移，但仅当当前配置能够在不使用 <literal>cache="none"</literal>/<literal>0_DIRECT</literal> 的情况下提供一致的 VM Guest 存储信息时，此选项才起作用。
+        </para>
+        <note>
+          <title>带宽选项</title>
+          <para>
+            在最近的虚拟机管理器版本中，去除了用于设置迁移带宽的选项。要设置特定的带宽，请改用 <command>virsh</command>。
+          </para>
+        </note>
+      </step>
+      <step>
+        <para>
+          要执行迁移，请单击<guimenu>迁移</guimenu>。
+        </para>
+        <para>
+          迁移完成后，<guimenu>迁移</guimenu>窗口将会关闭，该 VM Guest 随即列在新主机的虚拟机管理器窗口中。原始 VM Guest 仍可在源主机上使用（处于关机状态）。
+        </para>
+      </step>
+    </procedure>
+  </sect1>
+  <sect1 xml:id="sec-libvirt-admin-migrate-virsh">
+    <title>使用 <command>virsh</command> 进行迁移</title>
+
+    <para>
+      要使用 <command>virsh</command> <option>migrate</option> 迁移 VM Guest，您需要能够直接访问或者通过外壳远程访问 VM 主机服务器，因为命令需在主机上运行。迁移命令如下所示：
+    </para>
+
+<screen><prompt>&gt; </prompt>virsh migrate [OPTIONS] <replaceable>VM_ID_or_NAME</replaceable> <replaceable>CONNECTION_URI</replaceable> [--migrateuri tcp://<replaceable>REMOTE_HOST:PORT</replaceable>]</screen>
+
+    <para>
+      下面列出了最重要的选项。有关完整列表，请参见 <command>virsh help
+      migrate</command>。
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term><option>--live</option></term>
+        <listitem>
+          <para>
+            执行实时迁移。如果未指定此选项，Guest 将会在迁移期间暂停（<quote>非实时迁移</quote>）。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--suspend</option></term>
+        <listitem>
+          <para>
+            在实时或非实时迁移期间，暂停目标主机上的 VM。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--persistent</option></term>
+        <listitem>
+          <para>
+            在目标主机上保留迁移后的 VM。如果不使用此选项，当该 VM 关闭时，它不会出现在 <command>virsh list --all</command> 报告的域列表中。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--undefinesource</option></term>
+        <listitem>
+          <para>
+            如果指定此选项，成功迁移后，将删除源主机上的 VM Guest 定义，但<emphasis>不会</emphasis>删除挂接到此 Guest 的虚拟磁盘。
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--parallel --parallel-connections <replaceable>NUM_OF_CONNECTIONS</replaceable></option></term>
+        <listitem>
+          <para>
+            当单个迁移线程无法使源主机与目标主机之间的网络链接饱和时，可以使用并行迁移来提高迁移数据吞吐量。在具备 40 GB 网络接口的主机上，可能需要四个迁移线程才能使链接饱和。使用并行迁移可以缩短迁移大内存 VM 所需的时间。
+          </para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+
+    <para>
+      以下示例使用 mercury.example.com 作为源系统，使用 jupiter.example.com 作为目标系统；VM Guest 的名称为 <literal>opensuse131</literal>，ID 为 <literal>37</literal>。
+    </para>
+
+    <variablelist>
+      <varlistentry>
+        <term>使用默认参数进行非实时迁移</term>
+        <listitem>
+<screen><prompt>&gt; </prompt>virsh migrate 37 qemu+ssh://tux@jupiter.example.com/system</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>使用默认参数进行瞬态实时迁移</term>
+        <listitem>
+<screen><prompt>&gt; </prompt>virsh migrate --live opensuse131 qemu+ssh://tux@jupiter.example.com/system</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>永久性实时迁移；删除源上的 VM 定义</term>
+        <listitem>
+<screen><prompt>&gt; </prompt>virsh migrate --live --persistent --undefinesource 37 \
+qemu+tls://tux@jupiter.example.com/system</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>非实时迁移，使用端口 49152</term>
+        <listitem>
+<screen><prompt>&gt; </prompt>virsh migrate opensuse131 qemu+ssh://tux@jupiter.example.com/system \
+--migrateuri tcp://@jupiter.example.com:49152</screen>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term>实时迁移，转移所有已使用的存储</term>
+        <listitem>
+<screen><prompt>&gt; </prompt>virsh migrate --live --persistent --copy-storage-all \
+opensuse156 qemu+ssh://tux@jupiter.example.com/system</screen>
+          <important>
+            <para>
+              使用 <option>--copy-storage-all</option> 选项迁移 VM 的存储时，存储必须位于 <systemitem class="library">libvirt</systemitem> 的存储池中。目标存储池必须与源存储池类型相同、名称一致。
+            </para>
+            <para>
+              要获取源存储池的 XML 表示，请使用以下命令：
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> virsh pool-dumpxml <replaceable>EXAMPLE_VM</replaceable> &gt; <replaceable>EXAMPLE_POOL.xml</replaceable></screen>
+            <para>
+              要在目标主机上创建并启动该存储池，请将其 XML 文件复制到目标主机，并执行以下命令：
+            </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> virsh pool-define <replaceable>EXAMPLE_POOL.xml</replaceable>
+<prompt>&gt; </prompt><command>sudo</command> virsh pool-start <replaceable>EXAMPLE_VM</replaceable></screen>
+          </important>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+
+    <note>
+      <title>瞬态迁移与永久性迁移的比较</title>
+      <para>
+        默认情况下，<command>virsh migrate</command> 会为目标主机上的 VM Guest 创建临时（瞬态）副本。已关机版本的原始 Guest 说明将保留在源主机上。瞬态副本将会在 Guest 关机后从服务器中删除。
+      </para>
+      <para>
+        要为目标主机上的 Guest 创建永久副本，请使用开关 <option>--persistent</option>。已关机版本的原始 Guest 说明也会保留在源主机上。将选项 <option>--undefinesource</option> 与 <option>--persistent</option> 一起使用可以实现<quote>真正</quote>的迁移，在此情况下，将在目标主机上创建永久副本，并删除源主机上的版本。
+      </para>
+      <para>
+        不建议只使用 <option>--undefinesource</option> 而不使用 <option>--persistent</option> 选项，因为这会导致两个 VM Guest 定义均会在目标主机上的 Guest 关闭后丢失。
+      </para>
+    </note>
+  </sect1>
+
+  <sect1 xml:id="sec-libvirt-migrate-stepbstep">
+    <title>分步操作示例</title>
+
+    <sect2 xml:id="sec-migrate-stepbstep-export">
+      <title>导出存储设备</title>
+      <para>
+        首先需要导出存储区，以便在主机之间共享 Guest 映像。可以通过一台 NFS 服务器完成此操作。在以下示例中，我们想要共享网络 10.0.1.0/24 中所有计算机的 <filename>/volume1/VM</filename> 目录。我们使用了一个 SUSE Linux Enterprise NFS 服务器。以 root 用户身份编辑 <filename>/etc/exports</filename> 文件，在其中添加以下内容：
+      </para>
+<screen>/volume1/VM 10.0.1.0/24  (rw,sync,no_root_squash)</screen>
+      <para>
+        您需要重启动该 NFS 服务器：
+      </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> systemctl restart nfsserver
+<prompt>&gt; </prompt><command>sudo</command> exportfs
+/volume1/VM      10.0.1.0/24</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-pool">
+      <title>在目标主机上定义池</title>
+      <para>
+        在您要迁移 VM Guest 的每台主机上，必须定义池才能访问卷（其中包含 Guest 映像）。我们的 NFS 服务器 IP 地址为 10.0.1.99，它的共享是 <filename>/volume1/VM</filename> 目录，而我们想要将此共享挂载到 <filename>/var/lib/libvirt/images/VM</filename> 目录中。池名称为 <emphasis>VM</emphasis>。要定义此池，请创建包含以下内容的 <filename>VM.xml</filename> 文件：
+      </para>
+<screen>&lt;pool type='netfs'&gt;
+  &lt;name&gt;VM&lt;/name&gt;
+  &lt;source&gt;
+    &lt;host name='10.0.1.99'/&gt;
+    &lt;dir path='/volume1/VM'/&gt;
+    &lt;format type='auto'/&gt;
+  &lt;/source&gt;
+  &lt;target&gt;
+    &lt;path&gt;/var/lib/libvirt/images/VM&lt;/path&gt;
+    &lt;permissions&gt;
+      &lt;mode&gt;0755&lt;/mode&gt;
+      &lt;owner&gt;-1&lt;/owner&gt;
+      &lt;group&gt;-1&lt;/group&gt;
+    &lt;/permissions&gt;
+  &lt;/target&gt;
+  &lt;/pool&gt;</screen>
+      <para>
+        然后使用 <command>pool-define</command> 命令将其加载到 <systemitem class="library">libvirt</systemitem>：
+      </para>
+<screen><prompt role="root"># </prompt>virsh pool-define VM.xml</screen>
+      <para>
+        另一种定义此池的方法是使用 <command>virsh</command> 命令：
+      </para>
+<screen><prompt role="root"># </prompt>virsh pool-define-as VM --type netfs --source-host 10.0.1.99 \
+     --source-path /volume1/VM --target /var/lib/libvirt/images/VM
+Pool VM created</screen>
+      <para>
+        以下命令假设您在 <command>virsh</command> 的交互式外壳中操作，使用不带任何参数的 <command>virsh</command> 命令也可以访问该外壳。然后，可将池设置为在主机引导时自动启动（autostart 选项）：
+      </para>
+<screen><prompt>virsh # </prompt>pool-autostart VM
+Pool VM marked as autostarted</screen>
+      <para>
+        要禁用自动启动，请运行以下命令：
+      </para>
+<screen><prompt>virsh # </prompt>pool-autostart VM --disable
+Pool VM unmarked as autostarted</screen>
+      <para>
+        检查该池是否存在：
+      </para>
+<screen><prompt>virsh # </prompt>pool-list --all
+ Name                 State      Autostart
+-------------------------------------------
+ default              active     yes
+ VM                   active     yes
+
+<prompt>virsh # </prompt>pool-info VM
+Name:           VM
+UUID:           42efe1b3-7eaa-4e24-a06a-ba7c9ee29741
+State:          running
+Persistent:     yes
+Autostart:      yes
+Capacity:       2,68 TiB
+Allocation:     2,38 TiB
+Available:      306,05 GiB</screen>
+      <warning>
+        <title>池需要在所有目标主机上存在</title>
+        <para>
+          记住：必须在您要迁移 VM Guest 的每台主机上定义此池。
+        </para>
+      </warning>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-volume">
+      <title>创建卷</title>
+      <para>
+        池已定义，现在我们需要一个包含磁盘映像的卷：
+      </para>
+<screen><prompt>virsh # </prompt>vol-create-as VM sled12.qcow2 8G --format qcow2
+Vol sled12.qcow2 created</screen>
+      <para>
+        稍后将会通过 virt-install 使用所示的卷名称安装 Guest。
+      </para>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-guest">
+      <title>创建 VM Guest</title>
+      <para>
+        让我们使用 <command>virt-install</command> 命令创建一个 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> VM Guest。使用 <command>--disk</command> 选项指定 <emphasis>VM</emphasis> 池；如果您不希望在执行迁移时使用 <command>--unsafe</command> 选项，建议您设置 <emphasis>cache=none</emphasis>。
+      </para>
+<screen><prompt role="root"># </prompt>virt-install --connect qemu:///system --virt-type kvm --name \
+   sles15 --memory 1024 --disk vol=VM/sled12.qcow2,cache=none --cdrom \
+   /mnt/install/ISO/SLE-15-Server-DVD-x86_64-Build0327-Media1.iso --graphics \
+   vnc --os-variant sled15
+Starting install...
+Creating domain...</screen>
+    </sect2>
+
+    <sect2 xml:id="sec-migrate-stepbstep-migrate">
+      <title>迁移 VM Guest</title>
+      <para>
+        一切准备就绪，现在可以执行迁移。在当前托管 VM Guest 的 VM 主机服务器上运行 <command>migrate</command> 命令，并选择目标。
+      </para>
+<screen>virsh # migrate --live sled12 --verbose qemu+ssh://<replaceable>IP/Hostname</replaceable>/system
+Password:
+Migration: [ 12 %]</screen>
+    </sect2>
+  </sect1>
+</chapter>
