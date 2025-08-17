@@ -1,1 +1,339 @@
-../../../../xml/vm_security.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xml:base="vm_security.xml" version="5.0" xml:id="cha-vm-security">
+  <title>使用 AMD SEV-SNP 增强虚拟机安全性</title>
+  <info>
+    <abstract>
+      <para>
+        您可以通过 AMD 安全加密虚拟化-安全嵌套分页 (SEV-SNP) 增强虚拟机的安全性。AMD SEV-SNP 功能可将虚拟机与主机系统及其他 VM 隔离，保护数据和代码。该功能会对数据进行加密，并确保能检测或跟踪 VM 中代码和数据的任何更改。由于这种做法会隔离 VM，因此其他 VM 或主机不会受到威胁影响。
+      </para>
+
+      <para>
+        本节介绍在搭载 AMD EPYC 的服务器上使用 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP7</phrase></phrase> 启用和使用 AMD SEV-SNP 的步骤。
+      </para>
+    </abstract>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:bugtracker/>
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+  </info>
+  <sect1 xml:id="vm-security-hardware-support">
+    <title>支持的硬件</title>
+
+    <para>
+      运行 AMD SEV-SNP 虚拟机需要配备 AMD EPYC（第 3 代或更新版本）的系统。AMD 计算机的 BIOS 必须提供相应选项以启用平台的机密计算支持。
+    </para>
+  </sect1>
+  <sect1 xml:id="vm-security-enable-confidential-compute-module">
+    <title>启用机密计算模块</title>
+
+    <para>
+      AMD SEV-SNP 功能所需的软件包通过机密计算模块提供。您必须在系统安装时或之后通过 SUSEConnect 命令行工具启用该模块。
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          要检查模块是否已启用，请运行以下命令：
+        </para>
+<screen> <prompt>&gt; </prompt><command>sudo</command>  suseconnect -l</screen>
+        <para>
+          这将显示可用模块列表及其激活状态，以及启用非活动模块所需的命令。
+        </para>
+        <para>
+          非活动的机密计算模块将显示如下：
+        </para>
+<screen>Confidential Computing Technical Preview Module 15 SP6 x86_64
+Activate with: suseconnect -p sle-module-confidential-computing/15.6/x86_64</screen>
+      </listitem>
+      <listitem>
+        <para>
+          要启用机密计算模块技术预览，请运行以下命令：
+        </para>
+<screen> <prompt>&gt; </prompt><command>sudo</command>  <command>suseconnect -p sle-module-confidential-computing/15.6/x86_64</command>
+Registering system to SUSE Customer Center
+Updating system details on https://scc.suse.com ...
+Activating sle-module-confidential-computing 15.6 x86_64 ...
+Adding service to system ...
+Installing release package ...
+Successfully registered system</screen>
+        <para>
+          机密计算模块已启用，您现在可以安装软件包。
+        </para>
+      </listitem>
+    </itemizedlist>
+  </sect1>
+  <sect1 xml:id="vm-security-verify-setup">
+    <title>安装软件包并配置基础系统</title>
+
+    <para>
+      机密计算模块提供了支持 AMD SEV-SNP 的替代软件包。为了确保最大程度的兼容性，这些软件包基于 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP7</phrase></phrase> 的代码流。
+    </para>
+
+    <para>
+      需要替换的三个组件包括：
+    </para>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          Linux 内核
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          QEMU 虚拟机监视程序
+        </para>
+      </listitem>
+      <listitem>
+        <para>
+          <systemitem class="library">libvirt</systemitem> 框架
+        </para>
+      </listitem>
+    </itemizedlist>
+
+    <procedure>
+      <step>
+        <para>
+          要安装替代软件包，请执行以下命令：
+        </para>
+<screen><prompt>&gt; </prompt><command>sudo</command>  <command>zypper install --from SLE-Module-Confidential-Computing-15-SP6-Pool --from SLE-Module-Confidential-Computing-15-SP6-Updates qemu-ovmf-x86_64 libvirt kernel-coco</command></screen>
+        <para>
+          替换软件包后，必须通过配置更改来设置系统，以使 AMD SEV-SNP 功能处于可用状态。主机端的 IOMMU 必须配置为非直通模式。这是为了防止外围设备写入属于加密 Guest 的内存，从而破坏其数据完整性。<phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP7</phrase></phrase> 中的默认 IOMMU 配置为 <literal>passthrough</literal> 模式。
+        </para>
+      </step>
+      <step>
+        <para>
+          要在 <phrase role="productname"><phrase os="sles">SUSE Linux Enterprise Server</phrase></phrase> <phrase role="productnumber"><phrase os="sles;sled">15 SP7</phrase></phrase> 中禁用 IOMMU 配置，请打开 <filename>/etc/default/grub</filename> 文件，并将 <literal>iommu=nopt</literal> 添加到 <varname>GRUB_CMDLINE_LINUX_DEFAULT</varname> 变量。
+        </para>
+      </step>
+      <step>
+        <para>
+          要更新引导加载程序配置，请运行命令：
+        </para>
+<screen><prompt>&gt; </prompt><command>sudo</command> ; <command>update-bootloader</command></screen>
+      </step>
+      <step>
+        <para>
+          系统现在可以使用机密计算内核重新启动。引导加载程序中没有选择它作为默认内核，因此请确保在启动菜单中选择它。
+        </para>
+      </step>
+    </procedure>
+  </sect1>
+  <sect1 xml:id="vm-verify-setup">
+    <title>验证安装</title>
+
+    <para>
+      您可以验证软件包的安装和配置情况。
+    </para>
+
+    <procedure>
+      <step>
+        <para>
+          要验证系统是否已使用新内核启动，请查看命令 <command>uname -r</command> 的响应。
+        </para>
+<screen><prompt>&gt; </prompt><command>sudo</command>  <command>uname -r</command> <replaceable>6.4.0-150616.coco15sp6-coco</replaceable></screen>
+        <para>
+          确保显示的内核版本包含 coco 标签。
+        </para>
+      </step>
+      <step>
+        <para>
+          要在内核运行时检查 AMD 安全处理器的初始化结果，请运行以下命令查看内核日志：
+        </para>
+<screen><prompt>&gt; </prompt><command>sudo</command>  <command>dmesg | grep -i ccp</command>
+[ 10.103166] ccp 0000:42:00.1: enabling device (0000 -&gt; 0002)
+[ 10.114951] ccp 0000:42:00.1: no command queues available
+[ 10.127137] ccp 0000:42:00.1: sev enabled
+[ 10.133152] ccp 0000:42:00.1: psp enabled
+[ 10.240817] ccp 0000:42:00.1: SEV firmware update successful
+[ 11.128307] ccp 0000:42:00.1: SEV API:1.55 build:8
+[ 11.135057] ccp 0000:42:00.1: SEV-SNP API:1.55 build:8</screen>
+        <para>
+          出现 SEV-SNP API 版本的相关消息表示 AMD 安全处理器已成功初始化。有时，内核日志中不显示这些消息。这种情况下，通常是由于 BIOS 设置或 IOMMU 配置的问题。
+        </para>
+      </step>
+    </procedure>
+  </sect1>
+  <sect1 xml:id="vm-launch-amd-sv-snp-vm">
+    <title>启动 AMD SEV-SNP 虚拟机</title>
+
+    <para>
+      在机密计算内核启动且 AMD 安全处理器初始化完成后，您可以使用 <systemitem class="library">libvirt</systemitem> 框架运行受 AMD SEV-SNP 保护的虚拟机。
+    </para>
+
+    <para>
+      <systemitem class="library">libvirt</systemitem> 提供了多种设置新虚拟机的方法。本文档使用预先准备好的磁盘映像和 virt-manager 图形用户界面。
+    </para>
+
+    <procedure>
+      <step>
+        <para>
+          将 virt-manager 连接到 AMD EPYC 主机并创建新虚拟机。
+        </para>
+      </step>
+      <step>
+        <para>
+          在“创建新虚拟机”窗口中，选择以下详细信息：
+        </para>
+        <itemizedlist>
+          <listitem>
+            <para>
+              选择操作系统安装方式。
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              选择 ISO 或 CD-ROM 安装介质。
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              选择内存和 CPU 设置。
+            </para>
+          </listitem>
+          <listitem>
+            <para>
+              选择所需的存储详情。
+            </para>
+          </listitem>
+        </itemizedlist>
+      </step>
+      <step>
+        <para>
+          在第五步中，验证详细信息并选择<guilabel>在安装前自定义配置</guilabel>。
+        </para>
+        <figure>
+          <title>创建虚拟机</title>
+          <mediaobject>
+            <imageobject role="fo">
+              <imagedata fileref="vm_security_create_vm.png" width="75%"/>
+            </imageobject>
+            <textobject role="description"><phrase>选择“在安装前自定义配置”</phrase>
+            </textobject>
+            <imageobject role="html">
+              <imagedata fileref="vm_security_create_vm.png" width="75%"/>
+            </imageobject>
+          </mediaobject>
+        </figure>
+      </step>
+      <step>
+        <para>
+          单击<guilabel>完成</guilabel>。
+        </para>
+      </step>
+      <step>
+        <para>
+          在虚拟机配置窗口中选择“XML”选项卡。
+        </para>
+        <para>
+          在“XML”选项卡中，您可以编辑由 <systemitem class="library">libvirt</systemitem> 后端使用的虚拟机 XML 配置。
+        </para>
+        <figure>
+          <title>虚拟机配置的 <guimenu>XML</guimenu> 视图</title>
+          <mediaobject>
+            <imageobject role="fo">
+              <imagedata fileref="vm_security_create_vm_xml.png" width="75%"/>
+            </imageobject>
+            <textobject role="description"><phrase>单击“XML”选项卡</phrase>
+            </textobject>
+            <imageobject role="html">
+              <imagedata fileref="vm_security_create_vm_xml.png" width="75%"/>
+            </imageobject>
+          </mediaobject>
+        </figure>
+      </step>
+      <step>
+        <para>
+          要使用 AMD SEV-SNP 保护虚拟机，请按以下所示修改 <literal>os</literal> 部分以设置正确的固件：
+        </para>
+        <figure>
+          <title>设置固件</title>
+          <mediaobject>
+            <imageobject role="fo">
+              <imagedata fileref="vm_security_xml_os.png" width="75%"/>
+            </imageobject>
+            <textobject role="description"><phrase>设置固件</phrase>
+            </textobject>
+            <imageobject role="html">
+              <imagedata fileref="vm_security_xml_os.png" width="75%"/>
+            </imageobject>
+          </mediaobject>
+        </figure>
+        <para>
+          其中 <literal>loader</literal> 行将固件设置为 SEV 版本的 OVMF。
+        </para>
+      </step>
+      <step>
+        <para>
+          添加 <literal>launchSecurity</literal> 部分。对于 AMD SEV-SNP，该部分应如下所示：
+        </para>
+        <figure>
+          <title>launchSecurity</title>
+          <mediaobject>
+            <imageobject role="fo">
+              <imagedata fileref="vm_security_xml_launchsecurity.png" width="75%"/>
+            </imageobject>
+            <textobject role="description"><phrase>添加 launchSecurity</phrase>
+            </textobject>
+            <imageobject role="html">
+              <imagedata fileref="vm_security_xml_launchsecurity.png" width="75%"/>
+            </imageobject>
+          </mediaobject>
+        </figure>
+      </step>
+      <step>
+        <para>
+          单击<guilabel>应用</guilabel>选项卡，然后单击<guilabel>细节</guilabel>选项卡。
+        </para>
+      </step>
+      <step>
+        <para>
+          在左侧列表中选择 CPU，并将 CPU <guilabel>型号</guilabel> 设置为 <literal>host-model</literal>：
+        </para>
+        <figure>
+          <title>虚拟机配置的<guimenu>细节</guimenu>视图</title>
+          <mediaobject>
+            <imageobject role="fo">
+              <imagedata fileref="vm_security_create_vm_details.png" width="75%"/>
+            </imageobject>
+            <textobject role="description"><phrase>选择 CPU 型号</phrase>
+            </textobject>
+            <imageobject role="html">
+              <imagedata fileref="vm_security_create_vm_details.png" width="75%"/>
+            </imageobject>
+          </mediaobject>
+        </figure>
+      </step>
+      <step>
+        <para>
+          单击<guilabel>应用</guilabel>，然后单击<guilabel>开始安装</guilabel>。
+        </para>
+        <para>
+          这将启动虚拟机并根据您的设置进行安装。当上述流程完成后，虚拟机将正常启动，此时您可验证 AMD SEV-SNP 保护是否生效。
+        </para>
+      </step>
+    </procedure>
+  </sect1>
+  <sect1 xml:id="vm-verify-amd-sv-snp-vm">
+    <title>验证 AMD SEV-SNP 虚拟机</title>
+
+    <para>
+      从虚拟机的外观来看，无法判断它是否在机密计算环境中运行。但可以通过以下几种方式从虚拟机内部进行验证。
+    </para>
+
+    <para>
+      要检查内核日志，请运行以下命令：
+    </para>
+
+<screen><prompt>&gt; </prompt><command>sudo</command>  <command>dmesg | grep -i sev-snp</command>
+[ 1.986186] Memory Encryption Features active: AMD SEV SEV-ES SEV-SNP</screen>
+
+    <para>
+      内核日志中显示的 SEV-SNP 功能及其他活动内存加密特性，表明该虚拟机已启用此功能。
+    </para>
+
+    <para>
+      此外，还可以通过加密安全的方法验证 AMD SEV-SNP 环境的安全性。
+    </para>
+  </sect1>
+</chapter>
