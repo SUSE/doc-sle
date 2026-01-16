@@ -1,0 +1,80 @@
+---
+name: Nitpicks
+
+on:
+  pull_request:
+    paths:
+        - 'DC-*'
+        - 'xml/*'
+        - 'adoc/*'
+
+jobs:
+  nitpicks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Checking out relevant branches
+        run: |
+          git checkout $GITHUB_BASE_REF || { echo "There's a Git issue"; exit 1; }
+          git checkout $GITHUB_HEAD_REF || { echo "There's a Git issue"; exit 1; }
+
+      - name: Checking for tabs
+        run: |
+          tab=$(git diff -U0 $GITHUB_BASE_REF..$GITHUB_HEAD_REF | sed -n '/^+/ p' | sed -n '/\t/ p' | sed -r -e 's/\t/→/g')
+          if [[ -n "$tab" ]]; then
+            echo -e "\nThis pull request introduces tabs (→) on the following lines:"
+            echo -e "\n$tab\n"
+            exit 1
+          else
+            echo "This looks aight."
+            exit 0
+          fi
+
+      - name: Checking for Windows/Mac line ends
+        run: |
+          lineends=$(git diff -U0 $GITHUB_BASE_REF..$GITHUB_HEAD_REF | sed -n '/^+/ p' | sed -n '/\r/ p' | sed -r -e 's/\r/↲/g')
+          if [[ -n "$lineends" ]]; then
+            echo -e "\nThis pull request introduces Windows/Mac line ends (↲) on the following lines:"
+            echo -e "\n$lineends\n"
+            exit 1
+          else
+            echo "This looks aight."
+            exit 0
+          fi
+
+      - name: Checking for trailing characters
+        run: |
+          trail=$(git diff -U0 $GITHUB_BASE_REF..$GITHUB_HEAD_REF | sed -n '/^+/ p' | sed -n '/[  \t]$/ p' | sed -r -e 's/ *$/•/g' -e 's/\t*$/→/g' -e 's/ *$/⋄/g')
+          if [[ -n "$trail" ]]; then
+            echo -e "\nThis pull request introduces trailing spaces (•)/tabs (→)/protected spaces (⋄) on the following lines:"
+            echo -e "\n$trail\n"
+            exit 1
+          else
+            echo "This looks aight."
+            exit 0
+          fi
+
+      - name: Checking for long lines
+        # We exclude screens, there are legitimate reasons for them to be long.
+        run: |
+          potential=$(git diff -U1000 $GITHUB_BASE_REF..$GITHUB_HEAD_REF | tr '\n' '\r' | sed -r -e 's,<screen[^>]*/>,,g' -e 's,</screen[^>]*>,⋘,g' -e 's,<screen[^/>]*>[^⋘]*⋘,,g' | tr '\r' '\n' | sed -n '/^+/ p')
+          len=$(echo -e "$potential" | wc -l)
+          long=''
+          for n in $(seq 1 "$len"); do
+            line=$(echo -e "$potential" | sed -n "$n p")
+            if [[ $(echo "$line" | wc -c) -gt 91 ]]; then
+              long+="\n$line"
+            fi
+          done
+          if [[ -n "$long" ]]; then
+            echo -e "\nThis pull request introduces long lines (80+ characters) in at least the following spots:"
+            echo -e "$long\n"
+            exit 1
+          else
+            echo "This looks aight."
+            exit 0
+          fi
