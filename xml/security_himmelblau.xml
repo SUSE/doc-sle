@@ -1,0 +1,162 @@
+<?xml version="1.0"?>
+<!DOCTYPE chapter [
+  <!ENTITY % entities SYSTEM "generic-entities.ent">
+  %entities;
+]>
+<chapter xmlns:its="http://www.w3.org/2005/11/its" xmlns="http://docbook.org/ns/docbook" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.0" xml:id="cha-security-himmelblau">
+  <title>Authenticating with &ms; Entra ID using Himmelblau</title>
+  <info>
+    <meta name="description" its:translate="yes">Configure Himmelblau for &ms; Entra ID authentication</meta>
+    <dm:docmanager xmlns:dm="urn:x-suse:ns:docmanager">
+      <dm:translation>yes</dm:translation>
+    </dm:docmanager>
+    <abstract>
+      <para>
+        Himmelblau integrates &ms; Entra ID authentication with Linux authentication services.
+        This chapter describes the system configuration needed on &productname;: installing the
+        required packages, enabling the PAM module, enabling NSS lookups, configuring the Entra ID
+        domain and starting the Himmelblau services.
+      </para>
+    </abstract>
+    <revhistory xml:id="rh-cha-security-himmelblau">
+      <revision><date>2026-06-23</date>
+        <revdescription>
+          <para/>
+        </revdescription>
+      </revision>
+    </revhistory>
+  </info>
+  <sect1 xml:id="sec-security-himmelblau-install">
+    <title>Installing Himmelblau</title>
+
+    <para>
+      Install the Himmelblau daemon, PAM module and NSS module:
+    </para>
+
+<screen>&prompt.sudo;<command>zypper install himmelblau pam-himmelblau libnss_himmelblau2</command></screen>
+
+    <para>
+      To allow Entra ID users to sign in over SSH, also install the SSH configuration package:
+    </para>
+
+<screen>&prompt.sudo;<command>zypper install himmelblau-sshd-config</command></screen>
+  </sect1>
+  <sect1 xml:id="sec-security-himmelblau-config">
+    <title>Configuring Himmelblau authentication</title>
+
+    <para>
+      The following procedure configures &productname; to resolve and authenticate Entra ID users
+      through Himmelblau.
+    </para>
+
+    <procedure xml:id="pro-security-himmelblau-config">
+      <step>
+        <para>
+          Edit <filename>/etc/himmelblau/himmelblau.conf</filename> and set the primary Entra ID
+          domain in the <literal>[global]</literal> section:
+        </para>
+<screen>[global]
+domain = <replaceable>example.com</replaceable></screen>
+      </step>
+      <step>
+        <para>
+          Add Himmelblau to the system PAM configuration:
+        </para>
+<screen>&prompt.sudo;<command>pam-config --add --himmelblau</command></screen>
+      </step>
+      <step>
+        <para>
+          Edit <filename>/etc/nsswitch.conf</filename> and add <literal>himmelblau</literal> to the
+          <literal>passwd</literal>, <literal>group</literal> and <literal>shadow</literal>
+          databases. Keep the existing sources for your system and append
+          <literal>himmelblau</literal>. For example:
+        </para>
+<screen>passwd: files systemd himmelblau
+group:  files systemd himmelblau
+shadow: files systemd himmelblau</screen>
+      </step>
+      <step>
+        <para>
+          Enable and start the Himmelblau services:
+        </para>
+<screen>&prompt.sudo;<command>systemctl enable --now himmelblaud himmelblaud-tasks</command></screen>
+      </step>
+      <step>
+        <para>
+          If you installed <package>himmelblau-sshd-config</package>, restart the SSH daemon:
+        </para>
+<screen>&prompt.sudo;<command>systemctl restart sshd.service</command></screen>
+      </step>
+    </procedure>
+
+    <para>
+      After the system is configured, an Entra ID user can sign in locally or, when SSH support is
+      installed, over SSH. The first successful sign-in may register the device with Entra ID and
+      prompt for the authentication factors required by your tenant policy.
+    </para>
+  </sect1>
+  <sect1 xml:id="sec-security-himmelblau-verify">
+    <title>Verifying the configuration</title>
+
+    <para>
+      Check that the daemons are running:
+    </para>
+
+<screen>&prompt.sudo;<command>systemctl status himmelblaud himmelblaud-tasks</command></screen>
+
+    <para>
+      Check that the Himmelblau daemon is reachable:
+    </para>
+
+<screen>&prompt.sudo;<command>aad-tool status</command></screen>
+
+    <para>
+      Verify that NSS can resolve an Entra ID user:
+    </para>
+
+<screen>&prompt.user;<command>getent passwd <replaceable>USER</replaceable></command>
+&prompt.user;<command>id <replaceable>USER</replaceable></command></screen>
+
+    <para>
+      For troubleshooting, inspect the system journal:
+    </para>
+
+<screen>&prompt.sudo;<command>journalctl -u himmelblaud -u himmelblaud-tasks</command></screen>
+  </sect1>
+  <sect1 xml:id="sec-security-himmelblau-access">
+    <title>Restricting who can sign in</title>
+
+    <para>
+      If <literal>pam_allow_groups</literal> is not configured, all users from the configured Entra
+      ID domain can authenticate. To restrict access, add a comma-separated list of allowed user
+      principal names and Entra ID group object IDs to
+      <filename>/etc/himmelblau/himmelblau.conf</filename>:
+    </para>
+
+<screen>[global]
+pam_allow_groups = <replaceable>user@example.com</replaceable>,<replaceable>00000000-1111-2222-3333-444444444444</replaceable></screen>
+
+    <para>
+      Restart both Himmelblau services after changing the configuration:
+    </para>
+
+<screen>&prompt.sudo;<command>systemctl restart himmelblaud himmelblaud-tasks</command></screen>
+  </sect1>
+  <sect1 xml:id="sec-security-himmelblau-intune">
+    <title>Enabling Intune policy enforcement</title>
+
+    <para>
+      To allow Himmelblau to evaluate Intune compliance policy locally, enable policy processing in
+      <filename>/etc/himmelblau/himmelblau.conf</filename>:
+    </para>
+
+<screen>[global]
+apply_policy = true</screen>
+
+    <para>
+      Restart both Himmelblau services after changing the configuration:
+    </para>
+
+<screen>&prompt.sudo;<command>systemctl restart himmelblaud himmelblaud-tasks</command></screen>
+  </sect1>
+</chapter>
